@@ -25,7 +25,7 @@ The agents' full briefs are in [docs/agents/](agents/). To relaunch one, start a
 
 Agent work is uncommitted on main until the lead reviews it. `scripts/snapshot-wip.sh` pushes everything uncommitted to the `wip/demo` branch without touching main or the live site (Pages only deploys main). Run it with `SCRATCH=<scratch folder>` to include the map agent's helper scripts.
 
-While agents are working, their folders (src/render, src/ui, src/audio, src/data and their scripts) are listed in `.git/info/exclude` so half-built code isn't committed to main by accident; the snapshot script force-includes them. Remove those exclude lines at integration.
+While agents are working, their folders (src/render, src/ui, src/audio, src/data and their scripts) are listed in `.git/info/exclude` so half-built code isn't committed to main by accident; the snapshot script force-includes them. Remove those exclude lines at integration. The agent also edits the tracked files index.html, src/main.ts and src/style.css; those are marked `git update-index --skip-worktree` locally for the same reason. Undo with `--no-skip-worktree` at integration.
 
 To recover after a lost session: `git fetch origin wip/demo && git checkout origin/wip/demo -- src scripts docs index.html` from a clone of main.
 
