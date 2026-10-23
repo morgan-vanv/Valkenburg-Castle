@@ -7,7 +7,7 @@
 
 import { createEngine } from '../src/engine/engine';
 import { miniCastle } from '../src/engine/test/miniCastle';
-import { squareKey } from '../src/engine/geometry';
+import { neighbours, squareKey, cellAt } from '../src/engine/geometry';
 import type { Command, GameState, Unit } from '../src/engine/types';
 import type { CastleMap } from '../src/engine/types';
 
@@ -23,6 +23,34 @@ async function loadMap(): Promise<CastleMap> {
 const map = await loadMap();
 const engine = createEngine(map);
 const entrances = map.levels.flatMap((l) => l.entrances);
+
+/** Distance from every square to the nearest goal square, walking the static map (locked doors cost extra). */
+function distanceField(goals: { x: number; y: number; level: number }[]): Map<string, number> {
+  const d = new Map<string, number>();
+  const queue: { c: any; k: number }[] = [];
+  for (const g of goals) { d.set(squareKey(g as never), 0); queue.push({ c: g, k: 0 }); }
+  while (queue.length) {
+    queue.sort((a, b) => a.k - b.k);
+    const { c, k } = queue.shift()!;
+    if (k > (d.get(squareKey(c)) ?? Infinity)) continue;
+    const next: { to: any; cost: number }[] = [];
+    for (const n of neighbours(map, c)) {
+      if (n.edge === 'wall' || cellAt(map, n.to) !== 'floor') continue;
+      next.push({ to: n.to, cost: n.edge === 'locked' ? 4 : 1 });
+    }
+    for (const l of map.links) {
+      if (squareKey(l.a) === squareKey(c)) next.push({ to: l.b, cost: 1 });
+      if (squareKey(l.b) === squareKey(c)) next.push({ to: l.a, cost: 1 });
+    }
+    for (const n of next) {
+      const nk = squareKey(n.to);
+      const nd = k + n.cost;
+      if (nd < (d.get(nk) ?? Infinity)) { d.set(nk, nd); queue.push({ c: n.to, k: nd }); }
+    }
+  }
+  return d;
+}
+const exitField = distanceField(entrances);
 
 function ok(s: GameState, cmd: Command): GameState {
   const r = engine.apply(s, cmd);
@@ -91,17 +119,19 @@ function playExpedition(s: GameState): GameState {
         }
         const before = s;
         if (goHome) {
-          s = stepToward(s, u, (c) => Math.min(...entrances.map((e) => dist(c, e))));
+          s = stepToward(s, u, (c) => exitField.get(squareKey(c as never)) ?? 999);
         } else {
-          // Head for the nearest explored-or-not square in an unsearched room.
-          s = stepToward(s, u, (c) => {
-            const a = engine.area(c as never);
-            const searched = a ? (s.expedition!.searchProgress[a.id] ?? 0) < 0 : true;
-            const isTarget = a?.isRoom && !searched;
-            const nearestEnemy = vis.enemies.length ? Math.min(...vis.enemies.map((e) => dist(c, e.pos))) : 30;
-            return (isTarget ? 0 : 6) + dist(c, u.pos) * 0.2 - Math.min(nearestEnemy, 6) * 0.1;
-          });
-          if (s === before) s = stepToward(s, u, (c) => -Object.keys(s.expedition?.explored ?? {}).length + dist(c, { x: 8, y: 6, level: c.level }) * 0.01 - (s.expedition?.explored[squareKey(c as never)] ? 0 : 5));
+          const targets: { x: number; y: number; level: number }[] = [];
+          const seen = new Set<number>();
+          for (const lv of map.levels) for (let y = 0; y < lv.height; y++) for (let x = lv.x0; x < lv.x0 + lv.width; x++) {
+            const a = engine.area({ level: lv.id, x, y });
+            if (!a?.isRoom || seen.has(a.id)) continue;
+            seen.add(a.id);
+            if ((s.expedition!.searchProgress[a.id] ?? 0) < 0) continue;
+            targets.push(...a.squares);
+          }
+          const field = distanceField(targets);
+          s = stepToward(s, u, (c) => field.get(squareKey(c as never)) ?? 999);
         }
         if (s === before) break;
       }
