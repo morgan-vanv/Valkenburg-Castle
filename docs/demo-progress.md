@@ -2,7 +2,7 @@
 
 Where the playable demo stands, so work can resume from a fresh session. Update this file whenever a workstream changes state.
 
-Last updated: 2026-10-23, 16:35 New York.
+Last updated: 2026-10-23, 19:30 New York.
 
 ## Goal
 
@@ -14,9 +14,9 @@ A playable 4-week campaign on levels 1–3 of the classic 1980 castle, in low-po
 | --- | --- | --- | --- |
 | Demo spec and engine contract | Lead | Done | docs/demo-spec.md, src/engine/types.ts, api.ts, geometry.ts |
 | Rules engine | Lead | Done, 19 tests passing | src/engine/** (createEngine in engine.ts) |
-| Balance bot | Lead | Done; needs the real map to mean anything | scripts/sim.ts |
-| Classic map, levels 1–3 | Map agent | In progress | Target: src/data/maps/** ; helper scripts in the scratch folder (snapshotted to wip-scratch/map-tools/ on the wip/demo branch) |
-| 3D view, UI and sound | Render agent | In progress | src/render/**, src/ui/**, src/audio/**, src/main.ts, index.html, src/style.css |
+| Balance bot | Lead | Runs on the classic map; bot still banks too little, diagnosing | scripts/sim.ts |
+| Classic map, levels 1–3 | Map agent | Done, committed, 17 tests | src/data/maps/**, scripts/preview-map.ts; src/engine/index.ts exports the engine on it |
+| 3D view, UI and sound | Render agent | In progress (resumed after the 16:50 rate limit; type-checks) | src/render/**, src/ui/**, src/audio/**, src/main.ts, index.html, src/style.css |
 | Integration, play-test, deploy | Lead | Not started | — |
 
 The agents' full briefs are in [docs/agents/](agents/). To relaunch one, start a general-purpose agent with that file's contents as its prompt, plus a note on what already exists.
@@ -31,8 +31,7 @@ To recover after a lost session: `git fetch origin wip/demo && git checkout orig
 
 ## Remaining steps
 
-1. Map agent delivers src/data/maps/classic.ts (`classicCastle`) with tests and preview renders. Review the renders against the scans.
-2. Add src/engine/index.ts: `export const engine = createEngine(classicCastle)`.
+1. ~~Map~~ done. 2. ~~Engine entry point~~ done.
 3. Render agent delivers the 3D view and UI. Switch main.ts to the real engine and classic map.
 4. Run `npx tsx scripts/sim.ts 20` on the classic map; tune numbers in src/engine/data.ts so the 3,000-gold goal is reachable but hard.
 5. Play a full run in the browser (headless Chromium works here: see the render brief), fix what breaks.
