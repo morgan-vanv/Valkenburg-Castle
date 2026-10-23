@@ -158,8 +158,18 @@ export interface Unit {
   post?: Coord;
   /** Mantis: first attack bonus not yet used. */
   ambushReady?: boolean;
+  /** Where a climbing unit arrives when its climb finishes. */
+  climbTarget?: Coord;
+  /** Men at the start of the current phase, for the half-losses morale check. */
+  menAtPhaseStart: number;
+  /** Dragon: castle phases until it can breathe again. */
+  breathCooldown?: number;
   /** Has exited the castle this expedition. */
   exited: boolean;
+  /** Prisoners freed this expedition (they join the barracks if they get out). */
+  freed?: boolean;
+  /** Hero roster id, for player heroes. */
+  heroId?: string;
 }
 
 // ---------------------------------------------------------------- expedition
@@ -227,6 +237,14 @@ export interface Expedition {
   hasClimbingGear: boolean;
   /** Combat spell bonus waiting for this unit's next attack this turn. */
   combatBlessing: Record<string, true>;
+  /** Enemy unit ids revealed by ESP, with the turn the reveal lasts until. */
+  revealed: Record<string, number>;
+  /** Prisoners still held, by prison cell area id. */
+  prisoners: Record<number, number>;
+  /** Monster max wounds by room area id, for the treasure modifier. */
+  monsterRooms: Record<number, number>;
+  /** Men from the barracks who went in. */
+  musterMen: number;
   log: string[];
 }
 
@@ -294,6 +312,9 @@ export interface GameState {
   lastDebrief?: DebriefReport;
   /** Why the campaign ended. */
   endReason?: string;
+  /** Wages paid at the start of the current week. */
+  lastWages: number;
+  hiredThisWeek: number;
   /** Running id counter for new units and items. */
   nextId: number;
 }
@@ -308,6 +329,7 @@ export type Command =
   // campaign
   | { type: 'hire'; men: number }
   | { type: 'beginMuster' }
+  | { type: 'cancelMuster' }
   | { type: 'skipWeek' }
   | { type: 'launch'; plan: MusterPlan }
   | { type: 'continueAfterDebrief' }
