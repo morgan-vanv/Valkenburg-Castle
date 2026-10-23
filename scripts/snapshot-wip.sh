@@ -9,6 +9,10 @@ idx=$(mktemp)
 cp .git/index "$idx"
 export GIT_INDEX_FILE="$idx"
 git add -A
+# Agent folders may be excluded locally while in progress; include them anyway.
+for p in src/render src/ui src/audio src/data src/main.ts src/style.css index.html scripts/shot.mjs scripts/preview-map.mjs scripts/preview-map.ts; do
+  [ -e "$p" ] && git add -f "$p"
+done
 if [ -n "${SCRATCH:-}" ] && [ -d "$SCRATCH/tools" ]; then
   for f in "$SCRATCH"/tools/*; do
     [ -f "$f" ] || continue
