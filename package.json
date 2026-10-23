@@ -1,0 +1,23 @@
+{
+  "name": "valkenburg-castle",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "A roguelite extraction strategy game, a modern take on Task Force Games' Valkenburg Castle (1980).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

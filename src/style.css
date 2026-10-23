@@ -1,0 +1,61 @@
+:root {
+  --stone: #14110f;
+  --ember: #e8a33d;
+  --parchment: #efe4cf;
+  --muted: #8a7f6e;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--stone);
+  color: var(--parchment);
+  font-family: Georgia, 'Times New Roman', serif;
+  overflow: hidden;
+}
+
+#dungeon {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: none;
+}
+
+.title {
+  position: fixed;
+  left: 50%;
+  bottom: 12vh;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  padding: 0 16px;
+  width: min(640px, 100%);
+}
+
+.eyebrow {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+
+h1 {
+  font-size: clamp(2.25rem, 8vw, 4.5rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  margin: 0.25em 0;
+  text-shadow: 0 0 24px rgba(232, 163, 61, 0.35);
+}
+
+.status {
+  color: var(--muted);
+  font-style: italic;
+}
