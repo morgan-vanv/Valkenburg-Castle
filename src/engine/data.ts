@@ -86,7 +86,7 @@ export const NOISE = {
 /** Campaign numbers (spec section 1). */
 export const CAMPAIGN = {
   weeks: 4,
-  goal: 3000,
+  goal: 2000,
   startGold: 800,
   startMen: 36,
   wagePerMan: 1,
@@ -94,7 +94,7 @@ export const CAMPAIGN = {
   wageHobart: 3,
   hireCost: 5,
   hirePerWeek: 20,
-  outfitCost: 150,
+  outfitCost: 100,
   deathPerMan: 5,
   deathPerHero: 10,
   orcRegrowth: 6,

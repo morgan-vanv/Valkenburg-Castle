@@ -90,10 +90,11 @@ export function search(ctx: Ctx, u: Unit): void {
   ctx.exp.searchProgress[area.id] = -1;
   const roll = die(ctx.state);
   let result: string;
-  if (roll <= 3) {
+  // Demo tuning: the 1980 chart (7.22) finds nothing on 1-3; the demo on 1-2.
+  if (roll <= 2) {
     result = 'Nothing of value';
     ctx.log(`${u.name} finishes searching the room at ${label(u.pos)}: nothing.`);
-  } else if (roll === 4) {
+  } else if (roll <= 4) {
     result = rollTreasure(ctx, u, treasureModifier(ctx, area.id, area.level));
     ctx.log(`${u.name} finds ${result}.`);
   } else if (roll === 5) {
@@ -108,7 +109,8 @@ export function search(ctx: Ctx, u: Unit): void {
 }
 
 export function treasureModifier(ctx: Ctx, areaId: number, level: number): number {
-  const lvl = level === 2 ? 1 : level === 3 ? 2 : level === 4 ? 4 : level === 5 ? 8 : 0;
+  // Demo tuning: 1980 gives +0/+1/+2 for levels 1-3; the demo rewards depth more.
+  const lvl = level === 1 ? 1 : level === 2 ? 2 : level === 3 ? 4 : level === 4 ? 6 : 8;
   return Math.min(10, lvl + (ctx.exp.monsterRooms[areaId] ?? 0));
 }
 

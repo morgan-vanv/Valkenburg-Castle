@@ -8,12 +8,12 @@ Priorities: **P0** must be in the first playable build, **P1** should be, **P2**
 
 ## 1. Campaign (P0)
 
-- 4 weeks. Win: treasury at least 3,000 gold after week 4's debrief, with Hobart alive. Lose: Hobart dies, or wages can't be paid.
+- 4 weeks. Win: treasury at least 2,000 gold after week 4's debrief, with Hobart alive. Lose: Hobart dies, or wages can't be paid.
 - Start: 800 gold. Heroes: Lord Hobart (+2 leader), Rogier (+1 leader), Thorvold (Dwarf, +1 mace), Pim (Burglar), Aldous (Magic User, 10 spell points). 36 men in the barracks.
 - Each week, in order:
   1. **Wages**: 1 gold per man, 2 per hero, 3 for Hobart. If the treasury can't cover them, the campaign is lost.
   2. **Hire**: 5 gold per man, up to 20 a week.
-  3. **Muster**: pay 150 gold to outfit the expedition (it brings 2 explosive charges and climbing gear). Pick up to 6 units: heroes, plus squads of 3 to 10 men formed from the barracks, at most 30 men in all. Set each squad's armour (unarmored, normal, heavy). Pick each unit's entrance. Or skip the week: no expedition, no outfitting cost.
+  3. **Muster**: pay 100 gold to outfit the expedition (it brings 2 explosive charges and climbing gear). Pick up to 6 units: heroes, plus squads of 3 to 10 men formed from the barracks, at most 30 men in all. Set each squad's armour (unarmored, normal, heavy). Pick each unit's entrance. Or skip the week: no expedition, no outfitting cost.
   4. **Expedition** (section 2).
   5. **Debrief**: bank all loot carried out. Pay 5 gold per man lost and 10 per hero lost. Rescued prisoners join the barracks.
   6. **Castle regroups**: +6 orcs, added to existing orc squads or forming a new one in a guardroom. Dead monsters stay dead. Dropped loot stays where it fell. Doors you destroyed stay destroyed; other doors relock.
@@ -175,8 +175,8 @@ Areas are found by flood fill across open edges; walls and doors bound them. An 
 ### 6.2 Searching (P0)
 
 - A unit in a room spends 1 action to Search. A room needs one search per 6 of its squares, rounded up, from any units; a Burglar's search counts twice. No search is possible while enemies or monsters are in the room (7.14). Each room is searched once per expedition (7.12).
-- When the search completes, roll d6 on the search chart (7.22): 1–3 nothing, 4 treasure, 5 locked chest (P1; otherwise treasure), 6 trap.
-- **Treasure**: d6 + level modifier (level 1 +0, level 2 +1, level 3 +2) + the max wounds of a monster that was placed in the room, total modifier at most +10. Read it on 1980 table 7.23 (rows 1–16), with special treasure on 7.25.
+- When the search completes, roll d6 on the search chart: 1–2 nothing, 3–4 treasure, 5 locked chest, 6 trap. (Tuned for the demo; the 1980 chart 7.22 finds nothing on 1–3.)
+- **Treasure**: d6 + level modifier (level 1 +1, level 2 +2, level 3 +4; the 1980 values are +0, +1, +2) + the max wounds of a monster that was placed in the room, total modifier at most +10. Read it on 1980 table 7.23 (rows 1–16), with special treasure on 7.25.
 - **Trap** (7.24): d6, +1 if a Leader, Magic User or Dwarf is in the room, +3 if a Burglar is. 1: 1 wound, 2: 2 wounds, 3: 1 wound, 4: no trap, 5: sleep gas (P1; otherwise 1 wound), 6: 1 wound, 7–9: trap found, no harm. Wounds fall on the searching unit.
 - Sleep gas (P1): every unit in the room sleeps for 2 turns; attacks on sleepers score double (8.2).
 - Locked chest (P1): opens like a door (pick, smash, chop, Unlock), then roll treasure.

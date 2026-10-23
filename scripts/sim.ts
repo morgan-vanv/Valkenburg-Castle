@@ -52,8 +52,20 @@ function distanceField(goals: { x: number; y: number; level: number }[]): Map<st
 }
 const exitField = distanceField(entrances);
 
+const VERBOSE = process.env.VERBOSE === '1';
+let tally: Record<string, number> = {};
 function ok(s: GameState, cmd: Command): GameState {
   const r = engine.apply(s, cmd);
+  if (VERBOSE) {
+    if (r.error) tally[`error:${cmd.type}`] = (tally[`error:${cmd.type}`] ?? 0) + 1;
+    for (const e of r.events) {
+      let k: string = e.type;
+      if (e.type === 'searched') k = e.complete ? `searched:${e.result}` : 'searched:partial';
+      if (e.type === 'died') k = `died:${s.expedition?.units.find((u) => u.id === e.unitId)?.side ?? '?'}`;
+      if (e.type === 'lootFound') k = `loot:${e.items.map((i) => i.name).join('+')}`;
+      tally[k] = (tally[k] ?? 0) + 1;
+    }
+  }
   return r.error ? s : r.state;
 }
 
@@ -156,7 +168,10 @@ function playCampaign(seed: number): { won: boolean; gold: number; reason: strin
       s = ok(ok(s, { type: 'cancelMuster' }), { type: 'skipWeek' });
       continue;
     }
+    tally = {};
+    const before = r.state;
     s = playExpedition(r.state);
+    if (VERBOSE) console.log(`week ${before.week}:`, JSON.stringify(tally), 'banked', s.lastDebrief?.goldBanked, 'stage', s.stage);
     if (s.stage === 'debrief') {
       banked.push(s.lastDebrief!.goldBanked);
       s = ok(s, { type: 'continueAfterDebrief' });

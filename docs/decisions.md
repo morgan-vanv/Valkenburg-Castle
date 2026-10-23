@@ -9,5 +9,6 @@ A running log. Newest at the bottom.
 - **2026-10-23** The castle is generated once per campaign and fixed for that campaign, with the 1980 map as a classic seed. Keeps the feel of retaking one place while staying replayable.
 - **2026-10-23** Multi-man squads fight alongside named heroes. It is the 1980 game's identity and what makes frontage matter.
 - **2026-10-23** Desktop first with mouse and keyboard; UI kept touch-friendly to adapt later. Lets the camera and UI be designed without phone compromises.
+- **2026-10-23** Demo economy tuned: goal 2,000 gold, outfitting 100, searches find something on 3–6, deeper levels add more to treasure rolls. The 1980 tables assume a 52-week siege; at 4 weeks a simple bot banked almost nothing.
 
 The full design lives in the Game Design Document: https://claude.ai/artifact/5p4XddApJVqAodPrEuEGzc

@@ -6,6 +6,7 @@ import { indexMap } from './mapIndex';
 import { frontage, expectedWounds, rollSlots } from './combat';
 import { at, squareKey } from './geometry';
 import { makeEnemy } from './ai';
+import { CAMPAIGN } from './data';
 import type { Command, GameState, MusterPlan, Unit } from './types';
 
 const map = miniCastle();
@@ -68,7 +69,7 @@ describe('campaign', () => {
     const goldBefore = s.gold;
     s = ok(s, { type: 'launch', plan: plan() });
     expect(s.stage).toBe('expedition');
-    expect(s.gold).toBe(goldBefore - 150);
+    expect(s.gold).toBe(goldBefore - CAMPAIGN.outfitCost);
     expect(s.barracks).toBe(28);
     expect(s.expedition!.units.filter((u) => u.side === 'player')).toHaveLength(3);
   });
