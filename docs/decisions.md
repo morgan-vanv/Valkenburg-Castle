@@ -10,5 +10,6 @@ A running log. Newest at the bottom.
 - **2026-10-23** Multi-man squads fight alongside named heroes. It is the 1980 game's identity and what makes frontage matter.
 - **2026-10-23** Desktop first with mouse and keyboard; UI kept touch-friendly to adapt later. Lets the camera and UI be designed without phone compromises.
 - **2026-10-23** Demo economy tuned: goal 2,000 gold, outfitting 100, searches find something on 3–6, deeper levels add more to treasure rolls. The 1980 tables assume a 52-week siege; at 4 weeks a simple bot banked almost nothing.
+- **2026-10-23** V2: one-shot run instead of a 4-week campaign; a new spacious two-level map instead of the 1980 transcription; doors, loot and carrying simplified (see docs/v2-changes.md). Play-testers found V1 claustrophobic and clunky; V1 is kept on the `v1-prototype` branch.
 
 The full design lives in the Game Design Document: https://claude.ai/artifact/5p4XddApJVqAodPrEuEGzc
