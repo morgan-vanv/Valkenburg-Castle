@@ -13,3 +13,8 @@ A running log. Newest at the bottom.
 - **2026-10-23** V2: one-shot run instead of a 4-week campaign; a new spacious two-level map instead of the 1980 transcription; doors, loot and carrying simplified (see docs/v2-changes.md). Play-testers found V1 claustrophobic and clunky; V1 is kept on the `v1-prototype` branch.
 
 The full design lives in the Game Design Document: https://claude.ai/artifact/5p4XddApJVqAodPrEuEGzc
+- **2026-10-24** V3: rebuilt as a turn-based extraction crawler (Dark and Darker premise, For the King 2 slot rolls, XCOM permadeath) on a new two-level hex castle; light is the clock, noise is spatial. The owner found the 1980-derived rules encumbering; see docs/v3-changes.md.
+- **2026-10-24** V3 rounds are a player phase then a world phase, with no initiative order. Faster to read and play; enemy intents carry the information.
+- **2026-10-24** V3 lantern is 40 rounds. With 60 a bot finished every contract with most of its light left.
+
+The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1

@@ -38,12 +38,12 @@ Each step ends with a commit and push to `v3`. Agents don't commit; the lead com
 - [x] Contract: types, hex math, engine API, spec (src/game/types.ts, api.ts, hex.ts; docs/v3-spec.md); agent briefs in docs/agents/v3-*.md
 - [x] Engine: rules for exploration, slot rolls, light, noise, combat, AI, rivals, contracts, camp; 48 engine tests pass (src/game; sim: scripts/v3-engine-sim.ts)
 - [x] Castle: Levels 1 and 2 as hex maps, validated (src/data/castle; preview docs/castle-preview.svg; 9 tests)
-- [ ] Presentation: hex diorama, rotatable camera, HUD with roll previews, camp screens
-- [ ] Integration: wire it together, remove V2 code, typecheck and tests pass
+- [x] Presentation: hex diorama, rotatable camera, HUD with roll previews, camp screens (src/view, src/ui)
+- [x] Integration: V2 engine/renderer/map removed; typecheck clean, 60 tests, build OK
 - [x] Balance (first pass): lantern 40, tougher orcs, some monsters awake. Level 1 is a warm-up, Level 2 wipes careless parties. Revisit after play-testing.
-- [ ] Play-test in headless Chromium; fix blockers
+- [x] Play-test in headless Chromium: screenshot tour and a UI bot over several delves, 0 console errors
 - [ ] Merge to `main` and verify the live page
-- [ ] Changelog (docs/v3-changes.md) and decision log
+- [x] Changelog (docs/v3-changes.md) and decision log
 
 ## Resuming
 
