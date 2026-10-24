@@ -192,3 +192,55 @@ Approved layout: the Castle Map Proposal, pass 2 (https://claude.ai/artifact/C8o
 ### 14.6 The winch and lift
 
 - `winch` action: a hero next to the winch (the tallprop at the link's `winch`) works it: 1 action, noise 6, lift works for the rest of the delve. Then stepping from one lift tile to the other costs 1 movement, like stairs.
+
+## 15. V3.2: squad building, classes, spells, gear, and polish
+
+Owner's play-test notes (2026-10-24 evening). Design pillar added: **transformational over incremental.** Unlocks and gear should change how you approach the castle (a grappling hook, a blink spell) rather than add +10%. A heuristic, not a hard rule. This section overrides earlier ones where they disagree.
+
+### 15.1 Line of sight polish (owner's screenshot: docs/agents/v32-los-bug.png)
+
+- Reveal is patchy: holes of unrevealed floor inside seen rooms, and walls missing next to seen floor. Fix: a hex is in sight if a line from the viewer's center to the target's center OR to any of the target's 6 corners (pulled 10% toward the center) is clear (permissive LOS). Walls, pillars and tall props next to any revealed floor hex in sight are revealed too. Pits don't block sight; closed doors and tall props do. Same rule for heroes, monsters and the glimpse.
+
+### 15.2 Move, then move again
+
+- A hero who has moved and not acted may spend their action on a second move (a **dash**, XCOM style): same allowance, walk or sneak. A hero who dashes has used their action. Acting first and then moving stays allowed. The UI shows the dash range in a second colour once the first move is spent.
+
+### 15.3 Squad building
+
+- A new campaign starts with **Lord Hobart alone** and 160 gold. The tavern offers 4 recruits (refreshed after every delve, at least 3 different classes), price 40 + 20 × (level − 1). The first delve needs at least 1 hero.
+- Classes (Hobart stays as he is). Mage splits into three schools. Hero.cls values: 'hobart' | 'sellsword' | 'burglar' | 'ranger' | 'sapper' | 'pyromancer' | 'shadowmancer' | 'hedgewitch'.
+
+| Class | HP | Might | Finesse | Wits | Nerve | Weapon | Armor | Kit and abilities |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sellsword | 10 | 70 | 45 | 40 | 60 | Sword 3 Might, 2 | 1 | Guard (as now). Shove gets +1 slot. |
+| Burglar | 7 | 40 | 75 | 60 | 50 | Dagger 2 Finesse, 2 | 0 | Pick (as now), sneak 4, backstab. Takes and opens chests silently. |
+| Ranger | 8 | 45 | 75 | 60 | 55 | Longbow 3 Finesse, 2, range 6, noise 1 | 0 | Overwatch: spend the action; in the next world phase, shoot (full roll) the first enemy that moves or acts in sight within 6. Knockback shot: 2 Finesse slots at range ≤ 5, 2 hits push the target 1 hex away from the Ranger with all shove outcomes (pits!). Adjacent bow shots lose 1 slot. |
+| Sapper | 10 | 65 | 50 | 45 | 60 | Hammer 3 Might, 2 | 1 | Starts each delve with 2 free charges. Throw a charge up to 3 hexes (in sight). Dig: clear rubble or a cracked wall next to them without a charge (action, noise 4). |
+| Pyromancer | 6 | 30 | 50 | 75 | 55 | Staff 2 Might, 1 | 0 | Mana 3. Firebolt (1), Fireball (2: radius 1 at range ≤ 5, 3 Wits slots, 2 dmg per hit to everything there, allies too; noise 6; sets the hexes burning for 2 rounds), Kindle (1). |
+| Shadowmancer | 6 | 30 | 55 | 75 | 50 | Staff 2 Might, 1 | 0 | Mana 3. Veil (1: an ally within 3 can't be seen by monsters for 2 rounds or until they attack or make noise ≥ 4), Sleep (1: 2 Wits slots at range ≤ 5, 1+ hits puts a monster to sleep; not the Dragon or the Gloam), Blink (1: teleport up to 4 hexes to a free hex in sight on the same level, across pits and gaps; silent). |
+| Hedgewitch | 7 | 35 | 50 | 70 | 65 | Staff 2 Might, 1 | 0 | Mana 3. Mend (1: heal 4 within 3), Ward (1: an ally within 3 takes 1 less per hit, minimum 0, for 2 rounds), Gust (1: every figure within 1 of a hex at range ≤ 4 is pushed 1 hex away from it with all shove outcomes; noise 2). |
+
+- Existing 'mage' heroes in old saves: saves are reset (save key `vc.save.v32`).
+
+### 15.4 Quartermaster
+
+Current: torch 10, potion 20, rope 15, blasting charge 30. Add (all go in a pack slot; thrown items use the hero's action, range in hexes, need sight):
+
+| Item | Price | Effect |
+| --- | --- | --- |
+| Smoke bomb | 20 | Throw 4: the hex and its neighbours fill with smoke for 2 rounds. Smoke blocks sight both ways; monsters lose track of heroes inside (go alert). |
+| Glue bomb | 25 | Throw 4: every monster within 1 of the hex is stuck (can't move) for 2 rounds. |
+| Sleep dart | 25 | Throw 5 (any hero): 1 Finesse slot; a hit puts a monster to sleep (not the Dragon). Silent. |
+| Caltrops | 15 | Scatter on an adjacent hex: the first monster to step on it takes 2 and stops moving that turn. Lasts the delve. |
+| Grappling hook | 40 | Reusable for the delve. From a pit landing or a pit floor hex, climb straight up to the level above (to the edge hex nearest the column) — getting back up without a rope already placed. Uses move and action. |
+| Skeleton key | 30 | Opens one locked door or chest, silently, for anyone. One use. |
+| Oil flask | 20 | +10 lantern light. |
+| Firecracker | 10 | Throw 6: noise 6 at the target hex (lure monsters away). |
+
+### 15.5 Camera on enemy actions (view)
+
+- During the world phase, when a monster, rival or the Dragon acts or moves where any hero can see it (or it attacks a hero), the camera switches to that level and pans to it for the event, then moves on; at the end of the world phase it returns to the selected hero. Speed setting applies (instant skips the pans). Events nobody can see stay off camera.
+
+### 15.6 Unlooted chests (view)
+
+- An opened chest with items still on its hex (or ground loot heroes have seen) glows gold and shows a small coin marker until taken.
