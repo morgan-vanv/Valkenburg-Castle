@@ -6,8 +6,8 @@
 // fixture: the stand-in engine on src/game/test/testCastle.ts (?fixture=1).
 // test:    the real engine on the test castle (?castle=test).
 // real:    the real engine and castle.
-// Writes level<N>.png (whole level), level<N>-close.png (zoomed on the pit or
-// the level's middle) and level<N>-play.png (normal fog from a hero's view).
+// Writes level<N>.png (whole level) and level<N>-close.png (zoomed on the pit
+// or the level's middle).
 
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
 

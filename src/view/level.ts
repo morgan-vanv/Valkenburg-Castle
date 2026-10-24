@@ -69,7 +69,7 @@ export const LIGHT_COLOR: Record<LightDef['kind'], number> = {
   fungus: 0x5cff9a,
   glow: 0xc58aff,
 };
-const LIGHT_GLOW_POWER: Record<LightDef['kind'], number> = { sconce: 0.75, daylight: 0.7, fire: 1.0, fungus: 0.6, glow: 0.65 };
+const LIGHT_GLOW_POWER: Record<LightDef['kind'], number> = { sconce: 0.75, daylight: 0.32, fire: 1.0, fungus: 0.6, glow: 0.65 };
 
 /** Default floor colours per material, used when a room has no tint. */
 const MATERIAL_COLOR: Record<Material, number> = {
@@ -246,7 +246,7 @@ export class LevelView {
       (h) => this.withNeighbours(h),
       (h) => (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.06,
       0.3,
-      { cutaway: true },
+      { cutaway: true, glowScale: 0.35 },
     );
     // A dark sill under walls that face a pit, so walls don't float.
     const pitWalls = walls.filter((h) => DIRS.some((d) => this.isPit(add(h, d))));
@@ -335,7 +335,7 @@ export class LevelView {
     sources: (h: Hex) => string[],
     lift: (h: Hex) => number,
     litFloor: number,
-    opts: { cutaway?: boolean; floor?: boolean } = {},
+    opts: { cutaway?: boolean; floor?: boolean; glowScale?: number } = {},
   ): void {
     if (!hexes.length) return;
     const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, cutaway: opts.cutaway, glow: true, floor: opts.floor });
@@ -358,7 +358,8 @@ export class LevelView {
       mesh.setMatrixAt(i, m);
       mesh.setColorAt(i, color(h));
       const g = this.glow.get(hexKey(h));
-      if (g) glow.setXYZ(i, g.r, g.g, g.b);
+      const gs = opts.glowScale ?? 1;
+      if (g) glow.setXYZ(i, g.r * gs, g.g * gs, g.b * gs);
       if (matAttr) matAttr.setX(i, this.matId(h));
       srcs.push(sources(h));
     });
@@ -421,9 +422,9 @@ export class LevelView {
         const k = Math.max(0, 1 - d / (reach + 0.5));
         const f = LIGHT_GLOW_POWER[l.kind] * (0.25 + 0.75 * k * k) * (d <= l.radius ? 1 : 0.45);
         const prev = this.glow.get(hexKey(h)) ?? new THREE.Color(0, 0, 0);
-        prev.r = Math.min(1.4, prev.r + col.r * f);
-        prev.g = Math.min(1.4, prev.g + col.g * f);
-        prev.b = Math.min(1.4, prev.b + col.b * f);
+        prev.r = Math.min(0.9, prev.r + col.r * f);
+        prev.g = Math.min(0.9, prev.g + col.g * f);
+        prev.b = Math.min(0.9, prev.b + col.b * f);
         this.glow.set(hexKey(h), prev);
       }
     }
@@ -486,11 +487,11 @@ export class LevelView {
         }
         case 'daylight': {
           // A soft cool shaft from above.
-          const shaftMat = new THREE.MeshBasicMaterial({ color: 0xc8dcff, transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+          const shaftMat = new THREE.MeshBasicMaterial({ color: 0xc8dcff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
           const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.5, 6, 6, 1, true), shaftMat);
           shaft.position.set(0.6, 3.2, -0.4);
           shaft.rotation.z = -0.18;
-          const pool = new THREE.Mesh(new THREE.CircleGeometry(1.6, 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xc8dcff, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }));
+          const pool = new THREE.Mesh(new THREE.CircleGeometry(1.6, 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xc8dcff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false }));
           pool.position.y = FLOOR_TOP + 0.02;
           g.add(shaft, pool);
           g.userData.noFog = true;

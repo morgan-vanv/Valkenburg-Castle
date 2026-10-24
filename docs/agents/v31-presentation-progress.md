@@ -1,6 +1,6 @@
 # V3.1 presentation progress
 
-Status: look built; section 14 UI verified in screenshots on ?castle=test (jump hover/preview/confirm/fall, edge badge+lips, shove preview, breath/sweep/shove intents, breath jet, winch, slay card). Next: real castle when it typechecks; full tour + stress bot.
+Status: look built; section 14 UI verified in screenshots on ?castle=test (jump hover/preview/confirm/fall, edge badge+lips, shove preview, breath/sweep/shove intents, breath jet, winch, slay card). Real castle now typechecks; level shots of all three levels look right (scripts/v31-shot-levels.mjs real). Framing widened (camera max distance 90, frameLevel up to 110). v3-shot full tour passes on the real castle (0 errors). Perf fix: hidden instances collapse in the vertex shader; below-view only under explored pits (was 40 s/frame in SwiftShader). Daylight toned down, walls bake 35% of fixed light. Stress bot running against a static build (port 5192, scratchpad/dist) because the dev server reloads when the map agent saves.
 
 ## Done (files)
 - src/ui/names.ts: dragon name, winch glyph + hotkey W, hoard glyph.

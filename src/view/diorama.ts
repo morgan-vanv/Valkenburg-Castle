@@ -267,7 +267,8 @@ export class Diorama {
       if (n === shown) {
         v.group.visible = true;
         v.applyFogLit(this.fogLit, this.fogUnlit, this.vis.explored);
-        column = new Set(v.pits);
+        // Only pits the party has seen open onto what's below (no spoilers, less to draw).
+        column = new Set([...v.pits].filter((k) => this.vis.explored.has(`${n}:${k}`)));
         continue;
       }
       if (!column || !column.size) {
@@ -293,7 +294,7 @@ export class Diorama {
     if (!lv) return;
     const y = levelY(this.shownLevel);
     this.rig.focus(new THREE.Vector3((lv.min.x + lv.max.x) / 2, y, (lv.min.y + lv.max.y) / 2), true);
-    this.rig.distance = Math.max(14, Math.min(60, Math.max(lv.max.x - lv.min.x, lv.max.y - lv.min.y) * 1.1));
+    this.rig.distance = Math.max(14, Math.min(110, Math.max(lv.max.x - lv.min.x, lv.max.y - lv.min.y) * 1.15));
   }
 
   /** Look at a world x/z on the shown level (scripts and screenshots). */
