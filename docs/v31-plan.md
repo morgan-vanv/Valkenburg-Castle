@@ -26,7 +26,7 @@ Goal: the approved three-level castle (Castle Map Proposal, pass 2: https://clau
 
 - [x] Contract and spec (section 14)
 - [ ] Castle: three levels from mockup/sketch.py, monsters, loot, lights, props; tests
-- [ ] Engine: section 14 rules; tests; sim
+- [x] Engine: section 14 rules; 78 tests; sim with DRAGON=1 (src/game/falls.ts, dragon.ts)
 - [ ] Presentation: new look and UI for section 14
 - [ ] Integration: typecheck, tests, build
 - [ ] Balance with the sim (a Dragon run should stretch the lantern)

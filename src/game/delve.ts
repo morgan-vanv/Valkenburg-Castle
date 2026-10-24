@@ -4,18 +4,20 @@
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, HeroInDelve, Item, Stat } from './types';
 import type { ActionOption } from './api';
-import { CLASSES, FOCUS_MAX, LIGHT_MAX, PACK_SLOTS, TORCH_ROUNDS } from './data';
+import { CLASSES, FOCUS_MAX, LIGHT_MAX, MONSTERS, PACK_SLOTS, TORCH_ROUNDS, WINCH_NOISE } from './data';
 import { say, type Ctx } from './state';
 import {
   activeHeroes, addToPack, brightnessAt, chestLoot, cleanGround, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
-  killMonster, LIGHT_PENALTY, makeHostile, makeNoise, noteOnce, occupant, packUsed, passLanternIfNeeded, putOnGround,
+  LIGHT_PENALTY, makeHostile, makeNoise, noteOnce, occupant, packUsed, passLanternIfNeeded, putOnGround,
   rivalsOnMap, roll, valueOf, wakeAdjacent,
 } from './common';
 import {
-  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, glimpseSet, kindAt, litSet, los, pathTo, steps,
-  visibleSet, within,
+  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, glimpseSet, kindAt, litSet, los, pathTo,
+  pitsNextTo, steps, visibleSet, within,
 } from './world';
 import { buildSummary } from './camp';
+import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
+import { lairCheck } from './dragon';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -149,7 +151,8 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     }
   }
   if (walked.length) c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
-  afterHeroMove(c, h);
+  ventCheck(c, h);
+  afterHeroMove(c, h, sneak);
   makeNoise(c, h.at, h.status === 'active' ? moveNoise(sneak) : 0);
   refreshSight(c);
   checkDelveEnd(c);
@@ -165,7 +168,7 @@ function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
 }
 
 /** Prisoner follows, traps get spotted, sleepers next to the hero wake. */
-export function afterHeroMove(c: Ctx, h: HeroInDelve): void {
+export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false): void {
   const pr = c.d.prisoner;
   if (pr && h.escorting === pr.id && !pr.dead && !pr.out && !adjacent(pr.at, h.at)) {
     const spot = posNeighbors(h.at)
@@ -193,7 +196,12 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve): void {
     }
   }
   wakeAdjacent(c, h.at);
+  lairCheck(c, h, sneak);
 }
+
+setAfterLanding((c, h) => {
+  if (h && h.status === 'active') afterHeroMove(c, h);
+});
 
 // ---------------------------------------------------------------- targets
 
@@ -211,15 +219,38 @@ function aroundAndSelf(p: Pos): Pos[] {
   return [p, ...posNeighbors(p)];
 }
 
-function enemiesAdjacent(c: Ctx, h: HeroInDelve): ActionTarget[] {
+function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] {
   const out: ActionTarget[] = [];
-  for (const m of c.d.monsters) if (m.kind !== 'gloam' && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
+  for (const m of c.d.monsters) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
   for (const r of rivalsOnMap(c)) if (adjacent(r.at, h.at)) out.push({ id: r.id, at: r.at });
   return out;
 }
 
-function freeLanding(c: Ctx, set: Pos[]): Pos[] {
-  return set.filter((p) => canEnter(c.w, c.d, p) && !occupant(c, p));
+function parsePos(k: string): Pos {
+  const [lv, rest] = k.split(':');
+  const [q, r] = (rest ?? '').split(',').map(Number) as [number, number];
+  return { level: Number(lv), q, r };
+}
+
+/** Pit hexes next to `at` that something could fall down. */
+function droppablePits(c: Ctx, at: Pos, self: string): Pos[] {
+  return pitsNextTo(c.w, c.d, at).filter((p) => !!fallInfo(c, p, self));
+}
+
+/** Rope anchors a hero at `at` can climb up to (they stand on or next to the rope's foot). */
+function ropesUpFrom(c: Ctx, at: Pos): Pos[] {
+  const out: Pos[] = [];
+  for (const k of c.d.ropes) {
+    const top = parsePos(k);
+    if (occupant(c, top)) continue;
+    const foot = pitsNextTo(c.w, c.d, top).map((p) => fallColumn(c.w, c.d, p)?.to).filter((x): x is Pos => !!x);
+    if (foot.some((f) => within(f, at, 1))) out.push(top);
+  }
+  return out;
+}
+
+function nextToWinch(c: Ctx, at: Pos): Pos | undefined {
+  return c.w.winches.find((wp) => adjacent(wp, at));
 }
 
 function partyGold(c: Ctx): number {
@@ -233,8 +264,12 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
   const others = c.d.heroes.filter((x) => x !== h);
   switch (action) {
     case 'attack':
-    case 'shove':
       return enemiesAdjacent(c, h);
+    case 'shove':
+      return enemiesAdjacent(c, h, true);
+    case 'winch':
+      if (c.d.liftWorking) return [];
+      { const wp = nextToWinch(c, h.at); return wp ? [{ at: wp }] : []; }
     case 'firebolt': {
       if (cls !== 'mage' || h.mana < 1) return [];
       const vis = visibleSet(c.w, c.d);
@@ -317,19 +352,25 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     }
     case 'rope': {
       const r = h.pack.find((i) => i.kind === 'rope');
-      if (!r || !c.w.pitEdge.has(posKey(h.at)) || c.d.ropes.includes(posKey(h.at))) return [];
+      if (!r || !droppablePits(c, h.at, h.heroId).length || c.d.ropes.includes(posKey(h.at))) return [];
       return [{ at: h.at, itemId: r.id }];
     }
     case 'climb': {
-      if (c.d.ropes.includes(posKey(h.at))) return freeLanding(c, c.w.landing).map((at) => ({ at }));
-      if (c.w.landingSet.has(posKey(h.at))) {
-        return freeLanding(c, c.d.ropes.map((k) => { const [lv, rest] = k.split(':'); const [q, r] = (rest ?? '').split(',').map(Number) as [number, number]; return { level: Number(lv), q, r }; })).map((at) => ({ at }));
+      const out: ActionTarget[] = [];
+      const seen = new Set<string>();
+      if (c.d.ropes.includes(posKey(h.at))) {
+        for (const p of droppablePits(c, h.at, h.heroId)) {
+          const f = fallInfo(c, p, h.heroId)!;
+          if (seen.has(posKey(f.to))) continue;
+          seen.add(posKey(f.to));
+          out.push({ at: f.to });
+        }
       }
-      return [];
+      for (const top of ropesUpFrom(c, h.at)) out.push({ at: top });
+      return out;
     }
     case 'jump':
-      if (!c.w.pitEdge.has(posKey(h.at))) return [];
-      return freeLanding(c, c.w.landing).map((at) => ({ at }));
+      return droppablePits(c, h.at, h.heroId).map((at) => ({ at }));
     case 'free': {
       const pr = c.d.prisoner;
       if (!pr || pr.dead || pr.out || !adjacent(pr.at, h.at)) return [];
@@ -368,13 +409,13 @@ const LABELS: Record<ActionKind, string> = {
   disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', potion: 'Potion', revive: 'Revive',
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
   bribe: 'Bribe (40 gold)', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
-  passLantern: 'Pass lantern', leave: 'Leave castle',
+  passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle',
 };
 
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt'];
 const ORDER: ActionKind[] = [
   'attack', 'firebolt', 'shove', 'pick', 'smash', 'open', 'take', 'free', 'revive', 'potion', 'mend', 'kindle',
-  'rally', 'guard', 'light', 'torch', 'disarm', 'charge', 'rope', 'climb', 'jump', 'bribe', 'passLantern', 'give',
+  'rally', 'guard', 'light', 'torch', 'disarm', 'charge', 'winch', 'rope', 'climb', 'jump', 'bribe', 'passLantern', 'give',
   'drop', 'leave',
 ];
 
@@ -424,6 +465,8 @@ export interface Spec {
   light: number;
   /** Damage per hit (attacks). */
   dmg?: number;
+  warning?: string;
+  confirm?: boolean;
 }
 
 function foe(c: Ctx, id?: string) {
@@ -472,7 +515,9 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (def.cls === 'burglar' && f.monster && !f.hunting) { slots += 1; mods.push('Backstab +1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
       if (c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
-      const dmg = cls.weapon.dmg;
+      const armor = f.monster ? (MONSTERS[f.monster.kind].armor ?? 0) : 0;
+      if (armor) mods.push(`Armor −${armor} dmg per hit`);
+      const dmg = Math.max(1, cls.weapon.dmg - armor);
       const outcomes = [];
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? 'Miss' : `${i * dmg + (i === slots ? 1 : 0)} dmg`);
       return base(cls.weapon.stat, slots, p, outcomes, 2, dmg);
@@ -482,9 +527,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       let p = withLight(def.stats.wits);
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
+      const armor = f.monster ? (MONSTERS[f.monster.kind].armor ?? 0) : 0;
+      if (armor) mods.push(`Armor −${armor} dmg per hit`);
+      const bd = Math.max(1, 2 - armor);
       const outcomes = [];
-      for (let i = 0; i <= 3; i++) outcomes.push(i === 0 ? 'Miss' : `${i * 2 + (i === 3 ? 1 : 0)} dmg`);
-      const s = base('wits', 3, p, outcomes, 3, 2);
+      for (let i = 0; i <= 3; i++) outcomes.push(i === 0 ? 'Miss' : `${i * bd + (i === 3 ? 1 : 0)} dmg`);
+      const s = base('wits', 3, p, outcomes, 3, bd);
       s.modifiers.push('1 mana');
       return s;
     }
@@ -499,10 +547,10 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return base('finesse', 2, withLight(def.stats.finesse), ['Sets it off: 3 dmg', 'Disarmed', 'Disarmed'], 2);
     case 'shove': {
       const f = foe(c, t.id)!;
-      const dest = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
-      const k = kindAt(c.w, c.d, dest);
-      const what = k === 'pit' ? 'Falls into the pit' : canEnter(c.w, c.d, dest) && !occupant(c, dest) ? 'Pushed back' : 'Slams the wall: 1 dmg';
-      return base('might', 2, withLight(def.stats.might), ['Nothing', 'Nothing', what], 2);
+      const o = pushOutcome(c, h.at, f.at, t.id);
+      const sp = base('might', 2, withLight(def.stats.might), ['Nothing', 'Nothing', pushText(o, 1)], 2);
+      if (o.kind === 'fall' && o.fall) sp.warning = `${f.monster?.name ?? 'It'} would fall ${o.fall.levels === 1 ? '1 level' : `${o.fall.levels} levels`} into ${o.fall.levelName}.`;
+      return sp;
     }
     case 'open':
       if (t.id) return simple('Opens the chest');
@@ -519,8 +567,18 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'revive': return simple('Back up with 3 HP, wounded after');
     case 'charge': return simple('Blows at end of turn: 4 dmg within 1, 2 within 2', 8);
     case 'rope': return simple('Rope anchored here');
-    case 'climb': return simple('Climb the rope');
-    case 'jump': return simple('Jump: 4 dmg');
+    case 'climb': return simple(t.at!.level < h.at.level ? 'Climb up the rope' : 'Climb down the rope, no damage');
+    case 'jump': {
+      const f = fallInfo(c, t.at!, heroId)!;
+      const lv = f.levels === 1 ? '1 level' : `${f.levels} levels`;
+      const s = simple(`Falls ${lv}: ${f.damage} dmg`);
+      let warn = `Falls ${lv} into ${f.levelName}: ${f.damage} damage.`;
+      if (h.hp <= f.damage) warn += ` This will down ${def.name}.`;
+      s.warning = warn;
+      if (f.levels > 1) s.confirm = true;
+      return s;
+    }
+    case 'winch': return simple(`The lift runs for the rest of the delve. Noise ${WINCH_NOISE}`, WINCH_NOISE);
     case 'free': return simple(c.d.prisoner?.freed ? 'Take over the escort' : 'Free the prisoner');
     case 'bribe': return simple('Pay 40 gold: they leave');
     case 'rally': return simple('+1 Focus to allies within 3');
@@ -608,25 +666,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         wakeTarget(c, tid, h.at);
         break;
       }
-      const m = c.d.monsters.find((x) => x.id === tid);
-      const rv = rivalsOnMap(c).find((x) => x.id === tid);
-      const who = (m ?? rv)!;
-      const dest = { level: who.at.level, q: 2 * who.at.q - h.at.q, r: 2 * who.at.r - h.at.r };
-      if (kindAt(c.w, c.d, dest) === 'pit') {
-        say(c, `${who.name} goes over the edge.`);
-        c.ev.push({ type: 'moved', id: tid, path: [dest] });
-        if (m) killMonster(c, m, heroId);
-        else if (rv) {
-          rv.hp = 0;
-          c.ev.push({ type: 'monsterDied', id: rv.id });
-        }
-      } else if (canEnter(c.w, c.d, dest) && !occupant(c, dest)) {
-        who.at = dest;
-        c.ev.push({ type: 'moved', id: tid, path: [dest] });
-        wakeTarget(c, tid, h.at);
-      } else {
-        hurtAny(c, tid, 1, heroId);
-      }
+      wakeTarget(c, tid, h.at);
+      push(c, tid, h.at, heroId);
+      // Perfect: 1 more damage on top of whatever the push did.
+      if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
       break;
     }
     case 'pick': {
@@ -758,17 +801,28 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       useItem(h, t.itemId);
       c.d.ropes.push(posKey(h.at));
       break;
-    case 'climb':
-    case 'jump': {
+    case 'climb': {
       const from = h.at;
       h.at = { ...t.at! };
       c.ev.push({ type: 'moved', id: heroId, path: [h.at] });
       if (from.level !== h.at.level) c.ev.push({ type: 'levelChanged', id: heroId, from: from.level, to: h.at.level });
-      if (action === 'jump') {
-        say(c, `${name} jumps.`);
-        hurtHero(c, h, 4, 'fall');
-      }
+      if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
+      h.escorting = undefined;
+      ventCheck(c, h);
       afterHeroMove(c, h);
+      break;
+    }
+    case 'jump': {
+      say(c, `${name} jumps.`);
+      c.ev.push({ type: 'moved', id: heroId, path: [{ ...t.at! }] });
+      fall(c, heroId, t.at!, null);
+      break;
+    }
+    case 'winch': {
+      c.d.liftWorking = true;
+      c.ev.push({ type: 'liftWorking' });
+      say(c, `${name} hauls on the winch. Chains rattle; the lift groans awake.`);
+      makeNoise(c, h.at, WINCH_NOISE);
       break;
     }
     case 'free': {

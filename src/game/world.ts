@@ -2,18 +2,25 @@
 // state: tiles, doors, line of sight, light, sight and path finding.
 
 import { distance, hexKey, posKey, posNeighbors, line, range, samePos, type Hex, type Pos } from './hex';
-import type { Brightness, CastleDef, LevelDef, TileDef, TileKind } from './types';
+import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { LIGHT_MAX } from './data';
 
 export class World {
   readonly levels = new Map<number, LevelDef>();
   readonly stairs = new Map<string, Pos>();
-  readonly pitEdge = new Set<string>();
-  readonly landing: Pos[] = [];
-  readonly landingSet = new Set<string>();
+  /** Lift ends, by posKey, to the other end. Usable once the winch is worked. */
+  readonly lifts = new Map<string, Pos>();
+  /** Winch hexes (tallprops), by posKey. */
+  readonly winches: Pos[] = [];
   readonly exits: Pos[] = [];
   readonly floors = new Map<number, Pos[]>();
+  /** Fire vents: walkable hexes with a radius-1 'fire' light. */
+  readonly vents = new Set<string>();
+  /** Solid hexes that burn (the forge): a 'fire' light on a non-walkable hex. */
+  readonly fires = new Set<string>();
+  /** Fixed lit hexes, cached by door/blown state. */
+  fixedCache: { key: string; lit: Set<string> } | null = null;
 
   constructor(readonly castle: CastleDef) {
     for (const l of castle.levels) {
@@ -31,14 +38,33 @@ export class World {
       if (link.kind === 'stairs') {
         this.stairs.set(posKey(link.a), link.b);
         this.stairs.set(posKey(link.b), link.a);
-      } else {
-        for (const e of link.edge) this.pitEdge.add(posKey(e));
-        for (const l of link.landing) {
-          this.landing.push(l);
-          this.landingSet.add(posKey(l));
-        }
+      } else if (link.kind === 'lift') {
+        this.lifts.set(posKey(link.a), link.b);
+        this.lifts.set(posKey(link.b), link.a);
+        this.winches.push(link.winch);
       }
     }
+    for (const L of castle.lights ?? []) {
+      const k = this.tile(L.at)?.kind;
+      if (L.kind !== 'fire') continue;
+      if (k && FLOORISH.includes(k)) {
+        if (L.radius === 1) this.vents.add(posKey(L.at));
+      } else this.fires.add(posKey(L.at));
+    }
+    for (const t of castle.levels.flatMap((l) => Object.entries(l.tiles).map(([k, d]) => [l.level, k, d] as const))) {
+      const [lv, k, d] = t;
+      if (d.kind === 'tallprop' && d.prop === 'forge') this.fires.add(`${lv}:${k}`);
+    }
+  }
+
+  levelName(level: number): string {
+    const n = this.levels.get(level)?.name ?? `Level ${level}`;
+    return n.replace(/^The /, 'the ');
+  }
+
+  /** Room id of a hex, if any. */
+  roomOf(p: Pos): string | undefined {
+    return this.tile(p)?.room;
   }
 
   tile(p: Pos): TileDef | undefined {
@@ -61,7 +87,7 @@ export function kindAt(w: World, d: DelveX | null, p: Pos): TileKind | undefined
   return t.kind;
 }
 
-const FLOORISH: TileKind[] = ['floor', 'rubble', 'stairs', 'exit', 'door'];
+const FLOORISH: TileKind[] = ['floor', 'rubble', 'stairs', 'exit', 'door', 'lift'];
 
 /** Can feet stand here at all (ignoring doors' state and occupants)? */
 export function isFloorish(w: World, d: DelveX | null, p: Pos): boolean {
@@ -87,7 +113,7 @@ export function canEnter(w: World, d: DelveX, p: Pos, allowLocked = false): bool
 export function blocksSight(w: World, d: DelveX, p: Pos): boolean {
   const k = kindAt(w, d, p);
   if (k === undefined) return true;
-  if (k === 'wall' || k === 'pillar' || k === 'cracked') return true;
+  if (k === 'wall' || k === 'pillar' || k === 'cracked' || k === 'tallprop' || k === 'sealed') return true;
   if (k === 'door') return !doorAt(d, p)?.open;
   return false;
 }
@@ -142,47 +168,72 @@ export function litSet(w: World, d: DelveX): Set<string> {
     const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
     shine({ level: Number(lv), q, r }, 3);
   }
+  for (const k of fixedLit(w, d)) out.add(k);
   return out;
 }
 
-/** How far a hero can make out the shape of a room in the dark. */
-export const GLIMPSE_RANGE = 8;
+/** Hexes lit for good by the castle's fixed lights (sconces, daylight, fires, fungus, glow). */
+export function fixedLit(w: World, d: DelveX): Set<string> {
+  const lights: LightDef[] = w.castle.lights ?? [];
+  if (!lights.length) return new Set();
+  const key = Object.entries(d.doors).filter(([, v]) => v.open).map(([k]) => k).sort().join('|') + '#' + [...d.blown].sort().join('|');
+  if (w.fixedCache && w.fixedCache.key === key) return w.fixedCache.lit;
+  const out = new Set<string>();
+  for (const L of lights) {
+    for (const h of range(L.at, L.radius)) {
+      const p = { level: L.at.level, ...h };
+      if (!w.tile(p)) continue;
+      if (los(w, d, L.at, p)) out.add(posKey(p));
+    }
+  }
+  w.fixedCache = { key, lit: out };
+  return out;
+}
+
+/** Sight range by lantern stage and depth (spec 14.5): bright 8, dim 6, dark 4, pitch 2; −1 per level below 1; never below 2. */
+export const SIGHT_BY_STAGE: Record<Brightness, number> = { bright: 8, dim: 6, dark: 4, pitch: 2 };
+export function sightRangeOf(light: number, level: number): number {
+  return Math.max(2, SIGHT_BY_STAGE[brightnessOf(light)] - Math.max(0, level - 1));
+}
+/** Lit hexes in line of sight are visible from this far, whatever the sight range. */
+export const LIT_SIGHT = 14;
 
 /**
  * Hexes whose layout a hero at `from` can make out: every tile in line of
- * sight within GLIMPSE_RANGE, lit or not. Walls, doors and floors become
- * explored; units are only seen in light (visibleSet).
+ * sight within the sight range, lit or not.
  */
 export function glimpseSet(w: World, d: DelveX, from: Pos): Pos[] {
   const out: Pos[] = [];
-  for (const h of range(from, GLIMPSE_RANGE)) {
+  for (const h of range(from, sightRangeOf(d.light, from.level))) {
     const p = { level: from.level, ...h };
     if (w.tile(p) && los(w, d, from, p)) out.push(p);
   }
   return out;
 }
 
-/** Hexes the active heroes see now. */
+/**
+ * Hexes the active heroes see now (units there are seen): every hex within 1,
+ * every hex in line of sight within the sight range (lit or not), and lit
+ * hexes in line of sight up to LIT_SIGHT.
+ */
 export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> {
   const L = lit ?? litSet(w, d);
   const out = new Set<string>();
   const eyes = d.heroes.filter((h) => h.status === 'active');
   for (const h of eyes) {
-    for (const n of range(h.at, 1)) {
+    const sr = sightRangeOf(d.light, h.at.level);
+    for (const n of range(h.at, LIT_SIGHT)) {
       const p = { level: h.at.level, ...n };
-      if (w.tile(p)) out.add(posKey(p));
-    }
-  }
-  for (const k of L) {
-    if (out.has(k)) continue;
-    const [lv, rest] = k.split(':');
-    const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
-    const p = { level: Number(lv), q, r };
-    for (const h of eyes) {
-      if (h.at.level === p.level && distance(h.at, p) <= 8 && los(w, d, h.at, p)) {
+      if (!w.tile(p)) continue;
+      const k = posKey(p);
+      if (out.has(k)) continue;
+      const dist = distance(h.at, p);
+      if (dist <= 1) {
         out.add(k);
-        break;
+        continue;
       }
+      if (dist > sr && !L.has(k)) continue;
+      if (los(w, d, h.at, p)) out.add(k);
     }
   }
   return out;
@@ -223,6 +274,10 @@ export function steps(w: World, d: DelveX, p: Pos, opts: { stairs: boolean; allo
   }
   if (opts.stairs && kindAt(w, d, p) === 'stairs') {
     const o = w.stairs.get(posKey(p));
+    if (o) out.push([o, 1]);
+  }
+  if (opts.stairs && d.liftWorking && kindAt(w, d, p) === 'lift') {
+    const o = w.lifts.get(posKey(p));
     if (o) out.push([o, 1]);
   }
   return out;
@@ -304,8 +359,9 @@ export function noiseField(w: World, d: DelveX, src: Pos, radius: number): Map<s
     const [p, c] = open.shift()!;
     if (best.get(posKey(p))! < c) continue;
     for (const n of posNeighbors(p)) {
-      if (!isFloorish(w, d, n)) continue;
-      const door = kindAt(w, d, n) === 'door' && !doorAt(d, n)?.open;
+      const nk = kindAt(w, d, n);
+      if (!isFloorish(w, d, n) && nk !== 'prop' && nk !== 'pit') continue;
+      const door = nk === 'door' && !doorAt(d, n)?.open;
       const nc = c + (door ? 2 : 1);
       if (nc > radius) continue;
       const k = posKey(n);
@@ -327,3 +383,56 @@ export function within(a: Pos, b: Pos, n: number): boolean {
 
 export { samePos, posKey };
 export type { Hex };
+
+// ---------------------------------------------------------------- falls
+
+/** Floor-like hex a figure can stand on (doors excluded). */
+export function standable(w: World, d: DelveX | null, p: Pos): boolean {
+  const k = kindAt(w, d, p);
+  return k !== undefined && k !== 'door' && FLOORISH.includes(k);
+}
+
+/**
+ * Where a fall into the pit column at `pit` comes to rest, ignoring who stands there:
+ * the first level below whose tile at the same (q, r) is walkable. A solid tile
+ * under the column stops the fall on the nearest walkable hex of that level.
+ */
+export function fallColumn(w: World, d: DelveX | null, pit: Pos): { to: Pos; levels: number } | null {
+  if (kindAt(w, d, pit) !== 'pit') return null;
+  const levels = [...w.levels.keys()].filter((l) => l > pit.level).sort((a, b) => a - b);
+  for (const lv of levels) {
+    const p = { level: lv, q: pit.q, r: pit.r };
+    const k = kindAt(w, d, p);
+    if (k === 'pit') continue;
+    if (k && standable(w, d, p)) return { to: p, levels: lv - pit.level };
+    // Solid or void under the column: nearest walkable on this level.
+    for (let r = 1; r <= 3; r++) {
+      const ring = range(p, r).map((h) => ({ level: lv, ...h })).filter((x) => distance(x, p) === r && standable(w, d, x));
+      if (ring.length) return { to: ring[0]!, levels: lv - pit.level };
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Fall damage: 4 for one level, 7 for two or more. */
+export function fallDamage(levels: number): number {
+  return levels <= 1 ? 4 : 7;
+}
+
+/** Nearest free standable hex to `p` within 3 on its level (p itself first). */
+export function freeNear(w: World, d: DelveX, p: Pos, taken: (q: Pos) => boolean): Pos | null {
+  for (let r = 0; r <= 3; r++) {
+    for (const h of range(p, r)) {
+      const x = { level: p.level, ...h };
+      if (distance(x, p) !== r) continue;
+      if (standable(w, d, x) && !taken(x)) return x;
+    }
+  }
+  return null;
+}
+
+/** Floor hex next to a pit (an edge). */
+export function pitsNextTo(w: World, d: DelveX | null, p: Pos): Pos[] {
+  return posNeighbors(p).filter((n) => kindAt(w, d, n) === 'pit');
+}

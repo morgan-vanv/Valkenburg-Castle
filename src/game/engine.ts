@@ -5,7 +5,8 @@ import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Comm
 import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { SHOP } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
-import { brightnessOf, litSet, visibleSet, World } from './world';
+import { brightnessOf, litSet, sightRangeOf, visibleSet, World } from './world';
+import { edgeRiskAt, fallInfo } from './falls';
 import { backToCamp, campCommand, newGame } from './camp';
 import { hd, valueOf } from './common';
 import { abandon, actions, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
@@ -110,6 +111,8 @@ export function createEngine(castle: CastleDef): Engine {
         outcomes: sp.outcomes,
         noise: sp.noise,
         light: sp.light,
+        ...(sp.warning ? { warning: sp.warning } : {}),
+        ...(sp.confirm ? { confirm: true } : {}),
       };
     },
 
@@ -147,6 +150,24 @@ export function createEngine(castle: CastleDef): Engine {
       const c = rctx(state);
       if (!c) return false;
       return litSet(w, c.d).has(posKey(at));
+    },
+
+    sightRange(state, level) {
+      return sightRangeOf(state.delve?.light ?? 0, level);
+    },
+
+    fallInfo(state, pit: Pos) {
+      const c = rctx(state);
+      if (!c) return null;
+      return fallInfo(c, pit);
+    },
+
+    edgeRisk(state, heroId) {
+      const c = rctx(state);
+      if (!c) return null;
+      const h = hd(c, heroId);
+      if (!h || h.status !== 'active') return null;
+      return edgeRiskAt(c, h.at, heroId);
     },
 
     shop: () => SHOP.map((o) => ({ ...o })),
