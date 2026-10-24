@@ -46,9 +46,6 @@ interface Tag {
 function hexRing(rIn: number, rOut: number): THREE.BufferGeometry {
   return new THREE.RingGeometry(rIn, rOut, 6, 1, Math.PI / 6).rotateX(-Math.PI / 2);
 }
-function hexDisc(r: number): THREE.BufferGeometry {
-  return new THREE.CircleGeometry(r, 6, Math.PI / 6).rotateX(-Math.PI / 2);
-}
 
 const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
   walk: COLORS.ember,
@@ -128,7 +125,7 @@ export class Diorama {
     this.rig = new CameraRig(canvas);
 
     // Near-black ambient; light comes from the lantern, torches and braziers.
-    this.ambient = new THREE.AmbientLight(0x2a2f3a, 0.3);
+    this.ambient = new THREE.AmbientLight(0x3a3f4a, 0.45);
     this.hemi = new THREE.HemisphereLight(0x3a3046, 0x0a0806, 0.25);
     const rim = new THREE.DirectionalLight(COLORS.cold, 0.22);
     rim.position.set(-6, 9, -8);
@@ -144,10 +141,10 @@ export class Diorama {
 
     // Overlays.
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
-      const additive = style === 'walk' || style === 'sneak';
+      const fill = style === 'walk' || style === 'sneak';
       const m = new THREE.InstancedMesh(
-        style === 'target' || style === 'ally' || style === 'danger' ? hexRing(0.72, 0.9) : hexDisc(0.9),
-        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: additive ? 0.2 : 0.85, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending }),
+        fill ? hexRing(0.12, 0.84) : hexRing(0.72, 0.9),
+        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.22 : 0.85, depthWrite: false }),
         600,
       );
       m.count = 0;

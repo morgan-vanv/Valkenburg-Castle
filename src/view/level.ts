@@ -124,7 +124,7 @@ export class LevelView {
       (h) => this.floorColor(h, COLORS.floor),
       (h) => [this.pk(h)],
       (h) => (hash2(h.q, h.r, this.level) - 0.5) * 0.04,
-      0.08,
+      0.2,
     );
     this.batch(
       prism(R, RAISED_TOP),
@@ -132,7 +132,7 @@ export class LevelView {
       (h) => this.floorColor(h, COLORS.raised),
       (h) => [this.pk(h)],
       (h) => (hash2(h.q, h.r, this.level) - 0.5) * 0.04,
-      0.1,
+      0.22,
     );
     // Walls: taller stone prisms, lit when any neighbour is.
     this.batch(
@@ -141,7 +141,7 @@ export class LevelView {
       (h) => new THREE.Color(COLORS.stone).offsetHSL(0, (hash2(h.q, h.r, 3) - 0.5) * 0.04, (hash2(h.r, h.q, 9) - 0.5) * 0.08),
       (h) => this.withNeighbours(h),
       (h) => (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.18,
-      0.1,
+      0.22,
     );
     // Wall caps: a lighter rim so wall tops read from above.
     this.batch(
@@ -150,11 +150,11 @@ export class LevelView {
       (h) => new THREE.Color(COLORS.stoneLight).offsetHSL(0, 0, (hash2(h.q, h.r, 4) - 0.5) * 0.08),
       (h) => this.withNeighbours(h),
       (h) => WALL_HEIGHT + (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.18,
-      0.12,
+      0.3,
     );
     // Rock rim: void hexes around open tiles, low and dark.
     this.batch(
-      prism(R, WALL_HEIGHT * 0.8),
+      prism(R, 0.3),
       [...rim.values()],
       (h) => new THREE.Color(COLORS.rock).offsetHSL(0, 0, (hash2(h.q, h.r, 2) - 0.5) * 0.04),
       (h) => this.withNeighbours(h),
@@ -393,7 +393,7 @@ export class LevelView {
   private addExit(h: Hex): void {
     const axis = this.wallAxis(h);
     const stone = fogMaterial({ color: COLORS.stoneLight, litFloor: 0.2 });
-    const glow = new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const glow = new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     const g = new THREE.Group();
     g.rotation.y = this.dirAngle(axis);
     const span = HEX * 1.5;

@@ -10,7 +10,7 @@ export const LEVEL_GAP = 12;
 /** Height of the walkable top of a plain floor tile. */
 export const FLOOR_TOP = 0.18;
 export const RAISED_TOP = 0.62;
-export const WALL_HEIGHT = 1.7;
+export const WALL_HEIGHT = 1.25;
 
 export function levelY(level: number): number {
   return -(level - 1) * LEVEL_GAP;
@@ -35,7 +35,7 @@ export function hash2(x: number, y: number, s = 0): number {
 
 export const COLORS = {
   void: 0x050404,
-  stone: 0x5b5249,
+  stone: 0x6e645a,
   stoneLight: 0x7a6f62,
   stoneDark: 0x2c2722,
   floor: 0x6a5e50,

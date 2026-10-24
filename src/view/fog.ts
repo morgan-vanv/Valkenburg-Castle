@@ -25,7 +25,7 @@ export interface FogMaterialOptions {
 export type FogMaterial = THREE.MeshLambertMaterial & { userData: { fog: { value: number }; dim: { value: number } } };
 
 /** Global dimming of explored squares; tweak for readability. */
-export const EXPLORED_LEVEL = 0.16;
+export const EXPLORED_LEVEL = 0.22;
 
 export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
   const m = new THREE.MeshLambertMaterial({
