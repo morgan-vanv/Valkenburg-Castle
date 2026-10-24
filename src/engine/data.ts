@@ -76,7 +76,7 @@ export const NOISE = {
   turn: 2,
   attack: 3,
   kill: 2,
-  spotted: 5,
+  spotted: 2,
   smash: 6,
   chop: 4,
   blast: 15,

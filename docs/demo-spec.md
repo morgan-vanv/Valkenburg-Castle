@@ -146,7 +146,7 @@ Monsters fight as individuals, never use missiles and never leave the room they 
 ## 4. The Alarm (P0)
 
 - A meter from 0 to 100, always on screen. Tiers: Quiet 0–19, Wary 20–39, Alert 40–59, Roused 60–79, Swarming 80+.
-- It rises by: +2 each castle phase; +3 per attack; +2 per unit killed; +5 the first time any enemy sees a given player unit; door noise from the table above; Fireball +10.
+- It rises by: +2 each castle phase; +3 per attack; +2 per unit killed; +2 the first time any enemy sees a given player unit; door noise from the table above; Fireball +10.
 - Enemy units start **dormant**: they don't move or act. A dormant unit wakes when it sees a player unit, is attacked, or is woken by its tier:
   - Wary: guardrooms within 8 squares by path of any noise this turn wake.
   - Alert: every guardroom on a level with player units wakes.

@@ -3,17 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#060505" />
     <title>Valkenburg Castle</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <canvas id="dungeon" aria-hidden="true"></canvas>
-    <main class="title">
-      <p class="eyebrow">A roguelite extraction game</p>
-      <h1>Valkenburg Castle</h1>
-      <p class="status">Under construction. Move your lantern.</p>
-    </main>
+    <div id="app"><noscript>Valkenburg Castle needs JavaScript and WebGL.</noscript></div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

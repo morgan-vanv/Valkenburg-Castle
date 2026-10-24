@@ -1,6 +1,6 @@
 // The Alarm meter, noise, waking and spotting (spec 4, 1980 rule 9.11).
 
-import { ALARM_TIERS } from './data';
+import { ALARM_TIERS, NOISE } from './data';
 import { squareKey } from './geometry';
 import { areaAt } from './mapIndex';
 import { pathTo } from './movement';
@@ -29,7 +29,6 @@ export function addNoise(ctx: Ctx, at: Coord | undefined, amount: number): void 
   const tier = tierOf(to);
   const tierChanged = tier !== tierOf(from);
   ctx.emit({ type: 'alarm', from, to, tier, tierChanged });
-  if (tierChanged) ctx.log(`The Alarm rises: the castle is ${tier.toLowerCase()}.`);
 }
 
 export function wake(ctx: Ctx, u: Unit): void {
@@ -92,7 +91,7 @@ export function checkSpotting(ctx: Ctx): void {
         exp.spotted[p.id] = true;
         ctx.emit({ type: 'spotted', unitId: p.id });
         ctx.log(`${p.name} has been spotted.`);
-        addNoise(ctx, e.pos, 5);
+        addNoise(ctx, e.pos, NOISE.spotted);
       }
     }
   }
