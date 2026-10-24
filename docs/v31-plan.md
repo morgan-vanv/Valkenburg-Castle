@@ -31,7 +31,7 @@ Goal: the approved three-level castle (Castle Map Proposal, pass 2: https://clau
 - [x] Integration: typecheck clean, 95 tests, build OK
 - [x] Balance: on the real castle a slay run takes ~38-41 rounds, ending with ~4 light (stretch, as asked); careful bot 86% done, head-on bot 2/12. Level 1 stays a warm-up. No tuning needed yet.
 - [x] Play-test in headless Chromium: full tour, stress bot and level shots on the real castle, 0 errors
-- [ ] Merge to `main`, verify live
+- [x] Merge to `main`, verify live (deployed 2026-10-24 ~17:20 New York; live page serves 3 levels, no console errors)
 - [x] Changelog (docs/v3-changes.md) and decisions
 
 ## Resuming
