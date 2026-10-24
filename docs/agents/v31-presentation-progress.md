@@ -22,17 +22,17 @@ Status: look built; section 14 UI verified in screenshots on ?castle=test (jump 
 - src/ui/app.ts: events shoved/fell/breath/liftWorking (sfx + log), winch sfx. src/audio/sfx.ts: thud, whoosh, roar, winch.
 - src/ui/screens.ts: slay card (Dragon icon, 'Slay'). src/style.css: V3.1 block at the end.
 
-## Next (old list, items 2-3 done)
-1. Check latest screenshots, tune look.
-2. (done) HUD: Jump flow (highlight pit hexes, hover shows landing via engine.fallInfo + dio.showLanding, confirm dialog when preview.confirm with preview.warning, Jump/Stay), Shove preview landing + red fall outcome, edge badge on hero card + dio.showEdgeLips from engine.edgeRisk, winch action, describeHex for prop/lift/sealed/railing/vents, intentText for shove/breath/sweep, goalBox + contract card for 'slay' (Dragon icon), TILE_NAME new kinds.
-3. app.ts: sfx for shoved/fell/breath/liftWorking events, hook dio.onImpact etc; css for .landing-tag, edge badge, jump confirm.
-4. Switch to real engine/castle (engine committed; check src/data/castle typechecks) and shoot all three levels.
-5. Run scripts/v3-shot.mjs full tour + v3-stress.mjs for errors.
+## Next (brief done; nice to have)
+- Look tuning stopped at the lead's request. Ideas: thinner railings readable from far, Dragon breath on the real castle not yet seen in play (shown via scripted intents), touch pass.
+- Hoard heaps only appear if the engine places 'hoard' ground items (it does at delve start).
 
-- scripts/v31-shot-scenes.mjs: scenes on ?castle=test. Fixed: intent marks now re-shown on level change.
+## Final checks (2026-10-24)
+- tsc: 0 errors in my paths. v3-shot.mjs full tour on the real castle: 0 errors. v3-stress.mjs (2 delves) on the real castle: 0 errors. v31-shot-scenes.mjs (?castle=test): 0 errors. Real-castle jump from the L1 rim to the Hollow: 0 errors.
+- Static build for testing: `npx vite build --outDir <dir> --base ./` then serve it; the dev server reloads mid-run while other agents edit files.
 
 ## Contract requests
 - None.
 
 ## Known issues
 - Dev server: run `source scripts/npmenv.sh && npx vite --port 5191 --strictPort` (background).
+- SwiftShader is slow when looking into a pit (about 0.7 s/frame headless); fine on a real GPU. Screenshot scripts may need longer timeouts.
