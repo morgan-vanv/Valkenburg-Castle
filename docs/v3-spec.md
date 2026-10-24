@@ -69,13 +69,13 @@ Pillars to check every rule against: simplicity over simulation; never slow a fa
 
 ## 5. Light
 
-- `LIGHT_MAX` = 60. A delve starts at 60. Burns 1 per world phase.
-- Brightness from light: bright > 36, dim 19..36, dark 1..18, pitch 0.
+- `LIGHT_MAX` = 40. A delve starts at 40. Burns 1 per world phase.
+- Brightness from light: bright > 26, dim 13..26, dark 1..12, pitch 0.
 - Light radius around the lantern bearer: bright 4, dim 3, dark 2, pitch 0. Hexes inside are lit. Each hero with a lit torch lights radius 2 around them. Each lit brazier lights radius 3 around it.
 - Sight: heroes see lit hexes in line of sight within 8, plus every hex within 1 of them. Unlit hexes beyond 1 are unseen.
 - A hero standing in an unlit hex fights at "dark" penalties (−20) regardless of the lantern. That's the cost of splitting up without a torch.
 - Torch: `torch` action uses one from the pack: 12 rounds of radius-2 light around that hero. Lighting a brazier: +6 light to the lantern, permanent radius 3 light there, stays lit across delves.
-- Kindle: +12 (cap 60). The lantern can be passed to an adjacent hero (action).
+- Kindle: +12 (cap 40). The lantern can be passed to an adjacent hero (action).
 - **The Gloam**: when light hits 0, a Gloam spawns on a floor hex 8 to 10 hexes from the lantern bearer (on the bearer's level), out of sight if possible. It moves 3 hexes per world phase toward the nearest active hero (any level via stairs), and hits for 4 (no roll, ignores armor) when adjacent. It can't be harmed. When light rises above 0 it fades (removed). Message: "Something moves in the dark."
 
 ## 6. Noise

@@ -234,11 +234,11 @@ describe('movement', () => {
 
 describe('light', () => {
   it('stages by oil', () => {
-    expect(brightnessOf(60)).toBe('bright');
-    expect(brightnessOf(37)).toBe('bright');
-    expect(brightnessOf(36)).toBe('dim');
-    expect(brightnessOf(19)).toBe('dim');
-    expect(brightnessOf(18)).toBe('dark');
+    expect(brightnessOf(40)).toBe('bright');
+    expect(brightnessOf(27)).toBe('bright');
+    expect(brightnessOf(26)).toBe('dim');
+    expect(brightnessOf(13)).toBe('dim');
+    expect(brightnessOf(12)).toBe('dark');
     expect(brightnessOf(1)).toBe('dark');
     expect(brightnessOf(0)).toBe('pitch');
   });
@@ -247,10 +247,10 @@ describe('light', () => {
     let s = delve();
     put(s, 'hobart', PITHALL);
     s = ok(s, { type: 'endTurn' }).state;
-    expect(s.delve!.light).toBe(59);
+    expect(s.delve!.light).toBe(39);
     const lit = e.visibility(s).lit;
     expect(lit.has(posKey(at(1, 10, 3)))).toBe(true); // 4 rows up
-    s.delve!.light = 20; // dim: radius 3
+    s.delve!.light = 15; // dim: radius 3
     expect(e.visibility(s).lit.has(posKey(at(1, 10, 3)))).toBe(false);
     expect(e.inLight(s, PITHALL)).toBe(true);
   });
@@ -267,14 +267,14 @@ describe('light', () => {
 
   it('kindle adds 12, braziers add 6 and stay lit', () => {
     let s = delve();
-    s.delve!.light = 30;
+    s.delve!.light = 20;
     s = act(s, 'aldous', 'kindle', {}).state;
-    expect(s.delve!.light).toBe(42);
+    expect(s.delve!.light).toBe(32);
     expect(hero(s, 'aldous').mana).toBe(2);
     put(s, 'brann', at(1, 16, 3));
     const b = at(1, 16, 2);
     s = act(s, 'brann', 'light', { at: b }).state;
-    expect(s.delve!.light).toBe(48);
+    expect(s.delve!.light).toBe(38);
     expect(s.delve!.lit).toContain(posKey(b));
   });
 

@@ -2,7 +2,7 @@
 
 import type { HeroClass, MonsterKind, ShopOffer, Stat, Stats } from './types';
 
-export const LIGHT_MAX = 60;
+export const LIGHT_MAX = 40;
 export const PACK_SLOTS = 4;
 export const FOCUS_MAX = 3;
 export const MANA_MAX = 3;
@@ -72,10 +72,10 @@ export interface MonsterDef {
 
 export const MONSTERS: Record<MonsterKind | 'gloam', MonsterDef> = {
   rats: { name: 'Rats', hp: 3, slots: 2, chance: 50, dmg: 1, move: 4, xp: 1 },
-  orc: { name: 'Orc', hp: 6, slots: 2, chance: 55, dmg: 2, move: 3, xp: 1 },
-  spider: { name: 'Spider', hp: 5, slots: 2, chance: 60, dmg: 2, move: 3, xp: 1 },
+  orc: { name: 'Orc', hp: 6, slots: 2, chance: 60, dmg: 2, move: 3, xp: 1 },
+  spider: { name: 'Spider', hp: 5, slots: 2, chance: 65, dmg: 2, move: 3, xp: 1 },
   cutpurse: { name: 'Cutpurse', hp: 4, slots: 1, chance: 65, dmg: 1, move: 5, xp: 1 },
-  berserker: { name: 'Berserker', hp: 9, slots: 4, chance: 55, dmg: 2, move: 4, xp: 3 },
+  berserker: { name: 'Berserker', hp: 10, slots: 4, chance: 60, dmg: 3, move: 4, xp: 3 },
   gloam: { name: 'The Gloam', hp: 99, slots: 0, chance: 100, dmg: 4, move: 3, xp: 0 },
 };
 

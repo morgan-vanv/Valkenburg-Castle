@@ -107,8 +107,8 @@ export function los(w: World, d: DelveX, a: Pos, b: Pos): boolean {
 }
 
 export function brightnessOf(light: number): Brightness {
-  if (light > 36) return 'bright';
-  if (light >= 19) return 'dim';
+  if (light > 26) return 'bright';
+  if (light >= 13) return 'dim';
   if (light >= 1) return 'dark';
   return 'pitch';
 }
