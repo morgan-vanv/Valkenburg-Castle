@@ -20,7 +20,17 @@ export interface FogMaterialOptions {
   side?: THREE.Side;
   /** Fraction of the base colour always shown when visible. */
   litFloor?: number;
+  /** Instanced walls: lower the ones between the camera and the focus point. */
+  cutaway?: boolean;
 }
+
+/** Shared cutaway state, updated by the diorama every frame. */
+export const CUTAWAY = {
+  center: { value: new THREE.Vector3() },
+  /** Horizontal unit vector from the focus point toward the camera. */
+  dir: { value: new THREE.Vector3(0, 0, 1) },
+  height: { value: 0.3 },
+};
 
 export type FogMaterial = THREE.MeshLambertMaterial & { userData: { fog: { value: number }; dim: { value: number } } };
 
@@ -42,8 +52,12 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
   m.userData.fog = fog;
   m.userData.dim = dim;
   const instanced = !!opts.instanced;
+  const cut = !!opts.cutaway && instanced;
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uFog = fog;
+    shader.uniforms.uCutCenter = CUTAWAY.center;
+    shader.uniforms.uCutDir = CUTAWAY.dir;
+    shader.uniforms.uCutHeight = CUTAWAY.height;
     shader.uniforms.uLitFloor = dim;
     shader.uniforms.uExplored = { value: EXPLORED_LEVEL };
     shader.vertexShader = shader.vertexShader
@@ -51,12 +65,27 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
         '#include <common>',
         `#include <common>
 ${instanced ? 'attribute float aFog;' : 'uniform float uFog;'}
+uniform vec3 uCutCenter;
+uniform vec3 uCutDir;
+uniform float uCutHeight;
 varying float vFog;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-vFog = ${instanced ? 'aFog' : 'uFog'};`,
+vFog = ${instanced ? 'aFog' : 'uFog'};
+${
+  cut
+    ? `{
+  vec3 iCenter = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vec2 rel = iCenter.xz - uCutCenter.xz;
+  float ahead = dot(rel, uCutDir.xz);
+  float side = abs(dot(rel, vec2(-uCutDir.z, uCutDir.x)));
+  float k = smoothstep(-1.3, -0.2, ahead) * (1.0 - smoothstep(6.0, 9.0, side)) * (1.0 - smoothstep(9.0, 13.0, ahead));
+  transformed.y = mix(transformed.y, min(transformed.y, uCutHeight), k);
+}`
+    : ''
+}`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -80,7 +109,7 @@ if (vFog < 0.6) {
 #include <opaque_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => `fog-${instanced ? 'i' : 'u'}`;
+  m.customProgramCacheKey = () => `fog-${instanced ? 'i' : 'u'}${cut ? '-cut' : ''}`;
   return m;
 }
 

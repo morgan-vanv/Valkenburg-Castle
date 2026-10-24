@@ -13,6 +13,26 @@ import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type 
 import { loadSettings, saveSettings, type Settings } from './settings';
 
 export const SAVE_KEY = 'vc.save.v3';
+
+const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
+  pick: 'pick',
+  smash: 'smash',
+  torch: 'torch',
+  kindle: 'spell',
+  mend: 'spell',
+  firebolt: 'fire',
+  rally: 'horn',
+  potion: 'spell',
+  take: 'coin',
+  bribe: 'coin',
+  rope: 'creak',
+  climb: 'creak',
+  jump: 'slam',
+  shove: 'chop',
+  disarm: 'pick',
+  charge: 'click',
+  guard: 'sword',
+};
 const LOADOUT_KEY = 'vc.loadout.v3';
 
 export class App {
@@ -82,8 +102,9 @@ export class App {
       }
     });
 
+    // Title first; Continue resumes the autosave. ?resume=1 skips straight in.
     const saved = this.load();
-    if (saved && new URLSearchParams(location.search).get('resume') !== '0') {
+    if (saved && new URLSearchParams(location.search).get('resume') === '1') {
       this.state = saved;
       this.render(true);
     } else this.showTitle();
@@ -182,7 +203,7 @@ export class App {
       this.hud.root.classList.remove('hidden');
       this.dio.setActive(true);
       const vis = this.engine.visibility(s);
-      this.dio.sync(s, vis);
+      this.dio.sync(s, vis, this.engine.brightness(s));
       this.hud.setState(s, vis);
       this.hud.setDark(this.engine.brightness(s));
       sfx.setDrone(s.delve.monsters.some((m) => m.kind === 'gloam'));
@@ -191,7 +212,7 @@ export class App {
         if (sel) {
           this.dio.showLevel(sel.at.level, true);
           this.dio.lookAt(sel.at, true);
-          this.dio.rig.distance = 13;
+          this.dio.rig.distance = 19;
         }
       }
       return;
@@ -227,6 +248,10 @@ export class App {
     }
     this.state = res.state;
     this.save();
+    if (cmd.type === 'act') {
+      const snd = ACTION_SFX[cmd.action];
+      if (snd) sfx.play(snd);
+    }
     const inDelve = before.stage === 'delve' && !!before.delve;
     if (inDelve && res.events.length) {
       this.busy = true;
@@ -248,6 +273,7 @@ export class App {
       sfx.play('horn', { pitch: 0.7, gain: 0.6 });
     }
     this.render(cmd.type === 'startDelve');
+    if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
     return true;
   }
 
@@ -429,6 +455,11 @@ export class App {
       hud: this.hud,
       busy: () => this.busy,
       posKey,
+      /** Replace the state (debug/screenshots only). */
+      load: (st: GameState) => {
+        this.state = st;
+        this.render(false);
+      },
     };
   }
 }

@@ -167,8 +167,7 @@ if (tour === 'full') {
   await idle().catch(() => {});
   await p.waitForTimeout(600);
   await snap('14-summary');
-  await click('text=Back to camp');
-  await click('text=Continue');
+  await click('.summary .btn-primary');
   await snap('15-after');
 }
 console.log('[errors]', errors);

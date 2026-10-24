@@ -684,7 +684,7 @@ input.seed {
 
 .camp-grid {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 260px;
+  grid-template-columns: 230px minmax(0, 1fr) 240px;
   gap: 20px;
   align-items: start;
 }
@@ -789,7 +789,7 @@ input.seed {
 
 .contracts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 .contract {
@@ -832,8 +832,8 @@ input.seed {
 }
 .ct-top {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 2px;
 }
 .ct-bounty {
   font-size: 1.5rem;
@@ -2086,8 +2086,6 @@ input.seed {
   font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 700;
-  pointer-events: auto;
-  cursor: help;
 }
 .intent-icon {
   font-size: 0.95rem;
@@ -2215,4 +2213,20 @@ input.seed {
 }
 .prep-sum {
   margin-right: auto;
+}
+
+.hud-empty {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none !important;
+  color: var(--parch-dim);
+}
+
+@media (max-width: 900px) {
+  .contracts {
+    grid-template-columns: 1fr;
+  }
 }

@@ -40,10 +40,27 @@ export const BRIGHTNESS_NAME: Record<Brightness, string> = {
   pitch: 'Pitch black',
 };
 
+/** Light thresholds learned from the engine (balance changes them). */
+export interface LightScale {
+  max: number;
+  /** Lowest light value of each stage. */
+  min: Record<Brightness, number>;
+}
+
+/** Probe engine.brightness on light values 0..200 to find the stage edges and the max. */
+export function lightScale(brightness: (light: number) => Brightness, maxGuess: number): LightScale {
+  const min: Record<Brightness, number> = { bright: Infinity, dim: Infinity, dark: Infinity, pitch: 0 };
+  for (let l = 200; l >= 0; l--) {
+    const b = brightness(l);
+    if (l < min[b]) min[b] = l;
+  }
+  return { max: maxGuess, min };
+}
+
 /** Rounds of light left before the next stage, or before 0. */
-export function roundsToNext(light: number): { stage: Brightness; rounds: number } {
-  if (light > 36) return { stage: 'dim', rounds: light - 36 };
-  if (light >= 19) return { stage: 'dark', rounds: light - 18 };
+export function roundsToNext(light: number, sc: LightScale): { stage: Brightness; rounds: number } {
+  if (light >= sc.min.bright) return { stage: 'dim', rounds: light - sc.min.bright + 1 };
+  if (light >= sc.min.dim) return { stage: 'dark', rounds: light - sc.min.dim + 1 };
   if (light >= 1) return { stage: 'pitch', rounds: light };
   return { stage: 'pitch', rounds: 0 };
 }
@@ -98,7 +115,7 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   disarm: 'd',
   shove: 'z',
   bribe: 'b',
-  charge: 'c',
+  charge: 'w',
   passLantern: 'n',
   rope: 'y',
   climb: 'y',

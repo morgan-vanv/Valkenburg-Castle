@@ -42,10 +42,22 @@ interface Extra {
 }
 
 /** Hex prism: pointy-top (CylinderGeometry puts a corner at +z), base at y = 0. */
-function prism(radius: number, height: number): THREE.BufferGeometry {
+function prism(radius: number, height: number, top = 1, bottom = 1): THREE.BufferGeometry {
   const g = new THREE.CylinderGeometry(radius, radius, height, 6, 1);
   g.translate(0, height / 2, 0);
-  return g.toNonIndexed();
+  const n = g.toNonIndexed();
+  // Vertex shade: lighter top face, darker toward the base (multiplied by the instance colour).
+  const pos = n.getAttribute('position');
+  const nor = n.getAttribute('normal');
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / height;
+    const up = nor.getY(i) > 0.9;
+    const k = up ? top : bottom + (1 - bottom) * y;
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+  }
+  n.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return n;
 }
 
 function isSolid(t: TileDef | undefined): boolean {
@@ -119,7 +131,7 @@ export class LevelView {
     const flat = floors.filter((f) => !f.raised);
     const high = floors.filter((f) => f.raised);
     this.batch(
-      prism(R, FLOOR_TOP),
+      prism(R * 0.97, FLOOR_TOP, 1, 0.5),
       flat.map((f) => f.h),
       (h) => this.floorColor(h, COLORS.floor),
       (h) => [this.pk(h)],
@@ -127,30 +139,22 @@ export class LevelView {
       0.2,
     );
     this.batch(
-      prism(R, RAISED_TOP),
+      prism(R * 0.97, RAISED_TOP, 1.08, 0.45),
       high.map((f) => f.h),
       (h) => this.floorColor(h, COLORS.raised),
       (h) => [this.pk(h)],
       (h) => (hash2(h.q, h.r, this.level) - 0.5) * 0.04,
       0.22,
     );
-    // Walls: taller stone prisms, lit when any neighbour is.
+    // Walls: taller stone prisms with a pale top, cut away near the camera.
     this.batch(
-      prism(R, WALL_HEIGHT),
+      prism(R, WALL_HEIGHT, 1.55, 0.55),
       walls,
       (h) => new THREE.Color(COLORS.stone).offsetHSL(0, (hash2(h.q, h.r, 3) - 0.5) * 0.04, (hash2(h.r, h.q, 9) - 0.5) * 0.08),
       (h) => this.withNeighbours(h),
       (h) => (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.18,
       0.22,
-    );
-    // Wall caps: a lighter rim so wall tops read from above.
-    this.batch(
-      prism(R * 0.86, 0.05),
-      walls,
-      (h) => new THREE.Color(COLORS.stoneLight).offsetHSL(0, 0, (hash2(h.q, h.r, 4) - 0.5) * 0.08),
-      (h) => this.withNeighbours(h),
-      (h) => WALL_HEIGHT + (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.18,
-      0.3,
+      true,
     );
     // Rock rim: void hexes around open tiles, low and dark.
     this.batch(
@@ -207,9 +211,9 @@ export class LevelView {
     return [this.pk(h), ...DIRS.map((d) => this.pk(add(h, d)))];
   }
 
-  private batch(geo: THREE.BufferGeometry, hexes: Hex[], color: (h: Hex) => THREE.Color, sources: (h: Hex) => string[], lift: (h: Hex) => number, litFloor: number): void {
+  private batch(geo: THREE.BufferGeometry, hexes: Hex[], color: (h: Hex) => THREE.Color, sources: (h: Hex) => string[], lift: (h: Hex) => number, litFloor: number, cutaway = false): void {
     if (!hexes.length) return;
-    const mat = fogMaterial({ instanced: true, litFloor });
+    const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, cutaway });
     const mesh = new THREE.InstancedMesh(geo, mat, hexes.length);
     const fog = addFogAttribute(mesh, hexes.length);
     const m = new THREE.Matrix4();
@@ -392,30 +396,28 @@ export class LevelView {
 
   private addExit(h: Hex): void {
     const axis = this.wallAxis(h);
-    const stone = fogMaterial({ color: COLORS.stoneLight, litFloor: 0.2 });
-    const glow = new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const stone = fogMaterial({ color: COLORS.stoneLight, litFloor: 0.25 });
+    const glow = new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     const g = new THREE.Group();
     g.rotation.y = this.dirAngle(axis);
-    const span = HEX * 1.5;
+    const span = HEX * 1.6;
+    // Two short gateposts with pale caps, and a glowing threshold.
     for (const z of [-span / 2, span / 2]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.28, WALL_HEIGHT + 0.3, 0.28), stone);
-      post.position.set(0, (WALL_HEIGHT + 0.3) / 2, z);
-      g.add(post);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.9, 0.22), stone);
+      post.position.set(0, FLOOR_TOP + 0.45, z);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 4), stone);
+      cap.position.set(0, FLOOR_TOP + 1.0, z);
+      g.add(post, cap);
     }
-    const arch = new THREE.Mesh(new THREE.TorusGeometry(span / 2, 0.14, 4, 10, Math.PI), stone);
-    arch.rotation.y = Math.PI / 2;
-    arch.position.y = WALL_HEIGHT + 0.3;
-    g.add(arch);
-    // Pale daylight spilling in: a column of light.
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 2.6, 6, 1, true), glow);
-    beam.position.y = 1.3 + FLOOR_TOP;
-    g.add(beam);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.75, 6), glow);
+    const disc = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.82, 6, 1, Math.PI / 6), glow);
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = FLOOR_TOP + 0.02;
     g.add(disc);
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 3), glow);
+    arrow.position.y = FLOOR_TOP + 0.5;
+    g.add(arrow);
     this.place(h, g);
-    this.extra(h, g, [stone, glow], this.withNeighbours(h));
+    this.extra(h, g, [stone], this.withNeighbours(h));
   }
 
   private addBrazier(h: Hex): void {

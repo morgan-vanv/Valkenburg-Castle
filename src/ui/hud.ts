@@ -8,7 +8,7 @@ import type { ActionKind, ActionTarget, Brightness, GameEvent, GameState, Hero, 
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { clear, h, pips } from './dom';
-import { ACTION_GLYPH, ACTION_KEY, BRIGHTNESS_NAME, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel, roundsToNext } from './names';
+import { ACTION_GLYPH, ACTION_KEY, BRIGHTNESS_NAME, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
 
 export interface HudHost {
@@ -86,12 +86,13 @@ export class Hud {
   private vignette = h('div', { class: 'hud-vignette' });
   private camBox = h('div', { class: 'hud-cam' });
   private menuEl = h('div', { class: 'hud-menu hidden' });
+  private emptyEl = h('div', { class: 'hud-empty hidden' });
 
   constructor(
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud' }, this.vignette, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
@@ -121,6 +122,15 @@ export class Hud {
     this.intents = this.engine.intents(s);
     this.dio.showIntents(s, this.intents);
     this.refresh();
+  }
+
+  /** After a command: if the selected hero is spent, select the next one with something left. */
+  autoAdvance(): void {
+    const d = this.state?.delve;
+    const sel = this.selected();
+    if (!d || !sel || sel.status !== 'active' || !(sel.moved && sel.acted)) return;
+    const next = d.heroes.find((x) => x.status === 'active' && (!x.moved || !x.acted));
+    if (next) this.select(next.heroId);
   }
 
   setBusy(b: boolean): void {
@@ -172,6 +182,7 @@ export class Hud {
     this.renderBar();
     this.renderLog();
     this.renderRivals();
+    this.renderEmpty();
     this.drawHighlights();
   }
 
@@ -323,7 +334,8 @@ export class Hud {
     }
     if (this.pv) return;
     const best = this.bestActionFor(unitId, at);
-    if (best && (this.pending || !d.heroes.some((x) => x.heroId === unitId))) {
+    const activeHero = d.heroes.some((x) => x.heroId === unitId && x.status === 'active');
+    if (best && (this.pending || !activeHero)) {
       this.choose(best.option, best.target);
       return;
     }
@@ -612,14 +624,43 @@ export class Hud {
     if (old) old.replaceWith(this.lightMeter(light, b));
   }
 
+  private scale: LightScale | null = null;
+  private scaleDelve = -1;
+
+  /** Stage edges from engine.brightness; the max is the highest light seen this delve (light only falls, Kindle caps at max). */
+  private lightScale(): LightScale {
+    const s = this.state!;
+    const delve = s.campaign.delveCount;
+    if (this.scale && this.scaleDelve === delve) return this.scale;
+    const probe = (l: number) => this.engine.brightness({ ...s, delve: { ...s.delve!, light: l } });
+    let seen = 1;
+    try {
+      const saved = JSON.parse(localStorage.getItem('vc.lightmax.v3') ?? 'null') as { delve: number; max: number } | null;
+      if (saved && saved.delve === delve) seen = saved.max;
+    } catch {
+      /* ignore */
+    }
+    this.scale = lightScale(probe, Math.max(s.delve?.light ?? 0, seen));
+    this.scaleDelve = delve;
+    return this.scale;
+  }
+
   private lightMeter(light: number, b: Brightness): HTMLElement {
-    const next = roundsToNext(light);
-    const pct = (light / 60) * 100;
+    const sc = this.lightScale();
+    if (light > sc.max) sc.max = light;
+    try {
+      localStorage.setItem('vc.lightmax.v3', JSON.stringify({ delve: this.scaleDelve, max: sc.max }));
+    } catch {
+      /* ignore */
+    }
+    const next = roundsToNext(light, sc);
+    const pct = Math.min(100, (light / sc.max) * 100);
+    const at = (v: number) => `left:${Math.min(100, (v / sc.max) * 100)}%`;
     return h(
       'div',
-      { class: `light light-${b}`, title: 'Lantern oil burns 1 per round. Bright > 36, Dim 19–36, Dark 1–18, Pitch black at 0: the Gloam hunts.' },
+      { class: `light light-${b}`, title: `Lantern oil burns 1 per round. Bright ${sc.min.bright}+, Dim ${sc.min.dim}–${sc.min.bright - 1}, Dark 1–${sc.min.dim - 1}, Pitch black at 0: the Gloam hunts.` },
       h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, BRIGHTNESS_NAME[b]), h('span', { class: 'light-num num' }, `${light}`)),
-      h('div', { class: 'light-track' }, h('div', { class: 'light-fill', style: `width:${pct}%` }), h('i', { class: 'mark', style: 'left:30%' }), h('i', { class: 'mark', style: 'left:60%' })),
+      h('div', { class: 'light-track' }, h('div', { class: 'light-fill', style: `width:${pct}%` }), h('i', { class: 'mark', style: at(sc.min.dim) }), h('i', { class: 'mark', style: at(sc.min.bright) })),
       h('div', { class: 'light-next dim small' }, light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'The Gloam hunts'),
     );
   }
@@ -716,11 +757,13 @@ export class Hud {
     const lines = (d?.log ?? []).slice(-7);
     for (const l of lines) this.logEl.append(h('div', { class: 'log-line' }, l));
     for (const l of this.liveLog) this.logEl.append(h('div', { class: `log-line ${l.cls}` }, l.text));
+    this.logEl.classList.toggle('hidden', !this.logEl.children.length);
     this.logEl.scrollTop = this.logEl.scrollHeight;
   }
 
   log(text: string, cls = ''): void {
     this.liveLog.push({ text, cls });
+    this.logEl.classList.remove('hidden');
     this.logEl.append(h('div', { class: `log-line fresh ${cls}` }, text));
     while (this.logEl.children.length > 9) this.logEl.firstChild?.remove();
   }
@@ -893,8 +936,21 @@ export class Hud {
     );
   }
 
+  private renderEmpty(): void {
+    const s = this.state;
+    const lvl = this.dio.shownLevel;
+    const seen = !!this.vis && [...this.vis.explored].some((k) => k.startsWith(`${lvl}:`));
+    const name = this.engine.castle().levels.find((l) => l.level === lvl)?.name ?? `Level ${lvl}`;
+    clear(this.emptyEl);
+    if (s?.delve && !seen) {
+      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs or the pit.'));
+      this.emptyEl.classList.remove('hidden');
+    } else this.emptyEl.classList.add('hidden');
+  }
+
   levelChanged(): void {
     if (this.state?.delve) {
+      this.renderEmpty();
       this.renderTop();
       this.drawHighlights();
     }

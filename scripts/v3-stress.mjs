@@ -1,0 +1,90 @@
+// Bot that plays the real engine through the UI (window.vc.send) with random
+// valid commands at instant speed, to catch playback and rendering errors.
+//   node scripts/v3-stress.mjs <baseUrl> [delves] [outDir]
+import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+
+const [base, delves = '3', dir = ''] = process.argv.slice(2);
+const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+await p.route(/fonts\./, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+let errors = 0;
+p.on('console', (m) => m.type() === 'error' && (errors++, console.log('[console]', m.text().slice(0, 300))));
+p.on('pageerror', (e) => (errors++, console.log('[pageerror]', e.message, e.stack?.split('\n').slice(0, 3).join(' | '))));
+await p.goto(base);
+await p.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, reduceFlashes: false }));
+});
+await p.reload();
+await p.waitForFunction(() => !!window.vc);
+const res = await p.evaluate(async (n) => {
+  const vc = window.vc;
+  const E = window.vcEngine;
+  let seed = Number(new URLSearchParams(location.search).get('bot') ?? 11);
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  let s = E.apply(E.newGame(5), { type: 'newCampaign', seed: 5 }).state;
+  vc.load(s);
+  const log = [];
+  let delvesDone = 0;
+  for (let step = 0; step < 3000 && delvesDone < n; step++) {
+    while (vc.busy()) await new Promise((r) => setTimeout(r, 5));
+    s = vc.state();
+    if (s.stage === 'camp') {
+      const fit = s.campaign.roster.filter((h) => h.wounded === 0).slice(0, 4);
+      if (!fit.length || !s.campaign.board.length) break;
+      const k = pick(s.campaign.board);
+      const stash = s.campaign.stash.filter((i) => i.kind !== 'gold').slice(0, 2).map((i) => i.id);
+      await vc.send({ type: 'startDelve', contractId: k.id, heroIds: fit.map((h) => h.id), entrance: 0, packs: { [fit[0].id]: stash } });
+      continue;
+    }
+    if (s.stage === 'summary') {
+      delvesDone++;
+      log.push({ done: s.summary.contractDone, dead: s.summary.dead.length, loot: s.summary.lootValue, round: s.delve?.round });
+      await vc.send({ type: 'backToCamp' });
+      continue;
+    }
+    if (s.stage === 'over') {
+      log.push('over');
+      break;
+    }
+    const d = s.delve;
+    const heroes = d.heroes.filter((h) => h.status === 'active');
+    let sent = false;
+    for (const h of heroes) {
+      if (!h.acted && rnd() < 0.7) {
+        const all = E.actions(s, h.heroId);
+        const acts = all.some((a) => a.action === 'leave') && d.round > 6 ? all.filter((a) => a.action === 'leave') : all.filter((a) => a.action !== 'leave');
+        if (acts.length) {
+          const a = pick(acts);
+          const t = pick(a.targets);
+          if (a.rolls) E.preview(s, h.heroId, a.action, t);
+          await vc.send({ type: 'act', heroId: h.heroId, action: a.action, target: t, focus: Math.floor(rnd() * 2) });
+          sent = true;
+          break;
+        }
+      }
+      if (!h.moved) {
+        const r = E.reachable(s, h.heroId, rnd() < 0.3);
+        if (r.length) {
+          const t = pick(r);
+          E.moveNoise(s, h.heroId, false);
+          await vc.send({ type: 'move', heroId: h.heroId, path: t.path, sneak: false });
+          sent = true;
+          break;
+        }
+      }
+    }
+    if (!sent) {
+      if (d.round > 30) await vc.send({ type: 'abandon' });
+      else await vc.send({ type: 'endTurn' });
+    }
+    // Exercise HUD paths.
+    vc.hud.refresh();
+  }
+  return log;
+}, Number(delves));
+console.log(JSON.stringify(res));
+if (dir) await p.screenshot({ path: `${dir}/stress-end.png` });
+console.log('[errors]', errors);
+await b.close();

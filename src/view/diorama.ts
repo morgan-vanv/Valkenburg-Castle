@@ -15,7 +15,7 @@ import { makeChest, makeCoins, makeHeirloom, makeRope, makeSack, makeTrap, type 
 import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
-import { setMaterialFog } from './fog';
+import { CUTAWAY, setMaterialFog } from './fog';
 
 const MAX_LIGHTS = 10;
 
@@ -48,8 +48,8 @@ function hexRing(rIn: number, rOut: number): THREE.BufferGeometry {
 }
 
 const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
-  walk: COLORS.ember,
-  sneak: 0x7a9ad8,
+  walk: 0xffd08a,
+  sneak: 0x9ec0ff,
   target: COLORS.danger,
   ally: 0x7fbf5a,
   danger: COLORS.danger,
@@ -143,8 +143,8 @@ export class Diorama {
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
       const fill = style === 'walk' || style === 'sneak';
       const m = new THREE.InstancedMesh(
-        fill ? hexRing(0.12, 0.84) : hexRing(0.72, 0.9),
-        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.22 : 0.85, depthWrite: false }),
+        fill ? hexRing(0.7, 0.8) : hexRing(0.68, 0.88),
+        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.6 : 0.9, depthWrite: false }),
         600,
       );
       m.count = 0;
@@ -166,7 +166,7 @@ export class Diorama {
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }));
     this.ring.visible = false;
     this.ring.renderOrder = 3;
-    this.rippleMesh = new THREE.InstancedMesh(hexRing(0.5, 0.92), new THREE.MeshBasicMaterial({ color: 0x9ec8ff, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }), 400);
+    this.rippleMesh = new THREE.InstancedMesh(hexRing(0.74, 0.86), new THREE.MeshBasicMaterial({ color: 0x9ec8ff, transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending }), 400);
     this.rippleMesh.count = 0;
     this.rippleMesh.renderOrder = 2;
     this.rippleMesh.frustumCulled = false;
@@ -281,6 +281,7 @@ export class Diorama {
       }
     }
     this.rig.update(dtReal, t);
+    this.updateCutaway();
     if (this.active) {
       for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
       this.updateLights(t);
@@ -290,6 +291,19 @@ export class Diorama {
     }
     requestAnimationFrame(this.loop);
   };
+
+  cutaway = true;
+
+  private updateCutaway(): void {
+    const cam = this.rig.camera.position;
+    const tgt = this.rig.currentTarget();
+    CUTAWAY.center.value.copy(tgt);
+    const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
+    if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
+    CUTAWAY.dir.value.copy(d.normalize());
+    // Steep top-down views need no cut.
+    CUTAWAY.height.value = this.cutaway ? 0.3 : 99;
+  }
 
   /** Render one frame now (for screenshots in a throttled headless tab). */
   renderNow(): void {
@@ -362,7 +376,7 @@ export class Diorama {
     // Ripple: hex rings fade outward in a wave.
     if (this.rippleData && this.rippleMesh.count) {
       const m = this.rippleMesh.material as THREE.MeshBasicMaterial;
-      m.opacity = 0.32 + 0.18 * Math.sin(t * 5);
+      m.opacity = 0.25 + 0.15 * Math.sin(t * 5);
     }
     void dt;
   }
@@ -442,7 +456,7 @@ export class Diorama {
   // ------------------------------------------------------------ state sync
 
   /** Snap everything to `state` (no animation). */
-  sync(state: GameState, vis: Visibility): void {
+  sync(state: GameState, vis: Visibility, brightness?: Brightness): void {
     this.state = state;
     this.vis = vis;
     this.extraVisible = null;
@@ -455,7 +469,7 @@ export class Diorama {
       this.clearIntents();
       return;
     }
-    this.brightness = d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch';
+    this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
     this.lanternBearer = d.lanternBearer;
     this.torches = new Set(d.heroes.filter((h) => h.torch > 0 && h.status === 'active').map((h) => h.heroId));
     this.syncUnits(state);

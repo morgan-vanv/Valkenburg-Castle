@@ -131,6 +131,11 @@ export class CameraRig {
     } else this.shake = 0;
   }
 
+  /** The eased look-at point (where the camera is actually looking). */
+  currentTarget(): THREE.Vector3 {
+    return this.cur.target;
+  }
+
   /** Rotate the view by a sixth of a turn (one hex side). */
   snapRotate(dir: 1 | -1): void {
     const step = Math.PI / 3;
