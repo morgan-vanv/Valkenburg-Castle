@@ -12,7 +12,7 @@ export function buildLevel2(): LevelBuilder {
       crossing: { name: 'The Crossing', material: 'flagstone', tint: '#c4b89e', label: [23, 17] },
       bridges: { name: 'Bridges', material: 'flagstone', tint: '#b3a893', label: [18, 16] },
       arcade: { name: 'Arcade', material: 'flagstone', tint: '#8f8070', label: [22, 7] },
-      'ledge-e': { name: 'East ledge', material: 'rock', tint: '#7c7062', label: [35, 15] },
+      'ledge-e': { name: 'East ledge', material: 'rock', tint: '#7c7062', label: [34, 15] },
       rim: { name: 'South rim', material: 'rock', tint: '#857563', label: [21, 21] },
       guard: { name: 'Guard post', material: 'flagstone', tint: '#a0978a' },
       barracks: { name: 'Barracks', material: 'planks', tint: '#9a7e5c', label: [21, 3] },
@@ -69,7 +69,7 @@ export function buildLevel2(): LevelBuilder {
   // Forge: the forge (burning), anvils, a rack and a barrel.
   b.prop(37, 28, 'forge', true);
   b.props('anvil', [[35, 26], [36, 25]]);
-  b.prop(39, 24, 'rack');
+  b.prop(38, 24, 'rack');
   b.prop(32, 28, 'barrel');
 
   // Railing: the arcade's pit side, broken at (28, 7) and (15, 14).

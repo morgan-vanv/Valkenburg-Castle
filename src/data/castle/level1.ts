@@ -11,9 +11,9 @@ export function buildLevel1(): LevelBuilder {
     {
       hall: { name: 'Great Hall', material: 'flagstone', tint: '#a89a84', label: [20, 15] },
       dais: { name: 'High Table', material: 'rug', tint: '#8e3a32' },
-      gate: { name: 'Gatehouse', material: 'flagstone', tint: '#c8b98e', label: [24, 26] },
+      gate: { name: 'Gatehouse', material: 'flagstone', tint: '#d4c8aa', label: [24, 26] },
       'gate-pass': { name: 'Gate passage', material: 'flagstone', tint: '#8c8272' },
-      court: { name: 'Courtyard', material: 'earth', tint: '#b8a77a', label: [9, 24] },
+      court: { name: 'Courtyard', material: 'earth', tint: '#a8a06a', label: [9, 24] },
       kitchen: { name: 'Kitchens', material: 'planks', tint: '#9a7e5c' },
       servants: { name: "Servants' passage", material: 'flagstone', tint: '#7d7468' },
       library: { name: 'Library', material: 'planks', tint: '#7e5f42' },

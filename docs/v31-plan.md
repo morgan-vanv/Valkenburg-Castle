@@ -25,7 +25,7 @@ Goal: the approved three-level castle (Castle Map Proposal, pass 2: https://clau
 ## Checklist
 
 - [x] Contract and spec (section 14)
-- [ ] Castle: three levels from mockup/sketch.py, monsters, loot, lights, props; tests
+- [x] Castle: three levels from mockup/sketch.py (hex for hex), monsters, loot, lights, props; 14 castle tests
 - [x] Engine: section 14 rules; 78 tests; sim with DRAGON=1 (src/game/falls.ts, dragon.ts)
 - [ ] Presentation: new look and UI for section 14
 - [ ] Integration: typecheck, tests, build
