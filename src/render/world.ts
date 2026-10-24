@@ -1,10 +1,13 @@
-// World-space conventions for the diorama. One square = 1 world unit.
-// Square (x, y) occupies world x in [x, x+1] and z in [y, y+1].
+// World-space conventions for the diorama. One square = TILE world units
+// (V2 doubled the tile size so rooms read as open space). Level geometry is
+// built at 1 unit per square and its group is scaled by TILE on the ground plane;
+// everything else is placed through squareCenter().
 // Level 1 sits at y = 0; deeper levels stack downward.
 
 import * as THREE from 'three';
 import type { Coord, LevelId } from '../engine/types';
 
+export const TILE = 2;
 export const LEVEL_GAP = 8;
 export const FLOOR_TOP = 0.06;
 export const WALL_HEIGHT = 1.4;
@@ -15,7 +18,7 @@ export function levelY(level: LevelId | number): number {
 }
 
 export function squareCenter(c: Coord, lift = FLOOR_TOP, out = new THREE.Vector3()): THREE.Vector3 {
-  return out.set(c.x + 0.5, levelY(c.level) + lift, c.y + 0.5);
+  return out.set((c.x + 0.5) * TILE, levelY(c.level) + lift, (c.y + 0.5) * TILE);
 }
 
 /** Small deterministic hash for visual jitter (not game randomness). */
