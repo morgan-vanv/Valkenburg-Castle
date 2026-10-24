@@ -36,6 +36,7 @@ Goal: the approved three-level castle (Castle Map Proposal, pass 2: https://clau
 
 ## Resuming
 
+0. Scheduled check-ins: 16:15 and 17:30 New York (after the 16:10 rate-limit reset).
 1. `cd /home/claude/valkenburg-castle && git fetch origin && git checkout v3.1 && git pull`.
 2. If `origin/wip/v3` is newer than `v3.1`, restore it: `git checkout origin/wip/v3 -- .`, review, commit.
 3. Read this checklist and docs/agents/v31-*-progress.md; continue from the first unchecked step, re-briefing agents from docs/agents/v31-*.md.
