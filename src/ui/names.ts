@@ -35,14 +35,12 @@ export const CLASS_GLYPH: Partial<Record<UnitClass, string>> = {
 
 export const ARMOR_NAME: Record<Armor, string> = { unarmored: 'Unarmored', normal: 'Normal', heavy: 'Heavy' };
 
-export const METHOD_NAME: Record<DoorMethod, string> = { pick: 'Pick lock', unlock: 'Unlock spell', smash: 'Smash', chop: 'Chop', blast: 'Set charge' };
+export const METHOD_NAME: Record<DoorMethod, string> = { pick: 'Pick lock', force: 'Force', blast: 'Set charge' };
 
 export const METHOD_NOTE: Record<DoorMethod, string> = {
-  pick: 'd6: 1–3 opens, 6 jams. Silent.',
-  unlock: '2 spell points. Always opens. Ends turn.',
-  smash: '1–3 men try. Noise +6.',
-  chop: '+d6 toward 10. Noise +4.',
-  blast: 'Blows at end of phase. Noise +15.',
+  pick: 'Always works. Silent. Burglar only.',
+  force: 'Always works. Loud: Alarm +6.',
+  blast: 'Uses a charge. Blows at end of turn. Very loud.',
 };
 
 export const SPELL_NAME: Record<SpellId, string> = { esp: 'ESP', fireball: 'Fireball', smokescreen: 'Smokescreen', pyrotechnics: 'Pyrotechnics', unlock: 'Unlock Door', combat: 'Combat' };

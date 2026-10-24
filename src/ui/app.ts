@@ -8,7 +8,7 @@ import { sfx } from '../audio/sfx';
 import { Diorama } from '../render/scene';
 import { clear, h } from './dom';
 import { Hud } from './hud';
-import { debriefScreen, endScreen, musterScreen, titleScreen, weekScreen, type ScreenHost } from './screens';
+import { resultsScreen, shopScreen, titleScreen, type ScreenHost } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
 const SAVE_KEY = 'vc.save.v1';
@@ -114,7 +114,7 @@ export class App {
   }
 
   private newCampaign(seed?: number): void {
-    const s = this.engine.newCampaign(seed);
+    const s = this.engine.newRun(seed);
     sfx.play('coin');
     this.setState(s, true);
   }
@@ -161,15 +161,10 @@ export class App {
     this.screen.classList.remove('hidden');
     const host = this.host();
     switch (s.stage) {
-      case 'week':
-        return weekScreen(this.screen, s, host);
-      case 'muster':
-        return musterScreen(this.screen, s, host);
-      case 'debrief':
-        return debriefScreen(this.screen, s, host);
-      case 'won':
-      case 'lost':
-        return endScreen(this.screen, s, host);
+      case 'shop':
+        return shopScreen(this.screen, s, host);
+      case 'results':
+        return resultsScreen(this.screen, s, host);
     }
   }
 
@@ -205,13 +200,13 @@ export class App {
       }
     } else if (cmd.type === 'launch') {
       sfx.play('horn', { pitch: 0.8, gain: 0.6 });
-    } else if (cmd.type === 'hire') {
+    } else if (cmd.type === 'buy' || cmd.type === 'refund') {
       sfx.play('coin');
     }
     this.render(cmd.type === 'launch');
     if (res.state.stage !== 'expedition' && before.stage === 'expedition') {
       // The expedition ended; the debrief or end screen is up.
-      sfx.play(res.state.stage === 'lost' ? 'death' : 'coin');
+      sfx.play(res.state.result?.survived ? 'coin' : 'death');
     }
     return true;
   }
@@ -302,7 +297,7 @@ export class App {
           continue;
         }
         case 'doorAttempt':
-          sfx.play(e.method === 'pick' ? 'pick' : e.method === 'smash' ? 'smash' : e.method === 'chop' ? 'chop' : e.method === 'unlock' ? 'spell' : 'click');
+          sfx.play(e.method === 'pick' ? 'pick' : e.method === 'force' ? 'smash' : 'click');
           await this.dio.playEvent(e);
           continue;
         case 'doorDestroyed':
@@ -338,7 +333,7 @@ export class App {
           continue;
         }
         case 'expeditionOver':
-        case 'campaignOver':
+        case 'runOver':
           await wait(0.4);
           continue;
         default:
