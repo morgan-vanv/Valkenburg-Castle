@@ -12,7 +12,7 @@ import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v3';
+export const SAVE_KEY = 'vc.save.v31';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -33,7 +33,7 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   charge: 'click',
   guard: 'sword',
 };
-const LOADOUT_KEY = 'vc.loadout.v3';
+const LOADOUT_KEY = 'vc.loadout.v31';
 
 export class App {
   private state: GameState | null = null;

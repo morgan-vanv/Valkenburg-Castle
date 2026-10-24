@@ -30,6 +30,7 @@ export const MONSTER_NAME: Record<MonsterKind | 'gloam', string> = {
   spider: 'Spider',
   cutpurse: 'Cutpurse',
   berserker: 'Berserker',
+  dragon: 'The Dragon',
   gloam: 'The Gloam',
 };
 
@@ -91,6 +92,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   kindle: '✦',
   mend: '✚',
   passLantern: '◆',
+  winch: '⚙',
   leave: '⇱',
 };
 
@@ -122,6 +124,7 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   jump: 'j',
   give: 'i',
   drop: 'u',
+  winch: 'w',
 };
 
 export const ITEM_GLYPH: Record<Item['kind'], string> = {
@@ -133,6 +136,7 @@ export const ITEM_GLYPH: Record<Item['kind'], string> = {
   rope: '⌇',
   charge: '✹',
   heirloom: '♛',
+  hoard: '♜',
 };
 
 export function itemLabel(i: Item): string {

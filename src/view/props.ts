@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { fogMaterial } from './fog';
+import { hoardModel } from './furniture';
 import { COLORS, FLOOR_TOP } from './world';
 
 export interface PropView {
@@ -125,4 +126,21 @@ export function makeRope(): PropView {
   line.position.set(0.5, FLOOR_TOP - 1.8, 0);
   g.add(coil, stake, line);
   return { obj: g, mats: [rope] };
+}
+
+export function makeHoard(): PropView {
+  const gold = fogMaterial({ vertexColors: true, litFloor: 0.45, emissive: 0x2a1800 });
+  const glint = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const m = hoardModel();
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(m.body, gold);
+  body.position.y = FLOOR_TOP;
+  g.add(body);
+  if (m.glow) {
+    const gl = new THREE.Mesh(m.glow, glint);
+    gl.position.y = FLOOR_TOP;
+    g.add(gl);
+  }
+  g.scale.setScalar(1.25);
+  return { obj: g, mats: [gold] };
 }

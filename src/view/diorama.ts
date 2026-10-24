@@ -5,19 +5,21 @@
 
 import * as THREE from 'three';
 import type { Visibility } from '../game/api';
-import { hexKey, hexToWorld, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
+import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
 import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, Monster } from '../game/types';
 import { AnimClock } from './anim';
 import { CameraRig } from './camera';
 import type { ModelKey } from './figures';
 import { LevelView } from './level';
-import { makeChest, makeCoins, makeHeirloom, makeRope, makeSack, makeTrap, type PropView } from './props';
+import { makeChest, makeCoins, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
 import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
-import { CUTAWAY, setMaterialFog } from './fog';
+import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 
-const MAX_LIGHTS = 10;
+const MAX_LIGHTS = 12;
+/** How far below the shown level we draw through pits. */
+const BELOW_HALO = 3;
 
 export interface DioramaHooks {
   hover(at: Pos | null, unitId: string | null): void;
@@ -105,6 +107,19 @@ export class Diorama {
   private litBraziers = new Set<string>();
   private extraVisible: Set<string> | null = null;
   private sparks: THREE.Points;
+  /** Fog sets from the last sync, so a level switch can reapply them. */
+  private fogLit = new Set<string>();
+  private fogUnlit = new Set<string>();
+  /** The lift runs (for tooltips and the winch drum). */
+  liftWorking = false;
+  private drumSpin = 0;
+  /** Red lips under heroes standing on a shove-able edge (posKeys of the hero hex + pit hex). */
+  private lips = new THREE.Group();
+  /** Landing marker for jump/shove previews. */
+  private landing = new THREE.Group();
+  private landingTag: HTMLElement;
+  private landingAt: THREE.Vector3 | null = null;
+  private breathMarks = new THREE.Group();
 
   constructor(
     private readonly container: HTMLElement,
@@ -116,6 +131,7 @@ export class Diorama {
     this.fx = document.createElement('div');
     this.fx.className = 'dio-fx';
     container.appendChild(this.fx);
+    void 0;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -125,11 +141,14 @@ export class Diorama {
     this.rig = new CameraRig(canvas);
 
     // Near-black ambient; light comes from the lantern, torches and braziers.
-    this.ambient = new THREE.AmbientLight(0x3a3f4a, 0.45);
-    this.hemi = new THREE.HemisphereLight(0x3a3046, 0x0a0806, 0.25);
+    this.ambient = new THREE.AmbientLight(0x3a3f4a, 0.4);
+    this.hemi = new THREE.HemisphereLight(0x9aa4b8, 0x2a2018, 0.55);
     const rim = new THREE.DirectionalLight(COLORS.cold, 0.22);
     rim.position.set(-6, 9, -8);
-    this.scene.add(this.ambient, this.hemi, rim, rim.target);
+    // A soft key from above-left so wall faces and props have form.
+    const key = new THREE.DirectionalLight(0xfff0dc, 0.55);
+    key.position.set(-20, 40, 25);
+    this.scene.add(this.ambient, this.hemi, rim, rim.target, key, key.target);
     for (let i = 0; i < MAX_LIGHTS; i++) {
       const l = new THREE.PointLight(COLORS.emberHot, 0, 10, 1.3);
       this.scene.add(l);
@@ -170,7 +189,9 @@ export class Diorama {
     this.rippleMesh.count = 0;
     this.rippleMesh.renderOrder = 2;
     this.rippleMesh.frustumCulled = false;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks);
+    this.landingTag = document.createElement('div');
+    this.landingTag.className = 'landing-tag hidden';
 
     // Dust motes drifting in the lantern light.
     const n = 160;
@@ -186,6 +207,7 @@ export class Diorama {
     this.sparks.frustumCulled = false;
     this.scene.add(this.sparks);
 
+    this.fx.appendChild(this.landingTag);
     this.bindPointer(canvas);
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -221,7 +243,7 @@ export class Diorama {
     if (!lv) return;
     const changed = level !== this.shownLevel;
     this.shownLevel = level;
-    for (const [n, v] of this.levels) v.group.visible = n === level;
+    this.applyBelow();
     const y = levelY(level);
     this.rig.bounds.set(new THREE.Vector3(lv.min.x - 2, y - 1, lv.min.y - 2), new THREE.Vector3(lv.max.x + 2, y + 1, lv.max.y + 2));
     this.rig.setHeight(y, instant);
@@ -231,12 +253,48 @@ export class Diorama {
     if (changed) this.hooks.levelChanged(level);
   }
 
+  /** Show the shown level normally, and the levels below it only where a pit above opens onto them. */
+  private applyBelow(): void {
+    const shown = this.shownLevel;
+    let column: Set<string> | null = null;
+    for (const [n, v] of [...this.levels.entries()].sort((a, b) => a[0] - b[0])) {
+      if (n < shown) {
+        v.group.visible = false;
+        continue;
+      }
+      if (n === shown) {
+        v.group.visible = true;
+        v.applyFogLit(this.fogLit, this.fogUnlit, this.vis.explored);
+        column = new Set(v.pits);
+        continue;
+      }
+      if (!column || !column.size) {
+        v.group.visible = false;
+        continue;
+      }
+      // What is seen down the shaft: the column plus a halo (the camera looks in at an angle).
+      const seen = new Set<string>();
+      for (const k of column) for (const hx of range(parseHexKey(k), BELOW_HALO)) seen.add(hexKey(hx));
+      v.group.visible = true;
+      v.applyBelow(seen);
+      // The next level down is seen only through pits on this one that are inside the column.
+      const next = new Set<string>();
+      for (const k of column) if (v.pits.has(k)) next.add(k);
+      column = next;
+    }
+  }
+
   frameLevel(): void {
     const lv = this.levels.get(this.shownLevel);
     if (!lv) return;
     const y = levelY(this.shownLevel);
     this.rig.focus(new THREE.Vector3((lv.min.x + lv.max.x) / 2, y, (lv.min.y + lv.max.y) / 2), true);
     this.rig.distance = Math.max(14, Math.min(60, Math.max(lv.max.x - lv.min.x, lv.max.y - lv.min.y) * 1.1));
+  }
+
+  /** Look at a world x/z on the shown level (scripts and screenshots). */
+  focusXZ(x: number, z: number, instant = false): void {
+    this.rig.focus(new THREE.Vector3(x, levelY(this.shownLevel), z), instant);
   }
 
   lookAt(p: Pos, instant = false): void {
@@ -329,10 +387,34 @@ export class Diorama {
     }
     const lv = this.levels.get(this.shownLevel);
     if (lv) {
-      const target = this.rig.target;
-      const bz = [...lv.braziers.values()].filter((b) => b.lit).sort((a, b) => a.center.distanceToSquared(target) - b.center.distanceToSquared(target));
-      for (const b of bz) srcs.push({ at: b.center.clone().add(new THREE.Vector3(0, 0.3, 0)), radius: 3, color: 0xff8a30, power: 1, seed: b.center.x });
+      const target = this.rig.currentTarget();
+      const pool: (Src & { d: number })[] = [];
+      for (const b of lv.braziers.values()) if (b.lit) pool.push({ at: b.center.clone().add(new THREE.Vector3(0, 0.3, 0)), radius: 3, color: 0xff8a30, power: 1, seed: b.center.x, d: b.center.distanceToSquared(target) });
+      // Fixed lights are baked into the floors; the nearest few also get a point light so figures pick them up.
+      for (const f of lv.fixedLights) {
+        if (!lv.lightShown(f)) continue;
+        const d = f.at.distanceToSquared(target);
+        if (d > 22 * 22) continue;
+        pool.push({ at: f.at, radius: Math.max(1.5, f.radius), color: f.color, power: f.power * (f.def.kind === 'fire' ? 0.9 : 0.55), seed: f.at.x * 3.1 + f.at.z, d });
+      }
+      pool.sort((a, b) => a.d - b.d);
+      for (const p of pool) if (srcs.length < MAX_LIGHTS) srcs.push(p);
+      for (const f of lv.fixedLights)
+        f.flames.forEach((c, i) => {
+          if (f.def.kind === 'glow') {
+            c.position.y = Math.sin(t * 0.7 + i) * 0.2;
+            c.rotation.y = t * 0.3;
+          } else {
+            c.scale.y = 1 + Math.sin(t * (9 + i * 3) + f.at.x) * 0.2;
+            c.scale.x = 1 + Math.sin(t * 13 + f.at.z) * 0.08;
+          }
+        });
+      if (this.drumSpin > 0) {
+        this.drumSpin = Math.max(0, this.drumSpin - 0.016);
+        for (const d of lv.drums) d.rotation.x += 0.12;
+      }
     }
+    setFogTime(t);
     for (let i = 0; i < MAX_LIGHTS; i++) {
       const l = this.lights[i]!;
       const s = srcs[i];
@@ -373,6 +455,15 @@ export class Diorama {
     } else this.ring.visible = false;
     const tm = this.highlights.get('target')!.material as THREE.MeshBasicMaterial;
     tm.opacity = 0.55 + 0.35 * Math.sin(t * 6);
+    for (const g of this.breathMarks.children) {
+      if (g.userData.breath) {
+        const k = 0.5 + 0.5 * Math.sin(t * 7 + g.position.x);
+        g.children[2]!.scale.set(1, 0.7 + k * 0.8, 1);
+        g.children[2]!.position.y = 0.25 + k * 0.15;
+        ((g.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.3 * k;
+      } else if (g.userData.sweep) g.rotation.y = t * 0.8;
+    }
+    for (const l of this.lips.children) ((l as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(t * 5);
     // Ripple: hex rings fade outward in a wave.
     if (this.rippleData && this.rippleMesh.count) {
       const m = this.rippleMesh.material as THREE.MeshBasicMaterial;
@@ -425,6 +516,10 @@ export class Diorama {
       el.style.display = p.behind ? 'none' : '';
       el.style.transform = `translate(${p.x}px, ${p.y - 22}px) translate(-50%, -100%)`;
     }
+    if (this.landingAt) {
+      const p = this.project(this.landingAt);
+      this.landingTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
     for (const r of this.roomTags) {
       const show = r.level === this.shownLevel && this.vis.explored.has(r.key) && !!this.state?.delve;
       if (!show) {
@@ -461,7 +556,6 @@ export class Diorama {
     this.vis = vis;
     this.extraVisible = null;
     const d = state.delve;
-    for (const lv of this.levels.values()) lv.applyFog(vis.visible, vis.explored);
     this.applyLitFog();
     if (!d) {
       for (const v of [...this.units.values()]) this.removeUnit(v.id);
@@ -471,6 +565,7 @@ export class Diorama {
     }
     this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
     this.lanternBearer = d.lanternBearer;
+    this.liftWorking = !!d.liftWorking;
     this.torches = new Set(d.heroes.filter((h) => h.torch > 0 && h.status === 'active').map((h) => h.heroId));
     this.syncUnits(state);
     this.syncWorld(state);
@@ -484,10 +579,13 @@ export class Diorama {
     const vis = new Set<string>();
     const unlit = new Set<string>();
     for (const k of this.vis.visible) (this.vis.lit.has(k) ? vis : unlit).add(k);
-    for (const lv of this.levels.values()) lv.applyFogLit(vis, unlit, this.vis.explored);
+    this.fogLit = vis;
+    this.fogUnlit = unlit;
+    this.applyBelow();
   }
 
-  private modelFor(kind: string): ModelKey {
+  private modelFor(kind: string, awareness?: string): ModelKey {
+    if (kind === 'dragon') return awareness === 'asleep' ? 'dragonSleep' : 'dragon';
     return kind as ModelKey;
   }
 
@@ -542,7 +640,10 @@ export class Diorama {
     }
     for (const m of d.monsters) {
       if (m.hp <= 0) continue;
-      const v = this.ensureUnit(m.id, this.modelFor(m.kind), 'monster', m.at, m.name);
+      const want = this.modelFor(m.kind, m.awareness);
+      const have = this.units.get(m.id);
+      if (have && have.key !== want && !have.busy) this.removeUnit(m.id);
+      const v = this.ensureUnit(m.id, want, 'monster', m.at, m.name);
       keep.add(m.id);
       place(v, m.at);
       v.dead = false;
@@ -633,7 +734,7 @@ export class Diorama {
       const kind = groundKind(g.items);
       const p = this.props.get(key);
       if (p && p.state !== kind) this.removeProp(key);
-      const np = this.ensureProp(key, () => (kind === 'heirloom' ? makeHeirloom() : kind === 'gold' ? makeCoins(g.items.reduce((a, i) => a + i.amount, 0)) : makeSack()), g.at);
+      const np = this.ensureProp(key, () => (kind === 'hoard' ? makeHoard() : kind === 'heirloom' ? makeHeirloom() : kind === 'gold' ? makeCoins(g.items.reduce((a, i) => a + i.amount, 0)) : makeSack()), g.at, (hashStr(key) % 6) * (Math.PI / 3));
       np.state = kind;
     }
     // Traps (only when spotted).
@@ -752,6 +853,7 @@ export class Diorama {
 
   clearIntents(): void {
     this.intentLines.clear();
+    this.breathMarks.clear();
     for (const el of this.intentTags.values()) el.remove();
     this.intentTags.clear();
   }
@@ -772,6 +874,19 @@ export class Diorama {
       el.title = `${m.name}: ${INTENT_WORDS[it.kind]}${target ? ` ${target}` : ''}${dmg ? ` for ${dmg}` : ''}`;
       this.fx.appendChild(el);
       this.intentTags.set(id, el);
+      if (it.kind === 'breath' && it.hexes?.length) {
+        this.markBreath(it.hexes, id);
+        el.title = `${m.name}: breathes fire next turn on the marked hexes (${it.damage ? it.damage[1] : 4} damage, no roll, armor doesn't help)`;
+        continue;
+      }
+      if (it.kind === 'sweep') {
+        this.markSweep(m.at, id);
+        continue;
+      }
+      if (it.kind === 'shove' && it.to) {
+        this.markShove(m, it.targetId ? targetPos(state, it.targetId) : null, it.to, id);
+        continue;
+      }
       // A line to the target or destination.
       const from = this.worldOf(m.at, 0.6);
       let to: THREE.Vector3 | null = null;
@@ -799,10 +914,137 @@ export class Diorama {
   }
 
   private refreshIntentVisibility(): void {
-    for (const o of this.intentLines.children) {
+    for (const o of [...this.intentLines.children, ...this.breathMarks.children]) {
       const v = this.units.get(o.userData.monster as string);
-      o.visible = !!v && v.root.visible;
+      o.visible = !!v && v.root.visible && (o.userData.level ?? v.at.level) === this.shownLevel;
     }
+  }
+
+  /** Breath: every marked hex gets a pulsing fire warning (impossible to miss). */
+  private markBreath(hexes: Pos[], monster: string): void {
+    const fill = new THREE.MeshBasicMaterial({ color: 0xff4a10, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending });
+    const edge = new THREE.MeshBasicMaterial({ color: 0xffc040, transparent: true, opacity: 0.95, depthWrite: false });
+    for (const p of hexes) {
+      const g = new THREE.Group();
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.86, 6).rotateX(-Math.PI / 2).rotateY(Math.PI / 6), fill);
+      const ring = new THREE.Mesh(hexRing(0.74, 0.9), edge);
+      const tongue = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.5, 4), edge);
+      tongue.position.y = 0.3;
+      g.add(disc, ring, tongue);
+      g.position.copy(this.worldOf(p, 0.04));
+      g.userData = { monster, level: p.level, breath: true };
+      g.renderOrder = 5;
+      this.breathMarks.add(g);
+    }
+  }
+
+  /** Sweep: a red ring around the monster's reach. */
+  private markSweep(at: Pos, monster: string): void {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.35, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+    g.add(ring);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.38, 3), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.85, depthWrite: false }));
+      arrow.position.set(Math.sin(a) * 2.6, 0.05, Math.cos(a) * 2.6);
+      arrow.rotation.set(Math.PI / 2, 0, -a);
+      g.add(arrow);
+    }
+    g.position.copy(this.worldOf(at, 0.06));
+    g.userData = { monster, level: at.level, sweep: true };
+    this.breathMarks.add(g);
+  }
+
+  /** Shove intent: an arrow from the victim to where they'll land; red if that's a pit. */
+  private markShove(m: Monster, victim: Pos | null, to: Pos, monster: string): void {
+    const pit = this.levels.get(to.level)?.pits.has(hexKey(to)) ?? false;
+    const col = pit ? COLORS.danger : 0xffa040;
+    const from = victim && victim.level === to.level ? this.worldOf(victim, 0.35) : this.worldOf(m.at, 0.35);
+    const end = this.worldOf(to, pit ? -0.1 : 0.35);
+    if (pit) end.y = levelY(to.level) + FLOOR_TOP + 0.05;
+    const dir = end.clone().sub(from);
+    const len = dir.length();
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false });
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, Math.max(0.1, len - 0.35)), mat);
+    shaft.position.z = (len - 0.35) / 2;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.42, 3), mat);
+    head.rotation.x = Math.PI / 2;
+    head.position.z = len - 0.2;
+    g.add(shaft, head);
+    g.position.copy(from);
+    g.lookAt(end);
+    g.renderOrder = 7;
+    g.userData = { monster, level: to.level };
+    this.intentLines.add(g);
+    const ring = new THREE.Mesh(hexRing(0.6, 0.86), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false }));
+    ring.position.copy(this.worldOf(to, 0.04));
+    ring.userData = { monster, level: to.level };
+    this.intentLines.add(ring);
+  }
+
+  // ------------------------------------------------------------ edge risk and landing previews
+
+  /** Red lips on the pit side of each given hero's hex. */
+  showEdgeLips(at: Pos[]): void {
+    this.lips.clear();
+    for (const p of at) {
+      const lv = this.levels.get(p.level);
+      if (!lv) continue;
+      for (let i = 0; i < 6; i++) {
+        const n = add(p, DIRS[i]!);
+        if (!lv.pits.has(hexKey(n))) continue;
+        if (lv.def.tiles[hexKey(p)]?.railing) continue;
+        const a = this.worldOf(p, 0.03);
+        const b = this.worldOf({ level: p.level, ...n }, 0);
+        const mid = a.clone().lerp(b, 0.47);
+        const lip = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.14), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.9, depthWrite: false }));
+        lip.position.set(mid.x, a.y + 0.02, mid.z);
+        lip.lookAt(b.x, a.y + 0.02, b.z);
+        lip.rotateY(Math.PI / 2);
+        lip.userData.level = p.level;
+        lip.renderOrder = 4;
+        this.lips.add(lip);
+      }
+    }
+    for (const l of this.lips.children) l.visible = l.userData.level === this.shownLevel;
+  }
+
+  /**
+   * Show where something will land: a marker on the landing hex (maybe on a lower
+   * level, seen through the pit), a dashed drop line, and a label. Null clears.
+   */
+  showLanding(from: Pos | null, to: Pos | null, text: string, danger: boolean): void {
+    this.landing.clear();
+    this.landingAt = null;
+    this.landingTag.classList.add('hidden');
+    if (!to) return;
+    const col = danger ? COLORS.danger : 0x7fe0ff;
+    const end = this.worldOf(to, 0.05);
+    const mark = new THREE.Group();
+    const ring = new THREE.Mesh(hexRing(0.5, 0.9), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false }));
+    const x1 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.03, 0.12), ring.material);
+    const x2 = x1.clone();
+    x1.rotation.y = Math.PI / 4;
+    x2.rotation.y = -Math.PI / 4;
+    mark.add(ring, x1, x2);
+    mark.position.copy(end);
+    mark.renderOrder = 9;
+    this.landing.add(mark);
+    if (from) {
+      const top = this.worldOf(from, 0.1);
+      const pts = [top, new THREE.Vector3(end.x, top.y, end.z), end];
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      const lineMat = new THREE.LineDashedMaterial({ color: col, dashSize: 0.25, gapSize: 0.15, transparent: true, opacity: 0.9, depthTest: false });
+      const ln = new THREE.Line(g, lineMat);
+      ln.computeLineDistances();
+      ln.renderOrder = 9;
+      this.landing.add(ln);
+    }
+    this.landingAt = end.clone().add(new THREE.Vector3(0, 0.6, 0));
+    this.landingTag.textContent = text;
+    this.landingTag.classList.toggle('danger', danger);
+    this.landingTag.classList.toggle('hidden', !text);
   }
 
   // ------------------------------------------------------------ playback
@@ -814,7 +1056,7 @@ export class Diorama {
     if (d) {
       for (const m of d.monsters) {
         if (m.hp <= 0 || this.units.has(m.id)) continue;
-        const v = this.ensureUnit(m.id, this.modelFor(m.kind), 'monster', m.spawnedAt ?? m.at, m.name);
+        const v = this.ensureUnit(m.id, this.modelFor(m.kind, m.awareness), 'monster', m.spawnedAt ?? m.at, m.name);
         v.root.position.copy(this.worldOf(m.at));
         v.at = { ...m.at };
         v.setOpacity(0);
@@ -1048,12 +1290,181 @@ export class Diorama {
         this.brightness = e.brightness;
         return;
       }
+      case 'shoved': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const watch = v.root.visible || e.from.level === this.shownLevel;
+        const to = this.worldOf(e.to);
+        if (this.levels.get(e.to.level)?.pits.has(hexKey(e.to))) to.y = levelY(e.to.level) + FLOOR_TOP;
+        if (!watch) {
+          v.at = { ...e.to };
+          v.root.position.copy(to);
+          return;
+        }
+        v.busy++;
+        const from = v.root.position.clone();
+        v.flash(new THREE.Color(1, 0.5, 0.1), 0.5);
+        await clock.tween(0.22, (t) => {
+          const k = easeOutCubic(t);
+          v.root.position.lerpVectors(from, to, k);
+          v.root.position.y += Math.sin(t * Math.PI) * 0.25;
+        });
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        v.at = { ...e.to };
+        v.busy--;
+        if (!this.reduceShake) this.rig.addShake(0.08);
+        return;
+      }
+      case 'fell': {
+        const v = this.units.get(e.id);
+        const watchHero = !!v && v.side === 'hero';
+        const follow = !!v && (v.id === this.selectedId || (watchHero && e.from.level === this.shownLevel));
+        if (!v) return;
+        v.busy++;
+        // Step out over the pit if not already there.
+        const over = this.worldOf(e.from);
+        over.y = levelY(e.from.level) + FLOOR_TOP;
+        if (v.root.position.distanceTo(over) > 0.05) {
+          const a = v.root.position.clone();
+          await clock.tween(0.14, (t) => v.root.position.lerpVectors(a, over, easeOutCubic(t)));
+        }
+        const start = v.root.position.clone();
+        const land = this.worldOf(e.to);
+        v.root.visible = v.root.visible || follow;
+        if (follow && e.to.level !== this.shownLevel) {
+          // Keep the faller on screen: draw the levels between as we go.
+          this.rig.focus(new THREE.Vector3(start.x, start.y, start.z));
+        }
+        const dur = 0.35 + e.levels * 0.18;
+        let switched = false;
+        await clock.tween(dur, (t) => {
+          const k = t * t;
+          v.root.position.set(start.x + (land.x - start.x) * k, start.y + (land.y - start.y) * k, start.z + (land.z - start.z) * k);
+          v.fig.rotation.x = Math.sin(t * Math.PI * 1.5) * 0.4;
+          if (follow) {
+            this.rig.focus(new THREE.Vector3(v.root.position.x, v.root.position.y, v.root.position.z));
+            if (!switched && t > 0.55 && e.to.level !== this.shownLevel) {
+              switched = true;
+              this.showLevel(e.to.level);
+            }
+          }
+        });
+        v.fig.rotation.x = 0;
+        v.at = { ...e.to };
+        if (follow && !switched && e.to.level !== this.shownLevel) this.showLevel(e.to.level);
+        this.refreshUnits();
+        if (follow) v.root.visible = true;
+        // Impact.
+        this.flash(land.clone().add(new THREE.Vector3(0, 0.5, 0)), 0xffd0a0, 4 + e.levels * 2);
+        if (!this.reduceShake && (follow || v.root.visible)) this.rig.addShake(0.25 + e.levels * 0.15);
+        clock.hitStop(120);
+        this.onImpact?.(e.levels);
+        if (v.root.visible) {
+          this.floatText(land.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), `−${e.damage}`, 'damage', 1.4);
+          this.dustPuff(land);
+          v.flash(new THREE.Color(1, 0.15, 0.1), 0.9);
+          await clock.tween(0.18, (t) => v.fig.scale.set(v.scale * (1 + Math.sin(t * Math.PI) * 0.18), v.scale * (1 - Math.sin(t * Math.PI) * 0.25), v.scale * (1 + Math.sin(t * Math.PI) * 0.18)));
+          v.fig.scale.setScalar(v.scale);
+          v.flash(new THREE.Color(0, 0, 0), 0);
+        }
+        v.busy--;
+        return;
+      }
+      case 'breath': {
+        const src = this.units.get(e.by);
+        if (!e.hexes.length) return;
+        const lvl = e.hexes[0]!.level;
+        if (lvl !== this.shownLevel && !(src && src.root.visible)) return;
+        const from = src ? src.root.position.clone().add(new THREE.Vector3(0, src.height * 0.85, 0)) : this.worldOf(e.hexes[0]!, 1);
+        if (src && e.hexes[0]) {
+          const tgt = this.worldOf(e.hexes[e.hexes.length - 1]!);
+          src.face(tgt.x - src.root.position.x, tgt.z - src.root.position.z);
+        }
+        this.onBreath?.();
+        await this.fireJet(from, e.hexes);
+        return;
+      }
+      case 'liftWorking': {
+        this.liftWorking = true;
+        this.drumSpin = 2.2;
+        const lv = [...this.levels.values()].find((l) => l.drums.length);
+        if (lv && lv.level === this.shownLevel) {
+          const d = lv.drums[0]!;
+          const p = new THREE.Vector3();
+          d.getWorldPosition(p);
+          this.floatText(p.clone().add(new THREE.Vector3(0, 1.2, 0)), 'The lift runs', 'info', 1.8);
+        }
+        this.onLift?.();
+        await clock.wait(0.6);
+        return;
+      }
       default:
         return;
     }
   }
 
   onStep?: (side: UnitSide) => void;
+  onImpact?: (levels: number) => void;
+  onBreath?: () => void;
+  onLift?: () => void;
+
+  /** A jet of fire from `from` along the hexes, one hex after another. */
+  private async fireJet(from: THREE.Vector3, hexes: Pos[]): Promise<void> {
+    const group = new THREE.Group();
+    this.overlay.add(group);
+    const mats = [0xffe08a, 0xff9a30, 0xff5a10].map((c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const blobs: { m: THREE.Mesh; at: THREE.Vector3; born: number }[] = [];
+    const pts = hexes.map((p) => this.worldOf(p, 0.5));
+    const total = 0.55;
+    this.flash(from, 0xff7a20, 10);
+    if (!this.reduceShake) this.rig.addShake(0.18);
+    await this.clock.tween(total + 0.5, (t) => {
+      const time = t * (total + 0.5);
+      // Spawn blobs along the line up to the head.
+      const head = Math.min(1, time / total);
+      const want = Math.floor(head * 36);
+      while (blobs.length < want) {
+        const i = blobs.length;
+        const f = i / 36;
+        const seg = f * pts.length;
+        const a = seg < 1 ? from : pts[Math.min(pts.length - 1, Math.floor(seg) - 1)]!;
+        const b = pts[Math.min(pts.length - 1, Math.floor(seg))]!;
+        const at = a.clone().lerp(b, seg % 1);
+        at.x += (Math.random() - 0.5) * 0.4;
+        at.z += (Math.random() - 0.5) * 0.4;
+        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3 + Math.random() * 0.25, 0), mats[i % 3]!);
+        m.position.copy(at);
+        group.add(m);
+        blobs.push({ m, at, born: time });
+      }
+      for (const bl of blobs) {
+        const age = time - bl.born;
+        const k = Math.min(1, age / 0.45);
+        bl.m.scale.setScalar(0.6 + k * 1.2);
+        bl.m.position.y = bl.at.y + k * 0.6;
+        (bl.m.material as THREE.MeshBasicMaterial).opacity = 0.95 * (1 - k);
+        bl.m.visible = k < 1;
+      }
+      const tip = pts[Math.min(pts.length - 1, Math.floor(head * pts.length))]!;
+      this.flash(tip, 0xff6a20, 8 * (1 - Math.max(0, time - total) * 2));
+    });
+    this.overlay.remove(group);
+    for (const m of mats) m.dispose();
+  }
+
+  private dustPuff(at: THREE.Vector3): void {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xbfb2a0, transparent: true, opacity: 0.6, depthWrite: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.6, 16).rotateX(-Math.PI / 2), mat);
+    ring.position.copy(at).add(new THREE.Vector3(0, 0.05, 0));
+    this.overlay.add(ring);
+    void this.clock.tween(0.5, (t) => {
+      ring.scale.setScalar(1 + t * 2.2);
+      mat.opacity = 0.6 * (1 - t);
+    }).then(() => {
+      this.overlay.remove(ring);
+      mat.dispose();
+    });
+  }
   onDoor?: (open: boolean) => void;
   onExplosion?: () => void;
 
@@ -1169,6 +1580,9 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   steal: '✋',
   flee: '↶',
   wait: '…',
+  shove: '⇥',
+  breath: '🔥',
+  sweep: '↻',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -1177,6 +1591,9 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   steal: 'steals from',
   flee: 'flees',
   wait: 'waits',
+  shove: 'shoves',
+  breath: 'breathes fire on',
+  sweep: 'sweeps its tail at',
 };
 
 function hashStr(s: string): number {
@@ -1192,6 +1609,7 @@ function parsePos(k: string): Pos {
 }
 
 function groundKind(items: Item[]): string {
+  if (items.some((i) => i.kind === 'hoard')) return 'hoard';
   if (items.some((i) => i.kind === 'heirloom')) return 'heirloom';
   if (items.every((i) => i.kind === 'gold')) return 'gold';
   return 'sack';
