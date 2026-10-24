@@ -2,7 +2,8 @@
 // and from types.ts / geometry.ts. Everything is pure: functions take a
 // GameState and return data; apply() returns a new state plus events.
 
-import type { ApplyResult, CastleMap, Command, Contact, Coord, Frontage, GameState, Modifier, SpellId, Unit, AlarmTier, DoorMethod } from './types';
+import type { ApplyResult, CastleMap, Command, Contact, Coord, Frontage, GameState, ItemId, Modifier, SpellId, Unit, AlarmTier, DoorMethod } from './types';
+import type { ShopItem } from './data';
 
 export interface Reach {
   to: Coord;
@@ -32,15 +33,13 @@ export type ActionOption =
   | { kind: 'melee'; targetIds: string[] }
   | { kind: 'missile'; targetIds: string[] }
   | { kind: 'door'; edge: string; methods: DoorMethod[]; locked: boolean; secured: boolean }
-  | { kind: 'chest'; chestId: string; methods: Exclude<DoorMethod, 'blast'>[] }
-  | { kind: 'search'; progress: number; needed: number }
   | { kind: 'pickUp'; itemIds: string[] }
   | { kind: 'drop'; itemIds: string[] }
   | { kind: 'give'; toIds: string[] }
   | { kind: 'giveFocus'; toIds: string[] }
   | { kind: 'overwatch' }
-  | { kind: 'shieldwall'; facings: Coord[] }
   | { kind: 'cast'; spell: SpellId; cost: number; targets: Coord[]; targetIds: string[]; edges: string[] }
+  | { kind: 'item'; item: ItemId; targets: Coord[]; targetIds: string[] }
   | { kind: 'jump'; targets: Coord[] }
   | { kind: 'climb'; targets: Coord[] }
   | { kind: 'exit' };
@@ -68,7 +67,11 @@ export interface Visibility {
 export interface Engine {
   /** The castle map the game runs on. */
   map(): CastleMap;
-  newCampaign(seed?: number): GameState;
+  newRun(seed?: number): GameState;
+  /** What the shop sells before a run. */
+  shop(): ShopItem[];
+  /** Keys a LaunchPlan uses for each member of the company. */
+  companyKeys(state: GameState): string[];
   apply(state: GameState, cmd: Command): ApplyResult;
 
   reachable(state: GameState, unitId: string): Reach[];

@@ -7,6 +7,8 @@
 //   O  open shaft (no floor on this level)
 //   E  entrance    S  stairs      R  reinforcement point (stairs to the depths)
 //   D  dragon lair H  hoard       G  guard post (floor)
+//   X  cracked wall: a nook in a wall line, open on one side, with a
+//      blastable wall on its north or west edge (a shortcut for charges)
 //
 // Walls between rooms are whole squares of rock, so rooms and halls read as
 // big open spaces. Every edge between two floor squares is open unless a
@@ -22,7 +24,7 @@ export interface GridLevel {
   rows: string[];
 }
 
-const FLOORISH = new Set(['.', '+', '=', 'E', 'S', 'R', 'D', 'H', 'G']);
+const FLOORISH = new Set(['.', '+', '=', 'E', 'S', 'R', 'D', 'H', 'G', 'X']);
 
 export function parseGrid(spec: GridLevel): LevelMap {
   const x0 = spec.x0 ?? 0;
@@ -62,8 +64,8 @@ export function parseGrid(spec: GridLevel): LevelMap {
   for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
       const c = ch(x, y);
-      if (c !== '+' && c !== '=') continue;
-      const kind: EdgeKind = c === '=' ? 'locked' : 'door';
+      if (c !== '+' && c !== '=' && c !== 'X') continue;
+      const kind: EdgeKind = c === '=' ? 'locked' : c === 'X' ? 'wall' : 'door';
       if (floor(x, y - 1) && floor(x, y + 1)) hEdges[y * width + x] = kind;
       else if (floor(x - 1, y) && floor(x + 1, y)) vEdges[y * (width + 1) + x] = kind;
       else throw new Error(`${spec.name}: door at row ${y + 1}, column ${x + 1} needs floor on two opposite sides`);

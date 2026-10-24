@@ -3,7 +3,8 @@
 import type { Engine } from './api';
 import { tierOf } from './alarm';
 import { dispatch, legalActions } from './apply';
-import { newCampaign } from './campaign';
+import { companyKeys, newRun } from './run';
+import { SHOP } from './data';
 import { previewAttack } from './combat';
 import { Ctx, RuleError } from './ctx';
 import { areaAt, indexMap } from './mapIndex';
@@ -16,7 +17,9 @@ export function createEngine(map: CastleMap): Engine {
   const read = (state: GameState) => new Ctx(state, ix);
   return {
     map: () => map,
-    newCampaign: (seed) => newCampaign(ix, seed ?? (Math.floor(Math.random() * 2 ** 31) >>> 0)),
+    newRun: (seed) => newRun(ix, seed ?? (Math.floor(Math.random() * 2 ** 31) >>> 0)),
+    shop: () => SHOP,
+    companyKeys: (state) => companyKeys(state),
     apply(state, cmd) {
       const next = structuredClone(state);
       const ctx = new Ctx(next, ix);
@@ -60,7 +63,7 @@ export function createEngine(map: CastleMap): Engine {
     serialize: (state) => JSON.stringify(state),
     deserialize(text) {
       const s = JSON.parse(text) as GameState;
-      if (s.version !== 1) throw new Error('Unsupported save version.');
+      if (s.version !== 2) throw new Error('Saved game is from an older version.');
       return s;
     },
   };

@@ -10,7 +10,7 @@ import { parseGrid } from './grid';
 const HALLS = [
   '#####################', //  1
   '#.....#......#......#', //  2  Treasury | Library | Barracks
-  '#.....#......#..G...#', //  3
+  '#.....X......#..G...#', //  3  cracked wall G-3 (Library side)
   '#.....#......#......#', //  4
   '#.....#......#......#', //  5
   '###=####...#####+####', //  6  locked treasury, open library, barracks door
@@ -38,7 +38,7 @@ const DEEP = [
   '##=######...#####+###', //  9  locked bone vault, the Drop, crypt door
   '#.....#.......#.....#', // 10  Bone Vault | the Drop | Crypt
   '#.....#.......#.....#', // 11
-  '#.....#.......#.....#', // 12
+  '#.....X.......X.....#', // 12  cracked walls G-12 and O-12 (blast from the Drop)
   '#.....#.......#.....#', // 13
   '#.....#.......#....S#', // 14  stairs up T-14
   '#####################', // 15

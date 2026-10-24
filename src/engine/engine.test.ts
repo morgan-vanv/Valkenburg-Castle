@@ -1,28 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { createEngine } from './engine';
-import { miniCastle } from './test/miniCastle';
+import { v2Castle } from '../data/maps/v2';
 import { Ctx } from './ctx';
 import { indexMap } from './mapIndex';
 import { frontage, expectedWounds, rollSlots } from './combat';
 import { at, squareKey } from './geometry';
 import { makeEnemy } from './ai';
-import { CAMPAIGN } from './data';
-import type { Command, GameState, MusterPlan, Unit } from './types';
+import { RUN } from './data';
+import type { Command, GameState, Unit } from './types';
 
-const map = miniCastle();
+const map = v2Castle;
 const engine = createEngine(map);
-const A1 = at(1, 'A-1');
-
-function plan(over: Partial<MusterPlan> = {}): MusterPlan {
-  return {
-    heroes: [
-      { heroId: 'hobart', entrance: A1 },
-      { heroId: 'pim', entrance: A1 },
-    ],
-    squads: [{ squad: { id: 's1', name: '1st Squad', men: 8, armor: 'normal' }, entrance: A1 }],
-    ...over,
-  };
-}
+const WEST = at(1, 'B-7');
 
 function ok(state: GameState, cmd: Command): GameState {
   const r = engine.apply(state, cmd);
@@ -30,178 +19,209 @@ function ok(state: GameState, cmd: Command): GameState {
   return r.state;
 }
 
-function started(seed = 7): GameState {
-  let s = engine.newCampaign(seed);
-  s = ok(s, { type: 'beginMuster' });
-  return ok(s, { type: 'launch', plan: plan() });
+function started(seed = 7, buys: Command[] = []): GameState {
+  let s = engine.newRun(seed);
+  for (const b of buys) s = ok(s, b);
+  return ok(s, { type: 'launch', plan: { entrances: {} } });
 }
 
-function unitNamed(s: GameState, name: string): Unit {
+function unit(s: GameState, name: string): Unit {
   return s.expedition!.units.find((u) => u.name === name)!;
 }
 
-describe('campaign', () => {
-  it('starts in week 1 with wages paid', () => {
-    const s = engine.newCampaign(1);
-    expect(s.stage).toBe('week');
-    expect(s.week).toBe(1);
-    expect(s.lastWages).toBe(36 + 4 * 2 + 3);
-    expect(s.gold).toBe(800 - s.lastWages);
-    expect(s.castle.enemies.some((e) => e.cls === 'orcSquad')).toBe(true);
+/** Remove every enemy so a test can focus on one rule. */
+function emptyCastle(s: GameState): GameState {
+  s.expedition!.units = s.expedition!.units.filter((u) => u.side === 'player');
+  return s;
+}
+
+describe('the run', () => {
+  it('starts in the shop with a full purse', () => {
+    const s = engine.newRun(1);
+    expect(s.stage).toBe('shop');
+    expect(s.purse).toBe(RUN.purse);
+  });
+
+  it('buys and refunds within limits', () => {
+    let s = engine.newRun(1);
+    s = ok(s, { type: 'buy', item: 'rope' });
+    expect(s.purse).toBe(RUN.purse - 30);
+    expect(engine.apply(s, { type: 'buy', item: 'rope' }).error).toMatch(/at most 1/);
+    s = ok(s, { type: 'refund', item: 'rope' });
+    expect(s.purse).toBe(RUN.purse);
+  });
+
+  it('launches the default company with loot and enemies on the map', () => {
+    const s = started(3, [{ type: 'buy', item: 'sellswords' }, { type: 'buy', item: 'banner' }]);
+    const mine = s.expedition!.units.filter((u) => u.side === 'player');
+    expect(mine.map((u) => u.name).sort()).toEqual(['1st Squad', '2nd Squad', 'Aldous', 'Lord Hobart', 'Pim', 'Sellswords', 'Thorvold']);
+    expect(mine.filter((u) => u.heroId).every((u) => u.focus === 3)).toBe(true);
+    expect(Object.values(s.expedition!.floorLoot).flat()).toHaveLength(map.loot!.length);
+    expect(s.expedition!.units.filter((u) => u.side === 'castle')).toHaveLength(map.spawns!.length);
   });
 
   it('is deterministic for a seed', () => {
-    expect(JSON.stringify(engine.newCampaign(42))).toBe(JSON.stringify(engine.newCampaign(42)));
-  });
-
-  it('hires within the weekly limit', () => {
-    let s = engine.newCampaign(1);
-    s = ok(s, { type: 'hire', men: 10 });
-    expect(s.barracks).toBe(46);
-    expect(engine.apply(s, { type: 'hire', men: 11 }).error).toMatch(/20/);
-  });
-
-  it('launches an expedition and validates the muster', () => {
-    let s = engine.newCampaign(3);
-    s = ok(s, { type: 'beginMuster' });
-    const tooBig = plan({ squads: [{ squad: { id: 'x', name: 'Too big', men: 11, armor: 'normal' }, entrance: A1 }] });
-    expect(engine.apply(s, { type: 'launch', plan: tooBig }).error).toBeTruthy();
-    const goldBefore = s.gold;
-    s = ok(s, { type: 'launch', plan: plan() });
-    expect(s.stage).toBe('expedition');
-    expect(s.gold).toBe(goldBefore - CAMPAIGN.outfitCost);
-    expect(s.barracks).toBe(28);
-    expect(s.expedition!.units.filter((u) => u.side === 'player')).toHaveLength(3);
-  });
-
-  it('skipping weeks to the end without enough gold loses', () => {
-    let s = engine.newCampaign(5);
-    for (let i = 0; i < 4; i++) s = ok(s, { type: 'skipWeek' });
-    expect(s.stage).toBe('lost');
-    expect(s.endReason).toMatch(/short/);
+    expect(JSON.stringify(started(42))).toBe(JSON.stringify(started(42)));
   });
 });
 
-describe('movement and doors', () => {
-  it('reaches along the corridor and pays extra to open a door as a squad', () => {
-    const s = started();
-    const squad = unitNamed(s, '1st Squad');
-    const reach = engine.reachable(s, squad.id);
-    const a5 = reach.find((r) => squareKey(r.to) === squareKey(at(1, 'A-5')));
-    expect(a5?.cost).toBe(4);
-    const b2 = reach.find((r) => squareKey(r.to) === squareKey(at(1, 'B-2')));
-    expect(b2?.cost).toBe(3); // A-2 (1) + door (2)
-    const hobart = unitNamed(s, 'Lord Hobart');
-    const hb2 = engine.reachable(s, hobart.id).find((r) => squareKey(r.to) === squareKey(at(1, 'B-2')));
-    expect(hb2?.cost).toBe(2);
+describe('doors', () => {
+  it('Pim picks a lock silently; forcing one is loud', () => {
+    let s = emptyCastle(started());
+    const pim = unit(s, 'Pim');
+    s = ok(s, { type: 'move', unitId: pim.id, to: at(1, 'D-6') });
+    const door = engine.actions(s, pim.id).find((o) => o.kind === 'door');
+    expect(door && door.kind === 'door' && door.methods).toEqual(['pick', 'force']);
+    const edge = (door as { edge: string }).edge;
+    const picked = ok(s, { type: 'door', unitId: pim.id, edge, method: 'pick' });
+    expect(picked.expedition!.alarm).toBe(s.expedition!.alarm);
+    expect(picked.expedition!.doors[edge]!.locked).toBe(false);
+    const forced = ok(s, { type: 'door', unitId: pim.id, edge, method: 'force' });
+    expect(forced.expedition!.alarm).toBeGreaterThan(s.expedition!.alarm);
   });
 
-  it('opens a door when walking through it', () => {
-    const s = started();
-    const hobart = unitNamed(s, 'Lord Hobart');
-    const r = engine.apply(s, { type: 'move', unitId: hobart.id, to: at(1, 'B-2') });
-    expect(r.error).toBeUndefined();
-    expect(r.events.some((e) => e.type === 'doorOpened')).toBe(true);
-    expect(unitNamed(r.state, 'Lord Hobart').actionsLeft).toBe(1);
+  it('a blasting charge opens a cracked wall at the end of the turn', () => {
+    let s = emptyCastle(started(5, [{ type: 'buy', item: 'charge' }]));
+    const hob = unit(s, 'Lord Hobart');
+    // Teleport for the test: stand in the Library's nook by the cracked wall.
+    hob.pos = at(1, 'G-3');
+    const blast = engine.actions(s, hob.id).find((o) => o.kind === 'door' && o.methods.includes('blast'));
+    expect(blast).toBeTruthy();
+    s = ok(s, { type: 'door', unitId: hob.id, edge: (blast as { edge: string }).edge, method: 'blast' });
+    expect(s.expedition!.pack.charge).toBe(0);
+    // Hobart must step clear before it blows.
+    s = ok(s, { type: 'move', unitId: hob.id, to: at(1, 'H-3') });
+    s = ok(s, { type: 'endTurn' });
+    const reach = engine.reachable(s, unit(s, 'Lord Hobart').id);
+    expect(s.stage).toBe('expedition');
+    expect(reach.some((r) => squareKey(r.to) === squareKey(at(1, 'F-3')) || r.path.some((c) => squareKey(c) === squareKey(at(1, 'F-3'))))).toBe(true);
+  });
+});
+
+describe('loot', () => {
+  it('heroes carry one sack; carrying costs a move; the hoard needs a squad', () => {
+    let s = emptyCastle(started());
+    const hob = unit(s, 'Lord Hobart');
+    hob.pos = at(1, 'E-4');
+    const pile = engine.actions(s, hob.id).find((o) => o.kind === 'pickUp');
+    s = ok(s, { type: 'pickUp', unitId: hob.id, itemId: (pile as { itemIds: string[] }).itemIds[0]! });
+    const after = unit(s, 'Lord Hobart');
+    expect(after.loot).toHaveLength(1);
+    expect(engine.moveAllowance(s, after)).toBe(3);
+    // The hoard is two sacks.
+    after.pos = at(2, 'T-2');
+    after.loot = [];
+    const hoard = engine.actions(s, after.id).find((o) => o.kind === 'pickUp') as { itemIds: string[] };
+    expect(engine.apply(s, { type: 'pickUp', unitId: after.id, itemId: hoard.itemIds[0]! }).error).toMatch(/2 free sacks/);
+    const squad = unit(s, '1st Squad');
+    squad.pos = at(2, 'T-2');
+    expect(engine.apply(s, { type: 'pickUp', unitId: squad.id, itemId: hoard.itemIds[0]! }).error).toBeUndefined();
   });
 
-  it('cannot walk through a locked door but a burglar can try the lock', () => {
-    let s = started();
-    const pim = unitNamed(s, 'Pim');
-    expect(engine.reachable(s, pim.id).some((r) => squareKey(r.to) === squareKey(at(1, 'B-5')))).toBe(false);
-    s = ok(s, { type: 'move', unitId: pim.id, to: at(1, 'A-5') });
-    // Orcs right behind the door secure it: it can only be forced.
-    const secured = engine.actions(s, pim.id).find((o) => o.kind === 'door');
-    expect(secured && secured.kind === 'door' && secured.secured).toBe(true);
-    expect(secured && secured.kind === 'door' && secured.methods).not.toContain('pick');
-    // With the guardroom empty, the burglar can pick it.
-    s.expedition!.units = s.expedition!.units.filter((u) => u.side === 'player');
-    const opts = engine.actions(s, pim.id);
-    const door = opts.find((o) => o.kind === 'door');
-    expect(door && door.kind === 'door' && door.methods).toContain('pick');
-    const r = engine.apply(s, { type: 'door', unitId: pim.id, edge: (door as { edge: string }).edge, method: 'pick' });
-    expect(r.error).toBeUndefined();
-    expect(r.events.some((e) => e.type === 'doorAttempt')).toBe(true);
+  it('scores loot carried out plus the unspent purse, with a medal', () => {
+    let s = emptyCastle(started(8, [{ type: 'buy', item: 'rope' }]));
+    unit(s, 'Lord Hobart').loot.push({ id: 'x', name: 'Test gold', value: 700, weight: 1 });
+    for (const id of s.expedition!.units.filter((x) => x.side === 'player').map((x) => x.id)) {
+      s.expedition!.units.find((x) => x.id === id)!.pos = { ...WEST };
+      s = ok(s, { type: 'exit', unitId: id });
+      if (s.stage !== 'expedition') break;
+    }
+    expect(s.stage).toBe('results');
+    expect(s.result!.survived).toBe(true);
+    expect(s.result!.score).toBe(700 + RUN.purse - 30);
+    expect(s.result!.medal).toBe('bronze');
+  });
+
+  it('loses the run when Hobart is left behind', () => {
+    let s = emptyCastle(started());
+    for (const id of s.expedition!.units.filter((x) => x.side === 'player' && x.cls !== 'hobart').map((x) => x.id)) {
+      s.expedition!.units.find((x) => x.id === id)!.pos = { ...WEST };
+      s = ok(s, { type: 'exit', unitId: id });
+    }
+    expect(s.stage).toBe('expedition');
+    const hob = unit(s, 'Lord Hobart');
+    s.expedition!.units = s.expedition!.units.filter((u) => u.id !== hob.id);
+    s.expedition!.fallen.push(hob);
+    s = ok(s, { type: 'endTurn' });
+    expect(s.stage).toBe('results');
+    expect(s.result!.survived).toBe(false);
+    expect(s.result!.score).toBe(0);
+  });
+});
+
+describe('the shaft', () => {
+  it('climbing needs a rope; jumping hurts', () => {
+    let s = emptyCastle(started());
+    const sq = unit(s, '1st Squad');
+    sq.pos = at(1, 'I-12');
+    expect(engine.actions(s, sq.id).some((o) => o.kind === 'climb')).toBe(false);
+    const jump = engine.actions(s, sq.id).find((o) => o.kind === 'jump') as { targets: { level: number }[] };
+    expect(jump.targets[0]!.level).toBe(2);
+    s = ok(s, { type: 'jump', unitId: sq.id, to: jump.targets[0] as never });
+    expect(unit(s, '1st Squad').pos.level).toBe(2);
+  });
+
+  it('with a rope, climbing down and back up is safe', () => {
+    let s = emptyCastle(started(2, [{ type: 'buy', item: 'rope' }]));
+    const sq = unit(s, '1st Squad');
+    sq.pos = at(1, 'I-12');
+    const down = engine.actions(s, sq.id).find((o) => o.kind === 'climb') as unknown as { targets: never[] };
+    s = ok(s, { type: 'climb', unitId: sq.id, to: down.targets[0]! });
+    expect(unit(s, '1st Squad').men).toBe(RUN.squadMen);
+    expect(s.expedition!.rope).toBe(true);
+    const up = engine.actions(s, sq.id).find((o) => o.kind === 'climb') as { targets: { level: number }[] };
+    expect(up.targets[0]!.level).toBe(1);
   });
 });
 
 describe('combat', () => {
-  it('measures frontage', () => {
+  it('measures frontage: doorways narrow, wide halls open', () => {
     const s = started();
     const ctx = new Ctx(s, indexMap(map));
-    expect(frontage(ctx, at(1, 'A-2'), at(1, 'B-2'))).toBe('narrow'); // doorway
-    expect(frontage(ctx, at(1, 'A-3'), at(1, 'A-4'))).toBe('wide'); // 1-wide corridor
-    expect(frontage(ctx, at(1, 'C-2'), at(1, 'D-2'))).toBe('open'); // inside a room
+    expect(frontage(ctx, at(1, 'Q-6'), at(1, 'Q-5'))).toBe('narrow');
+    expect(frontage(ctx, at(1, 'J-7'), at(1, 'K-7'))).toBe('open');
   });
 
-  it('computes expected wounds with focus and Perfect', () => {
-    expect(expectedWounds(1, 1, 50, false)).toBe(1);
-    expect(expectedWounds(2, 0, 50, false)).toBeCloseTo(1 + 0.25);
+  it('computes expected wounds and locks Focus slots', () => {
     expect(expectedWounds(2, 2, 50, false)).toBe(3);
+    const ctx = new Ctx(started(), indexMap(map));
+    expect(rollSlots(ctx, 3, 3, 10, false).wounds).toBe(4);
   });
 
-  it('locks focus slots as hits', () => {
-    const s = started();
-    const ctx = new Ctx(s, indexMap(map));
-    const roll = rollSlots(ctx, 3, 3, 10, false);
-    expect(roll.hits).toEqual([true, true, true]);
-    expect(roll.perfect).toBe(true);
-    expect(roll.wounds).toBe(4);
+  it('heals with a draught', () => {
+    let s = emptyCastle(started(4, [{ type: 'buy', item: 'draught' }]));
+    const sq = unit(s, '1st Squad');
+    sq.men = 3;
+    s = ok(s, { type: 'useItem', unitId: sq.id, item: 'draught', targetId: sq.id });
+    expect(unit(s, '1st Squad').men).toBe(6);
+    expect(s.expedition!.pack.draught).toBe(0);
   });
 
-  it('resolves a melee attack with a preview that matches', () => {
-    const s = started();
+  it('resolves a melee attack in the open', () => {
+    const s = emptyCastle(started());
     const ctx = new Ctx(s, indexMap(map));
-    const orc = makeEnemy(ctx, 'orcSquad', 'Test orcs', at(1, 'A-2'), 4);
+    const sq = unit(s, '1st Squad');
+    sq.pos = at(1, 'J-7');
+    const orc = makeEnemy(ctx, 'orcSquad', 'Test orcs', at(1, 'K-7'), 4);
     orc.dormant = false;
     s.expedition!.units.push(orc);
-    const squad = unitNamed(s, '1st Squad');
-    const pv = engine.previewAttack(s, squad.id, orc.id, 'melee', 0);
-    expect(pv.ok).toBe(true);
-    expect(pv.frontage).toBe('wide');
-    expect(pv.slots).toBe(2);
-    const r = engine.apply(s, { type: 'melee', unitId: squad.id, targetId: orc.id, focus: 0 });
-    expect(r.error).toBeUndefined();
-    const atk = r.events.find((e) => e.type === 'attack');
-    expect(atk && atk.type === 'attack' && atk.roll.slots).toBe(2);
-    expect(unitNamed(r.state, '1st Squad').actionsLeft).toBe(0);
-  });
-});
-
-describe('turns', () => {
-  it('ends a turn, runs the castle, and raises the alarm', () => {
-    const s = started();
-    const r = engine.apply(s, { type: 'endTurn' });
-    expect(r.error).toBeUndefined();
-    expect(r.state.expedition!.turn).toBe(2);
-    expect(r.state.expedition!.alarm).toBeGreaterThanOrEqual(2);
-    expect(r.events.filter((e) => e.type === 'phase').map((e) => (e as { phase: string }).phase)).toEqual(['castle', 'player']);
-  });
-
-  it('exits, ends the expedition and banks loot at the debrief', () => {
-    let s = started();
-    const hob = unitNamed(s, 'Lord Hobart');
-    hob.loot.push({ id: 'gold', name: '200 gold coins', value: 200, weight: 200 });
-    const goldBefore = s.gold;
-    for (const u of s.expedition!.units.filter((x) => x.side === 'player')) s = ok(s, { type: 'exit', unitId: u.id });
-    expect(s.stage).toBe('debrief');
-    expect(s.gold).toBe(goldBefore + 200);
-    expect(s.barracks).toBe(36);
-    s = ok(s, { type: 'continueAfterDebrief' });
-    expect(s.week).toBe(2);
+    const pv = engine.previewAttack(s, sq.id, orc.id, 'melee', 0);
+    expect(pv.frontage).toBe('open');
+    expect(pv.slots).toBe(3);
+    expect(engine.apply(s, { type: 'melee', unitId: sq.id, targetId: orc.id, focus: 0 }).error).toBeUndefined();
   });
 });
 
 describe('robustness', () => {
   it('survives random legal play across seeds', () => {
-    for (let seed = 1; seed <= 12; seed++) {
-      let s = started(seed);
+    for (let seed = 1; seed <= 15; seed++) {
+      let s = started(seed, [{ type: 'buy', item: 'charge' }, { type: 'buy', item: 'rope' }, { type: 'buy', item: 'smoke' }, { type: 'buy', item: 'draught' }]);
       let rng = seed * 9973;
       const rand = (n: number) => {
         rng = (rng * 1103515245 + 12345) % 2147483648;
         return rng % n;
       };
-      for (let step = 0; step < 250 && s.stage === 'expedition'; step++) {
+      for (let step = 0; step < 300 && s.stage === 'expedition'; step++) {
         const mine = s.expedition!.units.filter((u) => u.side === 'player' && !u.exited && u.actionsLeft > 0);
         if (!mine.length || rand(8) === 0) {
           s = ok(s, { type: 'endTurn' });
@@ -228,8 +248,18 @@ describe('robustness', () => {
           case 'door':
             cmd = { type: 'door', unitId: u.id, edge: o.edge, method: o.methods[rand(o.methods.length)]! };
             break;
-          case 'search':
-            cmd = { type: 'search', unitId: u.id };
+          case 'pickUp':
+            cmd = { type: 'pickUp', unitId: u.id, itemId: o.itemIds[0]! };
+            break;
+          case 'item':
+            cmd = { type: 'useItem', unitId: u.id, item: o.item, target: o.targets[0], targetId: o.targetIds[0] };
+            break;
+          case 'cast':
+            cmd = { type: 'cast', unitId: u.id, spell: o.spell, target: o.targets[0], targetId: o.targetIds[0] };
+            break;
+          case 'jump':
+          case 'climb':
+            cmd = { type: o.kind, unitId: u.id, to: o.targets[0]! };
             break;
           case 'exit':
             cmd = { type: 'exit', unitId: u.id };
@@ -240,66 +270,9 @@ describe('robustness', () => {
           default:
             cmd = undefined;
         }
-        if (!cmd) continue;
-        const r = engine.apply(s, cmd);
-        s = r.state;
+        if (cmd) s = engine.apply(s, cmd).state;
       }
-      expect(['expedition', 'debrief', 'lost', 'won']).toContain(s.stage);
+      expect(['expedition', 'results']).toContain(s.stage);
     }
-  });
-});
-
-describe('alarm, overwatch and spells', () => {
-  it('sends reinforcement waves once the castle is roused', () => {
-    const s = started();
-    s.expedition!.units = s.expedition!.units.filter((u) => u.side === 'player');
-    s.expedition!.alarm = 75;
-    let st = s;
-    for (let i = 0; i < 3; i++) st = ok(st, { type: 'endTurn' });
-    expect(st.stage).toBe('expedition');
-    const reserves = st.expedition!.units.filter((u) => u.name.startsWith('Reserve band'));
-    expect(reserves.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('fires overwatch at an enemy that walks into view', () => {
-    const s = started(11);
-    const ctx = new Ctx(s, indexMap(map));
-    // Clear the garrison and put one awake orc band down the corridor.
-    s.expedition!.units = s.expedition!.units.filter((u) => u.side === 'player');
-    // A berserker has no bows, so it must walk into the arrows.
-    const orc = makeEnemy(ctx, 'berserker', 'Walker', at(1, 'A-6'), 1);
-    orc.dormant = false;
-    s.expedition!.units.push(orc);
-    // Wall off sight until it moves: put the squad on watch at A-1.
-    const squad = unitNamed(s, '1st Squad');
-    let st = ok(s, { type: 'overwatch', unitId: squad.id });
-    const r = engine.apply(st, { type: 'endTurn' });
-    st = r.state;
-    const shots = r.events.filter((e) => e.type === 'attack' && e.attackerId === squad.id);
-    expect(shots.length).toBe(1);
-  });
-
-  it('casts ESP and exposes a dummy contact', () => {
-    let s = engine.newCampaign(9);
-    s = ok(s, { type: 'beginMuster' });
-    s = ok(s, { type: 'launch', plan: plan({ heroes: [{ heroId: 'aldous', entrance: A1 }] }) });
-    const ctx = new Ctx(s, indexMap(map));
-    const dummy = makeEnemy(ctx, 'dummy', 'Contact', at(1, 'A-4'), 1);
-    dummy.dormant = false;
-    s.expedition!.units.push(dummy);
-    const aldous = unitNamed(s, 'Aldous');
-    const r = engine.apply(s, { type: 'cast', unitId: aldous.id, spell: 'esp' });
-    expect(r.error).toBeUndefined();
-    expect(r.state.expedition!.units.some((u) => u.id === dummy.id)).toBe(false);
-    expect(unitNamed(r.state, 'Aldous').spellPoints).toBe(9);
-  });
-
-  it('refuses a fireball without a straight clear line', () => {
-    let s = engine.newCampaign(9);
-    s = ok(s, { type: 'beginMuster' });
-    s = ok(s, { type: 'launch', plan: plan({ heroes: [{ heroId: 'aldous', entrance: A1 }] }) });
-    const aldous = unitNamed(s, 'Aldous');
-    const r = engine.apply(s, { type: 'cast', unitId: aldous.id, spell: 'fireball', target: at(1, 'C-2') });
-    expect(r.error).toMatch(/straight/);
   });
 });

@@ -36,8 +36,9 @@ Each step ends with a commit and push to `v2`.
 
 - [x] Save V1 to `v1-prototype`; create `v2`
 - [x] Map: cell-grid builder (src/data/maps/grid.ts) + the new two-level map (src/data/maps/v2.ts)
-- [ ] Engine: one-shot run flow (shop → expedition → results), party pack and items
-- [ ] Engine: simplified doors, visible loot and sacks, removals; tests updated
+- [x] Engine: one-shot run flow (shop → expedition → results), party pack and items (src/engine/run.ts, apply.ts)
+- [x] Engine: simplified doors, visible loot and sacks, cracked walls for charges, monster leashes; 16 tests pass
+- Note: the UI does not compile against the V2 engine until the UI step is done.
 - [ ] Renderer: tiles at 2× scale, two-level map, items and loot piles visible
 - [ ] UI: shop screen, results screen, item actions; remove muster/week/debrief
 - [ ] Bot balance check on the new map; tune medal thresholds

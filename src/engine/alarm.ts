@@ -2,7 +2,6 @@
 
 import { ALARM_TIERS, NOISE } from './data';
 import { squareKey } from './geometry';
-import { areaAt } from './mapIndex';
 import { pathTo } from './movement';
 import { canSee } from './sight';
 import type { Ctx } from './ctx';
@@ -41,28 +40,23 @@ export function wakeLevel(ctx: Ctx, level: number): void {
   for (const u of ctx.fighters('castle')) if (u.pos.level === level) wake(ctx, u);
 }
 
-function isGuardroomUnit(ctx: Ctx, u: Unit): boolean {
-  if (!u.post) return false;
-  return areaAt(ctx.ix, u.post)?.isGuardroom === true;
-}
-
-/** Tier wake rules, applied at the start of each castle phase. */
+/** Tier wake rules, applied at the start of each castle phase (V2: no guardrooms needed). */
 export function applyTierWakes(ctx: Ctx): void {
   const exp = ctx.exp;
   const t = tierIndex(tierOf(exp.alarm));
-  const guards = ctx.fighters('castle').filter((u) => u.dormant && isGuardroomUnit(ctx, u));
+  const sleepers = ctx.fighters('castle').filter((u) => u.dormant && !u.leash);
   if (t >= 1 && exp.noiseThisTurn.length) {
     const noise = new Set(exp.noiseThisTurn.map(squareKey));
-    for (const g of guards) {
-      const p = pathTo(ctx, g, (c) => noise.has(squareKey(c)), 8);
+    for (const g of sleepers) {
+      const p = pathTo(ctx, g, (c) => noise.has(squareKey(c)), 10);
       if (p || noise.has(squareKey(g.pos))) wake(ctx, g);
     }
   }
   if (t >= 2) {
     const levels = new Set(ctx.fighters('player').map((u) => u.pos.level));
-    for (const g of guards) if (levels.has(g.pos.level)) wake(ctx, g);
+    for (const g of sleepers) if (levels.has(g.pos.level)) wake(ctx, g);
   }
-  if (t >= 4) for (const u of ctx.fighters('castle')) if (!u.homeArea) wake(ctx, u);
+  if (t >= 4) for (const u of sleepers) wake(ctx, u);
 }
 
 /**
@@ -74,10 +68,10 @@ export function checkSpotting(ctx: Ctx): void {
   const exp = ctx.exp;
   const players = ctx.fighters('player');
   for (const e of ctx.fighters('castle')) {
-    if (e.homeArea !== undefined) {
-      const intruder = players.some((p) => ctx.ix.areaBySquare.get(squareKey(p.pos)) === e.homeArea);
-      const near = e.cls === 'dragon' && players.some((p) => p.pos.level === e.pos.level && Math.max(Math.abs(p.pos.x - e.pos.x), Math.abs(p.pos.y - e.pos.y)) <= 3);
-      if (e.dormant && (e.cls === 'dragon' ? near : intruder)) {
+    if (e.leash) {
+      // Monsters wake when someone comes within 4 squares of them and in sight.
+      const near = players.some((p) => p.pos.level === e.pos.level && Math.abs(p.pos.x - e.pos.x) + Math.abs(p.pos.y - e.pos.y) <= 4 && canSee(ctx, e, p.pos));
+      if (e.dormant && near) {
         wake(ctx, e);
         ctx.log(`${e.name} stirs.`);
       }

@@ -1,6 +1,6 @@
 // Numbers from docs/demo-spec.md, with 1980 rule references.
 
-import type { LootItem, SpellId, UnitClass } from './types';
+import type { ItemId, LootItem, Medal, SpellId, UnitClass } from './types';
 
 export interface UnitStats {
   baseHit: number;
@@ -57,12 +57,51 @@ export const MOVE_BY_ARMOR = { unarmored: 5, normal: 4, heavy: 3 } as const;
 
 export const SPELLS: Record<SpellId, { cost: number; name: string }> = {
   esp: { cost: 1, name: 'ESP' },
-  fireball: { cost: 8, name: 'Fireball' },
+  fireball: { cost: 3, name: 'Fireball' },
   smokescreen: { cost: 1, name: 'Smokescreen' },
   pyrotechnics: { cost: 1, name: 'Pyrotechnics' },
   unlock: { cost: 2, name: 'Unlock Door' },
-  combat: { cost: 1, name: 'Combat' },
+  combat: { cost: 1, name: 'Bless' },
 };
+
+/** Spells offered in V2. */
+export const V2_SPELLS: SpellId[] = ['fireball', 'smokescreen', 'combat'];
+
+/** One-shot run numbers (V2). */
+export const RUN = {
+  purse: 150,
+  spellPoints: 6,
+  squadMen: 8,
+  sellswordMen: 6,
+  monsterLeash: 5,
+  dragonLeash: 7,
+  medals: { gold: 2000, silver: 1200, bronze: 600 } as Record<Exclude<Medal, 'none'>, number>,
+} as const;
+
+export interface ShopItem {
+  id: ItemId;
+  name: string;
+  cost: number;
+  /** Most you can carry in. */
+  max: number;
+  text: string;
+}
+
+export const SHOP: ShopItem[] = [
+  { id: 'charge', name: 'Blasting charge', cost: 40, max: 3, text: 'Blow open a door or an inner wall. Loud.' },
+  { id: 'rope', name: 'Rope', cost: 30, max: 1, text: 'Anchor at the shaft: climb down to the Deep or back up safely, 1 action.' },
+  { id: 'draught', name: 'Healing draught', cost: 25, max: 4, text: 'Heal a hero 2 wounds, or return 3 men to a squad.' },
+  { id: 'smoke', name: 'Smoke bomb', cost: 20, max: 4, text: 'Smoke a square and its neighbours for a turn: blocks sight.' },
+  { id: 'sellswords', name: 'Sellsword band', cost: 60, max: 1, text: 'A third squad of 6 men joins the company.' },
+  { id: 'banner', name: 'War banner', cost: 50, max: 1, text: 'Every hero starts with full Focus.' },
+];
+
+export function medalFor(score: number): Medal {
+  if (score >= RUN.medals.gold) return 'gold';
+  if (score >= RUN.medals.silver) return 'silver';
+  if (score >= RUN.medals.bronze) return 'bronze';
+  return 'none';
+}
 
 export const ALARM_TIERS = [
   { tier: 'Quiet', min: 0 },
@@ -81,6 +120,7 @@ export const NOISE = {
   chop: 4,
   blast: 15,
   fireball: 10,
+  force: 6,
 } as const;
 
 /** Campaign numbers (spec section 1). */

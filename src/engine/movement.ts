@@ -71,16 +71,25 @@ export function moveAllowance(ctx: Ctx, u: Unit): number {
   return Math.max(0, base);
 }
 
+/** Sacks a unit can carry (V2): heroes 1, the Dwarf 2, squads 1 per 2 men. */
 export function carryLimit(u: Unit): number {
   const s = STATS[u.cls];
-  return s.isSquad ? u.men * s.carry : s.carry;
+  if (s.isSquad) return Math.ceil(u.men / 2);
+  return u.cls === 'dwarf' ? 2 : 1;
 }
 
+/** Weight is counted in sacks. Carrying anything costs 1 move. */
 export function carryInfo(u: Unit) {
   const weight = u.loot.reduce((n, i) => n + i.weight, 0);
   const value = u.loot.reduce((n, i) => n + i.value, 0);
   const limit = carryLimit(u);
-  return { weight, value, limit, overloaded: weight > limit, immobile: weight > limit * 2 };
+  return { weight, value, limit, overloaded: weight > 0, immobile: false };
+}
+
+/** Is a square within a leashed unit's range from its post? */
+export function withinLeash(u: Unit, c: Coord): boolean {
+  if (!u.leash || !u.post) return true;
+  return c.level === u.post.level && Math.abs(c.x - u.post.x) + Math.abs(c.y - u.post.y) <= u.leash;
 }
 
 /** Is any enemy (not a dummy) in a square adjacent to `c` by an open path? */
@@ -131,8 +140,7 @@ export function reachable(ctx: Ctx, u: Unit, opts: { ignoreStop?: boolean; allow
       const total = cur.cost + cost;
       if (total > allowance) continue;
       if (ctx.hasEnemyAt(s.to, u.side)) continue;
-      if (u.homeArea !== undefined && ctx.ix.areaBySquare.get(squareKey(s.to)) !== u.homeArea) continue;
-      if (u.cls === 'dragon' && forbiddenForDragon(s.to)) continue;
+      if (!withinLeash(u, s.to)) continue;
       const nk = squareKey(s.to);
       const prev = best.get(nk);
       if (prev && prev.cost <= total) continue;
@@ -148,11 +156,6 @@ export function reachable(ctx: Ctx, u: Unit, opts: { ignoreStop?: boolean; allow
     out.push({ to, cost: v.cost, path: v.path });
   }
   return out;
-}
-
-/** The dragon can never enter the narrow cave openings (8.6). */
-function forbiddenForDragon(c: Coord): boolean {
-  return c.level === 3 && ((c.x === 15 && c.y === 5) || (c.x === 19 && c.y === 1) || (c.x === 15 && c.y === 9));
 }
 
 /**
@@ -206,7 +209,7 @@ export function pathTo(ctx: Ctx, u: Unit, goal: (c: Coord) => boolean, maxCost =
       const d = dist.get(k)! + Math.min(s.cost, 2);
       if (d > maxCost) continue;
       if (ctx.hasEnemyAt(s.to, u.side)) continue;
-      if (u.homeArea !== undefined && ctx.ix.areaBySquare.get(nk) !== u.homeArea) continue;
+      if (!withinLeash(u, s.to)) continue;
       if (dist.has(nk) && dist.get(nk)! <= d) continue;
       dist.set(nk, d);
       prev.set(nk, k);
