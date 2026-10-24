@@ -1016,7 +1016,7 @@ export class Hud {
     const name = this.engine.castle().levels.find((l) => l.level === lvl)?.name ?? `Level ${lvl}`;
     clear(this.emptyEl);
     if (s?.delve && !seen) {
-      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs or the pit.'));
+      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs, the lift or the pit.'));
       this.emptyEl.classList.remove('hidden');
     } else this.emptyEl.classList.add('hidden');
   }
