@@ -145,6 +145,23 @@ export function litSet(w: World, d: DelveX): Set<string> {
   return out;
 }
 
+/** How far a hero can make out the shape of a room in the dark. */
+export const GLIMPSE_RANGE = 8;
+
+/**
+ * Hexes whose layout a hero at `from` can make out: every tile in line of
+ * sight within GLIMPSE_RANGE, lit or not. Walls, doors and floors become
+ * explored; units are only seen in light (visibleSet).
+ */
+export function glimpseSet(w: World, d: DelveX, from: Pos): Pos[] {
+  const out: Pos[] = [];
+  for (const h of range(from, GLIMPSE_RANGE)) {
+    const p = { level: from.level, ...h };
+    if (w.tile(p) && los(w, d, from, p)) out.push(p);
+  }
+  return out;
+}
+
 /** Hexes the active heroes see now. */
 export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> {
   const L = lit ?? litSet(w, d);

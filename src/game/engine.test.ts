@@ -4,7 +4,7 @@ import { at, testCastle } from './test/testCastle';
 import { posKey, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, Command, GameEvent, GameState, Monster, MonsterKind, SlotRoll } from './types';
 import { MONSTERS } from './data';
-import { brightnessOf, noiseField, World } from './world';
+import { brightnessOf, glimpseSet, noiseField, World } from './world';
 import type { DelveX, GameStateX } from './state';
 import { makeNoise } from './common';
 
@@ -229,6 +229,30 @@ describe('movement', () => {
     const s = delve();
     hero(s, 'brann').webbed = true;
     expect(e.reachable(s, 'brann', false)).toEqual([]);
+  });
+});
+
+describe('exploring by line of sight', () => {
+  it('every step of a walk reveals what that hex can see, lit or not', () => {
+    let s = delve({ heroes: ['hobart', 'pim'] });
+    s.delve!.light = 1; // dark: the lantern lights almost nothing
+    const reach = e.reachable(s, 'pim', false).sort((a, b) => b.path.length - a.path.length)[0]!;
+    expect(reach.path.length).toBeGreaterThan(2);
+    s = e.apply(s, { type: 'move', heroId: 'pim', path: reach.path, sneak: false }).state;
+    const ex = e.visibility(s).explored;
+    for (const step of reach.path) {
+      for (const p of glimpseSet(w, s.delve as DelveX, step)) expect(ex.has(posKey(p))).toBe(true);
+    }
+  });
+
+  it('walls stop the glimpse', () => {
+    const s = delve();
+    for (const p of glimpseSet(w, s.delve as DelveX, hero(s, 'hobart').at)) {
+      expect(p.level).toBe(hero(s, 'hobart').at.level);
+    }
+    const all = glimpseSet(w, s.delve as DelveX, hero(s, 'hobart').at).length;
+    const tiles = Object.keys(testCastle.levels[0]!.tiles).length;
+    expect(all).toBeLessThan(tiles);
   });
 });
 

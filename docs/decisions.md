@@ -18,3 +18,4 @@ The full design lives in the Game Design Document: https://claude.ai/artifact/5p
 - **2026-10-24** V3 lantern is 40 rounds. With 60 a bot finished every contract with most of its light left.
 
 The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
+- **2026-10-24** Exploration reveals layout by line of sight from every step, lit or not; units still need light. The owner found long moves left the map full of holes.

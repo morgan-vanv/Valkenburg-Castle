@@ -20,6 +20,10 @@ Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and 
 - **Monsters show their intent:** who they'll hit and for how much. Rats, orcs (they shout for help), spiders (webs), the cutpurse (steals and runs) and berserkers.
 - **The Lantern Sisters:** a rival crew that sometimes shows up to race you for chests and your prize. Leave them be, fight them, or bribe them 40 gold to leave.
 
+## Since launch
+
+- **Exploring by line of sight (2026-10-24):** every step of a walk reveals the layout of everything in line of sight within 8 hexes, lit or not, so long moves no longer leave gaps and walking into a room shows the room. Monsters still only show in light.
+
 ## Camp
 
 Bounty board, quartermaster (torches, potions, rope, blasting charges), smithy (weapon and armor tiers), tavern (recruits), infirmary, stash (sell valuables) and memorial.

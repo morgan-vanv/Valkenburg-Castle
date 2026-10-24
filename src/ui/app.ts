@@ -48,6 +48,17 @@ export class App {
   private hurry = false;
   private lastStage: string | null = null;
 
+  /** Dev only: `?reveal=1` shows the whole castle lit, for map review. */
+  private readonly reveal = new URLSearchParams(location.search).get('reveal') === '1';
+
+  private visibilityOf(s: GameState) {
+    const v = this.engine.visibility(s);
+    if (!this.reveal) return v;
+    const all = new Set<string>();
+    for (const lv of this.engine.castle().levels) for (const k of Object.keys(lv.tiles)) all.add(`${lv.level}:${k}`);
+    return { visible: all, explored: all, lit: all };
+  }
+
   constructor(
     private readonly root: HTMLElement,
     private readonly engine: Engine,
@@ -202,7 +213,7 @@ export class App {
       clear(this.screen);
       this.hud.root.classList.remove('hidden');
       this.dio.setActive(true);
-      const vis = this.engine.visibility(s);
+      const vis = this.visibilityOf(s);
       this.dio.sync(s, vis, this.engine.brightness(s));
       this.hud.setState(s, vis);
       this.hud.setDark(this.engine.brightness(s));
@@ -256,7 +267,7 @@ export class App {
     if (inDelve && res.events.length) {
       this.busy = true;
       this.hud.setBusy(true);
-      const nextVis = res.state.delve ? this.engine.visibility(res.state) : { visible: new Set<string>(), explored: new Set<string>(), lit: new Set<string>() };
+      const nextVis = res.state.delve ? this.visibilityOf(res.state) : { visible: new Set<string>(), explored: new Set<string>(), lit: new Set<string>() };
       this.dio.beginPlayback(res.state, nextVis);
       try {
         await this.playEvents(res.events, before);

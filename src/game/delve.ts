@@ -12,12 +12,23 @@ import {
   rivalsOnMap, roll, valueOf, wakeAdjacent,
 } from './common';
 import {
-  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, kindAt, litSet, los, pathTo, steps,
+  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, glimpseSet, kindAt, litSet, los, pathTo, steps,
   visibleSet, within,
 } from './world';
 import { buildSummary } from './camp';
 
 // ---------------------------------------------------------------- sight bookkeeping
+
+/** Mark everything in line of sight from `at` as explored (layout only). */
+export function glimpse(c: Ctx, at: Pos, ex: Set<string> = new Set(c.d.explored)): void {
+  for (const p of glimpseSet(c.w, c.d, at)) {
+    const k = posKey(p);
+    if (!ex.has(k)) {
+      ex.add(k);
+      c.d.explored.push(k);
+    }
+  }
+}
 
 /** After anything changes: explored grows, rivals get spotted, the Gloam fades in light. */
 export function refreshSight(c: Ctx): void {
@@ -25,6 +36,8 @@ export function refreshSight(c: Ctx): void {
   const vis = visibleSet(c.w, c.d, lit);
   const ex = new Set(c.d.explored);
   for (const k of vis) if (!ex.has(k)) c.d.explored.push(k);
+  for (const h of c.d.heroes) if (h.status === 'active') glimpse(c, h.at, ex);
+
   const cr = c.d.rivals;
   if (cr && !cr.spotted && rivalsOnMap(c).some((r) => vis.has(posKey(r.at)))) {
     cr.spotted = true;
@@ -126,6 +139,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     }
     h.at = { ...p };
     from = p;
+    glimpse(c, p);
     const trap = c.d.traps[posKey(p)];
     if (trap) {
       c.ev.push({ type: 'moved', id: heroId, path: [...walked] });

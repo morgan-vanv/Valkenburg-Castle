@@ -72,7 +72,8 @@ Pillars to check every rule against: simplicity over simulation; never slow a fa
 - `LIGHT_MAX` = 40. A delve starts at 40. Burns 1 per world phase.
 - Brightness from light: bright > 26, dim 13..26, dark 1..12, pitch 0.
 - Light radius around the lantern bearer: bright 4, dim 3, dark 2, pitch 0. Hexes inside are lit. Each hero with a lit torch lights radius 2 around them. Each lit brazier lights radius 3 around it.
-- Sight: heroes see lit hexes in line of sight within 8, plus every hex within 1 of them. Unlit hexes beyond 1 are unseen.
+- Sight: heroes see units in lit hexes in line of sight within 8, plus every hex within 1 of them. Units in unlit hexes beyond 1 are unseen.
+- Exploring: the layout (floors, walls, doors) of every hex in line of sight within 8 is revealed, lit or not, from every hex a hero steps on, not just where the move ends. Darkness hides what's in a room, not the room.
 - A hero standing in an unlit hex fights at "dark" penalties (−20) regardless of the lantern. That's the cost of splitting up without a torch.
 - Torch: `torch` action uses one from the pack: 12 rounds of radius-2 light around that hero. Lighting a brazier: +6 light to the lantern, permanent radius 3 light there, stays lit across delves.
 - Kindle: +12 (cap 40). The lantern can be passed to an adjacent hero (action).
