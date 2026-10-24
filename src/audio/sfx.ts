@@ -1,5 +1,6 @@
 // WebAudio-synthesized effects. No audio files. The context starts on the
-// first user gesture; mute is remembered in localStorage.
+// first user gesture; mute is remembered in localStorage. Adapted from V2,
+// with V3 cues (fire, torch, chest, level-up, web, the Gloam drone).
 
 type Sfx =
   | 'step'
@@ -20,7 +21,13 @@ type Sfx =
   | 'click'
   | 'error'
   | 'spell'
-  | 'miss';
+  | 'miss'
+  | 'fire'
+  | 'torch'
+  | 'chest'
+  | 'levelup'
+  | 'web'
+  | 'hurt';
 
 const MUTE_KEY = 'vc.muted';
 
@@ -79,6 +86,7 @@ class Audio {
       /* ignore */
     }
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.55, this.ctx.currentTime, 0.02);
+    if (m) this.setDrone(false);
   }
 
   // ------------------------------------------------------------ building blocks
@@ -117,6 +125,42 @@ class Audio {
     s.connect(f).connect(g).connect(this.master!);
     s.start(t, Math.random());
     s.stop(t + attack + dur + 0.05);
+  }
+
+  private droneNodes: { stop: () => void } | null = null;
+
+  /** A low, beating drone while the Gloam is near. */
+  setDrone(on: boolean): void {
+    if (!on || this.muted) {
+      this.droneNodes?.stop();
+      this.droneNodes = null;
+      return;
+    }
+    if (this.droneNodes) return;
+    const c = this.ensure();
+    if (!c || !this.master) return;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.16, c.currentTime + 1.5);
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 260;
+    f.connect(g).connect(this.master);
+    const oscs = [43, 43.7, 64.5].map((fr) => {
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = fr;
+      o.connect(f);
+      o.start();
+      return o;
+    });
+    this.droneNodes = {
+      stop: () => {
+        const now = c.currentTime;
+        g.gain.setTargetAtTime(0.0001, now, 0.4);
+        for (const o of oscs) o.stop(now + 2);
+      },
+    };
   }
 
   // ------------------------------------------------------------ effects
@@ -260,6 +304,33 @@ class Audio {
         break;
       case 'error':
         this.tone('square', 160, 120, t, 0.14, 0.08 * v, 0.003);
+        break;
+      case 'fire':
+        this.hiss(t, 0.9, 0.35 * v, 'lowpass', 600, 2400, 0.7, 0.08);
+        this.hiss(t + 0.05, 0.6, 0.15 * v, 'bandpass', 3000, 1200, 1.5, 0.02);
+        this.tone('sine', 90, 60, t, 0.5, 0.25 * v, 0.05);
+        break;
+      case 'torch':
+        this.hiss(t, 0.35, 0.25 * v, 'bandpass', 1800, 900, 1.2, 0.01);
+        this.hiss(t + 0.1, 0.5, 0.12 * v, 'lowpass', 800, 400, 0.7, 0.05);
+        break;
+      case 'chest':
+        this.tone('sawtooth', 140 * p, 220 * p, t, 0.25, 0.06 * v, 0.02);
+        this.hiss(t, 0.2, 0.12 * v, 'bandpass', 900, 600, 4, 0.02);
+        this.tone('sine', 70, 50, t + 0.24, 0.15, 0.4 * v);
+        break;
+      case 'levelup': {
+        const notes = [392, 523.25, 659.25, 783.99];
+        notes.forEach((n, i) => this.tone('triangle', n, n, t + i * 0.09, 0.4, 0.12 * v, 0.005));
+        break;
+      }
+      case 'web':
+        this.hiss(t, 0.3, 0.2 * v, 'highpass', 5000, 2000, 2, 0.04);
+        this.tone('sine', 300, 180, t, 0.25, 0.06 * v, 0.03);
+        break;
+      case 'hurt':
+        this.tone('sawtooth', 180 * p, 90, t, 0.18, 0.18 * v, 0.005);
+        this.hiss(t, 0.12, 0.3 * v, 'lowpass', 1600, 300, 0.8);
         break;
       case 'spell': {
         for (let i = 0; i < 5; i++) this.tone('sine', (600 + i * 220) * p, (900 + i * 300) * p, t + i * 0.03, 0.35, 0.05 * v, 0.02);

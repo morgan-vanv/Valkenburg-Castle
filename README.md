@@ -1,10 +1,10 @@
-# Valkenburg Castle
+# Valkenburg Castle: Hobart's Revenge
 
-A one-run dungeon extraction strategy game for the browser, a modern take on Task Force Games' *Valkenburg Castle* (1980), with inspiration from XCOM, Deep Rock Galactic and Ultrakill.
+A turn-based extraction crawler for the browser, inspired by Task Force Games' *Valkenburg Castle* (1980), Dark and Darker, For the King 2, XCOM and Deep Rock Galactic. Take Lord Hobart's contracts, loot the ruined castle and get out before the light dies.
 
 Play the current build: https://morgan-vanv.github.io/Valkenburg-Castle/
 
-What changed from the first prototype: [docs/v2-changes.md](docs/v2-changes.md). The first prototype is on the `v1-prototype` branch.
+What's new in V3: [docs/v3-changes.md](docs/v3-changes.md). Rules: [docs/v3-spec.md](docs/v3-spec.md). Earlier versions: [docs/v2-changes.md](docs/v2-changes.md) and the `v1-prototype` branch.
 
 ## Run locally
 

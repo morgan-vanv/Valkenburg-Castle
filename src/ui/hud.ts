@@ -1,106 +1,108 @@
-// The expedition overlay: unit card, roster, action bar, pickers, attack
-// preview, dice tray, alarm meter, turn and phase, event log, settings.
-// Owns DOM only; asks the App to send commands and the Diorama to highlight.
+// The delve HUD: light meter, round, contract goal, hero cards, action bar,
+// roll preview, roll animation, event log, tooltips, banners. Drives the
+// diorama's highlights from hover and click. Commands go through host.send.
 
-import type { ActionOption, AttackPreview, Reach, Visibility } from '../engine/api';
-import { dirBetween, edgeSquares, label, sameSquare, squareKey } from '../engine/geometry';
-import type { AlarmTier, Command, Coord, DoorMethod, GameEvent, GameState, LevelId, LootItem, Modifier, RollResult, SpellId, Unit } from '../engine/types';
+import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
+import { hexKey, posKey, samePos, type Pos } from '../game/hex';
+import type { ActionKind, ActionTarget, Brightness, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, Monster, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
-import type { Diorama } from '../render/scene';
-import { clear, gold, h, pips } from './dom';
-import { ALARM_BANDS, maxFocus } from './rules';
-import { CLASS_GLYPH, CLASS_NAME, FRONTAGE_NAME, METHOD_NAME, METHOD_NOTE, SPELL_NAME, SPELL_NOTE, isSquad, unitStrength } from './names';
+import type { Diorama } from '../view/diorama';
+import { clear, h, pips } from './dom';
+import { ACTION_GLYPH, ACTION_KEY, BRIGHTNESS_NAME, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
-import type { Engine } from '../engine/api';
 
 export interface HudHost {
   engine: Engine;
-  send(cmd: Command): Promise<boolean>;
+  send(cmd: import('../game/types').Command): Promise<boolean>;
   isBusy(): boolean;
   settings: Settings;
   saveSettings(): void;
-  abandon(): void;
+  applySettings(): void;
+  abandonDelve(): void;
+  toTitle(): void;
 }
 
-type Mode =
-  | { kind: 'idle' }
-  | { kind: 'attack'; attack: 'melee' | 'missile'; targetIds: string[] }
-  | { kind: 'square'; title: string; squares: Coord[]; pick: (c: Coord) => Command };
+interface PreviewState {
+  option: ActionOption;
+  target: ActionTarget;
+  preview: RollPreview;
+  focus: number;
+}
 
-const HERO_COLOR: Record<string, string> = { hobart: '#d9a93a', rogier: '#3561c9', thorvold: '#b0702f', pim: '#3b9a4a', aldous: '#8a4cc9' };
-const DIR_NAME = { n: 'north', s: 'south', e: 'east', w: 'west' } as const;
+const SPEEDS: { label: string; value: number }[] = [
+  { label: '½×', value: 0.5 },
+  { label: '1×', value: 1 },
+  { label: '2×', value: 2 },
+  { label: '4×', value: 4 },
+  { label: 'Instant', value: 0 },
+];
+
+/** Probability of exactly k hits for n free slots at chance p (0..1), plus `locked` sure hits. */
+export function hitOdds(slots: number, chance: number, locked: number): number[] {
+  const n = Math.max(0, slots - locked);
+  const p = Math.max(0, Math.min(1, chance / 100));
+  const out = new Array<number>(slots + 1).fill(0);
+  let c = 1;
+  for (let k = 0; k <= n; k++) {
+    if (k > 0) c = (c * (n - k + 1)) / k;
+    out[k + locked] = c * Math.pow(p, k) * Math.pow(1 - p, n - k);
+  }
+  return out;
+}
 
 export class Hud {
   readonly root: HTMLElement;
+  selectedId: string | null = null;
+  sneak = false;
   private state: GameState | null = null;
   private vis: Visibility | null = null;
-  selectedId: string | null = null;
+  private busy = false;
   private reach: Reach[] = [];
-  private actions: ActionOption[] = [];
-  private mode: Mode = { kind: 'idle' };
-  private previewing: { targetId: string; kind: 'melee' | 'missile'; focus: number } | null = null;
+  private options: ActionOption[] = [];
+  private pending: ActionOption | null = null;
+  private pv: PreviewState | null = null;
+  private lastPreview: PreviewState | null = null;
+  private intents: Record<string, Intent> = {};
   private mouse = { x: 0, y: 0 };
+  private hoverAt: Pos | null = null;
+  private hoverUnit: string | null = null;
+  private confirmBox: { text: string; ok: () => void } | null = null;
+  /** Lines added during playback, shown before the state's log catches up. */
+  private liveLog: { text: string; cls: string }[] = [];
 
-  private el = {
-    turn: h('div', { class: 'turn-box' }),
-    alarm: h('div', { class: 'alarm' }),
-    levels: h('div', { class: 'level-buttons' }),
-    tools: h('div', { class: 'tools' }),
-    card: h('aside', { class: 'unit-card panel' }),
-    log: h('div', { class: 'log panel' }),
-    roster: h('div', { class: 'roster' }),
-    bar: h('div', { class: 'action-bar' }),
-    endTurn: h('button', { class: 'btn btn-end' }),
-    preview: h('aside', { class: 'preview panel hidden' }),
-    picker: h('div', { class: 'picker panel hidden' }),
-    tip: h('div', { class: 'tip hidden' }),
-    banner: h('div', { class: 'phase-banner' }),
-    dice: h('div', { class: 'dice-tray hidden' }),
-    vignette: h('div', { class: 'vignette' }),
-    toast: h('div', { class: 'toast hidden' }),
-    hint: h('div', { class: 'mode-hint hidden' }),
-    settings: h('div', { class: 'settings panel hidden' }),
-    empty: h('div', { class: 'level-empty hidden' }),
-    enemy: h('aside', { class: 'enemy-card panel hidden' }),
-  };
-  private logLines: string[] = [];
-  private logSeed = '';
-  private lastTier: AlarmTier | null = null;
+  // Elements.
+  private topbar = h('div', { class: 'hud-top' });
+  private cards = h('div', { class: 'hud-cards' });
+  private bar = h('div', { class: 'hud-bar' });
+  private logEl = h('div', { class: 'hud-log' });
+  private tip = h('div', { class: 'hud-tip hidden' });
+  private previewEl = h('div', { class: 'hud-preview hidden' });
+  private rollEl = h('div', { class: 'hud-roll hidden' });
+  private bannerEl = h('div', { class: 'hud-banner hidden' });
+  private toastEl = h('div', { class: 'hud-toast hidden' });
+  private picker = h('div', { class: 'hud-picker hidden' });
+  private modal = h('div', { class: 'hud-modal hidden' });
+  private rivalEl = h('div', { class: 'hud-rivals hidden' });
+  private vignette = h('div', { class: 'hud-vignette' });
+  private camBox = h('div', { class: 'hud-cam' });
+  private menuEl = h('div', { class: 'hud-menu hidden' });
+  private emptyEl = h('div', { class: 'hud-empty hidden' });
 
   constructor(
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    const e = this.el;
-    this.root = h(
-      'div',
-      { class: 'hud' },
-      e.vignette,
-      e.empty,
-      h('header', { class: 'topbar' }, e.turn, e.alarm, h('div', { class: 'top-right' }, e.levels, e.tools)),
-      e.card,
-      e.enemy,
-      e.log,
-      h('footer', { class: 'bottombar' }, e.roster, e.bar),
-      e.endTurn,
-      e.preview,
-      e.picker,
-      e.dice,
-      e.banner,
-      e.hint,
-      e.toast,
-      e.settings,
-      e.tip,
-    );
-    e.endTurn.addEventListener('click', () => this.endTurn());
-    e.endTurn.append(h('span', null, 'End turn'), h('kbd', null, 'Enter'));
-    this.buildTools();
-    addEventListener('keydown', (ev) => this.onKey(ev));
-    addEventListener('pointermove', (ev) => {
-      this.mouse.x = ev.clientX;
-      this.mouse.y = ev.clientY;
-      this.placeTip();
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.buildCamBox();
+    addEventListener('pointermove', (e) => {
+      this.mouse = { x: e.clientX, y: e.clientY };
+      if (!this.tip.classList.contains('hidden')) this.placeTip();
     });
+    addEventListener('keydown', (e) => this.onKey(e));
+  }
+
+  get engine(): Engine {
+    return this.host.engine;
   }
 
   // ------------------------------------------------------------ state
@@ -108,911 +110,997 @@ export class Hud {
   setState(s: GameState, vis: Visibility): void {
     this.state = s;
     this.vis = vis;
-    const exp = s.expedition;
-    if (!exp) return;
-    const mine = this.players();
-    if (!this.selectedId || !mine.some((u) => u.id === this.selectedId)) {
-      const next = mine.find((u) => u.actionsLeft > 0) ?? mine[0];
-      this.select(next?.id ?? null, true);
-    } else this.refreshSelection();
-    this.renderTop();
-    this.renderRoster();
-    // Seed the log from the save once per expedition; afterwards events feed it.
-    if (this.logSeed !== `${s.seed}`) {
-      this.logSeed = `${s.seed}`;
-      this.renderLogFrom(exp.log);
+    this.liveLog = [];
+    const d = s.delve;
+    if (!d) return;
+    const active = d.heroes.filter((x) => x.status === 'active');
+    if (!this.selectedId || !active.some((x) => x.heroId === this.selectedId)) {
+      const next = active.find((x) => !x.moved || !x.acted) ?? active[0];
+      this.selectedId = next?.heroId ?? null;
     }
-    if (this.previewing) this.renderPreview();
+    this.dio.select(this.selectedId);
+    this.intents = this.engine.intents(s);
+    this.dio.showIntents(s, this.intents);
+    this.refresh();
   }
 
-  private players(): Unit[] {
-    return this.state?.expedition?.units.filter((u) => u.side === 'player' && !u.exited) ?? [];
+  /** After a command: if the selected hero is spent, select the next one with something left. */
+  autoAdvance(): void {
+    const d = this.state?.delve;
+    const sel = this.selected();
+    if (!d || !sel || sel.status !== 'active' || !(sel.moved && sel.acted)) return;
+    const next = d.heroes.find((x) => x.status === 'active' && (!x.moved || !x.acted));
+    if (next) this.select(next.heroId);
   }
 
-  private unit(id: string | null): Unit | undefined {
-    if (!id) return undefined;
-    return this.state?.expedition?.units.find((u) => u.id === id);
-  }
-
-  select(id: string | null, follow = true): void {
-    const changed = id !== this.selectedId;
-    this.selectedId = id;
-    this.mode = { kind: 'idle' };
-    this.closePicker();
-    if (changed) this.closePreview();
-    this.dio.setSelected(id);
-    this.dio.setFollow(null);
-    const u = this.unit(id);
-    if (u && follow) {
-      this.dio.lookAt(u.pos);
+  setBusy(b: boolean): void {
+    this.busy = b;
+    this.root.classList.toggle('busy', b);
+    if (b) {
+      this.closePreview();
+      this.pending = null;
+      this.picker.classList.add('hidden');
+      this.dio.clearHighlights();
+      this.hideTip();
     }
-    this.refreshSelection();
-    this.renderRoster();
-  }
-
-  private refreshSelection(): void {
-    const s = this.state;
-    const u = this.unit(this.selectedId);
-    if (!s || !u) {
-      this.reach = [];
-      this.actions = [];
-    } else {
-      this.reach = this.host.engine.reachable(s, u.id);
-      this.actions = this.host.engine.actions(s, u.id);
-    }
-    this.renderCard();
     this.renderBar();
-    this.renderHighlights();
-    this.renderEndTurn();
   }
 
-  private renderHighlights(): void {
-    const m = this.mode;
-    if (m.kind === 'square') {
-      this.dio.setReachable([]);
-      this.dio.setTargets(m.squares);
-      this.showHint(m.title);
-    } else if (m.kind === 'attack') {
-      this.dio.setReachable([]);
-      this.dio.setTargets(this.targetSquares(m.targetIds));
-      this.showHint(m.attack === 'melee' ? 'Choose a target to strike' : 'Choose a target to shoot');
-    } else {
-      this.dio.setReachable(this.reach.map((r) => r.to));
-      const ids = this.actions.flatMap((a) => (a.kind === 'melee' || a.kind === 'missile' ? a.targetIds : []));
-      this.dio.setTargets(this.targetSquares(ids));
-      this.showHint(null);
-    }
-    this.dio.setPath([]);
+  select(id: string): void {
+    const d = this.state?.delve;
+    const hd = d?.heroes.find((x) => x.heroId === id);
+    if (!hd || hd.status !== 'active') return;
+    this.selectedId = id;
+    this.pending = null;
+    this.closePreview();
+    this.dio.select(id);
+    if (hd.at.level !== this.dio.shownLevel) this.dio.showLevel(hd.at.level);
+    this.dio.lookAt(hd.at);
+    sfx.play('click');
+    this.refresh();
   }
 
-  private targetSquares(ids: string[]): Coord[] {
-    const out: Coord[] = [];
-    for (const id of ids) {
-      const t = this.unit(id);
-      if (t && !out.some((c) => sameSquare(c, t.pos))) out.push(t.pos);
+  private selected(): HeroInDelve | undefined {
+    return this.state?.delve?.heroes.find((x) => x.heroId === this.selectedId);
+  }
+
+  private heroDef(id: string): Hero | undefined {
+    return this.state?.campaign.roster.find((x) => x.id === id);
+  }
+
+  /** Recompute reach and options and redraw panels and highlights. */
+  refresh(): void {
+    const s = this.state;
+    const d = s?.delve;
+    if (!s || !d) return;
+    const sel = this.selected();
+    const canAct = !!sel && sel.status === 'active' && d.phase === 'player';
+    this.reach = canAct && !this.busy ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
+    this.options = canAct && !this.busy ? this.engine.actions(s, sel.heroId) : [];
+    this.renderTop();
+    this.renderCards();
+    this.renderBar();
+    this.renderLog();
+    this.renderRivals();
+    this.renderEmpty();
+    this.drawHighlights();
+  }
+
+  // ------------------------------------------------------------ highlights
+
+  private drawHighlights(): void {
+    this.dio.clearHighlights();
+    if (this.busy || !this.state?.delve) return;
+    if (this.pending) {
+      const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
+      const friendly = ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free'].includes(this.pending.action);
+      this.dio.highlight(ats, friendly ? 'ally' : 'target');
+      return;
     }
+    if (this.pv) {
+      const at = this.targetPos(this.pv.target);
+      if (at) this.dio.highlight([at], 'target');
+      const sel = this.selected();
+      if (sel && this.pv.preview.noise > 0) this.dio.showRipple(sel.at, this.pv.preview.noise);
+      return;
+    }
+    this.dio.highlight(
+      this.reach.map((r) => r.to),
+      this.sneak ? 'sneak' : 'walk',
+    );
+    // Attackable enemies get a red ring.
+    const atk = this.options.filter((o) => o.action === 'attack' || o.action === 'firebolt');
+    const ats = atk.flatMap((o) => o.targets.map((t) => this.targetPos(t))).filter((p): p is Pos => !!p);
+    this.dio.highlight(ats, 'target');
+    this.applyHover();
+  }
+
+  private targetPos(t: ActionTarget): Pos | null {
+    if (t.at) return t.at;
+    const d = this.state?.delve;
+    if (!t.id || !d) return null;
+    return d.heroes.find((x) => x.heroId === t.id)?.at ?? d.monsters.find((m) => m.id === t.id)?.at ?? d.rivals?.members.find((r) => r.id === t.id)?.at ?? (d.prisoner?.id === t.id ? d.prisoner.at : null);
+  }
+
+  // ------------------------------------------------------------ hover and click
+
+  onHover(at: Pos | null, unitId: string | null): void {
+    this.hoverAt = at;
+    this.hoverUnit = unitId;
+    this.applyHover();
+  }
+
+  private applyHover(): void {
+    if (this.busy || !this.state?.delve || this.pv) {
+      this.hideTip();
+      return;
+    }
+    const at = this.hoverAt;
+    const unitId = this.hoverUnit;
+    const d = this.state.delve;
+    // Path preview.
+    const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
+    const sel = this.selected();
+    if (r && sel) {
+      this.dio.showPath(r.path);
+      const noise = this.engine.moveNoise(this.state, sel.heroId, this.sneak);
+      this.dio.showRipple(r.to, noise);
+    } else if (!this.pending) {
+      this.dio.showPath(null);
+      this.dio.showRipple(null, 0);
+    }
+    // Tooltip.
+    const lines: string[] = [];
+    if (unitId) {
+      const m = d.monsters.find((x) => x.id === unitId);
+      const hero = d.heroes.find((x) => x.heroId === unitId);
+      const rival = d.rivals?.members.find((x) => x.id === unitId);
+      if (m) lines.push(...this.monsterLines(m));
+      else if (hero) {
+        const def = this.heroDef(hero.heroId);
+        lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? CLASS_NAME[def.cls] : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
+      } else if (rival && d.rivals) lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
+      else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
+      const act = this.bestActionFor(unitId, at);
+      if (act) lines.push(`<span class="tip-act">Click: ${act.option.label}</span>`);
+    } else if (at) {
+      if (r) lines.push(`<b>${this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}`);
+      const desc = this.describeHex(at);
+      if (desc) lines.push(desc);
+      const act = this.bestActionFor(null, at);
+      if (act && !r) lines.push(`<span class="tip-act">Click: ${act.option.label}</span>`);
+    }
+    if (lines.filter(Boolean).length) this.showTip(lines.filter(Boolean).join('<br>'));
+    else this.hideTip();
+  }
+
+  private monsterLines(m: Monster): string[] {
+    const it = this.intents[m.id];
+    const out = [`<b>${m.name}</b> <span class="dim">${m.awareness}</span>`];
+    if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}`);
+    else out.push('Cannot be harmed. Raise the light.');
+    if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
     return out;
   }
 
-  // ------------------------------------------------------------ top bar
-
-  private renderTop(): void {
+  private describeHex(at: Pos): string {
     const s = this.state!;
-    const exp = s.expedition!;
-    clear(this.el.turn);
-    this.el.turn.append(h('span', { class: 'kicker' }, `${exp.phase === 'player' ? 'Your move' : 'Castle phase'} · pack: ${packSummary(exp.pack)}`), h('span', { class: 'turn-num' }, 'Turn ', h('b', { class: 'num' }, String(exp.turn))));
-    this.renderAlarm(exp.alarm);
-    this.renderLevels();
+    const d = s.delve!;
+    const lv = this.engine.castle().levels.find((l) => l.level === at.level);
+    const t = lv?.tiles[hexKey(at)];
+    if (!t) return '';
+    const k = posKey(at);
+    const room = lv?.rooms.find((r) => r.id === t.room)?.name;
+    const parts: string[] = [];
+    const door = d.doors[k];
+    if (t.kind === 'door' && door) parts.push(door.open ? 'Open door' : door.jammed ? 'Jammed door' : door.locked ? 'Locked door' : 'Closed door');
+    else if (t.kind === 'brazier') parts.push(d.lit.includes(k) ? 'Brazier, lit' : 'Brazier, cold');
+    else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
+    if (t.raised) parts.push('Raised');
+    const chest = d.chests.find((c) => samePos(c.at, at));
+    if (chest) parts.push(chest.opened ? 'Chest, empty' : chest.jammed ? 'Chest, jammed' : chest.locked ? 'Chest, locked' : 'Chest');
+    const g = d.ground.find((x) => samePos(x.at, at));
+    if (g?.items.length) parts.push(g.items.map(itemLabel).join(', '));
+    if (d.traps[k]?.spotted) parts.push('<span class="neg">Trap</span>');
+    const vis = this.vis;
+    const light = vis?.lit.has(k) ? 'lit' : vis?.visible.has(k) ? 'unlit' : vis?.explored.has(k) ? 'remembered' : '';
+    return `${parts.join(' · ')}${room ? ` <span class="dim">${room}</span>` : ''}${light ? ` <span class="dim">(${light})</span>` : ''}`;
   }
 
-  renderAlarm(value: number, pulse = false): void {
-    const tier = this.host.engine.alarmTier(value);
-    const a = this.el.alarm;
-    clear(a);
-    const bands = h('div', { class: 'alarm-bands' });
-    ALARM_BANDS.forEach((b, i) => {
-      const next = ALARM_BANDS[i + 1]?.min ?? 100;
-      bands.appendChild(h('span', { class: `band band-${i} ${b.tier === tier ? 'current' : ''}`, style: `flex:${next - b.min}` }, b.tier));
-    });
-    const fill = h('div', { class: 'alarm-fill', style: `width:${Math.min(100, value)}%` });
-    a.append(
-      h('div', { class: 'alarm-head' }, h('span', { class: 'kicker' }, 'Alarm'), h('span', { class: `alarm-tier tier-${tier.toLowerCase()}` }, tier), h('span', { class: 'alarm-value num' }, String(value))),
-      h('div', { class: 'alarm-track' }, fill, bands),
-    );
-    a.dataset.tier = tier;
-    if (pulse) {
-      a.classList.remove('pulse');
-      void a.offsetWidth;
-      a.classList.add('pulse');
+  /** The action a click on this unit or hex would pick. */
+  private bestActionFor(unitId: string | null, at: Pos | null): { option: ActionOption; target: ActionTarget } | null {
+    const match = (t: ActionTarget) => (unitId ? t.id === unitId : !!at && !!t.at && samePos(t.at, at) && !t.id);
+    if (this.pending) {
+      const t = this.pending.targets.find(match) ?? (at ? this.pending.targets.find((x) => x.at && samePos(x.at, at)) : undefined);
+      return t ? { option: this.pending, target: t } : null;
     }
-    this.lastTier = tier;
+    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'leave'];
+    for (const kind of order) {
+      const o = this.options.find((x) => x.action === kind);
+      const t = o?.targets.find(match);
+      if (o && t) return { option: o, target: t };
+    }
+    return null;
   }
 
-  private renderLevels(): void {
-    const ls = this.el.levels;
-    clear(ls);
+  onClick(at: Pos | null, unitId: string | null, ev: PointerEvent): void {
+    if (this.busy || this.confirmBox) return;
     const s = this.state;
-    const levels = this.host.engine.map().levels.map((l) => l.id);
-    const occupied = new Set(this.players().map((u) => u.pos.level));
-    const shown = this.dio.shownLevel;
-    const seen = !!this.vis && [...this.vis.explored].some((k) => k.startsWith(`${shown}:`));
-    clear(this.el.empty);
-    this.el.empty.append(h('span', { class: 'banner-main' }, `Level ${shown}`), h('span', { class: 'banner-sub' }, 'unexplored · nothing seen down here yet'));
-    this.el.empty.classList.toggle('hidden', seen || !s?.expedition);
-    for (const id of levels) {
-      const b = h('button', { class: `btn btn-sq level-btn ${id === this.dio.shownLevel ? 'on' : ''} ${occupied.has(id) ? 'occupied' : ''}`, title: `Show level ${id}` }, String(id));
-      b.addEventListener('click', () => {
-        this.dio.showLevel(id as LevelId);
-        this.renderLevels();
-        this.renderHighlights();
-      });
-      ls.appendChild(b);
-    }
-    void s;
-  }
-
-  levelChanged(): void {
-    this.renderLevels();
-    if (this.state) this.renderHighlights();
-  }
-
-  private buildTools(): void {
-    const t = this.el.tools;
-    const mute = h('button', { class: 'btn btn-sq', title: 'Mute (M)' });
-    const setMute = () => (mute.textContent = sfx.muted ? '♪̸' : '♪');
-    setMute();
-    mute.addEventListener('click', () => {
-      sfx.setMuted(!sfx.muted);
-      setMute();
-    });
-    this.muteBtn = { el: mute, refresh: setMute };
-    const gear = h('button', { class: 'btn btn-sq', title: 'Settings' }, '⚙');
-    gear.addEventListener('click', () => this.toggleSettings());
-    t.append(mute, gear);
-  }
-  private muteBtn!: { el: HTMLElement; refresh: () => void };
-
-  private toggleSettings(): void {
-    const p = this.el.settings;
-    if (!p.classList.contains('hidden')) {
-      p.classList.add('hidden');
+    const d = s?.delve;
+    if (!s || !d) return;
+    if (ev.button === 2) {
+      this.cancel();
       return;
     }
-    clear(p);
-    const st = this.host.settings;
-    const speed = h('select', null, [0.5, 1, 1.5, 2, 3].map((v) => h('option', { value: v, selected: st.speed === v }, `${v}×`)));
-    speed.addEventListener('change', () => {
-      st.speed = Number(speed.value);
-      this.dio.clock.speed = st.speed;
-      this.host.saveSettings();
-    });
-    const toggle = (name: string, key: 'reduceShake' | 'reduceFlashes') => {
-      const cb = h('input', { type: 'checkbox', checked: st[key] });
-      cb.addEventListener('change', () => {
-        st[key] = cb.checked;
-        this.dio.feel = { reduceShake: st.reduceShake, reduceFlashes: st.reduceFlashes };
-        this.host.saveSettings();
-      });
-      return h('label', { class: 'tick' }, cb, name);
-    };
-    p.append(
-      h('h2', null, 'Settings'),
-      h('label', { class: 'row' }, 'Animation speed ', speed),
-      toggle('Reduce screen shake', 'reduceShake'),
-      toggle('Reduce flashes', 'reduceFlashes'),
-      h('p', { class: 'fine' }, 'Camera: right-drag or Q/E to orbit, middle-drag or WASD to pan, wheel to zoom. Tab cycles units. Hold Space to hurry the castle.'),
-      h('div', { class: 'row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.host.abandon() }, 'Abandon campaign…'), h('button', { class: 'btn btn-small', onclick: () => p.classList.add('hidden') }, 'Close')),
-    );
-    p.classList.remove('hidden');
-  }
-
-  // ------------------------------------------------------------ unit card
-
-  private renderCard(): void {
-    const c = this.el.card;
-    clear(c);
-    const u = this.unit(this.selectedId);
-    if (!u) {
-      c.appendChild(h('p', { class: 'fine' }, 'No one left inside.'));
+    if (this.pv) return;
+    const best = this.bestActionFor(unitId, at);
+    const activeHero = d.heroes.some((x) => x.heroId === unitId && x.status === 'active');
+    if (best && (this.pending || !activeHero)) {
+      this.choose(best.option, best.target);
       return;
     }
-    const carry = this.host.engine.carry(u);
-    const allowance = this.state ? this.host.engine.moveAllowance(this.state, u) : 0;
-    const color = u.heroId ? HERO_COLOR[u.heroId] : undefined;
-    const status: string[] = [];
-    if (u.overwatch) status.push('Overwatch');
-    if (u.shieldwallFacing) status.push(`Shieldwall → ${label(u.shieldwallFacing)}`);
-    if (u.panicked || u.panicTurns > 0) status.push('Panicked');
-    if (u.webbed) status.push('Webbed');
-    if (u.asleepTurns > 0) status.push('Asleep');
-    if (u.climbingTurns > 0) status.push('Climbing');
-    if (carry.immobile) status.push('Can’t move: overloaded');
-    else if (carry.overloaded) status.push('Overloaded −1 move');
-    const strength = isSquad(u)
-      ? h('div', { class: 'strength' }, h('span', { class: 'big-num num' }, String(u.men)), h('span', { class: 'dim' }, ' men'), menDots(u.men))
-      : h('div', { class: 'strength' }, h('span', { class: 'big-num num' }, `${u.maxWounds - u.wounds}`), h('span', { class: 'dim' }, `/${u.maxWounds} wounds left`), pips(u.maxWounds - u.wounds, u.maxWounds, 'hp'));
-    const pct = carry.limit ? Math.min(100, (carry.weight / carry.limit) * 100) : 0;
-    appendAll(c,
-      h(
-        'div',
-        { class: 'card-head', style: color ? `--banner:${color}` : '' },
-        h('span', { class: 'counter-badge big' }, CLASS_GLYPH[u.cls] ?? '?'),
-        h('div', null, h('h2', { class: 'unit-name' }, u.name), h('p', { class: 'unit-cls' }, `${CLASS_NAME[u.cls]} · ${u.armor === 'normal' ? 'normal armour' : u.armor === 'heavy' ? 'heavy armour' : 'unarmored'}`)),
-        h('span', { class: 'coord num' }, `L${u.pos.level} ${label(u.pos)}`),
-      ),
-      strength,
-      h(
-        'dl',
-        { class: 'card-stats' },
-        h('dt', null, 'Actions'),
-        h('dd', null, pips(u.actionsLeft, 2, 'acts')),
-        h('dt', null, 'Focus'),
-        h('dd', null, pips(u.focus, maxFocus(u), 'focus')),
-        h('dt', null, 'Move'),
-        h('dd', { class: 'num' }, String(allowance)),
-        u.cls === 'magicUser' ? [h('dt', null, 'Spell pts'), h('dd', { class: 'num' }, String(u.spellPoints))] : null,
-        u.cls === 'dwarf' ? [h('dt', null, 'Charges'), h('dd', { class: 'num' }, String(u.charges))] : null,
-      ),
-      status.length ? h('p', { class: 'status' }, status.join(' · ')) : null,
-      h('div', { class: 'carry' }, h('div', { class: 'carry-head' }, h('span', null, carry.weight ? 'Carrying · −1 move' : 'Carrying'), h('span', { class: 'num' }, `${carry.weight}/${carry.limit} sacks`), h('span', { class: 'num gold-text' }, `${gold(carry.value)} g`)), h('div', { class: 'carry-bar' }, h('i', { style: `width:${pct}%` })), u.loot.length ? h('ul', { class: 'loot' }, u.loot.map((it) => h('li', null, h('span', null, it.name), h('span', { class: 'num dim' }, `${it.weight} sack${it.weight > 1 ? 's' : ''} · ${gold(it.value)}g`)))) : null),
-    );
+    if (unitId && d.heroes.some((x) => x.heroId === unitId && x.status === 'active')) {
+      this.select(unitId);
+      return;
+    }
+    if (this.pending) {
+      this.cancel();
+      return;
+    }
+    if (at) {
+      const r = this.reach.find((x) => samePos(x.to, at));
+      if (r && this.selectedId) {
+        void this.host.send({ type: 'move', heroId: this.selectedId, path: r.path, sneak: this.sneak });
+        return;
+      }
+      if (best) this.choose(best.option, best.target);
+    }
   }
 
-  // ------------------------------------------------------------ roster
-
-  private renderRoster(): void {
-    const r = this.el.roster;
-    clear(r);
-    const exp = this.state?.expedition;
-    if (!exp) return;
-    for (const u of exp.units.filter((x) => x.side === 'player')) {
-      const color = u.heroId ? HERO_COLOR[u.heroId] : 'var(--ochre)';
-      const b = h(
-        'button',
-        { class: `roster-chip ${u.id === this.selectedId ? 'on' : ''} ${u.exited ? 'out' : ''} ${u.actionsLeft === 0 && !u.exited ? 'spent' : ''}`, style: `--banner:${color}`, title: `${u.name} · ${unitStrength(u)}` },
-        h('span', { class: 'counter-badge' }, CLASS_GLYPH[u.cls] ?? '?'),
-        h('span', { class: 'chip-body' }, h('span', { class: 'chip-name' }, u.name), h('span', { class: 'chip-sub num' }, u.exited ? 'out' : isSquad(u) ? `${u.men} men` : `${u.maxWounds - u.wounds}/${u.maxWounds}`)),
-        u.exited ? null : pips(u.actionsLeft, 2, 'acts'),
-      );
-      if (!u.exited) b.addEventListener('click', () => this.select(u.id));
-      else b.setAttribute('disabled', '');
-      r.appendChild(b);
+  private cancel(): void {
+    if (this.confirmBox) {
+      this.closeConfirm();
+      return;
     }
+    if (this.pv) this.closePreview();
+    else if (this.pending) this.pending = null;
+    else if (!this.menuEl.classList.contains('hidden')) this.menuEl.classList.add('hidden');
+    this.picker.classList.add('hidden');
+    this.drawHighlights();
+    this.renderBar();
   }
 
   // ------------------------------------------------------------ actions
 
-  private renderBar(): void {
-    const bar = this.el.bar;
-    clear(bar);
-    const u = this.unit(this.selectedId);
-    if (!u) return;
-    const items = this.actionItems(u);
-    if (!items.length) {
-      bar.appendChild(h('span', { class: 'bar-empty' }, u.actionsLeft > 0 ? 'Nothing to do here.' : `${u.name} is spent this turn.`));
+  private startAction(o: ActionOption): void {
+    if (this.busy) return;
+    sfx.play('click');
+    if (o.targets.length === 1) {
+      this.choose(o, o.targets[0]!);
       return;
     }
-    items.forEach((it, i) => {
-      const b = h('button', { class: `act ${it.danger ? 'act-danger' : ''}`, title: it.note ?? '' }, h('kbd', null, String(i + 1)), h('span', { class: 'act-name' }, it.name), it.sub ? h('span', { class: 'act-sub' }, it.sub) : null);
-      b.addEventListener('click', () => {
-        sfx.play('click');
-        it.run();
-      });
-      bar.appendChild(b);
-    });
+    this.pending = o;
+    this.closePreview();
+    this.showPicker(o);
+    this.drawHighlights();
+    this.renderBar();
   }
 
-  private actionItems(u: Unit): { name: string; sub?: string; note?: string; danger?: boolean; run: () => void }[] {
-    const out: { name: string; sub?: string; note?: string; danger?: boolean; run: () => void }[] = [];
+  private showPicker(o: ActionOption): void {
+    clear(this.picker);
+    this.picker.append(
+      h('div', { class: 'kicker' }, `${o.label}: pick a target`),
+      ...o.targets.map((t) => h('button', { class: 'btn btn-small picker-row', onclick: () => this.choose(o, t) }, this.targetLabel(t))),
+      h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
+    );
+    this.picker.classList.remove('hidden');
+  }
+
+  private choose(o: ActionOption, t: ActionTarget): void {
+    this.pending = null;
+    this.picker.classList.add('hidden');
+    const sel = this.selected();
+    if (!sel || !this.state) return;
+    if (o.rolls || o.action === 'jump') {
+      const p = this.engine.preview(this.state, sel.heroId, o.action, t);
+      this.openPreview({ option: o, target: t, preview: p, focus: 0 });
+      return;
+    }
+    void this.act(o.action, t, 0);
+  }
+
+  private async act(action: ActionKind, target: ActionTarget, focus: number): Promise<void> {
+    const sel = this.selected();
+    if (!sel) return;
+    this.closePreview();
+    await this.host.send({ type: 'act', heroId: sel.heroId, action, target, focus });
+  }
+
+  private targetLabel(t: ActionTarget): string {
     const s = this.state!;
-    const exp = s.expedition!;
-    for (const a of this.actions) {
-      switch (a.kind) {
-        case 'move':
-          break;
-        case 'melee':
-          out.push({ name: 'Melee', sub: `${a.targetIds.length} target${a.targetIds.length > 1 ? 's' : ''}`, danger: true, note: 'Ends the turn', run: () => this.beginAttack('melee', a.targetIds) });
-          break;
-        case 'missile':
-          out.push({ name: 'Shoot', sub: `${a.targetIds.length} in range`, danger: true, note: 'Ends the turn', run: () => this.beginAttack('missile', a.targetIds) });
-          break;
-        case 'door': {
-          const where = this.edgeWhere(u.pos, a.edge);
-          const isWall = a.methods.length === 1 && a.methods[0] === 'blast' && !a.locked;
-          out.push({ name: isWall ? 'Blast wall' : a.secured ? 'Secured door' : 'Locked door', sub: where, run: () => this.doorPicker(u, a.edge, a.methods, isWall, a.secured) });
-          break;
-        }
-        case 'pickUp': {
-          const pile = exp.floorLoot[squareKey(u.pos)] ?? [];
-          out.push({ name: 'Pick up', sub: `${a.itemIds.length}`, run: () => this.itemPicker('Pick up', pile.filter((i) => a.itemIds.includes(i.id)), (it) => ({ type: 'pickUp', unitId: u.id, itemId: it.id })) });
-          break;
-        }
-        case 'drop':
-          out.push({ name: 'Drop', run: () => this.itemPicker('Drop', u.loot.filter((i) => a.itemIds.includes(i.id)), (it) => ({ type: 'drop', unitId: u.id, itemId: it.id })) });
-          break;
-        case 'give':
-          out.push({ name: 'Hand over', run: () => this.givePicker(u, a.toIds) });
-          break;
-        case 'giveFocus':
-          out.push({ name: 'Inspire', sub: 'give Focus', run: () => this.unitPicker('Give 1 Focus to', a.toIds, (id) => ({ type: 'giveFocus', unitId: u.id, toId: id })) });
-          break;
-        case 'overwatch':
-          out.push({ name: 'Overwatch', note: 'Shoot the first enemy that shows itself. Ends the turn.', run: () => void this.host.send({ type: 'overwatch', unitId: u.id }) });
-          break;
-        case 'item':
-          if (a.item === 'draught') out.push({ name: 'Draught', sub: `${exp.pack.draught} left`, note: 'Heal a hero 2 wounds or return 3 men to a squad (1 action)', run: () => this.unitPicker('Give a healing draught to', a.targetIds, (id) => ({ type: 'useItem', unitId: u.id, item: 'draught', targetId: id })) });
-          else if (a.item === 'smoke') out.push({ name: 'Smoke bomb', sub: `${exp.pack.smoke} left`, note: 'Smoke a square and its neighbours for a turn (1 action)', run: () => this.squareMode('Throw smoke at…', a.targets, (c) => ({ type: 'useItem', unitId: u.id, item: 'smoke', target: c })) });
-          break;
-        case 'cast':
-          break;
-        case 'jump':
-          out.push({ name: 'Jump', sub: 'into the Deep', danger: true, note: 'A long drop: each man is hurt on a 1–2', run: () => this.squareMode('Jump to…', a.targets, (c) => ({ type: 'jump', unitId: u.id, to: c })) });
-          break;
-        case 'climb':
-          out.push({ name: 'Climb', sub: exp.rope ? 'rope' : 'anchor rope', run: () => this.squareMode('Climb to…', a.targets, (c) => ({ type: 'climb', unitId: u.id, to: c })) });
-          break;
-        case 'exit':
-          out.push({ name: 'Exit', sub: 'extract', note: 'Leave the castle with what you carry. No coming back.', run: () => void this.host.send({ type: 'exit', unitId: u.id }) });
-          break;
-      }
+    const d = s.delve!;
+    const parts: string[] = [];
+    if (t.id) {
+      const name = this.heroDef(t.id)?.name ?? d.monsters.find((m) => m.id === t.id)?.name ?? d.rivals?.members.find((r) => r.id === t.id)?.name ?? (d.prisoner?.id === t.id ? d.prisoner.name : t.id);
+      parts.push(name);
     }
-    const spells = this.actions.filter((a): a is Extract<ActionOption, { kind: 'cast' }> => a.kind === 'cast');
-    if (spells.length) out.push({ name: 'Spells', sub: `${u.spellPoints} pts`, run: () => this.spellPicker(u, spells) });
-    return out;
-  }
-
-  private edgeWhere(from: Coord, edge: string): string {
-    const [a, b] = edgeSquares(edge);
-    const other = sameSquare(a, from) ? b : a;
-    const d = dirBetween(from, other);
-    return d ? `${DIR_NAME[d]} · ${label(other)}` : label(other);
-  }
-
-  private beginAttack(kind: 'melee' | 'missile', ids: string[]): void {
-    if (ids.length === 1) {
-      this.openPreview(ids[0]!, kind);
-      return;
+    if (t.itemId) {
+      const all: Item[] = [...d.heroes.flatMap((x) => x.pack), ...d.ground.flatMap((g) => g.items)];
+      const it = all.find((i) => i.id === t.itemId);
+      parts.unshift(it ? itemLabel(it) : 'item');
     }
-    this.mode = { kind: 'attack', attack: kind, targetIds: ids };
-    this.closePicker();
-    this.renderHighlights();
-  }
-
-  private squareMode(title: string, squares: Coord[], pick: (c: Coord) => Command): void {
-    this.closePicker();
-    this.mode = { kind: 'square', title, squares, pick };
-    if (squares[0] && squares[0].level !== this.dio.shownLevel) this.dio.showLevel(squares[0].level);
-    this.renderHighlights();
-  }
-
-  cancelMode(): boolean {
-    if (this.previewing) {
-      this.closePreview();
-      return true;
+    if (!t.id && t.at) {
+      const lv = this.engine.castle().levels.find((l) => l.level === t.at!.level);
+      const tile = lv?.tiles[hexKey(t.at)];
+      const chest = d.chests.find((c) => samePos(c.at, t.at!));
+      const g = d.ground.find((x) => samePos(x.at, t.at!));
+      parts.push(chest ? 'Chest' : tile?.kind === 'door' ? 'Door' : g?.items.length ? g.items.map(itemLabel).join(', ') : (TILE_NAME[tile?.kind ?? 'floor'] ?? 'There'));
     }
-    if (!this.el.picker.classList.contains('hidden')) {
-      this.closePicker();
-      return true;
-    }
-    if (this.mode.kind !== 'idle') {
-      this.mode = { kind: 'idle' };
-      this.renderHighlights();
-      return true;
-    }
-    return false;
+    return parts.join(' → ') || 'Self';
   }
 
-  // ------------------------------------------------------------ pickers
+  // ------------------------------------------------------------ roll preview
 
-  private openPicker(title: string, rows: { name: string; note?: string; disabled?: boolean; run: () => void }[]): void {
-    const p = this.el.picker;
-    clear(p);
-    p.appendChild(h('h3', null, title));
-    rows.forEach((r, i) => {
-      const b = h('button', { class: 'pick-row', disabled: r.disabled }, h('kbd', null, String(i + 1)), h('span', { class: 'pick-name' }, r.name), r.note ? h('span', { class: 'pick-note' }, r.note) : null);
-      b.addEventListener('click', () => {
-        sfx.play('click');
-        this.closePicker();
-        r.run();
-      });
-      p.appendChild(b);
-    });
-    p.appendChild(h('button', { class: 'pick-cancel', onclick: () => this.closePicker() }, 'Cancel ', h('kbd', null, 'Esc')));
-    p.classList.remove('hidden');
-  }
-
-  private closePicker(): void {
-    this.el.picker.classList.add('hidden');
-  }
-
-  private doorPicker(u: Unit, edge: string, methods: DoorMethod[], isWall: boolean, secured: boolean): void {
-    const rows = methods.map((m) => ({
-      name: METHOD_NAME[m],
-      note: METHOD_NOTE[m],
-      run: () => void this.host.send({ type: 'door', unitId: u.id, edge, method: m }),
-    }));
-    this.openPicker(`${isWall ? 'Cracked wall' : 'Door'} ${this.edgeWhere(u.pos, edge)}${secured ? ' · held from the far side' : ''}`, rows);
-  }
-
-  private itemPicker(title: string, items: LootItem[], cmd: (it: LootItem) => Command): void {
-    this.openPicker(
-      title,
-      items.map((it) => ({ name: it.name, note: `${it.weight} sack${it.weight > 1 ? 's' : ''} · ${gold(it.value)} g`, run: () => void this.host.send(cmd(it)) })),
-    );
-  }
-
-  private unitPicker(title: string, ids: string[], cmd: (id: string) => Command): void {
-    this.openPicker(
-      title,
-      ids.map((id) => {
-        const t = this.unit(id);
-        return { name: t?.name ?? id, note: t ? `${unitStrength(t)} · ${label(t.pos)}` : '', run: () => void this.host.send(cmd(id)) };
-      }),
-    );
-  }
-
-  private givePicker(u: Unit, toIds: string[]): void {
-    this.openPicker(
-      'Hand loot to',
-      toIds.map((to) => {
-        const t = this.unit(to);
-        const c = t ? this.host.engine.carry(t) : null;
-        return {
-          name: t?.name ?? to,
-          note: c ? `carrying ${c.weight}/${c.limit}` : '',
-          run: () => this.itemPicker(`Hand to ${t?.name ?? ''}`, u.loot, (it) => ({ type: 'give', unitId: u.id, toId: to, itemId: it.id })),
-        };
-      }),
-    );
-  }
-
-  private spellPicker(u: Unit, spells: Extract<ActionOption, { kind: 'cast' }>[]): void {
-    const rows = spells.map((sp) => ({
-      name: `${SPELL_NAME[sp.spell]} · ${sp.cost}`,
-      note: SPELL_NOTE[sp.spell],
-      run: () => this.castSpell(u, sp.spell, sp),
-    }));
-    this.openPicker(`Spells · ${u.spellPoints} points`, rows);
-  }
-
-  private castSpell(u: Unit, spell: SpellId, sp: Extract<ActionOption, { kind: 'cast' }>): void {
-    const base = { type: 'cast' as const, unitId: u.id, spell };
-    if (sp.edges.length) {
-      if (sp.edges.length === 1) void this.host.send({ ...base, edge: sp.edges[0] });
-      else this.openPicker('Unlock which door?', sp.edges.map((e) => ({ name: this.edgeWhere(u.pos, e), run: () => void this.host.send({ ...base, edge: e }) })));
-      return;
-    }
-    if (sp.targetIds.length) {
-      if (sp.targetIds.length === 1) void this.host.send({ ...base, targetId: sp.targetIds[0] });
-      else this.unitPicker(`${SPELL_NAME[spell]} on`, sp.targetIds, (id) => ({ ...base, targetId: id }));
-      return;
-    }
-    if (sp.targets.length) {
-      this.squareMode(`${SPELL_NAME[spell]}: choose a square`, sp.targets, (c) => ({ ...base, target: c }));
-      return;
-    }
-    void this.host.send(base);
-  }
-
-  // ------------------------------------------------------------ attack preview
-
-  openPreview(targetId: string, kind: 'melee' | 'missile'): void {
-    const u = this.unit(this.selectedId);
-    if (!u) return;
-    this.mode = { kind: 'idle' };
-    this.closePicker();
-    this.previewing = { targetId, kind, focus: 0 };
-    this.renderHighlights();
-    const t = this.unit(targetId);
-    if (t) this.dio.setTargets([t.pos]);
+  private openPreview(p: PreviewState): void {
+    this.pv = p;
+    this.lastPreview = p;
     this.renderPreview();
+    this.drawHighlights();
+    this.hideTip();
   }
 
   private closePreview(): void {
-    this.previewing = null;
-    this.el.preview.classList.add('hidden');
+    this.pv = null;
+    this.previewEl.classList.add('hidden');
   }
 
   private renderPreview(): void {
-    const pv = this.previewing;
-    const s = this.state;
-    const u = this.unit(this.selectedId);
-    if (!pv || !s || !u) return this.closePreview();
-    const t = this.unit(pv.targetId);
-    if (!t) return this.closePreview();
-    const p: AttackPreview = this.host.engine.previewAttack(s, u.id, t.id, pv.kind, pv.focus);
-    pv.focus = Math.max(0, Math.min(pv.focus, p.maxFocus));
-    const el = this.el.preview;
+    const p = this.pv;
+    if (!p) return;
+    const el = this.previewEl;
     clear(el);
-    const sum = p.modifiers.reduce((n, m) => n + m.value, 0);
-    const base = p.chance - sum;
-    const clamped = p.chance === 10 || p.chance === 90;
-    const slots = h('div', { class: 'slot-row' });
-    for (let i = 0; i < p.slots; i++) slots.appendChild(h('span', { class: `slot ${i < pv.focus ? 'locked' : ''}` }, i < pv.focus ? 'F' : `${p.chance}`));
-    const focusRow = h(
-      'div',
-      { class: 'focus-row' },
-      h('span', { class: 'kicker' }, 'Focus'),
-      h('button', { class: 'btn btn-sq', disabled: pv.focus <= 0, onclick: () => this.bumpFocus(-1), 'aria-label': 'Less Focus' }, '−'),
-      h('span', { class: 'num big-num' }, `${pv.focus}`),
-      h('span', { class: 'dim num' }, `/ ${p.maxFocus}`),
-      h('button', { class: 'btn btn-sq', disabled: pv.focus >= p.maxFocus, onclick: () => this.bumpFocus(1), 'aria-label': 'More Focus' }, '+'),
-      h('span', { class: 'dim small' }, `holding ${u.focus}`),
-    );
-    appendAll(el,
-      h('p', { class: 'kicker' }, pv.kind === 'melee' ? 'Melee attack' : 'Missile attack'),
-      h('h2', { class: 'pv-title' }, u.name, h('span', { class: 'arrow' }, ' → '), h('span', { class: 'enemy-name' }, t.name)),
-      h('p', { class: 'pv-target dim' }, `${unitStrength(t)} · ${label(t.pos)}`),
-      h('div', { class: 'pv-main' }, h('div', { class: 'pv-chance' }, h('span', { class: 'num huge' }, `${p.chance}`), h('span', { class: 'pct' }, '%'), h('span', { class: 'kicker' }, 'per slot')), h('div', { class: 'pv-front' }, h('span', { class: `frontage f-${p.frontage}` }, FRONTAGE_NAME[p.frontage]), h('span', { class: 'kicker' }, 'frontage'), h('span', { class: 'num' }, `${p.slots} slot${p.slots === 1 ? '' : 's'}`))),
-      slots,
+    const pr = p.preview;
+    const sel = this.selected();
+    const name = sel ? (this.heroDef(sel.heroId)?.name ?? '') : '';
+    el.append(
       h(
-        'ul',
-        { class: 'mods' },
-        h('li', null, h('span', null, 'Base'), h('span', { class: 'num' }, `${base}%`)),
-        p.modifiers.map((m: Modifier) => h('li', { class: m.value > 0 ? 'up' : m.value < 0 ? 'down' : '' }, h('span', null, m.label), h('span', { class: 'num' }, m.value ? `${m.value > 0 ? '+' : '−'}${Math.abs(m.value)}` : '×2'))),
-        clamped ? h('li', { class: 'dim' }, h('span', null, 'Clamped to 10–90%'), h('span', null, '')) : null,
+        'div',
+        { class: 'pv-head' },
+        h('span', { class: 'pv-glyph' }, ACTION_GLYPH[p.option.action] ?? '•'),
+        h('div', null, h('div', { class: 'kicker' }, `${name} · ${p.option.label}`), h('div', { class: 'pv-target' }, this.targetLabel(p.target))),
       ),
-      focusRow,
-      h('div', { class: 'pv-expect' }, h('span', { class: 'kicker' }, 'Expected wounds'), h('span', { class: 'num big-num' }, p.expectedWounds.toFixed(2)), p.slots >= 2 ? h('span', { class: 'dim small' }, 'Perfect: +1 wound, morale check') : null),
-      p.ok ? null : h('p', { class: 'problems' }, p.reason ?? 'Cannot attack.'),
+    );
+    if (!pr.ok) {
+      el.append(h('p', { class: 'pv-reason neg' }, pr.reason ?? 'Not possible.'), h('div', { class: 'pv-actions' }, h('button', { class: 'btn', onclick: () => this.cancel() }, 'Back ', h('kbd', null, 'Esc'))));
+      el.classList.remove('hidden');
+      return;
+    }
+    if (pr.slots > 0) {
+      const odds = hitOdds(pr.slots, pr.chance, p.focus);
+      const slots = h('div', { class: 'pv-slots' });
+      for (let i = 0; i < pr.slots; i++) {
+        const locked = i < p.focus;
+        slots.append(h('div', { class: `slot ${locked ? 'locked' : ''}` }, h('span', { class: 'slot-mark' }, locked ? '◆' : ''), h('span', { class: 'slot-pct num' }, locked ? '100%' : `${pr.chance}%`)));
+      }
+      el.append(h('div', { class: 'pv-stat' }, h('span', { class: 'dim' }, `${pr.slots} slot${pr.slots > 1 ? 's' : ''} of ${STAT_NAME[pr.stat ?? 'might']}`), h('b', { class: 'num' }, ` ${pr.chance}% each`)));
+      el.append(slots);
+      if (pr.modifiers.length) el.append(h('ul', { class: 'pv-mods' }, ...pr.modifiers.map((m) => h('li', { class: /[−-]/.test(m) ? 'neg' : 'pos' }, m))));
+      // Focus.
+      const max = Math.min(pr.maxFocus, pr.slots);
+      el.append(
+        h(
+          'div',
+          { class: 'pv-focus' },
+          h('span', { class: 'kicker' }, 'Focus'),
+          h('button', { class: 'btn btn-sq btn-small', 'aria-label': 'Less Focus', disabled: p.focus <= 0, onclick: () => this.setFocus(p.focus - 1) }, '−'),
+          h('output', { class: 'num' }, `${p.focus}`),
+          h('button', { class: 'btn btn-sq btn-small', 'aria-label': 'More Focus', disabled: p.focus >= max, onclick: () => this.setFocus(p.focus + 1) }, '+'),
+          h('span', { class: 'dim small' }, `${sel?.focus ?? 0} left · locks a slot as a hit`),
+        ),
+      );
+      // Outcomes with odds.
+      const rows = pr.outcomes.map((text, hits) => {
+        const pct = odds[hits] ?? 0;
+        return h('li', { class: `${pct < 0.0005 ? 'impossible' : ''} ${hits === pr.slots ? 'perfect' : ''}` }, h('span', { class: 'oc-hits num' }, `${hits}`), h('span', { class: 'oc-bar' }, h('i', { style: `width:${Math.round(pct * 100)}%` })), h('span', { class: 'oc-pct num' }, `${Math.round(pct * 100)}%`), h('span', { class: 'oc-text' }, text));
+      });
+      el.append(h('div', { class: 'kicker pv-oc-head' }, 'Hits → outcome'), h('ol', { class: 'pv-outcomes' }, ...rows));
+    } else {
+      el.append(h('ul', { class: 'pv-outcomes plain' }, ...pr.outcomes.map((t) => h('li', null, t))));
+    }
+    const foot: (HTMLElement | string)[] = [];
+    foot.push(h('span', { class: pr.noise > 0 ? 'pv-noise loud' : 'pv-noise' }, pr.noise > 0 ? `Noise ${pr.noise}` : 'Silent'));
+    if (pr.light) foot.push(h('span', { class: pr.light > 0 ? 'pos' : 'neg' }, `Light ${pr.light > 0 ? '+' : ''}${pr.light}`));
+    el.append(h('div', { class: 'pv-foot' }, ...foot));
+    el.append(
       h(
         'div',
         { class: 'pv-actions' },
-        h('button', { class: 'btn', onclick: () => this.closePreview() }, 'Cancel ', h('kbd', null, 'Esc')),
-        h('button', { class: 'btn btn-primary btn-danger', disabled: !p.ok, onclick: () => this.confirmAttack() }, 'Confirm ', h('kbd', null, 'Enter')),
+        h('button', { class: 'btn btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
+        h('button', { class: 'btn btn-primary pv-go', onclick: () => this.confirmPreview() }, `${p.option.label} `, h('kbd', null, 'Enter')),
       ),
     );
     el.classList.remove('hidden');
   }
 
-  private bumpFocus(d: number): void {
-    if (!this.previewing) return;
-    this.previewing.focus = Math.max(0, this.previewing.focus + d);
-    sfx.play('click');
+  private setFocus(n: number): void {
+    if (!this.pv) return;
+    const max = Math.min(this.pv.preview.maxFocus, this.pv.preview.slots);
+    this.pv.focus = Math.max(0, Math.min(max, n));
+    sfx.play('flip', { pitch: 1.2 });
     this.renderPreview();
   }
 
-  private confirmAttack(): void {
-    const pv = this.previewing;
-    const u = this.unit(this.selectedId);
-    if (!pv || !u) return;
-    this.closePreview();
-    void this.host.send({ type: pv.kind, unitId: u.id, targetId: pv.targetId, focus: pv.focus });
+  private confirmPreview(): void {
+    const p = this.pv;
+    if (!p || !p.preview.ok) return;
+    void this.act(p.option.action, p.target, p.focus);
   }
 
-  // ------------------------------------------------------------ board input
+  // ------------------------------------------------------------ roll animation
 
-  onHover(c: Coord | null, unitId: string | null): void {
-    if (!this.state?.expedition) return;
-    const tip = this.el.tip;
-    if (!c) {
-      tip.classList.add('hidden');
-      this.dio.setHover(null);
-      this.dio.setPath([]);
-      this.showEnemyCard(null);
-      return;
-    }
-    const k = squareKey(c);
-    const vis = this.vis;
-    const known = !!vis && (vis.explored.has(k) || vis.visible.has(k));
-    const lines: (string | HTMLElement)[] = [h('b', { class: 'num' }, `L${c.level} ${label(c)}`)];
-    const target = unitId ? this.unit(unitId) : undefined;
-    let danger = false;
-    this.dio.setPath([]);
-    if (this.host.isBusy()) {
-      // Only the label while the castle moves.
-    } else if (target && target.side === 'castle') {
-      const kind = this.attackKindFor(target.id);
-      if (kind) {
-        danger = true;
-        const p = this.host.engine.previewAttack(this.state, this.selectedId!, target.id, kind, 0);
-        lines.push(h('span', { class: 'tip-danger' }, `${kind === 'melee' ? 'Strike' : 'Shoot'} ${target.name}: ${p.chance}% × ${p.slots}`));
-      } else lines.push(h('span', null, target.name));
-    } else if (this.mode.kind === 'square') {
-      if (this.mode.squares.some((s) => sameSquare(s, c))) lines.push(h('span', { class: 'tip-go' }, 'Click to choose'));
-    } else {
-      const r = this.reach.find((x) => sameSquare(x.to, c));
-      if (r) {
-        this.dio.setPath(r.path);
-        lines.push(h('span', { class: 'tip-go' }, `Move · ${r.cost} MP`));
-      } else if (!known) lines.push(h('span', { class: 'dim' }, 'unexplored'));
-    }
-    const contact = vis?.contacts.find((x) => sameSquare(x.pos, c));
-    if (contact) lines.push(h('span', { class: 'tip-danger' }, 'Contact: something moves here'));
-    clear(tip);
-    tip.append(...lines.flatMap((l, i) => (i ? [h('br'), l] : [l])));
-    tip.classList.remove('hidden');
-    this.placeTip();
-    this.dio.setHover(c, danger);
-    this.showEnemyCard(target && target.side === 'castle' ? target : null);
-  }
-
-  private showEnemyCard(t: Unit | null): void {
-    const el = this.el.enemy;
-    if (!t) {
-      el.classList.add('hidden');
-      return;
-    }
+  /** Animate slots flipping one by one. Resolves when done. */
+  async showRoll(e: Extract<GameEvent, { type: 'roll' }>, wait: (s: number) => Promise<void>, enemy: boolean): Promise<void> {
+    const r: SlotRoll = e.roll;
+    const el = this.rollEl;
     clear(el);
-    appendAll(el,
-      h('p', { class: 'kicker' }, t.dormant ? 'Dormant' : 'Awake'),
-      h('h2', { class: 'enemy-name' }, t.name),
-      h('p', { class: 'unit-cls' }, CLASS_NAME[t.cls]),
-      isSquad(t) ? h('div', { class: 'strength' }, h('span', { class: 'big-num num' }, String(t.men)), h('span', { class: 'dim' }, ' orcs'), menDots(t.men, 'enemy')) : h('div', { class: 'strength' }, pips(t.maxWounds - t.wounds, t.maxWounds, 'hp enemy'), h('span', { class: 'dim num' }, ` ${t.maxWounds - t.wounds}/${t.maxWounds}`)),
-      t.panicked ? h('p', { class: 'status' }, 'Panicked') : null,
-    );
+    el.className = `hud-roll ${enemy ? 'enemy' : ''}`;
+    const who = this.nameOf(e.who);
+    const boxes = r.results.map((_, i) => h('div', { class: `slot ${i < r.focus ? 'locked' : ''}` }, h('span', { class: 'slot-mark' }, i < r.focus ? '◆' : '?')));
+    const result = h('div', { class: 'roll-result' });
+    el.append(h('div', { class: 'kicker' }, `${who} · ${e.what}`), h('div', { class: 'roll-chance dim num' }, `${r.chance}% per slot`), h('div', { class: 'pv-slots' }, ...boxes), result);
     el.classList.remove('hidden');
+    sfx.play('dice');
+    await wait(0.12);
+    for (let i = 0; i < r.results.length; i++) {
+      const hit = r.results[i]!;
+      const b = boxes[i]!;
+      b.classList.add('flipped', hit ? 'hit' : 'miss');
+      (b.firstChild as HTMLElement).textContent = hit ? '✔' : '✖';
+      if (i >= r.focus) sfx.play('flip', { pitch: hit ? 1.25 : 0.8 });
+      await wait(i < r.focus ? 0.05 : 0.16);
+    }
+    const outcome = !enemy && this.lastPreview && this.lastPreview.preview.outcomes[r.hits] ? this.lastPreview.preview.outcomes[r.hits] : '';
+    result.append(h('b', { class: 'num' }, `${r.hits}/${r.slots} hit${r.slots > 1 ? 's' : ''}`), outcome ? h('span', null, ` · ${outcome}`) : '', r.perfect ? h('span', { class: 'perfect' }, ' PERFECT') : '');
+    if (r.perfect && r.slots > 1) {
+      sfx.play('perfect');
+      el.classList.add('is-perfect');
+      this.dio.clock.hitStop(this.host.settings.speed === 0 ? 0 : 200);
+    }
+    await wait(r.perfect ? 0.55 : 0.4);
+  }
+
+  hideRoll(): void {
+    this.rollEl.classList.add('hidden');
+  }
+
+  nameOf(id: string): string {
+    const s = this.state;
+    const d = s?.delve;
+    return this.heroDef(id)?.name ?? d?.monsters.find((m) => m.id === id)?.name ?? d?.rivals?.members.find((r) => r.id === id)?.name ?? (d?.prisoner?.id === id ? d.prisoner.name : undefined) ?? id;
+  }
+
+  // ------------------------------------------------------------ panels
+
+  private renderTop(): void {
+    const s = this.state!;
+    const d = s.delve!;
+    clear(this.topbar);
+    const light = d.light;
+    const b = this.engine.brightness(s);
+    this.topbar.append(this.lightMeter(light, b));
+    this.topbar.append(h('div', { class: 'hud-round' }, h('span', { class: 'kicker' }, 'Round'), h('b', { class: 'num' }, `${d.round}`)));
+    this.topbar.append(this.goalBox());
+    const levels = h('div', { class: 'hud-levels' });
+    for (const lv of this.engine.castle().levels) {
+      const here = d.heroes.some((x) => x.status === 'active' && x.at.level === lv.level);
+      levels.append(
+        h(
+          'button',
+          {
+            class: `btn btn-small level-btn ${lv.level === this.dio.shownLevel ? 'on' : ''} ${here ? 'occupied' : ''}`,
+            title: lv.name,
+            onclick: () => {
+              this.dio.showLevel(lv.level);
+              this.refresh();
+            },
+          },
+          `L${lv.level}`,
+        ),
+      );
+    }
+    this.topbar.append(levels);
+    this.topbar.append(
+      h(
+        'div',
+        { class: 'hud-sys' },
+        h('button', { class: 'btn btn-small btn-sq', title: 'Sound', onclick: () => this.toggleMute() }, sfx.muted ? '🔇' : '🔊'),
+        h('button', { class: 'btn btn-small', title: 'Menu', onclick: () => this.toggleMenu() }, 'Menu'),
+      ),
+    );
+  }
+
+  updateLight(light: number, b: Brightness): void {
+    const old = this.topbar.querySelector('.light');
+    if (old) old.replaceWith(this.lightMeter(light, b));
+  }
+
+  private scale: LightScale | null = null;
+  private scaleDelve = -1;
+
+  /** Stage edges from engine.brightness; the max is the highest light seen this delve (light only falls, Kindle caps at max). */
+  private lightScale(): LightScale {
+    const s = this.state!;
+    const delve = s.campaign.delveCount;
+    if (this.scale && this.scaleDelve === delve) return this.scale;
+    const probe = (l: number) => this.engine.brightness({ ...s, delve: { ...s.delve!, light: l } });
+    let seen = 1;
+    try {
+      const saved = JSON.parse(localStorage.getItem('vc.lightmax.v3') ?? 'null') as { delve: number; max: number } | null;
+      if (saved && saved.delve === delve) seen = saved.max;
+    } catch {
+      /* ignore */
+    }
+    this.scale = lightScale(probe, Math.max(s.delve?.light ?? 0, seen));
+    this.scaleDelve = delve;
+    return this.scale;
+  }
+
+  private lightMeter(light: number, b: Brightness): HTMLElement {
+    const sc = this.lightScale();
+    if (light > sc.max) sc.max = light;
+    try {
+      localStorage.setItem('vc.lightmax.v3', JSON.stringify({ delve: this.scaleDelve, max: sc.max }));
+    } catch {
+      /* ignore */
+    }
+    const next = roundsToNext(light, sc);
+    const pct = Math.min(100, (light / sc.max) * 100);
+    const at = (v: number) => `left:${Math.min(100, (v / sc.max) * 100)}%`;
+    return h(
+      'div',
+      { class: `light light-${b}`, title: `Lantern oil burns 1 per round. Bright ${sc.min.bright}+, Dim ${sc.min.dim}–${sc.min.bright - 1}, Dark 1–${sc.min.dim - 1}, Pitch black at 0: the Gloam hunts.` },
+      h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, BRIGHTNESS_NAME[b]), h('span', { class: 'light-num num' }, `${light}`)),
+      h('div', { class: 'light-track' }, h('div', { class: 'light-fill', style: `width:${pct}%` }), h('i', { class: 'mark', style: at(sc.min.dim) }), h('i', { class: 'mark', style: at(sc.min.bright) })),
+      h('div', { class: 'light-next dim small' }, light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'The Gloam hunts'),
+    );
+  }
+
+  private goalBox(): HTMLElement {
+    const s = this.state!;
+    const d = s.delve!;
+    const k = d.contract;
+    let status = '';
+    if (k.kind === 'rescue') {
+      const p = d.prisoner;
+      status = !p ? '' : p.dead ? 'The prisoner is dead.' : p.out ? 'Out. Done.' : p.freed ? `Freed. Escort ${p.name} to an exit.` : `Find and free ${p.name}.`;
+    } else {
+      const carrier = d.heroes.find((x) => x.pack.some((i) => i.kind === 'heirloom'));
+      const rival = d.rivals?.members.find((r) => r.loot.some((i) => i.kind === 'heirloom'));
+      status = carrier ? `${this.heroDef(carrier.heroId)?.name ?? ''} carries it. Get out.` : rival ? 'The Lantern Sisters have it!' : 'Find it and carry it out.';
+    }
+    return h('div', { class: 'hud-goal' }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : 'Recover'} · ${k.bounty} gold`), h('b', null, k.title), h('span', { class: 'dim small' }, status));
+  }
+
+  private renderCards(): void {
+    const s = this.state!;
+    const d = s.delve!;
+    clear(this.cards);
+    d.heroes.forEach((hd, i) => {
+      const def = this.heroDef(hd.heroId);
+      if (!def) return;
+      const sel = hd.heroId === this.selectedId;
+      const done = hd.status === 'active' && hd.moved && hd.acted;
+      const card = h(
+        'button',
+        {
+          class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${done ? 'done' : ''}`,
+          onclick: () => this.select(hd.heroId),
+          disabled: hd.status !== 'active',
+        },
+        h('div', { class: 'hc-badge' }, h('span', null, CLASS_GLYPH[def.cls]), h('kbd', null, `${i + 1}`)),
+        h(
+          'div',
+          { class: 'hc-body' },
+          h('div', { class: 'hc-name' }, def.name, hd.heroId === d.lanternBearer ? h('span', { class: 'hc-lantern', title: 'Carries the lantern' }, ' ◆') : '', h('span', { class: 'hc-lvl dim' }, ` L${def.level}`)),
+          h('div', { class: 'hc-hp' }, hpBar(hd.hp, def.maxHp), h('span', { class: 'num small' }, `${hd.hp}/${def.maxHp}`)),
+          h('div', { class: 'hc-row' }, h('span', { class: 'dim small' }, 'Focus'), pips(hd.focus, 3, 'focus'), def.cls === 'mage' ? [h('span', { class: 'dim small' }, ' Mana'), pips(hd.mana, 3, 'mana')] : '', def.cls === 'hobart' && hd.rallyCooldown > 0 ? h('span', { class: 'dim small' }, ` Rally in ${hd.rallyCooldown}`) : ''),
+          packRow(hd.pack),
+          h('div', { class: 'hc-status' }, ...statusChips(hd)),
+        ),
+      );
+      this.cards.append(card);
+    });
+  }
+
+  private renderBar(): void {
+    const s = this.state;
+    const d = s?.delve;
+    clear(this.bar);
+    if (!s || !d) return;
+    const sel = this.selected();
+    const def = sel ? this.heroDef(sel.heroId) : undefined;
+    const left = h('div', { class: 'bar-who' });
+    if (sel && def) {
+      left.append(h('b', null, def.name), h('span', { class: 'dim small' }, ` ${CLASS_NAME[def.cls]}`), h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved ? 'used' : 'ready' }, sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.acted ? 'Acted' : 'Action ready')));
+    }
+    const modes = h(
+      'div',
+      { class: 'bar-modes' },
+      h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy }, 'Walk'),
+      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: 'Sneak: shorter moves, no noise' }, 'Sneak ', h('kbd', null, 'S')),
+    );
+    const acts = h('div', { class: 'bar-actions' });
+    const usedKeys = new Set<string>();
+    for (const o of this.options) {
+      let key = ACTION_KEY[o.action];
+      if (key && usedKeys.has(key)) key = undefined;
+      if (key) usedKeys.add(key);
+      const btn = h(
+        'button',
+        { class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''}`, onclick: () => this.startAction(o), disabled: this.busy, 'data-key': key ?? '', title: `${o.label}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}` },
+        h('span', { class: 'act-glyph' }, ACTION_GLYPH[o.action] ?? '•'),
+        h('span', { class: 'act-label' }, o.label),
+        key ? h('kbd', null, key.toUpperCase()) : '',
+        o.targets.length > 1 ? h('span', { class: 'act-count num' }, `${o.targets.length}`) : '',
+      );
+      acts.append(btn);
+    }
+    if (!this.options.length && sel && !this.busy) acts.append(h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing to do here. Move closer to something.'));
+    const allDone = d.heroes.filter((x) => x.status === 'active').every((x) => x.moved && x.acted);
+    const end = h('button', { class: `btn btn-primary bar-end ${allDone ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy }, 'End turn ', h('kbd', null, 'E'));
+    this.bar.append(left, modes, acts, end);
+  }
+
+  private renderLog(): void {
+    const d = this.state?.delve;
+    clear(this.logEl);
+    const lines = (d?.log ?? []).slice(-7);
+    for (const l of lines) this.logEl.append(h('div', { class: 'log-line' }, l));
+    for (const l of this.liveLog) this.logEl.append(h('div', { class: `log-line ${l.cls}` }, l.text));
+    this.logEl.classList.toggle('hidden', !this.logEl.children.length);
+    this.logEl.scrollTop = this.logEl.scrollHeight;
+  }
+
+  log(text: string, cls = ''): void {
+    this.liveLog.push({ text, cls });
+    this.logEl.classList.remove('hidden');
+    this.logEl.append(h('div', { class: `log-line fresh ${cls}` }, text));
+    while (this.logEl.children.length > 9) this.logEl.firstChild?.remove();
+  }
+
+  private renderRivals(): void {
+    const r = this.state?.delve?.rivals;
+    const d = this.state?.delve;
+    if (!r || !d || !r.spotted || d.round < r.entersRound) {
+      this.rivalEl.classList.add('hidden');
+      return;
+    }
+    clear(this.rivalEl);
+    const alive = r.members.filter((m) => m.hp > 0 && !m.goneOut).length;
+    this.rivalEl.append(
+      h('div', { class: 'kicker' }, 'Rival crew'),
+      h('b', null, r.name),
+      h('div', { class: `rv-stance st-${r.stance}` }, r.stance === 'neutral' ? 'Neutral' : r.stance === 'hostile' ? 'Hostile' : 'Bribed'),
+      h('div', { class: 'small' }, `Goal: ${GOAL_TEXT[r.goal]}`),
+      h('div', { class: 'dim small' }, `${alive} on the map`),
+    );
+    this.rivalEl.classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ tooltips, banners, toasts
+
+  private showTip(html: string): void {
+    this.tip.innerHTML = html;
+    this.tip.classList.remove('hidden');
+    this.placeTip();
   }
 
   private placeTip(): void {
-    const t = this.el.tip;
-    t.style.transform = `translate(${this.mouse.x + 16}px, ${this.mouse.y + 18}px)`;
+    const w = this.tip.offsetWidth;
+    const x = Math.min(innerWidth - w - 12, this.mouse.x + 18);
+    this.tip.style.transform = `translate(${x}px, ${this.mouse.y + 18}px)`;
   }
 
-  private attackKindFor(targetId: string): 'melee' | 'missile' | null {
-    for (const a of this.actions) if (a.kind === 'melee' && a.targetIds.includes(targetId)) return 'melee';
-    for (const a of this.actions) if (a.kind === 'missile' && a.targetIds.includes(targetId)) return 'missile';
-    return null;
+  private hideTip(): void {
+    this.tip.classList.add('hidden');
   }
 
-  onClick(c: Coord | null, unitId: string | null, ev: PointerEvent): void {
-    if (this.host.isBusy() || !this.state?.expedition) return;
-    if (ev.button === 2) {
-      this.cancelMode();
+  async banner(title: string, sub: string, wait: (s: number) => Promise<void>, world = false): Promise<void> {
+    clear(this.bannerEl);
+    this.bannerEl.className = `hud-banner ${world ? 'world' : ''}`;
+    this.bannerEl.append(h('div', { class: 'bn-title' }, title), h('div', { class: 'bn-sub' }, sub));
+    await wait(0.55);
+    this.bannerEl.classList.add('hidden');
+  }
+
+  toast(text: string): void {
+    this.toastEl.textContent = text;
+    this.toastEl.classList.remove('hidden');
+    this.toastEl.classList.remove('pop');
+    void this.toastEl.offsetWidth;
+    this.toastEl.classList.add('pop');
+    clearTimeout((this.toastEl as unknown as { _t?: number })._t);
+    (this.toastEl as unknown as { _t?: number })._t = window.setTimeout(() => this.toastEl.classList.add('hidden'), 2600);
+  }
+
+  pulse(kind: 'hurt' | 'dark'): void {
+    this.vignette.classList.remove('pulse-hurt', 'pulse-dark');
+    void this.vignette.offsetWidth;
+    this.vignette.classList.add(kind === 'hurt' ? 'pulse-hurt' : 'pulse-dark');
+  }
+
+  setDark(b: Brightness): void {
+    this.vignette.dataset.b = b;
+  }
+
+  // ------------------------------------------------------------ confirm and menu
+
+  confirm(text: string, okLabel: string, ok: () => void): void {
+    this.confirmBox = { text, ok };
+    clear(this.modal);
+    this.modal.append(
+      h(
+        'div',
+        { class: 'modal-box' },
+        h('p', null, text),
+        h(
+          'div',
+          { class: 'pv-actions' },
+          h('button', { class: 'btn btn-ghost', onclick: () => this.closeConfirm() }, 'Cancel ', h('kbd', null, 'Esc')),
+          h(
+            'button',
+            {
+              class: 'btn btn-danger',
+              onclick: () => {
+                this.closeConfirm();
+                ok();
+              },
+            },
+            okLabel,
+          ),
+        ),
+      ),
+    );
+    this.modal.classList.remove('hidden');
+  }
+
+  private closeConfirm(): void {
+    this.confirmBox = null;
+    this.modal.classList.add('hidden');
+  }
+
+  private toggleMenu(): void {
+    const m = this.menuEl;
+    if (!m.classList.contains('hidden')) {
+      m.classList.add('hidden');
       return;
     }
-    const clicked = unitId ? this.unit(unitId) : undefined;
-    const m = this.mode;
-    if (m.kind === 'square') {
-      const hit = c && m.squares.find((s) => sameSquare(s, c));
-      if (hit) {
-        const cmd = m.pick(hit);
-        this.mode = { kind: 'idle' };
-        this.renderHighlights();
-        void this.host.send(cmd);
-      } else {
-        this.mode = { kind: 'idle' };
-        this.renderHighlights();
-      }
-      return;
+    clear(m);
+    const st = this.host.settings;
+    const speed = h('div', { class: 'menu-row' }, h('span', { class: 'kicker' }, 'Playback'), ...SPEEDS.map((sp) => h('button', { class: `btn btn-small ${st.speed === sp.value ? 'on' : ''}`, onclick: () => this.setSpeed(sp.value) }, sp.label)));
+    m.append(
+      h('div', { class: 'kicker' }, 'Settings'),
+      speed,
+      h(
+        'label',
+        { class: 'menu-check' },
+        h('input', {
+          type: 'checkbox',
+          checked: st.reduceShake,
+          onchange: (e: Event) => {
+            st.reduceShake = (e.target as HTMLInputElement).checked;
+            this.host.saveSettings();
+            this.host.applySettings();
+          },
+        }),
+        ' Reduce camera shake',
+      ),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
+    );
+    m.classList.remove('hidden');
+  }
+
+  private setSpeed(v: number): void {
+    this.host.settings.speed = v;
+    this.host.saveSettings();
+    this.host.applySettings();
+    this.menuEl.classList.add('hidden');
+    this.toggleMenu();
+  }
+
+  private toggleMute(): void {
+    sfx.setMuted(!sfx.muted);
+    this.renderTop();
+  }
+
+  private buildCamBox(): void {
+    clear(this.camBox);
+    this.camBox.append(
+      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate left [', onclick: () => this.dio.rig.snapRotate(1) }, '⟲'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate right ]', onclick: () => this.dio.rig.snapRotate(-1) }, '⟳'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom in', onclick: () => this.dio.rig.zoomBy(0.8) }, '+'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom out', onclick: () => this.dio.rig.zoomBy(1.25) }, '−'),
+      h(
+        'button',
+        {
+          class: 'btn btn-sq btn-small',
+          title: 'Center on hero (C)',
+          onclick: () => {
+            const s = this.selected();
+            if (s) this.dio.lookAt(s.at);
+          },
+        },
+        '◎',
+      ),
+    );
+  }
+
+  private renderEmpty(): void {
+    const s = this.state;
+    const lvl = this.dio.shownLevel;
+    const seen = !!this.vis && [...this.vis.explored].some((k) => k.startsWith(`${lvl}:`));
+    const name = this.engine.castle().levels.find((l) => l.level === lvl)?.name ?? `Level ${lvl}`;
+    clear(this.emptyEl);
+    if (s?.delve && !seen) {
+      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs or the pit.'));
+      this.emptyEl.classList.remove('hidden');
+    } else this.emptyEl.classList.add('hidden');
+  }
+
+  levelChanged(): void {
+    if (this.state?.delve) {
+      this.renderEmpty();
+      this.renderTop();
+      this.drawHighlights();
     }
-    if (m.kind === 'attack') {
-      const id = clicked && m.targetIds.includes(clicked.id) ? clicked.id : m.targetIds.find((tid) => c && sameSquare(this.unit(tid)!.pos, c));
-      if (id) this.openPreview(id, m.attack);
-      else {
-        this.mode = { kind: 'idle' };
-        this.renderHighlights();
-      }
-      return;
-    }
-    // Idle: enemies, friends, then squares.
-    let enemy = clicked && clicked.side === 'castle' ? clicked : undefined;
-    if (!enemy && c) {
-      const kinds = this.actions.flatMap((a) => (a.kind === 'melee' || a.kind === 'missile' ? a.targetIds : []));
-      enemy = kinds.map((id) => this.unit(id)).find((t) => t && sameSquare(t.pos, c));
-    }
-    if (enemy) {
-      const kind = this.attackKindFor(enemy.id);
-      if (kind) this.openPreview(enemy.id, kind);
-      else this.toast(`${enemy.name} is out of reach.`);
-      return;
-    }
-    if (clicked && clicked.side === 'player') {
-      if (clicked.id !== this.selectedId) {
-        sfx.play('click');
-        this.select(clicked.id, false);
-        return;
-      }
-    }
-    if (!c) return;
-    const r = this.reach.find((x) => sameSquare(x.to, c));
-    if (r && this.selectedId) {
-      this.closePreview();
-      void this.host.send({ type: 'move', unitId: this.selectedId, to: c });
-      return;
-    }
-    // A friendly unit's square: select it (cycling if several).
-    const here = this.players().filter((p) => sameSquare(p.pos, c));
-    if (here.length) {
-      const i = here.findIndex((p) => p.id === this.selectedId);
-      this.select(here[(i + 1) % here.length]!.id, false);
-    }
+  }
+
+  // ------------------------------------------------------------ input
+
+  private setSneak(on: boolean): void {
+    this.sneak = on;
+    this.refresh();
+  }
+
+  private endTurn(): void {
+    if (this.busy) return;
+    this.cancel();
+    void this.host.send({ type: 'endTurn' });
   }
 
   private onKey(e: KeyboardEvent): void {
-    const tgt = e.target as HTMLElement | null;
-    if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
-    if (!this.state?.expedition || !this.root.isConnected) return;
-    if (e.key === 'm' || e.key === 'M') {
-      sfx.setMuted(!sfx.muted);
-      this.muteBtn.refresh();
+    const s = this.state;
+    if (!s?.delve || this.root.classList.contains('hidden')) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    if (e.key === 'Escape') {
+      this.cancel();
       return;
     }
-    if (this.host.isBusy()) return;
-    if (e.key === 'Escape') {
-      if (!this.cancelMode()) this.el.settings.classList.add('hidden');
+    if (this.confirmBox) {
+      if (e.key === 'Enter') {
+        const ok = this.confirmBox.ok;
+        this.closeConfirm();
+        ok();
+      }
+      return;
+    }
+    if (this.busy) return;
+    if (this.pv) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.confirmPreview();
+      } else if (e.key === '+' || e.key === '=' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.setFocus(this.pv.focus + 1);
+      } else if (e.key === '-' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.setFocus(this.pv.focus - 1);
+      }
+      return;
+    }
+    const d = s.delve;
+    const k = e.key.toLowerCase();
+    if (k >= '1' && k <= '4') {
+      const hd = d.heroes[Number(k) - 1];
+      if (hd) this.select(hd.heroId);
       return;
     }
     if (e.key === 'Tab') {
       e.preventDefault();
-      const list = this.players();
-      if (!list.length) return;
-      const i = list.findIndex((u) => u.id === this.selectedId);
-      const next = list[(i + (e.shiftKey ? -1 + list.length : 1)) % list.length]!;
-      sfx.play('click');
-      this.select(next.id);
+      const act = d.heroes.filter((x) => x.status === 'active');
+      if (!act.length) return;
+      const i = act.findIndex((x) => x.heroId === this.selectedId);
+      const order = [...act.slice(i + 1), ...act.slice(0, i + 1)];
+      const next = (e.shiftKey ? [...order].reverse().slice(1) : order).find((x) => !x.moved || !x.acted) ?? order[0]!;
+      this.select(next.heroId);
       return;
     }
-    if (e.key === 'Enter') {
+    if (k === 's') return this.setSneak(!this.sneak);
+    if (k === 'e') return this.endTurn();
+    if (k === '[') return this.dio.rig.snapRotate(1);
+    if (k === ']') return this.dio.rig.snapRotate(-1);
+    if (k === 'c') {
+      const sel = this.selected();
+      if (sel) this.dio.lookAt(sel.at);
+      return;
+    }
+    if (this.pending && e.key === 'Enter') return;
+    const btn = this.bar.querySelector<HTMLButtonElement>(`button.act[data-key="${k}"]`);
+    if (btn && !btn.disabled) {
       e.preventDefault();
-      if (this.previewing) this.confirmAttack();
-      else this.endTurn();
-      return;
+      btn.click();
     }
-    if (this.previewing && (e.key === '+' || e.key === '=')) return this.bumpFocus(1);
-    if (this.previewing && (e.key === '-' || e.key === '_')) return this.bumpFocus(-1);
-    if (/^[1-9]$/.test(e.key)) {
-      const n = Number(e.key) - 1;
-      const picker = this.el.picker;
-      if (!picker.classList.contains('hidden')) {
-        const rows = picker.querySelectorAll<HTMLButtonElement>('.pick-row');
-        rows[n]?.click();
-        return;
-      }
-      const acts = this.el.bar.querySelectorAll<HTMLButtonElement>('.act');
-      acts[n]?.click();
-    }
-  }
-
-  private endTurn(): void {
-    if (this.host.isBusy() || !this.state?.expedition) return;
-    this.closePreview();
-    this.closePicker();
-    this.mode = { kind: 'idle' };
-    void this.host.send({ type: 'endTurn' });
-  }
-
-  private renderEndTurn(): void {
-    const left = this.players().some((u) => u.actionsLeft > 0);
-    this.el.endTurn.classList.toggle('ready', !left);
-  }
-
-  setBusy(busy: boolean): void {
-    this.root.classList.toggle('busy', busy);
-    if (busy) {
-      this.dio.setReachable([]);
-      this.dio.setPath([]);
-      this.dio.setTargets([]);
-      this.closePicker();
-      this.showHint(null);
-    }
-  }
-
-  // ------------------------------------------------------------ feedback
-
-  private showHint(text: string | null): void {
-    const el = this.el.hint;
-    if (!text) {
-      el.classList.add('hidden');
-      return;
-    }
-    clear(el);
-    el.append(text, h('span', { class: 'dim' }, '  ·  right-click or Esc to cancel'));
-    el.classList.remove('hidden');
-  }
-
-  private toastTimer = 0;
-  toast(text: string, kind: 'error' | 'info' = 'error'): void {
-    const t = this.el.toast;
-    t.textContent = text;
-    t.className = `toast toast-${kind}`;
-    clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => t.classList.add('hidden'), 2600);
-  }
-
-  private renderLogFrom(lines: string[]): void {
-    this.logLines = lines.slice(-60);
-    const el = this.el.log;
-    clear(el);
-    for (const l of this.logLines) el.appendChild(h('p', null, l));
-    el.scrollTop = el.scrollHeight;
-  }
-
-  appendLog(text: string, cls = ''): void {
-    const el = this.el.log;
-    const p = h('p', { class: `fresh ${cls}` }, text);
-    el.appendChild(p);
-    while (el.childElementCount > 60) el.firstElementChild?.remove();
-    el.scrollTop = el.scrollHeight;
-  }
-
-  async banner(text: string, sub: string, danger: boolean, wait: (s: number) => Promise<void>): Promise<void> {
-    const b = this.el.banner;
-    clear(b);
-    b.append(h('span', { class: 'banner-main' }, text), h('span', { class: 'banner-sub' }, sub));
-    b.className = `phase-banner show ${danger ? 'danger' : ''}`;
-    await wait(0.85);
-    b.className = 'phase-banner';
-  }
-
-  pulseVignette(reduce: boolean): void {
-    const v = this.el.vignette;
-    v.classList.remove('pulse', 'soft');
-    void v.offsetWidth;
-    v.classList.add('pulse');
-    if (reduce) v.classList.add('soft');
-  }
-
-  /** Dice resolution for one attack event. Flips each slot in turn. */
-  async showDice(e: Extract<GameEvent, { type: 'attack' }>, names: { a: string; t: string; enemyAttacking: boolean }, wait: (s: number) => Promise<void>, onFlip: (hit: boolean, i: number) => void, onPerfect: () => void): Promise<void> {
-    const roll: RollResult = e.roll;
-    const tray = this.el.dice;
-    clearTimeout(this.diceTimer);
-    clear(tray);
-    const tiles: HTMLElement[] = [];
-    const row = h('div', { class: 'dice-row' });
-    for (let i = 0; i < roll.slots; i++) {
-      const locked = i < roll.locked;
-      const tile = h('div', { class: `die ${locked ? 'locked' : ''}` }, h('div', { class: 'die-inner' }, h('span', { class: 'die-front' }, locked ? 'F' : `${roll.chance}`), h('span', { class: `die-back ${roll.hits[i] ? 'hit' : 'miss'}` }, roll.hits[i] ? 'HIT' : 'MISS')));
-      tiles.push(tile);
-      row.appendChild(tile);
-    }
-    const result = h('div', { class: 'dice-result' });
-    tray.append(
-      h('div', { class: `dice-head ${names.enemyAttacking ? 'enemy' : ''}` }, h('span', null, names.a), h('span', { class: 'arrow' }, e.kind === 'melee' ? ' strikes ' : ' shoots '), h('span', null, names.t), h('span', { class: 'dim small' }, ` · ${FRONTAGE_NAME[e.frontage]} · ${roll.chance}%`)),
-      row,
-      result,
-    );
-    tray.className = `dice-tray show ${names.enemyAttacking ? 'enemy' : ''}`;
-    await wait(0.18);
-    for (let i = 0; i < tiles.length; i++) {
-      tiles[i]!.classList.add('flipped');
-      onFlip(!!roll.hits[i], i);
-      await wait(i < roll.locked ? 0.1 : 0.2);
-    }
-    if (roll.perfect) {
-      tray.classList.add('perfect');
-      result.append(h('span', { class: 'perfect-stamp' }, 'PERFECT'));
-      onPerfect();
-      await wait(0.55);
-    } else {
-      result.append(h('span', { class: roll.wounds ? 'wounds' : 'dim' }, roll.wounds ? `${roll.wounds} wound${roll.wounds > 1 ? 's' : ''}` : 'No wounds'));
-      await wait(0.25);
-    }
-    // It stays up while the blow lands; hideDice() clears it after playback.
-    void result;
-  }
-
-  /** Keep the dice tray up after playback (screenshots, debugging). */
-  holdDice = false;
-  private diceTimer = 0;
-
-  /** Hide the dice tray a moment after playback ends. */
-  hideDice(): void {
-    clearTimeout(this.diceTimer);
-    if (this.holdDice) return;
-    this.diceTimer = window.setTimeout(() => this.el.dice.classList.remove('show'), 900 / Math.max(0.5, this.host.settings.speed));
-  }
-
-  get tier(): AlarmTier | null {
-    return this.lastTier;
   }
 }
 
-function menDots(n: number, cls = ''): HTMLElement {
-  const row = h('span', { class: `men-dots ${cls}` });
-  for (let i = 0; i < Math.min(12, n); i++) row.appendChild(h('i'));
+// ------------------------------------------------------------ helpers
+
+const STAT_NAME: Record<string, string> = { might: 'Might', finesse: 'Finesse', wits: 'Wits', nerve: 'Nerve' };
+
+const TILE_NAME: Record<string, string> = {
+  floor: 'Floor',
+  wall: 'Wall',
+  cracked: 'Cracked wall',
+  pillar: 'Pillar',
+  rubble: 'Rubble (costs 2)',
+  door: 'Door',
+  pit: 'Pit',
+  stairs: 'Stairs',
+  exit: 'Exit: leave here',
+  brazier: 'Brazier',
+};
+
+const GOAL_TEXT: Record<string, string> = { loot: 'looting', objective: 'after your objective', leave: 'leaving' };
+
+export function intentText(s: GameState, it: Intent): string {
+  const d = s.delve;
+  const name = (id?: string) => (id ? (s.campaign.roster.find((x) => x.id === id)?.name ?? (d?.prisoner?.id === id ? d.prisoner.name : undefined) ?? d?.rivals?.members.find((r) => r.id === id)?.name ?? id) : '');
+  const dmg = it.damage ? ` for ${it.damage[0]}–${it.damage[1]}` : '';
+  switch (it.kind) {
+    case 'attack':
+      return `attacks ${name(it.targetId)}${dmg}`;
+    case 'move':
+      return 'moves';
+    case 'web':
+      return `webs ${name(it.targetId)}`;
+    case 'steal':
+      return `steals from ${name(it.targetId)}`;
+    case 'flee':
+      return 'flees';
+    default:
+      return 'waits';
+  }
+}
+
+function hpBar(hp: number, max: number): HTMLElement {
+  const pct = Math.max(0, Math.min(1, hp / max));
+  return h('span', { class: `hp-bar ${pct <= 0.34 ? 'low' : ''}` }, h('i', { style: `width:${pct * 100}%` }));
+}
+
+function packRow(pack: Item[]): HTMLElement {
+  const row = h('div', { class: 'hc-pack' });
+  let used = 0;
+  for (const it of pack) {
+    row.append(h('span', { class: `pk pk-${it.kind} ${it.slots > 1 ? 'wide' : ''}`, title: itemLabel(it) }, ITEM_GLYPH[it.kind], it.kind === 'gold' ? h('small', { class: 'num' }, `${it.amount}`) : ''));
+    used += it.slots;
+  }
+  for (let i = used; i < 4; i++) row.append(h('span', { class: 'pk empty' }));
   return row;
 }
 
-function appendAll(el: HTMLElement, ...kids: (Node | null)[]): void {
-  for (const k of kids) if (k) el.appendChild(k);
-}
-
-function packSummary(pack: Record<string, number>): string {
-  const names: Record<string, string> = { charge: 'charge', rope: 'rope', draught: 'draught', smoke: 'smoke' };
-  const parts = Object.entries(pack)
-    .filter(([k, n]) => n > 0 && names[k])
-    .map(([k, n]) => `${n} ${names[k]}${n > 1 ? 's' : ''}`);
-  return parts.length ? parts.join(', ') : 'empty';
+function statusChips(hd: HeroInDelve): (HTMLElement | string)[] {
+  const out: HTMLElement[] = [];
+  if (hd.status === 'downed') out.push(h('span', { class: 'chip bad' }, `Downed · dies in ${hd.bleed}`));
+  if (hd.status === 'out') out.push(h('span', { class: 'chip good' }, 'Out'));
+  if (hd.status === 'dead') out.push(h('span', { class: 'chip bad' }, 'Dead'));
+  if (hd.status === 'active') {
+    out.push(h('span', { class: `chip ${hd.moved ? 'used' : ''}` }, 'Move'), h('span', { class: `chip ${hd.acted ? 'used' : ''}` }, 'Act'));
+  }
+  if (hd.webbed) out.push(h('span', { class: 'chip bad' }, 'Webbed'));
+  if (hd.torch > 0) out.push(h('span', { class: 'chip warm' }, `Torch ${hd.torch}`));
+  if (hd.guarding) out.push(h('span', { class: 'chip' }, 'Guarding'));
+  if (hd.escorting) out.push(h('span', { class: 'chip good' }, 'Escorting'));
+  return out;
 }

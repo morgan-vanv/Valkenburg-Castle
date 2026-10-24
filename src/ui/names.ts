@@ -1,66 +1,142 @@
-// Player-facing names for classes, methods, spells and frontage.
+// Player-facing names, glyphs and short texts.
 
-import type { Armor, DoorMethod, Frontage, SpellId, Unit, UnitClass } from '../engine/types';
+import type { ActionKind, Brightness, HeroClass, Item, MonsterKind } from '../game/types';
 
-export const CLASS_NAME: Record<UnitClass, string> = {
-  hobart: 'Lord, +2 leader',
-  leader: 'Leader, +1',
-  dwarf: 'Dwarf',
+export const CLASS_NAME: Record<HeroClass, string> = {
+  hobart: 'Lord',
+  sellsword: 'Sellsword',
   burglar: 'Burglar',
-  magicUser: 'Magic User',
-  squad: 'Squad',
-  orcSquad: 'Orc squad',
-  evilLeader: 'Orc leader',
-  evilMagicUser: 'Evil magic user',
-  troll: 'Troll',
-  ogre: 'Ogre',
-  berserker: 'Berserker',
-  mantis: 'Mantis',
-  spider: 'Giant spider',
-  drog: 'Drog',
-  banshee: 'Banshee',
-  dragon: 'Dragon',
-  dummy: 'Contact',
+  mage: 'Hedge Mage',
 };
 
-/** Short counter glyph for roster badges, 1980 style. */
-export const CLASS_GLYPH: Partial<Record<UnitClass, string>> = {
-  hobart: 'L2',
-  leader: 'L1',
-  dwarf: 'D',
+/** Counter-style badge glyph, 1980 style. */
+export const CLASS_GLYPH: Record<HeroClass, string> = {
+  hobart: 'L',
+  sellsword: 'S',
   burglar: 'B',
-  magicUser: 'M',
-  squad: 'S',
+  mage: 'M',
 };
 
-export const ARMOR_NAME: Record<Armor, string> = { unarmored: 'Unarmored', normal: 'Normal', heavy: 'Heavy' };
-
-export const METHOD_NAME: Record<DoorMethod, string> = { pick: 'Pick lock', force: 'Force', blast: 'Set charge' };
-
-export const METHOD_NOTE: Record<DoorMethod, string> = {
-  pick: 'Always works. Silent. Burglar only.',
-  force: 'Always works. Loud: Alarm +6.',
-  blast: 'Uses a charge. Blows at end of turn. Very loud.',
+export const CLASS_BLURB: Record<HeroClass, string> = {
+  hobart: 'The heir. Rally: +1 Focus to allies nearby. If he dies, it is over.',
+  sellsword: 'Hits hard, takes hits. Guard: soak blows aimed at an ally.',
+  burglar: 'Picks locks, sneaks fast, backstabs the unwary.',
+  mage: 'Firebolt, Kindle the lantern, Mend wounds. Fragile.',
 };
 
-export const SPELL_NAME: Record<SpellId, string> = { esp: 'ESP', fireball: 'Fireball', smokescreen: 'Smokescreen', pyrotechnics: 'Pyrotechnics', unlock: 'Unlock Door', combat: 'Combat' };
-
-export const SPELL_NOTE: Record<SpellId, string> = {
-  esp: 'Reveal contacts within 4.',
-  fireball: 'd6+2 wounds down a line. Wakes the level.',
-  smokescreen: 'Smoke an adjacent square for a turn.',
-  pyrotechnics: 'Squads in the target square check morale.',
-  unlock: 'Open an adjacent locked door.',
-  combat: '+10 on one attack this turn.',
+export const MONSTER_NAME: Record<MonsterKind | 'gloam', string> = {
+  rats: 'Rats',
+  orc: 'Orc',
+  spider: 'Spider',
+  cutpurse: 'Cutpurse',
+  berserker: 'Berserker',
+  gloam: 'The Gloam',
 };
 
-export const FRONTAGE_NAME: Record<Frontage, string> = { narrow: 'Narrow', wide: 'Wide', open: 'Open' };
+export const BRIGHTNESS_NAME: Record<Brightness, string> = {
+  bright: 'Bright',
+  dim: 'Dim',
+  dark: 'Dark',
+  pitch: 'Pitch black',
+};
 
-export function unitStrength(u: Unit): string {
-  if (u.cls === 'squad' || u.cls === 'orcSquad') return `${u.men} men`;
-  return `${u.maxWounds - u.wounds}/${u.maxWounds} wounds left`;
+/** Light thresholds learned from the engine (balance changes them). */
+export interface LightScale {
+  max: number;
+  /** Lowest light value of each stage. */
+  min: Record<Brightness, number>;
 }
 
-export function isSquad(u: Unit): boolean {
-  return u.cls === 'squad' || u.cls === 'orcSquad';
+/** Probe engine.brightness on light values 0..200 to find the stage edges and the max. */
+export function lightScale(brightness: (light: number) => Brightness, maxGuess: number): LightScale {
+  const min: Record<Brightness, number> = { bright: Infinity, dim: Infinity, dark: Infinity, pitch: 0 };
+  for (let l = 200; l >= 0; l--) {
+    const b = brightness(l);
+    if (l < min[b]) min[b] = l;
+  }
+  return { max: maxGuess, min };
+}
+
+/** Rounds of light left before the next stage, or before 0. */
+export function roundsToNext(light: number, sc: LightScale): { stage: Brightness; rounds: number } {
+  if (light >= sc.min.bright) return { stage: 'dim', rounds: light - sc.min.bright + 1 };
+  if (light >= sc.min.dim) return { stage: 'dark', rounds: light - sc.min.dim + 1 };
+  if (light >= 1) return { stage: 'pitch', rounds: light };
+  return { stage: 'pitch', rounds: 0 };
+}
+
+export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
+  attack: '⚔',
+  pick: '⚷',
+  smash: '✊',
+  open: '◫',
+  take: '⇡',
+  drop: '⇣',
+  give: '⇄',
+  disarm: '✂',
+  light: '♨',
+  torch: '🜂',
+  potion: '⚱',
+  revive: '✚',
+  charge: '✹',
+  rope: '⌇',
+  climb: '⇅',
+  jump: '⤓',
+  shove: '⇥',
+  free: '⛓',
+  bribe: '¤',
+  rally: '⚑',
+  guard: '⛨',
+  firebolt: '☄',
+  kindle: '✦',
+  mend: '✚',
+  passLantern: '◆',
+  leave: '⇱',
+};
+
+/** Hotkey per action (letters not used by the global keys). */
+export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
+  attack: 'a',
+  firebolt: 'f',
+  pick: 'p',
+  smash: 'x',
+  open: 'o',
+  take: 'g',
+  torch: 't',
+  potion: 'h',
+  revive: 'v',
+  light: 'l',
+  rally: 'r',
+  guard: 'r',
+  kindle: 'k',
+  mend: 'm',
+  free: 'g',
+  leave: 'q',
+  disarm: 'd',
+  shove: 'z',
+  bribe: 'b',
+  charge: 'w',
+  passLantern: 'n',
+  rope: 'y',
+  climb: 'y',
+  jump: 'j',
+  give: 'i',
+  drop: 'u',
+};
+
+export const ITEM_GLYPH: Record<Item['kind'], string> = {
+  gold: '¤',
+  gem: '◆',
+  jewelry: '◎',
+  torch: '🜂',
+  potion: '⚱',
+  rope: '⌇',
+  charge: '✹',
+  heirloom: '♛',
+};
+
+export function itemLabel(i: Item): string {
+  if (i.kind === 'gold') return `${i.amount} gold`;
+  if (i.kind === 'gem' || i.kind === 'jewelry') return `${i.name} (${i.amount})`;
+  return i.name;
 }
