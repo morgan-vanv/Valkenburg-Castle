@@ -40,7 +40,7 @@ Each step ends with a commit and push to `v2`.
 - [x] Engine: simplified doors, visible loot and sacks, cracked walls for charges, monster leashes; 16 tests pass
 - [x] Renderer: tiles at 2× scale (TILE in src/render/world.ts), figures 1.5×, loot piles as chests and coin heaps
 - [x] UI: shop screen, results screen, item actions; remove muster/week/debrief
-- [ ] Bot balance check on the new map; tune medal thresholds
+- [x] Bot balance check: the careless bot banks 355–515 (median 395) in ~10 turns, short of bronze (600). The company carries 13 sacks against 16 sacks of loot: silver needs the Deep, gold needs the Dragon's hoard. Thresholds kept.
 - [ ] Play-test in headless Chromium, fix, merge to `main`, check the live page
 - [ ] Changelog for the owner (docs/v2-changes.md) and GDD note
 
