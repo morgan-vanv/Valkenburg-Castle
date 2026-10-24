@@ -22,6 +22,8 @@ Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and 
 
 ## Since launch
 
+- **V3.1, the three-level castle (2026-10-24):** the castle from the approved map proposal (pass 2): the Ruined Keep, the Crossing (bridges over the pit) and the Hollow (caves, the Dragon's Lair, the Sealed Stair). Pits drop straight down (4 damage per level, 7 for two; two-level jumps ask first), shoves and railings make edges a weapon, orcs and berserkers push back, the Dragon breathes on marked hexes and sweeps with its tail, the winch runs the lift, sight shrinks with the lantern and with depth, and a 500-gold Dragon contract unlocks at reputation 3. New look: pale cutaway walls, floors per room, furniture, fixed lights, and you can see the levels below down the pit. Old saves start fresh.
+
 - **Exploring by line of sight (2026-10-24):** every step of a walk reveals the layout of everything in line of sight within 8 hexes, lit or not, so long moves no longer leave gaps and walking into a room shows the room. Monsters still only show in light.
 
 ## Camp

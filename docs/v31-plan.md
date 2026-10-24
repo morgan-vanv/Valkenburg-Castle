@@ -27,12 +27,12 @@ Goal: the approved three-level castle (Castle Map Proposal, pass 2: https://clau
 - [x] Contract and spec (section 14)
 - [x] Castle: three levels from mockup/sketch.py (hex for hex), monsters, loot, lights, props; 14 castle tests
 - [x] Engine: section 14 rules; 78 tests; sim with DRAGON=1 (src/game/falls.ts, dragon.ts)
-- [ ] Presentation: new look and UI for section 14
-- [ ] Integration: typecheck, tests, build
+- [x] Presentation: new look and UI for section 14
+- [x] Integration: typecheck clean, 95 tests, build OK
 - [x] Balance: on the real castle a slay run takes ~38-41 rounds, ending with ~4 light (stretch, as asked); careful bot 86% done, head-on bot 2/12. Level 1 stays a warm-up. No tuning needed yet.
-- [ ] Play-test in headless Chromium
+- [x] Play-test in headless Chromium: full tour, stress bot and level shots on the real castle, 0 errors
 - [ ] Merge to `main`, verify live
-- [ ] Changelog (docs/v3-changes.md) and decisions
+- [x] Changelog (docs/v3-changes.md) and decisions
 
 ## Resuming
 
