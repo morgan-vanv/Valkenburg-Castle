@@ -1,0 +1,10 @@
+import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+import { readFileSync } from 'node:fs';
+const [inp, out] = process.argv.slice(2);
+const svg = readFileSync(inp, 'utf8');
+const m = svg.match(/width="(\d+)" height="(\d+)"/);
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: +m[1], height: +m[2] } });
+await p.setContent(`<html><body style="margin:0">${svg}</body></html>`);
+await p.screenshot({ path: out });
+await b.close();
