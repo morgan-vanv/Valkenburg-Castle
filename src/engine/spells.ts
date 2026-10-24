@@ -6,7 +6,6 @@ import { die } from './dice';
 import { SPELLS, STATS } from './data';
 import { cellAt, edgeKindAt, label, sameSquare, squareKey, step, type Dir } from './geometry';
 import { adjacentSquares } from './movement';
-import { openLock, isSecured } from './doors';
 import { RuleError, type Ctx } from './ctx';
 import type { Coord, SpellId, Unit } from './types';
 
@@ -44,7 +43,7 @@ export function canCast(u: Unit, spell: SpellId): boolean {
   return casters.includes(u.cls) && u.spellPoints >= SPELLS[spell].cost;
 }
 
-export function cast(ctx: Ctx, u: Unit, spell: SpellId, target?: Coord, targetId?: string, edge?: string): void {
+export function cast(ctx: Ctx, u: Unit, spell: SpellId, target?: Coord, targetId?: string, _edge?: string): void {
   if (!canCast(u, spell)) throw new RuleError(`Not enough spell points for ${SPELLS[spell].name}.`);
   if (u.actionsLeft < 1) throw new RuleError('No actions left.');
   const exp = ctx.exp;
@@ -91,15 +90,8 @@ export function cast(ctx: Ctx, u: Unit, spell: SpellId, target?: Coord, targetId
       ctx.log(`${u.name} fills ${label(target)} with smoke.`);
       break;
     }
-    case 'unlock': {
-      if (!edge) throw new RuleError('Choose a door.');
-      const door = exp.doors[edge];
-      if (!door || !door.locked || door.destroyed) throw new RuleError('That door is not locked.');
-      if (isSecured(ctx, edge, u.pos, u.side)) throw new RuleError('Someone is holding it from the other side.');
-      openLock(ctx, u, door, 'unlock', `the door at ${label(u.pos)}`);
-      u.actionsLeft = 0;
-      return;
-    }
+    case 'unlock':
+      throw new RuleError('That spell is not known.');
     case 'combat': {
       const friend = targetId ? ctx.findUnit(targetId) : u;
       if (!friend || friend.side !== u.side) throw new RuleError('Choose a friend.');

@@ -1,8 +1,10 @@
 # Valkenburg Castle
 
-A roguelite extraction strategy game for the browser, a modern take on Task Force Games' *Valkenburg Castle* (1980), with inspiration from XCOM, Deep Rock Galactic and Ultrakill.
+A one-run dungeon extraction strategy game for the browser, a modern take on Task Force Games' *Valkenburg Castle* (1980), with inspiration from XCOM, Deep Rock Galactic and Ultrakill.
 
 Play the current build: https://morgan-vanv.github.io/Valkenburg-Castle/
+
+What changed from the first prototype: [docs/v2-changes.md](docs/v2-changes.md). The first prototype is on the `v1-prototype` branch.
 
 ## Run locally
 

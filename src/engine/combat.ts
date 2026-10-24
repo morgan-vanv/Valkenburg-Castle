@@ -263,7 +263,7 @@ export function applyWounds(ctx: Ctx, u: Unit, n: number): boolean {
 
 /** Drop whatever no longer fits after a squad loses men (7.4). */
 export function dropExcess(ctx: Ctx, u: Unit): void {
-  const limit = carryLimit(u) * 2;
+  const limit = carryLimit(u);
   const items = [...u.loot].sort((a, b) => a.value / Math.max(1, a.weight) - b.value / Math.max(1, b.weight));
   while (carryInfo(u).weight > limit && items.length) {
     const it = items.shift()!;

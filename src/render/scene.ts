@@ -11,7 +11,7 @@ import { CameraRig } from './camera';
 import { LevelView } from './level';
 import { glowTexture, glyphSprite } from './sprites';
 import { UnitView, fanOffsets } from './unitView';
-import { COLORS, FLOOR_TOP, LEVEL_GAP, easeInOut, easeOutBack, easeOutCubic, levelY, squareCenter } from './world';
+import { COLORS, FLOOR_TOP, LEVEL_GAP, TILE, easeInOut, easeOutBack, easeOutCubic, levelY, squareCenter } from './world';
 
 const MAX_LIGHTS = 8;
 
@@ -108,36 +108,37 @@ export class Diorama {
     const fill = new THREE.HemisphereLight(0x3a3046, 0x0a0806, 0.25);
     this.scene.add(fill);
     for (let i = 0; i < MAX_LIGHTS; i++) {
-      const l = new THREE.PointLight(COLORS.emberHot, 0, 8, 1.4);
+      const l = new THREE.PointLight(COLORS.emberHot, 0, 14, 1.4);
       l.visible = true;
       this.scene.add(l);
       this.lights.push(l);
       this.lightOwner.push(null);
     }
-    this.flashLight = new THREE.PointLight(0xffd2a0, 0, 14, 1.2);
+    this.flashLight = new THREE.PointLight(0xffd2a0, 0, 24, 1.2);
     this.scene.add(this.flashLight);
 
     for (const lv of map.levels) {
       const view = new LevelView(lv, map);
       this.levels.set(lv.id, view);
+      view.group.scale.set(TILE, 1, TILE);
       this.scene.add(view.group);
     }
     this.scene.add(this.props, this.contacts, this.overlay);
 
     // Overlays.
-    const sq = new THREE.PlaneGeometry(0.94, 0.94).rotateX(-Math.PI / 2);
+    const sq = new THREE.PlaneGeometry(0.94 * TILE, 0.94 * TILE).rotateX(-Math.PI / 2);
     this.reachMesh = new THREE.InstancedMesh(sq, new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }), 400);
     this.reachMesh.count = 0;
     this.reachMesh.renderOrder = 2;
-    const dot = new THREE.CircleGeometry(0.09, 4).rotateX(-Math.PI / 2);
+    const dot = new THREE.CircleGeometry(0.12, 4).rotateX(-Math.PI / 2);
     this.pathMesh = new THREE.InstancedMesh(dot, new THREE.MeshBasicMaterial({ color: COLORS.emberHot, transparent: true, opacity: 0.95, depthWrite: false }), 64);
     this.pathMesh.count = 0;
     this.pathMesh.renderOrder = 3;
-    const frame = squareFrame(0.98, 0.06);
+    const frame = squareFrame(0.98 * TILE, 0.06 * TILE);
     this.hoverMesh = new THREE.Mesh(frame, new THREE.MeshBasicMaterial({ color: COLORS.parchment, transparent: true, opacity: 0.85, depthWrite: false }));
     this.hoverMesh.visible = false;
     this.hoverMesh.renderOrder = 4;
-    this.targetMesh = new THREE.InstancedMesh(squareFrame(0.92, 0.07), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.9, depthWrite: false }), 64);
+    this.targetMesh = new THREE.InstancedMesh(squareFrame(0.92 * TILE, 0.07 * TILE), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.9, depthWrite: false }), 64);
     this.targetMesh.count = 0;
     this.targetMesh.renderOrder = 4;
     const ringGeo = new THREE.RingGeometry(0.34, 0.42, 24).rotateX(-Math.PI / 2);
@@ -226,7 +227,7 @@ export class Diorama {
       const seed = i * 1.7;
       const flicker = 1 + Math.sin(t * 11 + seed) * 0.04 + Math.sin(t * 23 + seed * 2) * 0.03 + Math.sin(t * 5.3 + seed) * 0.03;
       l.intensity = (v.isSquad ? 5 : 4.5) * flicker;
-      l.distance = 8.5;
+      l.distance = 15;
       l.position.set(v.root.position.x + 0.1, v.root.position.y + 1.05 + Math.sin(t * 7 + seed) * 0.02, v.root.position.z + 0.1);
     }
   }
@@ -240,10 +241,10 @@ export class Diorama {
     for (const [lid, v] of this.levels) v.group.visible = lid === id;
     const lv = levelOf(this.map, id)!;
     const y = levelY(id);
-    this.rig.bounds.set(new THREE.Vector3(lv.x0 - 1, y - 1, -1), new THREE.Vector3(lv.x0 + lv.width + 1, y + 1, lv.height + 1));
+    this.rig.bounds.set(new THREE.Vector3((lv.x0 - 1) * TILE, y - 1, -TILE), new THREE.Vector3((lv.x0 + lv.width + 1) * TILE, y + 1, (lv.height + 1) * TILE));
     this.rig.setHeight(y, instant);
     if (instant) {
-      this.rig.focus(new THREE.Vector3(lv.x0 + lv.width / 2, y, lv.height / 2), true);
+      this.rig.focus(new THREE.Vector3((lv.x0 + lv.width / 2) * TILE, y, (lv.height / 2) * TILE), true);
     }
     this.refreshUnitVisibility();
     this.refreshContacts();
@@ -260,8 +261,8 @@ export class Diorama {
   /** Frame the whole shown level. */
   frameLevel(): void {
     const lv = levelOf(this.map, this.shownLevel)!;
-    this.rig.focus(new THREE.Vector3(lv.x0 + lv.width / 2, levelY(lv.id), lv.height / 2));
-    this.rig.distance = Math.max(10, Math.min(36, Math.max(lv.width, lv.height) * 1.15));
+    this.rig.focus(new THREE.Vector3((lv.x0 + lv.width / 2) * TILE, levelY(lv.id), (lv.height / 2) * TILE));
+    this.rig.distance = Math.max(14, Math.min(60, Math.max(lv.width, lv.height) * 1.15 * TILE));
   }
 
   setFollow(unitId: string | null): void {
@@ -317,6 +318,7 @@ export class Diorama {
     const v = new UnitView(u, this.clock);
     this.views.set(u.id, v);
     this.scene.add(v.root);
+    v.root.scale.setScalar(1.5); // V2: bigger figures on bigger tiles
     v.root.position.copy(squareCenter(u.pos, 0));
     v.face(0, u.side === 'player' ? -1 : 1);
     return v;
@@ -350,20 +352,31 @@ export class Diorama {
     this.props.clear();
     const exp = state.expedition;
     if (!exp) return;
-    const coin = new THREE.MeshLambertMaterial({ color: COLORS.gold, emissive: 0x3a2604, flatShading: true });
+    const coin = new THREE.MeshLambertMaterial({ color: COLORS.gold, emissive: 0x7a4f08, flatShading: true });
     const wood = new THREE.MeshLambertMaterial({ color: COLORS.wood, flatShading: true });
     const iron = new THREE.MeshLambertMaterial({ color: COLORS.iron, flatShading: true });
     for (const [k, items] of Object.entries(exp.floorLoot)) {
       if (!items.length || !this.explored.has(k)) continue;
       const c = parseSquareKey(k);
       const g = new THREE.Group();
-      const n = Math.min(6, 2 + items.length);
+      const value = items.reduce((n, i) => n + i.value, 0);
+      // V2: treasure is the goal, so piles read from across a room. A chest
+      // for anything worth 100+, a heap of coins sized by value.
+      if (value >= 100) {
+        const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.28), wood);
+        chest.position.set(0, 0.13, -0.12);
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.05, 0.3), iron);
+        band.position.set(0, 0.2, -0.12);
+        g.add(chest, band);
+      }
+      const n = Math.min(12, 3 + Math.round(value / 60));
       for (let i = 0; i < n; i++) {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 6), coin);
-        m.position.set((i % 3) * 0.08 - 0.08, 0.01 + Math.floor(i / 3) * 0.022, Math.floor(i / 3) * 0.04);
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.03, 6), coin);
+        m.position.set(((i * 37) % 5) * 0.09 - 0.18, 0.015 + Math.floor(i / 5) * 0.03, ((i * 17) % 3) * 0.08 + 0.08);
         g.add(m);
       }
-      g.position.copy(squareCenter(c)).add(new THREE.Vector3(0.28, 0, 0.28));
+      if (items.some((i) => i.weight > 1)) g.scale.setScalar(1.6);
+      g.position.copy(squareCenter(c));
       g.userData.square = k;
       this.props.add(g);
     }
@@ -500,7 +513,7 @@ export class Diorama {
     let n = 0;
     for (const c of squares) {
       if (c.level !== this.shownLevel || n >= 400) continue;
-      m.makeTranslation(c.x + 0.5, levelY(c.level) + FLOOR_TOP + 0.012, c.y + 0.5);
+      m.makeTranslation((c.x + 0.5) * TILE, levelY(c.level) + FLOOR_TOP + 0.012, (c.y + 0.5) * TILE);
       this.reachMesh.setMatrixAt(n++, m);
     }
     this.reachMesh.count = n;
@@ -512,7 +525,7 @@ export class Diorama {
     let n = 0;
     for (const c of path) {
       if (c.level !== this.shownLevel || n >= 64) continue;
-      m.makeTranslation(c.x + 0.5, levelY(c.level) + FLOOR_TOP + 0.02, c.y + 0.5);
+      m.makeTranslation((c.x + 0.5) * TILE, levelY(c.level) + FLOOR_TOP + 0.02, (c.y + 0.5) * TILE);
       this.pathMesh.setMatrixAt(n++, m);
     }
     this.pathMesh.count = n;
@@ -524,7 +537,7 @@ export class Diorama {
     let n = 0;
     for (const c of squares) {
       if (c.level !== this.shownLevel || n >= 64) continue;
-      m.makeTranslation(c.x + 0.5, levelY(c.level) + FLOOR_TOP + 0.025, c.y + 0.5);
+      m.makeTranslation((c.x + 0.5) * TILE, levelY(c.level) + FLOOR_TOP + 0.025, (c.y + 0.5) * TILE);
       this.targetMesh.setMatrixAt(n++, m);
     }
     this.targetMesh.count = n;
@@ -538,7 +551,7 @@ export class Diorama {
     }
     this.hoverMesh.visible = true;
     (this.hoverMesh.material as THREE.MeshBasicMaterial).color.setHex(danger ? COLORS.danger : COLORS.parchment);
-    this.hoverMesh.position.set(c.x + 0.5, levelY(c.level) + FLOOR_TOP + 0.03, c.y + 0.5);
+    this.hoverMesh.position.set((c.x + 0.5) * TILE, levelY(c.level) + FLOOR_TOP + 0.03, (c.y + 0.5) * TILE);
   }
 
   // ------------------------------------------------------------ picking
@@ -592,8 +605,8 @@ export class Diorama {
       const p = new THREE.Vector3();
       if (this.raycaster.ray.intersectPlane(plane, p)) {
         const lv = levelOf(this.map, this.shownLevel)!;
-        const x = Math.floor(p.x);
-        const yy = Math.floor(p.z);
+        const x = Math.floor(p.x / TILE);
+        const yy = Math.floor(p.z / TILE);
         if (x >= lv.x0 && x < lv.x0 + lv.width && yy >= 0 && yy < lv.height) coord = { level: this.shownLevel, x, y: yy };
       }
     }

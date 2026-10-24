@@ -6,7 +6,7 @@ import { applyWounds, isAdjacent, moraleCheck, planAttack, resolveAttack } from 
 import { chance, die, pick } from './dice';
 import { STATS } from './data';
 import { cellAt, label, sameSquare, squareKey } from './geometry';
-import { adjacentSquares, adjacentToEnemy, moveAllowance, pathTo, stepsFrom, walk } from './movement';
+import { adjacentSquares, adjacentToEnemy, moveAllowance, pathTo, stepsFrom, walk, withinLeash } from './movement';
 import { canSee } from './sight';
 import { boltTargets, cast, canCast } from './spells';
 import type { Ctx } from './ctx';
@@ -107,7 +107,7 @@ function actSoldier(ctx: Ctx, u: Unit): void {
 
 function actMonster(ctx: Ctx, u: Unit): void {
   if (u.cls === 'dragon' && dragonBreath(ctx, u)) return;
-  const inRoom = ctx.fighters('player').filter((p) => ctx.ix.areaBySquare.get(squareKey(p.pos)) === u.homeArea || isAdjacent(ctx, u, p));
+  const inRoom = ctx.fighters('player').filter((p) => withinLeash(u, p.pos) || isAdjacent(ctx, u, p));
   if (!inRoom.length) return;
   if (u.cls === 'banshee') {
     const squads = inRoom.filter((p) => STATS[p.cls].isSquad);
@@ -135,7 +135,7 @@ function actMonster(ctx: Ctx, u: Unit): void {
 function dragonBreath(ctx: Ctx, u: Unit): boolean {
   u.breathCooldown = Math.max(0, (u.breathCooldown ?? 0) - 1);
   if (u.breathCooldown) return false;
-  const inCave = ctx.fighters('player').filter((p) => ctx.ix.areaBySquare.get(squareKey(p.pos)) === u.homeArea);
+  const inCave = ctx.fighters('player').filter((p) => withinLeash(u, p.pos));
   const targets = inCave.filter((p) => canSee(ctx, u, p.pos, 6)).sort((a, b) => targetScore(b) - targetScore(a));
   if (!targets.length) return false;
   const t = targets[0]!;
@@ -250,7 +250,7 @@ export function castlePhase(ctx: Ctx, visible: Set<string>): void {
       u.actionsLeft -= 1;
       u.webbed = false;
     }
-    if (u.homeArea !== undefined) actMonster(ctx, u);
+    if (u.leash) actMonster(ctx, u);
     else actSoldier(ctx, u);
   }
 

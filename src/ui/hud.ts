@@ -118,8 +118,8 @@ export class Hud {
     this.renderTop();
     this.renderRoster();
     // Seed the log from the save once per expedition; afterwards events feed it.
-    if (this.logSeed !== `${s.seed}:${s.week}`) {
-      this.logSeed = `${s.seed}:${s.week}`;
+    if (this.logSeed !== `${s.seed}`) {
+      this.logSeed = `${s.seed}`;
       this.renderLogFrom(exp.log);
     }
     if (this.previewing) this.renderPreview();
@@ -200,7 +200,7 @@ export class Hud {
     const s = this.state!;
     const exp = s.expedition!;
     clear(this.el.turn);
-    this.el.turn.append(h('span', { class: 'kicker' }, `Week ${s.week} · ${exp.phase === 'player' ? 'your move' : 'castle phase'}`), h('span', { class: 'turn-num' }, 'Turn ', h('b', { class: 'num' }, String(exp.turn))));
+    this.el.turn.append(h('span', { class: 'kicker' }, `${exp.phase === 'player' ? 'Your move' : 'Castle phase'} · pack: ${packSummary(exp.pack)}`), h('span', { class: 'turn-num' }, 'Turn ', h('b', { class: 'num' }, String(exp.turn))));
     this.renderAlarm(exp.alarm);
     this.renderLevels();
   }
@@ -354,7 +354,7 @@ export class Hud {
         u.cls === 'dwarf' ? [h('dt', null, 'Charges'), h('dd', { class: 'num' }, String(u.charges))] : null,
       ),
       status.length ? h('p', { class: 'status' }, status.join(' · ')) : null,
-      h('div', { class: 'carry' }, h('div', { class: 'carry-head' }, h('span', null, 'Carrying'), h('span', { class: `num ${carry.overloaded ? 'neg' : ''}` }, `${carry.weight}/${carry.limit}`), h('span', { class: 'num gold-text' }, `${gold(carry.value)} g`)), h('div', { class: `carry-bar ${carry.overloaded ? 'over' : ''}` }, h('i', { style: `width:${pct}%` })), u.loot.length ? h('ul', { class: 'loot' }, u.loot.map((it) => h('li', null, h('span', null, it.name), h('span', { class: 'num dim' }, `${it.weight}c · ${gold(it.value)}g`)))) : null),
+      h('div', { class: 'carry' }, h('div', { class: 'carry-head' }, h('span', null, carry.weight ? 'Carrying · −1 move' : 'Carrying'), h('span', { class: 'num' }, `${carry.weight}/${carry.limit} sacks`), h('span', { class: 'num gold-text' }, `${gold(carry.value)} g`)), h('div', { class: 'carry-bar' }, h('i', { style: `width:${pct}%` })), u.loot.length ? h('ul', { class: 'loot' }, u.loot.map((it) => h('li', null, h('span', null, it.name), h('span', { class: 'num dim' }, `${it.weight} sack${it.weight > 1 ? 's' : ''} · ${gold(it.value)}g`)))) : null),
     );
   }
 
@@ -422,12 +422,6 @@ export class Hud {
           out.push({ name: isWall ? 'Blast wall' : a.secured ? 'Secured door' : 'Locked door', sub: where, run: () => this.doorPicker(u, a.edge, a.methods, isWall, a.secured) });
           break;
         }
-        case 'chest':
-          out.push({ name: 'Chest', sub: 'locked', run: () => this.chestPicker(u, a.chestId, a.methods) });
-          break;
-        case 'search':
-          out.push({ name: 'Search', sub: `${a.progress}/${a.needed}`, note: 'Search the room (1 action)', run: () => void this.host.send({ type: 'search', unitId: u.id }) });
-          break;
         case 'pickUp': {
           const pile = exp.floorLoot[squareKey(u.pos)] ?? [];
           out.push({ name: 'Pick up', sub: `${a.itemIds.length}`, run: () => this.itemPicker('Pick up', pile.filter((i) => a.itemIds.includes(i.id)), (it) => ({ type: 'pickUp', unitId: u.id, itemId: it.id })) });
@@ -445,19 +439,20 @@ export class Hud {
         case 'overwatch':
           out.push({ name: 'Overwatch', note: 'Shoot the first enemy that shows itself. Ends the turn.', run: () => void this.host.send({ type: 'overwatch', unitId: u.id }) });
           break;
-        case 'shieldwall':
-          out.push({ name: 'Shieldwall', note: 'Face a square: −20 to attacks from it. Ends the turn.', run: () => this.squareMode('Face the shieldwall toward…', a.facings, (c) => ({ type: 'shieldwall', unitId: u.id, facing: c })) });
+        case 'item':
+          if (a.item === 'draught') out.push({ name: 'Draught', sub: `${exp.pack.draught} left`, note: 'Heal a hero 2 wounds or return 3 men to a squad (1 action)', run: () => this.unitPicker('Give a healing draught to', a.targetIds, (id) => ({ type: 'useItem', unitId: u.id, item: 'draught', targetId: id })) });
+          else if (a.item === 'smoke') out.push({ name: 'Smoke bomb', sub: `${exp.pack.smoke} left`, note: 'Smoke a square and its neighbours for a turn (1 action)', run: () => this.squareMode('Throw smoke at…', a.targets, (c) => ({ type: 'useItem', unitId: u.id, item: 'smoke', target: c })) });
           break;
         case 'cast':
           break;
         case 'jump':
-          out.push({ name: 'Jump', sub: 'into the Pit', danger: true, note: 'Each man rolls: 1–4 is a wound', run: () => this.squareMode('Jump to…', a.targets, (c) => ({ type: 'jump', unitId: u.id, to: c })) });
+          out.push({ name: 'Jump', sub: 'into the Deep', danger: true, note: 'A long drop: each man is hurt on a 1–2', run: () => this.squareMode('Jump to…', a.targets, (c) => ({ type: 'jump', unitId: u.id, to: c })) });
           break;
         case 'climb':
-          out.push({ name: 'Climb', sub: 'with gear', run: () => this.squareMode('Climb to…', a.targets, (c) => ({ type: 'climb', unitId: u.id, to: c })) });
+          out.push({ name: 'Climb', sub: exp.rope ? 'rope' : 'anchor rope', run: () => this.squareMode('Climb to…', a.targets, (c) => ({ type: 'climb', unitId: u.id, to: c })) });
           break;
         case 'exit':
-          out.push({ name: 'Exit', sub: 'extract', note: 'Leave the castle with what you carry. No coming back this week.', run: () => void this.host.send({ type: 'exit', unitId: u.id }) });
+          out.push({ name: 'Exit', sub: 'extract', note: 'Leave the castle with what you carry. No coming back.', run: () => void this.host.send({ type: 'exit', unitId: u.id }) });
           break;
       }
     }
@@ -531,25 +526,18 @@ export class Hud {
   }
 
   private doorPicker(u: Unit, edge: string, methods: DoorMethod[], isWall: boolean, secured: boolean): void {
-    const exp = this.state!.expedition!;
-    const door = exp.doors[edge];
-    const helpers = exp.units.filter((x) => x.side === 'player' && !x.exited && x.id !== u.id && sameSquare(x.pos, u.pos)).map((x) => x.id);
     const rows = methods.map((m) => ({
       name: METHOD_NAME[m],
-      note: m === 'chop' && door ? `${METHOD_NOTE[m]} (${door.chop}/10)` : m === 'smash' && helpers.length ? `${METHOD_NOTE[m]} Helpers in square join in.` : METHOD_NOTE[m],
-      run: () => void this.host.send({ type: 'door', unitId: u.id, edge, method: m, helpers: m === 'smash' ? helpers : undefined }),
+      note: METHOD_NOTE[m],
+      run: () => void this.host.send({ type: 'door', unitId: u.id, edge, method: m }),
     }));
-    this.openPicker(`${isWall ? 'Wall' : 'Door'} ${this.edgeWhere(u.pos, edge)}${secured ? ' · held from the far side' : ''}`, rows);
-  }
-
-  private chestPicker(u: Unit, chestId: string, methods: ('pick' | 'smash' | 'chop' | 'unlock')[]): void {
-    this.openPicker('Locked chest', methods.map((m) => ({ name: METHOD_NAME[m], note: METHOD_NOTE[m], run: () => void this.host.send({ type: 'chest', unitId: u.id, chestId, method: m }) })));
+    this.openPicker(`${isWall ? 'Cracked wall' : 'Door'} ${this.edgeWhere(u.pos, edge)}${secured ? ' · held from the far side' : ''}`, rows);
   }
 
   private itemPicker(title: string, items: LootItem[], cmd: (it: LootItem) => Command): void {
     this.openPicker(
       title,
-      items.map((it) => ({ name: it.name, note: `${it.weight} coins weight · ${gold(it.value)} g`, run: () => void this.host.send(cmd(it)) })),
+      items.map((it) => ({ name: it.name, note: `${it.weight} sack${it.weight > 1 ? 's' : ''} · ${gold(it.value)} g`, run: () => void this.host.send(cmd(it)) })),
     );
   }
 
@@ -1019,4 +1007,12 @@ function menDots(n: number, cls = ''): HTMLElement {
 
 function appendAll(el: HTMLElement, ...kids: (Node | null)[]): void {
   for (const k of kids) if (k) el.appendChild(k);
+}
+
+function packSummary(pack: Record<string, number>): string {
+  const names: Record<string, string> = { charge: 'charge', rope: 'rope', draught: 'draught', smoke: 'smoke' };
+  const parts = Object.entries(pack)
+    .filter(([k, n]) => n > 0 && names[k])
+    .map(([k, n]) => `${n} ${names[k]}${n > 1 ? 's' : ''}`);
+  return parts.length ? parts.join(', ') : 'empty';
 }

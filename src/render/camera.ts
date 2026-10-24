@@ -9,8 +9,8 @@ export class CameraRig {
   target = new THREE.Vector3();
   yaw = -0.5;
   pitch = 0.95;
-  distance = 13;
-  private cur = { target: new THREE.Vector3(), yaw: -0.5, pitch: 0.95, distance: 13 };
+  distance = 20;
+  private cur = { target: new THREE.Vector3(), yaw: -0.5, pitch: 0.95, distance: 20 };
   private keys = new Set<string>();
   private drag: { button: number; x: number; y: number } | null = null;
   /** Limits for the target, set from the shown level's bounds. */
@@ -56,7 +56,7 @@ export class CameraRig {
       (e) => {
         e.preventDefault();
         const f = Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 120) * 0.0015);
-        this.distance = THREE.MathUtils.clamp(this.distance * f, 4, 40);
+        this.distance = THREE.MathUtils.clamp(this.distance * f, 6, 64);
       },
       { passive: false },
     );

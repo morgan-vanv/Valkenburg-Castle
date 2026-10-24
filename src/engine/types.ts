@@ -76,10 +76,34 @@ export interface LevelMap {
   hoard: Coord[];
 }
 
+/** A treasure pile placed on the map (V2: loot is visible, no search rolls). */
+export interface LootSpot {
+  at: Coord;
+  name: string;
+  value: number;
+  /** Sacks needed to carry it. */
+  sacks: number;
+}
+
+/** An enemy placed on the map at the start of a run. */
+export interface Spawn {
+  at: Coord;
+  cls: UnitClass;
+  name: string;
+  /** Squads only. */
+  men?: number;
+  /** Starts awake and patrolling. */
+  awake?: boolean;
+}
+
 export interface CastleMap {
   name: string;
   levels: LevelMap[];
   links: LevelLink[];
+  loot?: LootSpot[];
+  spawns?: Spawn[];
+  /** Pairs of shaft squares: top (balcony side, upper level) and bottom (lower level). */
+  shafts?: { top: Coord[]; bottom: Coord[] }[];
 }
 
 // ---------------------------------------------------------------- units
@@ -170,6 +194,10 @@ export interface Unit {
   freed?: boolean;
   /** Hero roster id, for player heroes. */
   heroId?: string;
+  /** Squads: men at the start of the run (healing can't exceed it). */
+  startMen?: number;
+  /** Monsters: how far from their post they will go. */
+  leash?: number;
 }
 
 // ---------------------------------------------------------------- expedition
@@ -245,12 +273,16 @@ export interface Expedition {
   monsterRooms: Record<number, number>;
   /** Men from the barracks who went in. */
   musterMen: number;
+  /** The party's shared pack of bought items. */
+  pack: Record<ItemId, number>;
+  /** A rope is anchored at the shaft: climbing down or up is safe and quick. */
+  rope: boolean;
   log: string[];
 }
 
 // ---------------------------------------------------------------- campaign
 
-export type CampaignStage = 'week' | 'muster' | 'expedition' | 'debrief' | 'won' | 'lost';
+export type CampaignStage = 'shop' | 'expedition' | 'results';
 
 export interface Hero {
   id: string;
@@ -260,93 +292,70 @@ export interface Hero {
   enchanted: boolean;
 }
 
-export interface MusterSquad {
-  id: string;
-  name: string;
-  men: number;
-  armor: Armor;
-}
+export type Medal = 'gold' | 'silver' | 'bronze' | 'none';
 
-export interface MusterPlan {
-  heroes: { heroId: string; entrance: Coord }[];
-  squads: { squad: MusterSquad; entrance: Coord }[];
-}
-
-export interface DebriefReport {
-  week: number;
-  goldBanked: number;
+export interface RunResult {
+  /** Hobart got out alive. */
+  survived: boolean;
+  /** Gold carried out plus the unspent purse (0 if Hobart died). */
+  score: number;
+  lootGold: number;
+  purseLeft: number;
+  medal: Medal;
   lootNames: string[];
   menLost: number;
   heroesLost: string[];
-  deathPayments: number;
-  prisonersRescued: number;
+  turns: number;
+  reason: string;
 }
 
-/** What the castle keeps between weeks. */
-export interface CastlePersistent {
-  /** Surviving enemy units, stored as at the end of the last expedition (reset to posts). */
-  enemies: Unit[];
-  /** Edge keys of doors destroyed for the campaign. */
-  destroyedDoors: string[];
-  floorLoot: Record<string, LootItem[]>;
-  /** Prisoners still held per cell index. */
-  prisoners: number[];
-  dragonAlive: boolean;
-  hoardTaken: boolean;
+/** Which entrance each unit uses. Keys: hero ids and squad keys ('squad1', 'squad2', 'sellswords'). */
+export interface LaunchPlan {
+  entrances: Record<string, Coord>;
 }
 
 export interface GameState {
-  version: 1;
+  version: 2;
   seed: number;
   /** RNG state, advanced by every roll. */
   rng: number;
-  week: number;
-  maxWeeks: number;
-  goalGold: number;
-  gold: number;
-  barracks: number;
-  heroes: Hero[];
   stage: CampaignStage;
-  castle: CastlePersistent;
+  /** Gold left to spend in the shop; what's unspent counts toward the score. */
+  purse: number;
+  /** Items bought, carried in as the party pack. */
+  pack: Record<ItemId, number>;
+  heroes: Hero[];
   expedition?: Expedition;
-  lastDebrief?: DebriefReport;
-  /** Why the campaign ended. */
-  endReason?: string;
-  /** Wages paid at the start of the current week. */
-  lastWages: number;
-  hiredThisWeek: number;
+  result?: RunResult;
   /** Running id counter for new units and items. */
   nextId: number;
 }
 
 // ---------------------------------------------------------------- commands
 
-export type DoorMethod = 'pick' | 'smash' | 'chop' | 'unlock' | 'blast';
+export type DoorMethod = 'pick' | 'force' | 'blast';
+
+export type ItemId = 'charge' | 'rope' | 'draught' | 'smoke' | 'sellswords' | 'banner';
 
 export type SpellId = 'esp' | 'fireball' | 'smokescreen' | 'pyrotechnics' | 'unlock' | 'combat';
 
 export type Command =
-  // campaign
-  | { type: 'hire'; men: number }
-  | { type: 'beginMuster' }
-  | { type: 'cancelMuster' }
-  | { type: 'skipWeek' }
-  | { type: 'launch'; plan: MusterPlan }
-  | { type: 'continueAfterDebrief' }
-  // expedition
+  // before the run
+  | { type: 'buy'; item: ItemId }
+  | { type: 'refund'; item: ItemId }
+  | { type: 'launch'; plan: LaunchPlan }
+  // the run
   | { type: 'move'; unitId: string; to: Coord }
   | { type: 'melee'; unitId: string; targetId: string; focus: number }
   | { type: 'missile'; unitId: string; targetId: string; focus: number }
-  | { type: 'door'; unitId: string; edge: string; method: DoorMethod; helpers?: string[] }
-  | { type: 'chest'; unitId: string; chestId: string; method: Exclude<DoorMethod, 'blast'> }
-  | { type: 'search'; unitId: string }
+  | { type: 'door'; unitId: string; edge: string; method: DoorMethod }
   | { type: 'pickUp'; unitId: string; itemId: string }
   | { type: 'drop'; unitId: string; itemId: string }
   | { type: 'give'; unitId: string; toId: string; itemId: string }
   | { type: 'giveFocus'; unitId: string; toId: string }
   | { type: 'overwatch'; unitId: string }
-  | { type: 'shieldwall'; unitId: string; facing: Coord }
   | { type: 'cast'; unitId: string; spell: SpellId; target?: Coord; targetId?: string; edge?: string }
+  | { type: 'useItem'; unitId: string; item: ItemId; target?: Coord; targetId?: string; edge?: string }
   | { type: 'jump'; unitId: string; to: Coord }
   | { type: 'climb'; unitId: string; to: Coord }
   | { type: 'exit'; unitId: string }
@@ -399,7 +408,8 @@ export type GameEvent =
   | { type: 'freed'; unitId: string; men: number }
   | { type: 'log'; text: string }
   | { type: 'expeditionOver' }
-  | { type: 'campaignOver'; won: boolean; reason: string };
+  | { type: 'itemUsed'; unitId: string; item: ItemId; target?: Coord }
+  | { type: 'runOver'; survived: boolean; score: number; medal: Medal; reason: string };
 
 export interface ApplyResult {
   state: GameState;
