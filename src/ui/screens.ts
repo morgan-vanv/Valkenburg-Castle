@@ -186,12 +186,14 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   }
 }
 
+const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
+
 function contractCard(k: Contract, host: ScreenHost): HTMLElement {
   return h(
     'article',
     { class: `contract kind-${k.kind}` },
-    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : 'Recover'} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
-    h('h3', null, k.title),
+    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
+    k.kind === 'slay' ? h('h3', null, h('span', { class: 'ct-dragon', 'aria-hidden': 'true' }, '🐉 '), k.title) : h('h3', null, k.title),
     h('p', null, k.brief),
     k.warnings.length ? h('ul', { class: 'ct-warn' }, ...k.warnings.map((w) => h('li', null, w))) : h('p', { class: 'dim small' }, 'No warnings posted.'),
     h(
@@ -430,7 +432,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
   el.append(stationHead(`Prepare: ${contract.title}`, contract.brief));
   // Contract switcher.
-  el.append(h('div', { class: 'prep-contracts' }, ...c.board.map((k) => h('button', { class: `btn btn-small ${k.id === contract.id ? 'on' : ''}`, onclick: () => ((l.contractId = k.id), save()) }, `${k.kind === 'rescue' ? 'Rescue' : 'Recover'} L${k.level} · ${k.bounty}`))));
+  el.append(h('div', { class: 'prep-contracts' }, ...c.board.map((k) => h('button', { class: `btn btn-small ${k.id === contract.id ? 'on' : ''}`, onclick: () => ((l.contractId = k.id), save()) }, `${KIND_WORD[k.kind]} L${k.level} · ${k.bounty}`))));
 
   // Party.
   const party = h('div', { class: 'prep-party' });

@@ -4,6 +4,7 @@
 //   node scripts/v31-shot-levels.mjs <baseUrl> <outDir> [fixture|real] [pitch] [yaw]
 //
 // fixture: the stand-in engine on src/game/test/testCastle.ts (?fixture=1).
+// test:    the real engine on the test castle (?castle=test).
 // real:    the real engine and castle.
 // Writes level<N>.png (whole level), level<N>-close.png (zoomed on the pit or
 // the level's middle) and level<N>-play.png (normal fog from a hero's view).
@@ -24,7 +25,7 @@ p.on('pageerror', (e) => {
   console.log('[pageerror]', e.message);
 });
 
-const q = mode === 'fixture' ? '?fixture=1&reveal=1' : '?reveal=1';
+const q = mode === 'fixture' ? '?fixture=1&reveal=1' : mode === 'test' ? '?castle=test&reveal=1' : '?reveal=1';
 await p.goto(`${base}${q}`);
 await p.evaluate(() => localStorage.clear());
 await p.reload();

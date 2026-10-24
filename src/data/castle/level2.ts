@@ -1,83 +1,87 @@
-// Level 2: the Barracks and Cells. The orcs hold this floor. The mess hall is
-// the hub; the pit landing lies right under the Ruined Keep's pit, the tower
-// stair comes down into the undercroft, and a cracked wall joins the
-// cellblock to the landing. No exits: the way out is up. Format: see parse.ts.
-//
-// Rooms: b barracks, c cellblock, d drill yard, g guard room, m mess hall,
-// p pit landing, r storeroom, s old shrine, u undercroft.
+// Level 2: the Crossing. Built from the approved sketch (mockup/sketch.py)
+// region for region; hand edits below in offset (col, row).
 
-import { parseLevel } from './parse';
+import { LevelBuilder } from './build';
+import { PIT_L2, REGIONS_L2 } from './regions';
 
-const TILES = [
-//              111111111122222222223333
-//    0123456789012345678901234567890123
-  '  #########             ######### ', // 0
-  ' #..#..#..#   #####    #........# ', // 1
-  ' #..#..#..#   #....#   #........# ', // 2
-  ' #+##+##+### #%....#####........# ', // 3
-  ' #..........##..................# ', // 4
-  ' #..........x%..................# ', // 5
-  '  #+###+##+###......####........# ', // 6
-  '  #..##..#..##....%#   #........# ', // 7
-  '  #..##..#..# #....#    ####..### ', // 8
-  '  #..#######  ##..#        #..#   ', // 9
-  ' ##..#####  ####..#####    #..#   ', // 10
-  '#........# #..........#   ##..#   ', // 11
-  '#........###..........#####...#   ', // 12
-  '#.............o....o..........#   ', // 13
-  '#...............B...........S..#  ', // 14
-  '#........###..........####....#   ', // 15
-  '#........# #..o....o..#   #...#   ', // 16
-  '####..###  #..........#   ####    ', // 17
-  '   #..#     ####..#####           ', // 18
-  '####..###   ####..####   #######  ', // 19
-  '#........####.........#  #......# ', // 20
-  '#..............%......####......# ', // 21
-  '#...B....................L......# ', // 22
-  '#........####......%..####......# ', // 23
-  '#........#  #.........#  #......# ', // 24
-  '#########   ##########   #######  ', // 25
-];
+export function buildLevel2(): LevelBuilder {
+  const b = new LevelBuilder(
+    2,
+    'The Crossing',
+    {
+      crossing: { name: 'The Crossing', material: 'flagstone', tint: '#c4b89e', label: [23, 17] },
+      bridges: { name: 'Bridges', material: 'flagstone', tint: '#b3a893', label: [18, 16] },
+      arcade: { name: 'Arcade', material: 'flagstone', tint: '#8f8070', label: [22, 7] },
+      'ledge-e': { name: 'East ledge', material: 'rock', tint: '#7c7062', label: [35, 15] },
+      rim: { name: 'South rim', material: 'rock', tint: '#857563', label: [21, 21] },
+      guard: { name: 'Guard post', material: 'flagstone', tint: '#a0978a' },
+      barracks: { name: 'Barracks', material: 'planks', tint: '#9a7e5c', label: [21, 3] },
+      officers: { name: "Officers' quarters", material: 'rug', tint: '#8e5a4a' },
+      archive: { name: 'Archive', material: 'planks', tint: '#76604a' },
+      cells: { name: 'Cellblock', material: 'flagstone', tint: '#6e665c', label: [10, 23] },
+      winch: { name: 'Winch room', material: 'flagstone', tint: '#9c9282', label: [21, 25] },
+      forge: { name: 'Forge', material: 'flagstone', tint: '#8e5e4a' },
+    },
+    REGIONS_L2,
+    PIT_L2,
+  );
 
-const ROOMS = [
-//              111111111122222222223333
-//    0123456789012345678901234567890123
-  '                                  ', // 0
-  '  cc cc cc              bbbbbbbb  ', // 1
-  '  cc cc cc     pppp     bbbbbbbb  ', // 2
-  '              ppppp     bbbbbbbb  ', // 3
-  '  cccccccccc  ppppppbbbbbbbbbbbb  ', // 4
-  '  cccccccccc pppppppbbbbbbbbbbbb  ', // 5
-  '              pppppp    bbbbbbbb  ', // 6
-  '   gg  cc cc  ppppp     bbbbbbbb  ', // 7
-  '   gg  cc cc   pppp         uu    ', // 8
-  '   gg           mm          uu    ', // 9
-  '   gg           mm          uu    ', // 10
-  ' gggggggg   mmmmmmmmmm      uu    ', // 11
-  ' gggggggg   mmmmmmmmmm     uuu    ', // 12
-  ' gggggggggggmm mmmm mmmmmmuuuu    ', // 13
-  ' gggggggggggmmmm mmmmmmmmmuuuuu   ', // 14
-  ' gggggggg   mmmmmmmmmm    uuuu    ', // 15
-  ' gggggggg   mm mmmm mm     uuu    ', // 16
-  '    gg      mmmmmmmmmm            ', // 17
-  '    gg          dd                ', // 18
-  '    gg          dd                ', // 19
-  ' ssssssss    ddddddddd    rrrrrr  ', // 20
-  ' ssssssssssssddddddddd    rrrrrr  ', // 21
-  ' sss ssssssssdddddddddrrr rrrrrr  ', // 22
-  ' ssssssss    ddddddddd    rrrrrr  ', // 23
-  ' ssssssss    ddddddddd    rrrrrr  ', // 24
-  '                                  ', // 25
-];
+  // Fix: the cracked wall from the officers' quarters touched no archive hex.
+  b.floor(9, 8, 'archive');
 
-export const level2 = parseLevel(2, 'The Barracks and Cells', TILES, ROOMS, {
-  m: { id: 'l2-mess-hall', name: 'Mess Hall', label: [16, 12] },
-  p: { id: 'l2-pit-landing', name: 'Pit Landing', label: [16, 1] },
-  c: { id: 'l2-cellblock', name: 'Cellblock', label: [6, 4] },
-  g: { id: 'l2-guard-room', name: 'Guard Room', label: [5, 13] },
-  b: { id: 'l2-barracks', name: 'Barracks', label: [27, 4] },
-  u: { id: 'l2-undercroft', name: 'Undercroft', label: [28, 12] },
-  d: { id: 'l2-drill-yard', name: 'Drill Yard', label: [17, 22] },
-  s: { id: 'l2-shrine', name: 'Old Shrine', label: [5, 21] },
-  r: { id: 'l2-storeroom', name: 'Storeroom', label: [28, 22] },
-});
+  // Doors, cracked wall, stairs, lift, the collapsed floor.
+  b.set(13, 3, { kind: 'door', locked: true }).set(32, 3, { kind: 'door' }).set(16, 23, { kind: 'door' }).set(5, 20, { kind: 'door' });
+  b.set(9, 7, { kind: 'cracked' });
+  b.set(37, 3, { kind: 'stairs' });
+  b.set(24, 27, { kind: 'lift' });
+  b.set(3, 23, { kind: 'pit' }); // collapsed floor: drops into the Drain
+
+  // The Crossing's statue, between the four bridge ends.
+  b.prop(23, 16, 'statue', true);
+
+  // Barracks: bunks along the north wall, a table and a barrel.
+  b.props('bunk', [[17, 1], [18, 1], [22, 1], [23, 1], [27, 1], [28, 1]]);
+  b.props('table', [[24, 4], [25, 4]]);
+  b.prop(31, 4, 'barrel');
+
+  // Officers' quarters: a table, a rack, a crate.
+  b.props('table', [[8, 1], [9, 1]]);
+  b.prop(6, 2, 'rack');
+  b.prop(11, 5, 'crate');
+
+  // Guard post: table and weapon rack; brazier in the corner.
+  b.props('table', [[35, 5], [36, 5]]);
+  b.props('rack', [[39, 2], [39, 3]]);
+  b.set(39, 6, { kind: 'brazier' });
+
+  // Archive: shelves in rows with aisles, a brazier at the reading end.
+  b.props('shelf', [[5, 10], [6, 10], [8, 10], [9, 10], [4, 13], [5, 13], [6, 13], [8, 13], [9, 13], [5, 16], [6, 16], [8, 16]], true);
+  b.set(10, 15, { kind: 'brazier' });
+
+  // Cellblock: cages in three of the cells.
+  b.props('cage', [[9, 21], [13, 25], [5, 25]]);
+
+  // Winch room: the winch beside the lift, crates and a barrel.
+  b.prop(25, 27, 'winch', true);
+  b.props('crate', [[18, 28], [19, 28]]);
+  b.prop(18, 26, 'barrel');
+
+  // Forge: the forge (burning), anvils, a rack and a barrel.
+  b.prop(37, 28, 'forge', true);
+  b.props('anvil', [[35, 26], [36, 25]]);
+  b.prop(39, 24, 'rack');
+  b.prop(32, 28, 'barrel');
+
+  // Railing: the arcade's pit side, broken at (28, 7) and (15, 14).
+  b.railing([[26, 7], [27, 7], [29, 7], [30, 7], [31, 7], [15, 13], [15, 15]]);
+
+  // Lights. The bridges and the Crossing are dark on purpose.
+  b.sconce(16, 1).sconce(31, 1); // barracks
+  b.sconce(6, 1); // officers
+  b.sconce(14, 6).sconce(33, 6); // arcade
+  b.sconce(7, 23); // cellblock
+  b.sconce(18, 23).sconce(26, 28); // winch room
+  b.light('fire', [[37, 28]]); // the forge
+  b.sconce(30, 24); // forge
+  return b;
+}

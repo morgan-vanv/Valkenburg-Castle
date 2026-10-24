@@ -6,7 +6,7 @@
 // in axial keys through offsetToAxial.
 
 import { axialToOffset, hexKey, offsetToAxial, type Hex, type Pos } from '../../game/hex';
-import type { LevelDef, Material, PropKind, RoomDef, TileDef } from '../../game/types';
+import type { LevelDef, LightDef, Material, PropKind, RoomDef, TileDef } from '../../game/types';
 import type { Shape } from './shapes';
 
 /** Sketch grid bounds (sketch.py COLS, ROWS). */
@@ -87,6 +87,11 @@ export class LevelBuilder {
     }
   }
 
+  /** Sketch region name of a hex (as built from the shapes). */
+  regionAt(c: number, r: number): string | undefined {
+    return this.regionOf.get(ok(c, r));
+  }
+
   get(c: number, r: number): TileDef | undefined {
     return this.tiles.get(ok(c, r));
   }
@@ -155,6 +160,24 @@ export class LevelBuilder {
   wallBeside(c: number, r: number): Off {
     for (const n of offNeighbors(c, r)) if (!this.tiles.has(ok(n[0], n[1]))) return n;
     throw new Error(`L${this.level}: no wall beside ${c},${r}`);
+  }
+
+  /** Fixed lights placed while building (offset coords resolved to Pos). */
+  readonly lights: LightDef[] = [];
+
+  /** A sconce on the wall next to floor hex (c, r). */
+  sconce(c: number, r: number): this {
+    const t = this.get(c, r);
+    if (!t || t.kind === 'pit' || !t.room) throw new Error(`L${this.level}: sconce beside ${c},${r} not next to floor`);
+    const [wc, wr] = this.wallBeside(c, r);
+    this.lights.push({ at: at(this.level, wc, wr), radius: 2, kind: 'sconce' });
+    return this;
+  }
+
+  light(kind: LightDef['kind'], cells: Off[], radius?: number): this {
+    const R: Record<LightDef['kind'], number> = { sconce: 2, daylight: 3, fire: 3, fungus: 2, glow: 2 };
+    for (const [c, r] of cells) this.lights.push({ at: at(this.level, c, r), radius: radius ?? R[kind], kind });
+    return this;
   }
 
   finish(): LevelDef {

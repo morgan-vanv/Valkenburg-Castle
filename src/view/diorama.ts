@@ -274,7 +274,9 @@ export class Diorama {
       }
       // What is seen down the shaft: the column plus a halo (the camera looks in at an angle).
       const seen = new Set<string>();
-      for (const k of column) for (const hx of range(parseHexKey(k), BELOW_HALO)) seen.add(hexKey(hx));
+      // Only under the shown level's footprint (elsewhere the void would show it floating).
+      const upper = this.levels.get(shown)!.def.tiles;
+      for (const k of column) for (const hx of range(parseHexKey(k), BELOW_HALO)) if (upper[hexKey(hx)]) seen.add(hexKey(hx));
       v.group.visible = true;
       v.applyBelow(seen);
       // The next level down is seen only through pits on this one that are inside the column.
@@ -1001,7 +1003,6 @@ export class Diorama {
         const lip = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.14), new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.9, depthWrite: false }));
         lip.position.set(mid.x, a.y + 0.02, mid.z);
         lip.lookAt(b.x, a.y + 0.02, b.z);
-        lip.rotateY(Math.PI / 2);
         lip.userData.level = p.level;
         lip.renderOrder = 4;
         this.lips.add(lip);
@@ -1041,7 +1042,8 @@ export class Diorama {
       ln.renderOrder = 9;
       this.landing.add(ln);
     }
-    this.landingAt = end.clone().add(new THREE.Vector3(0, 0.6, 0));
+    // Label at the jump-off hex when there is one (a deep landing may be off screen).
+    this.landingAt = (from && from.level === this.shownLevel ? this.worldOf(from, 0.2) : end).clone().add(new THREE.Vector3(0, 0.6, 0));
     this.landingTag.textContent = text;
     this.landingTag.classList.toggle('danger', danger);
     this.landingTag.classList.toggle('hidden', !text);

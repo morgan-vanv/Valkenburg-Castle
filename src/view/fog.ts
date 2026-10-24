@@ -201,7 +201,7 @@ uniform float uTime;`,
 ${glow ? 'vec3 baked = diffuseColor.rgb * vGlow;' : 'vec3 baked = vec3(0.0);'}
 if (vFog < 0.45) {
   // Seen down a pit: flat, cool and dim, but readable; fixed lights still glow.
-  outgoingLight = outgoingLight * 0.5 + diffuseColor.rgb * 0.30 * vec3(0.78, 0.82, 1.0) + baked * 0.8;
+  outgoingLight = outgoingLight * 0.3 + diffuseColor.rgb * 0.16 * vec3(0.75, 0.8, 1.0) + baked * 0.85;
 } else if (vFog < 0.6) {
   float l = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
   outgoingLight = mix(vec3(l), diffuseColor.rgb, 0.25) * uExplored + baked * 0.12 + vec3(0.004, 0.006, 0.012);
