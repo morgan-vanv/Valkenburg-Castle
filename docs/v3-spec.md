@@ -146,3 +146,49 @@ Pillars to check every rule against: simplicity over simulation; never slow a fa
 ## 13. Not in the slice (later)
 
 Levels 3 to 5, the Dragon, Sapper class, other crews, hiring/allying rivals, relight/eliminate/survey/hoard contracts, arcanist, traits, endless Deep Vaults mode.
+
+## 14. V3.1: the three-level castle
+
+Approved layout: the Castle Map Proposal, pass 2 (https://claude.ai/artifact/C8o5Sz4x4ngXzSMDG6cHsQ), drawn by mockup/sketch.py (images in mockup/shots/level1-3.png). Design intent: the redesign pitch (https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd). This section overrides earlier sections where they disagree.
+
+### 14.1 Levels
+
+- Level 1, the Ruined Keep; Level 2, the Crossing; Level 3, the Hollow. Light burns 1 per round on every level.
+- Exits: Level 1 main gate, sally port, east breach; Level 3 cave mouth (open from the start; the cost of using it is the long walk). No exits on Level 2.
+- Links: tower stair (L1 north-east) to the guard post (L2); the lift (L2 winch room to L3 lift base) runs once the winch is worked; the Sealed Stair (L3) is a sealed door, not usable.
+
+### 14.2 Falling
+
+- Pits are columns. Something entering a pit hex falls straight down: on each lower level in turn, if the tile at the same (q, r) is walkable it lands there (if occupied, the nearest free walkable hex within 3); if it's pit, it keeps falling. Level 1's pit mouth lies partly over Level 2's bridges, so a jump there may land on a bridge.
+- Damage: 4 for one level, 7 for two. Armor doesn't help. A fall that kills a monster counts as a kill.
+- Ways to fall: Jump (a hero action from a hex next to a pit: pick the pit hex), being shoved, a blast. Walking never steps into a pit.
+- Rope: anchored at an edge hex; Climb from that edge goes to where a fall from the adjacent pit hex would land, with no damage, and back up from that landing hex. Uses move and action.
+- Railing: an edge hex with `railing` can't be shoved off on its pit side. Level 1's pit mouth has only a few bits of railing; the arcade on Level 2 is railed except at its broken gaps.
+- Jump preview: `warning` names the drop ("Falls 2 levels into the Hollow: 7 damage. This will down Pim.") and `confirm` is true for drops of more than one level; the UI asks before sending.
+- `edgeRisk(heroId)`: the worst fall a shove could cause from where the hero stands (null if none). The UI shows an edge badge on the hero card and a red lip under the hero.
+
+### 14.3 Shoves and knockback
+
+- Hero Shove (action, adjacent target): 2 Might slots; 2 hits push it 1 hex straight away; 1 hit, nothing; Perfect also deals 1 damage. Into a pit hex: it falls. Into a wall or prop: 1 damage. Into another figure: both take 1. Into a fire (forge, vent, burning hex): 3 damage. The Dragon can't be shoved. The preview's outcomes name the landing hex result.
+- Orcs: if a hero they could attack stands on an edge so that the hex straight behind them (away from the orc) is an unrailed pit, the orc's intent is `shove` instead of attack (60% chance to land, no roll shown to the player beyond the intent). The intent shows `to`.
+- Berserker: its charge (moving 2+ hexes then attacking) knocks the target back 1 hex after the hit.
+
+### 14.4 The Dragon
+
+- 30 HP, armor 1, bite 4 slots at 65% for 3, moves 3, never leaves the Lair room. Starts asleep; wakes when a hero enters the Lair room or noise of 4+ reaches it.
+- Breath: every other round once awake, its intent is `breath` with `hexes` = a 5-hex straight line from its hex toward the nearest hero (hexes in that direction); the next world phase every hero on those hexes takes 4 (no roll, ignores armor). Noise 6.
+- Tail sweep: when not breathing and 2+ heroes are adjacent, intent `sweep`: every adjacent hero is shoved 1 hex away.
+- Otherwise it bites the nearest adjacent hero, or moves toward one.
+- Fire vents: walkable hexes listed in `castle.lights` with kind 'fire' and radius 1 (only those count as vents). Ending a move on one, or being shoved onto one, deals 3. The forge's fire is a tallprop with a 'fire' light next to it.
+- The hoard: 3 hoard items (2 slots each, worth 300 each) on the ground around the Dragon's spawn. A Burglar can take them while it sleeps (taking is silent).
+- Contract `slay`: unlocks at reputation 3; bounty 500; done when the Dragon dies and at least one hero gets out alive. XP for the kill +10 split among the heroes in the delve.
+
+### 14.5 Sight and fixed light
+
+- Sight range (layout glimpse and unit sight): bright 8, dim 6, dark 4, pitch 2; minus 1 on Level 2 and minus 2 on Level 3; never below 2.
+- Fixed lights (`castle.lights`): each lights its radius for good (sconce 2, daylight 3, fire 3, fungus 2, glow 2). Lit hexes count as lit for penalties and for sight.
+- Any lit hex in line of sight is visible from up to 14 hexes regardless of sight range (but only the lit hexes, not the dark ones between).
+
+### 14.6 The winch and lift
+
+- `winch` action: a hero next to the winch (the tallprop at the link's `winch`) works it: 1 action, noise 6, lift works for the rest of the delve. Then stepping from one lift tile to the other costs 1 movement, like stairs.
