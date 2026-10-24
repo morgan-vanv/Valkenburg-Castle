@@ -42,7 +42,7 @@ Each step ends with a commit and push to `v3`. Agents don't commit; the lead com
 - [x] Integration: V2 engine/renderer/map removed; typecheck clean, 60 tests, build OK
 - [x] Balance (first pass): lantern 40, tougher orcs, some monsters awake. Level 1 is a warm-up, Level 2 wipes careless parties. Revisit after play-testing.
 - [x] Play-test in headless Chromium: screenshot tour and a UI bot over several delves, 0 console errors
-- [ ] Merge to `main` and verify the live page
+- [x] Merge to `main` and verify the live page (deployed 2026-10-24 ~03:15 New York; title, camp and a delve checked live, no console errors)
 - [x] Changelog (docs/v3-changes.md) and decision log
 
 ## Resuming
