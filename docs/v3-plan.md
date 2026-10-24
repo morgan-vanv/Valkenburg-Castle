@@ -34,8 +34,8 @@ Levels 1 and 2 on hex grids; Hobart plus Sellsword, Burglar, Hedge Mage; slot ro
 
 Each step ends with a commit and push to `v3`. Agents don't commit; the lead commits their work, and `scripts/snapshot-wip.sh` pushes uncommitted work to `wip/v3` every so often.
 
-- [ ] Plan, safeguards and resume reminders
-- [ ] Contract: types, hex math, engine API, spec
+- [x] Plan, safeguards and resume reminders (6:00 and 8:30 New York check-ins scheduled)
+- [x] Contract: types, hex math, engine API, spec (src/game/types.ts, api.ts, hex.ts; docs/v3-spec.md); agent briefs in docs/agents/v3-*.md
 - [ ] Engine: rules for exploration, slot rolls, light, noise, combat, AI, rivals, contracts, camp; tests pass
 - [ ] Castle: Levels 1 and 2 as hex maps, validated (every room reachable, spawns on floor)
 - [ ] Presentation: hex diorama, rotatable camera, HUD with roll previews, camp screens
