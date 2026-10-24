@@ -41,7 +41,7 @@ Each step ends with a commit and push to `v2`.
 - [x] Renderer: tiles at 2× scale (TILE in src/render/world.ts), figures 1.5×, loot piles as chests and coin heaps
 - [x] UI: shop screen, results screen, item actions; remove muster/week/debrief
 - [x] Bot balance check: the careless bot banks 355–515 (median 395) in ~10 turns, short of bronze (600). The company carries 13 sacks against 16 sacks of loot: silver needs the Deep, gold needs the Dragon's hoard. Thresholds kept.
-- [ ] Play-test in headless Chromium, fix, merge to `main`, check the live page
+- [x] Play-test in headless Chromium, merge to `main` (deployed 2026-10-24 00:05 New York), live page checked
 - [x] Changelog for the owner (docs/v2-changes.md); decision logged in docs/decisions.md
 
 ## Resuming
