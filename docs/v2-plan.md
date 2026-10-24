@@ -35,7 +35,7 @@ Owner feedback after playing V1: too claustrophobic, visually and mechanically; 
 Each step ends with a commit and push to `v2`.
 
 - [x] Save V1 to `v1-prototype`; create `v2`
-- [ ] Map: cell-grid builder + the new two-level map, with tests
+- [x] Map: cell-grid builder (src/data/maps/grid.ts) + the new two-level map (src/data/maps/v2.ts)
 - [ ] Engine: one-shot run flow (shop → expedition → results), party pack and items
 - [ ] Engine: simplified doors, visible loot and sacks, removals; tests updated
 - [ ] Renderer: tiles at 2× scale, two-level map, items and loot piles visible

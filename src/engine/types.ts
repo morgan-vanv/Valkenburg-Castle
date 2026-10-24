@@ -76,10 +76,34 @@ export interface LevelMap {
   hoard: Coord[];
 }
 
+/** A treasure pile placed on the map (V2: loot is visible, no search rolls). */
+export interface LootSpot {
+  at: Coord;
+  name: string;
+  value: number;
+  /** Sacks needed to carry it. */
+  sacks: number;
+}
+
+/** An enemy placed on the map at the start of a run. */
+export interface Spawn {
+  at: Coord;
+  cls: UnitClass;
+  name: string;
+  /** Squads only. */
+  men?: number;
+  /** Starts awake and patrolling. */
+  awake?: boolean;
+}
+
 export interface CastleMap {
   name: string;
   levels: LevelMap[];
   links: LevelLink[];
+  loot?: LootSpot[];
+  spawns?: Spawn[];
+  /** Pairs of shaft squares: top (balcony side, upper level) and bottom (lower level). */
+  shafts?: { top: Coord[]; bottom: Coord[] }[];
 }
 
 // ---------------------------------------------------------------- units
