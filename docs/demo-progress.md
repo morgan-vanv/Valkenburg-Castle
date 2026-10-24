@@ -31,11 +31,13 @@ To recover after a lost session: `git fetch origin wip/demo && git checkout orig
 
 ## Remaining steps
 
-1. ~~Map~~ done. 2. ~~Engine entry point~~ done.
-3. Render agent delivers the 3D view and UI. Switch main.ts to the real engine and classic map.
-4. Run `npx tsx scripts/sim.ts 20` on the classic map; tune numbers in src/engine/data.ts so the 3,000-gold goal is reachable but hard.
-5. Play a full run in the browser (headless Chromium works here: see the render brief), fix what breaks.
-6. Commit, push to main, check the live page, update the GDD with anything learned.
+The demo is live. Next:
+
+1. The owner plays it and reports what is and isn't fun.
+2. Untested in a real run so far: Alarm tier waves late in an expedition, the cavern and the Dragon, the Pit and ladders, chests, smoke, explosions, melee Perfects. Exercise these next.
+3. Known UI rough edges: orc figures small at default zoom; 743 kB bundle (code-split Three.js); touch untested.
+4. API gaps the render agent noted: `died` events don't carry the unit; chest positions aren't exposed (UI assumes the unit's square).
+5. Tune numbers in src/engine/data.ts from play feedback; `npx tsx scripts/sim.ts 20` gives a quick bot baseline (median about 500 gold against the 2,000 goal).
 
 ## Workspace notes
 
