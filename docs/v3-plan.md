@@ -36,7 +36,7 @@ Each step ends with a commit and push to `v3`. Agents don't commit; the lead com
 
 - [x] Plan, safeguards and resume reminders (6:00 and 8:30 New York check-ins scheduled)
 - [x] Contract: types, hex math, engine API, spec (src/game/types.ts, api.ts, hex.ts; docs/v3-spec.md); agent briefs in docs/agents/v3-*.md
-- [ ] Engine: rules for exploration, slot rolls, light, noise, combat, AI, rivals, contracts, camp; tests pass
+- [x] Engine: rules for exploration, slot rolls, light, noise, combat, AI, rivals, contracts, camp; 48 engine tests pass (src/game; sim: scripts/v3-engine-sim.ts)
 - [x] Castle: Levels 1 and 2 as hex maps, validated (src/data/castle; preview docs/castle-preview.svg; 9 tests)
 - [ ] Presentation: hex diorama, rotatable camera, HUD with roll previews, camp screens
 - [ ] Integration: wire it together, remove V2 code, typecheck and tests pass

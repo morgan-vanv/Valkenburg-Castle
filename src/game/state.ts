@@ -15,6 +15,8 @@ export interface MonsterX extends Monster {
 export interface CrewX extends RivalCrew {
   pickups?: number;
   entered?: boolean;
+  /** Rounds in a row a sister couldn't get closer to her goal. */
+  blocked?: number;
 }
 
 export interface DelveX extends Delve {

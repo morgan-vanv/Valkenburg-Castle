@@ -145,6 +145,7 @@ export const testCastle: CastleDef = {
   contractSites: [
     { id: 'rec1', kind: 'recover', at: at(1, 5, 3), where: 'the pantry' },
     { id: 'res1', kind: 'rescue', at: at(2, 16, 8), where: 'the cells' },
+    { id: 'res2', kind: 'rescue', at: at(1, 16, 8), where: 'the east hall' },
   ],
   rivalEntrances: [at(1, 18, 7)],
 };
