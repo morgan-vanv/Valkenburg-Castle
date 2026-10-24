@@ -27,7 +27,7 @@ export interface FigureModel {
 
 const cache = new Map<string, FigureModel>();
 
-class Kit {
+export class Kit {
   parts: Part[] = [];
   add(geo: THREE.BufferGeometry, color: number, pos: [number, number, number], rot: [number, number, number] = [0, 0, 0], scale: [number, number, number] = [1, 1, 1], glow = false): this {
     const g = geo.clone();
@@ -196,7 +196,9 @@ export type ModelKey =
   | 'berserker'
   | 'gloam'
   | 'sister'
-  | 'prisoner';
+  | 'prisoner'
+  | 'dragon'
+  | 'dragonSleep';
 
 export function getModel(key: ModelKey): FigureModel {
   const hit = cache.get(key);
@@ -287,6 +289,12 @@ function buildModel(key: ModelKey): FigureModel {
         }
       return k.build(0.35, 0.28);
     }
+    case 'dragon':
+      dragon(k, false);
+      return k.build(2.6, 1.3);
+    case 'dragonSleep':
+      dragon(k, true);
+      return k.build(1.3, 1.3);
     case 'gloam': {
       // A shape of darkness with two pale eyes.
       const s = 0x050508;
@@ -298,6 +306,80 @@ function buildModel(key: ModelKey): FigureModel {
       k.box(0.07, 0.035, 0.02, 0xdfe8ff, [0.08, 1.08, 0.24], undefined, true);
       return k.build(1.4, 0.35, { floats: true, ghost: true });
     }
+  }
+}
+
+/**
+ * The Dragon, in real world units (UnitView draws it at scale 1): about two
+ * hexes long, red-brown scales, pale belly, horns, bat wings. Awake: reared up,
+ * neck raised, wings half open, jaws glowing. Asleep: curled round, head on its
+ * tail, wings folded.
+ */
+function dragon(k: Kit, asleep: boolean): void {
+  const scale = 0x8a2e1e;
+  const dark = 0x5a1c12;
+  const belly = 0xd8a868;
+  const horn = 0xe8dcc0;
+  const wing = 0x6a2216;
+  const eye = 0xffd040;
+  if (asleep) {
+    // Coiled body: a ring of segments.
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 1.75 + 0.3;
+      const r = 0.62;
+      const s = 0.5 - i * 0.03;
+      k.ball(s, i % 2 ? scale : dark, [Math.cos(a) * r, s * 0.7, Math.sin(a) * r], [1.25, 0.8, 1.1]);
+    }
+    k.ball(0.62, scale, [0, 0.5, 0], [1.4, 0.75, 1.2]);
+    // Folded wings on the back.
+    for (const sx of [-1, 1]) k.add(new THREE.ConeGeometry(0.55, 1.3, 3), wing, [sx * 0.3, 0.95, -0.1], [0.2, 0, sx * 1.2], [1, 1, 0.25]);
+    // Spines.
+    for (let i = 0; i < 5; i++) k.cone(0.08, 0.28, 4, horn, [-0.4 + i * 0.2, 1.0 - Math.abs(i - 2) * 0.06, -0.05]);
+    // Head resting on the coil, eyes shut (dark slits).
+    k.add(new THREE.ConeGeometry(0.26, 0.85, 5), scale, [0.85, 0.32, 0.7], [Math.PI / 2, 0, -0.4], [1, 1, 0.75]);
+    k.ball(0.28, scale, [0.6, 0.32, 0.45], [1, 0.8, 1.1]);
+    k.box(0.1, 0.02, 0.03, 0x1a0a06, [0.68, 0.42, 0.62]);
+    for (const sx of [-1, 1]) k.cone(0.06, 0.38, 4, horn, [0.5 + sx * 0.12, 0.55, 0.3], [-1.0, 0, sx * 0.3]);
+    // Tail tip.
+    k.cone(0.12, 0.6, 4, dark, [1.0, 0.18, -0.35], [0, 0, -1.4]);
+    // Smoke wisp from the nostrils (glow).
+    k.ball(0.06, 0xffa060, [1.1, 0.4, 1.0], undefined, true);
+    return;
+  }
+  // Awake: body, legs, tail, raised neck, head, jaws, wings.
+  k.ball(0.75, scale, [0, 0.95, -0.15], [1.05, 0.8, 1.45]);
+  k.ball(0.55, belly, [0, 0.8, 0.2], [1.0, 0.75, 1.1]);
+  for (const sx of [-1, 1]) {
+    // Fore and hind legs with claws.
+    k.cyl(0.14, 0.18, 0.75, 6, dark, [sx * 0.5, 0.38, 0.45], [0.2, 0, sx * 0.1]);
+    k.cyl(0.18, 0.22, 0.8, 6, dark, [sx * 0.55, 0.4, -0.6], [-0.2, 0, sx * 0.1]);
+    for (const dz of [0.45, -0.6]) for (let c = -1; c <= 1; c++) k.cone(0.04, 0.16, 3, horn, [sx * 0.5 + c * 0.07, 0.05, dz + 0.15], [Math.PI / 2, 0, 0]);
+    // Wings: two big triangles each, half open.
+    k.add(new THREE.ConeGeometry(1.1, 2.0, 3), wing, [sx * 1.15, 1.75, -0.35], [0.35, 0, sx * 1.15], [1, 1, 0.12]);
+    k.add(new THREE.ConeGeometry(0.7, 1.4, 3), dark, [sx * 1.75, 1.45, -0.6], [0.6, 0, sx * 1.6], [1, 1, 0.12]);
+    k.cyl(0.05, 0.07, 1.6, 4, dark, [sx * 0.9, 1.95, -0.3], [0.2, 0, sx * 1.0]);
+  }
+  // Tail: tapering segments curling back.
+  for (let i = 0; i < 6; i++) {
+    const t = i / 5;
+    k.ball(0.32 - i * 0.045, i % 2 ? scale : dark, [Math.sin(t * 2.2) * 0.5, 0.5 - t * 0.35, -1.0 - i * 0.32], [1, 0.8, 1.4]);
+  }
+  k.cone(0.14, 0.45, 4, horn, [Math.sin(2.2) * 0.5, 0.18, -2.95], [-Math.PI / 2, 0, 0]);
+  // Spines along the back.
+  for (let i = 0; i < 6; i++) k.cone(0.09, 0.32, 4, horn, [0, 1.55 - i * 0.07, 0.45 - i * 0.3], [-0.3, 0, 0]);
+  // Neck rising forward.
+  for (let i = 0; i < 4; i++) k.ball(0.3 - i * 0.03, i % 2 ? dark : scale, [0, 1.3 + i * 0.3, 0.55 + i * 0.18], [1, 1, 1.15]);
+  // Head: skull, snout, open jaw with a fire glow, horns, eyes.
+  const hy = 2.35;
+  const hz = 1.35;
+  k.ball(0.34, scale, [0, hy, hz], [1, 0.85, 1.2]);
+  k.box(0.38, 0.2, 0.6, scale, [0, hy + 0.02, hz + 0.45], [0.12, 0, 0]);
+  k.box(0.34, 0.1, 0.55, dark, [0, hy - 0.22, hz + 0.38], [0.4, 0, 0]);
+  k.box(0.26, 0.12, 0.4, 0xff7a20, [0, hy - 0.1, hz + 0.4], [0.25, 0, 0], true);
+  for (const sx of [-1, 1]) {
+    k.cone(0.07, 0.55, 4, horn, [sx * 0.2, hy + 0.32, hz - 0.25], [-1.1, 0, sx * 0.35]);
+    k.box(0.08, 0.05, 0.05, eye, [sx * 0.16, hy + 0.12, hz + 0.24], undefined, true);
+    for (let t = 0; t < 3; t++) k.cone(0.025, 0.09, 3, horn, [sx * 0.12, hy - 0.1, hz + 0.3 + t * 0.12], [Math.PI, 0, 0]);
   }
 }
 

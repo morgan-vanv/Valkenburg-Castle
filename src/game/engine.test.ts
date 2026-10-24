@@ -175,9 +175,9 @@ describe('movement', () => {
 
   it('rubble costs 2', () => {
     const s = delve();
-    const rub = at(2, 11, 3);
+    const rub = at(2, 14, 3);
     expect(w.tile(rub)?.kind).toBe('rubble');
-    put(s, 'brann', at(2, 10, 3));
+    put(s, 'brann', at(2, 13, 3));
     const r = e.reachable(s, 'brann', false).find((x) => samePos(x.to, rub))!;
     expect(r.cost).toBe(2);
   });
@@ -474,19 +474,6 @@ describe('combat', () => {
     expect(hero(r.state, 'brann').hp).toBeLessThan(10);
   });
 
-  it('shove into the pit kills', () => {
-    const s = delve();
-    // Pit at (10,3),(9,4),(10,4). Hero at (12,3) hmm: needs a straight line hero → monster → pit.
-    const pit = at(1, 10, 3);
-    const mAt = at(1, 11, 3);
-    const hAt = at(1, 12, 3);
-    expect(w.tile(pit)?.kind).toBe('pit');
-    put(s, 'brann', hAt);
-    const m = monster(s, 'orc', mAt, 'hunting');
-    expect(e.preview(s, 'brann', 'shove', { id: m.id }).outcomes[2]).toBe('Falls into the pit');
-    const r = act(s, 'brann', 'shove', { id: m.id }, 2);
-    expect(r.state.delve!.monsters).toHaveLength(0);
-  });
 });
 
 describe('monsters', () => {
@@ -665,5 +652,444 @@ describe('determinism and saves', () => {
     expect(back).toEqual(s);
     expect(e.deserialize('nope')).toBeNull();
     expect(e.deserialize('{"version":2}')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- V3.1 (spec section 14)
+
+import { computeIntents } from './world-phase';
+import { lairCheck } from './dragon';
+import { posNeighbors as posNeighborsOf } from './hex';
+
+/** Hexes a, b, c in a straight line: b = a + dir, c = a + 2 dir. */
+function inLine(b: Pos, c: Pos): Pos {
+  return { level: b.level, q: 2 * b.q - c.q, r: 2 * b.r - c.r };
+}
+
+function dragonDelve(): { s: GameState; dragon: Monster } {
+  const s = delve();
+  const sp = testCastle.spawns.find((x) => x.kind === 'dragon')!;
+  const def = MONSTERS.dragon;
+  const dragon: Monster = { id: 'm9', kind: 'dragon', name: 'The Wyrm', at: { ...sp.at }, hp: def.hp, maxHp: def.hp, awareness: 'asleep', spawnedAt: { ...sp.at } };
+  s.delve!.monsters.push(dragon);
+  for (const id of ALL) put(s, id, at(3, 2 + ALL.indexOf(id), 2));
+  return { s, dragon };
+}
+
+describe('falls (14.2)', () => {
+  it('L1 over a bridge lands on L2 for 4; elsewhere falls to L3 for 7', () => {
+    const s = delve();
+    const a = e.fallInfo(s, at(1, 10, 3))!;
+    expect(a.to).toEqual(at(2, 10, 3));
+    expect([a.levels, a.damage]).toEqual([1, 4]);
+    const b = e.fallInfo(s, at(1, 10, 4))!;
+    expect(b.to).toEqual(at(3, 10, 4));
+    expect([b.levels, b.damage]).toEqual([2, 7]);
+    expect(b.levelName).toBe('the Test Hollow');
+    const c = e.fallInfo(s, at(2, 10, 5))!;
+    expect([c.to.level, c.damage]).toEqual([3, 4]);
+    expect(e.fallInfo(s, at(1, 4, 7))).toBeNull();
+  });
+
+  it('lands on the nearest free hex when the spot is taken', () => {
+    const s = delve();
+    put(s, 'brann', at(2, 10, 3));
+    const f = e.fallInfo(s, at(1, 10, 3))!;
+    expect(f.to.level).toBe(2);
+    expect(samePos(f.to, at(2, 10, 3))).toBe(false);
+  });
+
+  it('jump offers each adjacent pit hex; previews warn and confirm on 2-level drops', () => {
+    const s = delve();
+    put(s, 'pim', at(1, 11, 3));
+    const j = e.actions(s, 'pim').find((o) => o.action === 'jump')!;
+    expect(j.targets.map((t) => posKey(t.at!)).sort()).toEqual([posKey(at(1, 10, 3)), posKey(at(1, 11, 4))].sort());
+    const one = e.preview(s, 'pim', 'jump', { at: at(1, 10, 3) });
+    expect(one.warning).toMatch(/1 level.*4 damage/);
+    expect(one.confirm).toBeFalsy();
+    const two = e.preview(s, 'pim', 'jump', { at: at(1, 11, 4) });
+    expect(two.warning).toBe('Falls 2 levels into the Test Hollow: 7 damage. This will down Pim.');
+    expect(two.confirm).toBe(true);
+  });
+
+  it('jumping lands per the column with damage and a fell event', () => {
+    const s = delve();
+    put(s, 'brann', at(1, 11, 3));
+    const r = act(s, 'brann', 'jump', { at: at(1, 11, 4) });
+    const b = hero(r.state, 'brann');
+    expect(b.at).toEqual(at(3, 11, 4));
+    expect(b.hp).toBe(3);
+    const fell = r.events.find((x) => x.type === 'fell');
+    expect(fell).toMatchObject({ type: 'fell', id: 'brann', levels: 2, damage: 7 });
+    expect(b.moved && b.acted).toBe(true);
+  });
+
+  it('rope and climb: down to where a fall would land, no damage, and back up', () => {
+    let s = delve();
+    put(s, 'brann', at(1, 11, 3));
+    hero(s, 'brann').pack.push({ id: 'rp', kind: 'rope', name: 'Rope', amount: 1, slots: 1 });
+    s = act(s, 'brann', 'rope', { itemId: 'rp' }).state;
+    expect(s.delve!.ropes).toEqual([posKey(at(1, 11, 3))]);
+    s = ok(s, { type: 'endTurn' }).state;
+    const cl = e.actions(s, 'brann').find((o) => o.action === 'climb')!;
+    expect(cl.targets.some((t) => samePos(t.at!, at(2, 10, 3)))).toBe(true);
+    s = act(s, 'brann', 'climb', { at: at(3, 11, 4) }).state;
+    expect(hero(s, 'brann').at).toEqual(at(3, 11, 4));
+    expect(hero(s, 'brann').hp).toBe(10);
+    s = ok(s, { type: 'endTurn' }).state;
+    s = act(s, 'brann', 'climb', { at: at(1, 11, 3) }).state;
+    expect(hero(s, 'brann').at).toEqual(at(1, 11, 3));
+  });
+
+  it('edgeRisk: worst unrailed fall; null on a railing or away from pits', () => {
+    const s = delve();
+    put(s, 'pim', at(1, 11, 3));
+    expect(e.edgeRisk(s, 'pim')!.levels).toBe(2);
+    put(s, 'pim', at(1, 9, 3));
+    expect(e.edgeRisk(s, 'pim')).toBeNull();
+    put(s, 'pim', GATE);
+    expect(e.edgeRisk(s, 'pim')).toBeNull();
+  });
+});
+
+describe('shoves (14.3)', () => {
+  function shoveSetup(dest: Pos, mAt: Pos, kind: MonsterKind = 'orc') {
+    const s = delve();
+    put(s, 'brann', inLine(mAt, dest));
+    const m = monster(s, kind, mAt, 'hunting');
+    m.hp = m.maxHp = 20;
+    return { s, m };
+  }
+
+  it('into a pit: it falls with fall damage; a fall kill counts', () => {
+    const { s, m } = shoveSetup(at(1, 10, 3), at(1, 11, 3));
+    const p = e.preview(s, 'brann', 'shove', { id: m.id });
+    expect(p.outcomes[1]).toBe('Nothing');
+    expect(p.outcomes[2]).toMatch(/Over the edge: falls 1 level/);
+    const r = until(s, { type: 'act', heroId: 'brann', action: 'shove', target: { id: m.id }, focus: 0 }, (ev) => rolls(ev)[0]!.hits === 2 && !rolls(ev)[0]!.perfect || rolls(ev)[0]!.perfect);
+    const mm = r.state.delve!.monsters.find((x) => x.id === m.id)!;
+    expect(mm.at).toEqual(at(2, 10, 3));
+    expect(mm.hp).toBe(20 - 4 - 1); // perfect (2 of 2) adds 1
+    expect(r.events.map((x) => x.type)).toEqual(expect.arrayContaining(['shoved', 'fell']));
+    // A kill by falling.
+    const k = shoveSetup(at(1, 10, 3), at(1, 11, 3), 'rats');
+    k.m.hp = 3;
+    const r2 = act(k.s, 'brann', 'shove', { id: k.m.id }, 2);
+    expect(r2.state.delve!.monsters).toHaveLength(0);
+    expect(r2.state.delve!.kills.brann).toBe(1);
+  });
+
+  it('1 hit does nothing', () => {
+    const { s, m } = shoveSetup(at(1, 10, 3), at(1, 11, 3));
+    const r = until(s, { type: 'act', heroId: 'brann', action: 'shove', target: { id: m.id }, focus: 0 }, (ev) => rolls(ev)[0]!.hits === 1);
+    expect(r.state.delve!.monsters[0]!.at).toEqual(at(1, 11, 3));
+    expect(r.state.delve!.monsters[0]!.hp).toBe(20);
+  });
+
+  it('a railing blocks a shove off the edge: 1 damage instead', () => {
+    const { s, m } = shoveSetup(at(1, 10, 3), at(1, 9, 3));
+    expect(e.preview(s, 'brann', 'shove', { id: m.id }).outcomes[2]).toMatch(/railing/);
+    const r = act(s, 'brann', 'shove', { id: m.id }, 2);
+    const mm = r.state.delve!.monsters[0]!;
+    expect(mm.at).toEqual(at(1, 9, 3));
+    expect(mm.hp).toBe(20 - 1 - 1);
+  });
+
+  it('into a wall: 1; into a figure: both take 1; onto a vent: 3', () => {
+    // Wall: gate room west wall at (0,7).
+    const w1 = shoveSetup(at(1, 0, 7), at(1, 1, 7));
+    const r1 = act(w1.s, 'brann', 'shove', { id: w1.m.id }, 2);
+    expect(r1.state.delve!.monsters[0]!.hp).toBe(20 - 2);
+    // Figure.
+    const f = shoveSetup(at(1, 3, 7), at(1, 4, 7));
+    const other = monster(f.s, 'orc', at(1, 3, 7), 'hunting', 'm7');
+    other.hp = 20;
+    const r2 = act(f.s, 'brann', 'shove', { id: f.m.id }, 2);
+    expect(r2.state.delve!.monsters.find((x) => x.id === f.m.id)!.hp).toBe(20 - 1 - 1);
+    expect(r2.state.delve!.monsters.find((x) => x.id === 'm7')!.hp).toBe(19);
+    // Vent at L3 (15,2).
+    const vent = at(3, 15, 2);
+    const v = shoveSetup(vent, at(3, 15, 3));
+    const r3 = act(v.s, 'brann', 'shove', { id: v.m.id }, 2);
+    const mv = r3.state.delve!.monsters.find((x) => x.id === v.m.id)!;
+    expect(mv.at).toEqual(vent);
+    expect(mv.hp).toBe(20 - 3 - 1);
+  });
+
+  it('into the forge: 3', () => {
+    const forge = at(2, 17, 2);
+    const { s, m } = shoveSetup(forge, at(2, 16, 2));
+    expect(e.preview(s, 'brann', 'shove', { id: m.id }).outcomes[2]).toMatch(/fire/);
+    const r = act(s, 'brann', 'shove', { id: m.id }, 2);
+    expect(r.state.delve!.monsters[0]!.hp).toBe(20 - 3 - 1);
+  });
+
+  it('orcs shove a hero standing on an unrailed edge (intent with to), 60% to land', () => {
+    const s = delve();
+    put(s, 'pim', at(1, 11, 3));
+    const orc = monster(s, 'orc', at(1, 12, 3), 'hunting');
+    (orc as { shouted?: boolean }).shouted = true;
+    computeIntents(ctx(s));
+    expect(orc.intent).toMatchObject({ kind: 'shove', targetId: 'pim', to: at(1, 10, 3) });
+    const vis = e.intents(s)[orc.id]!;
+    expect(vis.kind).toBe('shove');
+    const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'fell'));
+    expect(hero(r.state, 'pim').at).toEqual(at(2, 10, 3));
+    // On the railing: plain attack.
+    const s2 = delve();
+    put(s2, 'pim', at(1, 9, 3));
+    const o2 = monster(s2, 'orc', at(1, 8, 3), 'hunting');
+    computeIntents(ctx(s2));
+    expect(o2.intent!.kind).toBe('attack');
+  });
+
+  it('berserker charge knocks the target back', () => {
+    const s = delve();
+    put(s, 'brann', at(3, 7, 5));
+    const b = monster(s, 'berserker', at(3, 3, 5), 'hunting');
+    computeIntents(ctx(s));
+    expect(b.intent!.kind).toBe('attack');
+    const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === b.id && x.roll.hits > 0));
+    const sh = r.events.find((x) => x.type === 'shoved');
+    expect(sh).toMatchObject({ type: 'shoved', id: 'brann', from: at(3, 7, 5), to: at(3, 8, 5) });
+  });
+
+  it("can't shove the Dragon", () => {
+    const { s, dragon } = dragonDelve();
+    put(s, 'brann', inLine(dragon.at, { ...dragon.at, q: dragon.at.q - 1 }));
+    const acts = e.actions(s, 'brann');
+    expect(acts.find((o) => o.action === 'attack')!.targets.some((t) => t.id === dragon.id)).toBe(true);
+    expect(acts.find((o) => o.action === 'shove')).toBeUndefined();
+  });
+});
+
+describe('the Dragon (14.4)', () => {
+  it('sleeps; wakes when a hero walks into the Lair', () => {
+    const { s, dragon } = dragonDelve();
+    put(s, 'brann', at(3, 12, 3));
+    computeIntents(ctx(s));
+    expect(dragon.intent?.kind ?? 'wait').toBe('wait');
+    const r = ok(s, { type: 'move', heroId: 'brann', path: [at(3, 13, 3), at(3, 14, 3)], sneak: false });
+    expect(r.state.delve!.monsters.find((x) => x.kind === 'dragon')!.awareness).toBe('hunting');
+  });
+
+  it('a sneaking Burglar can lift the hoard without waking it', () => {
+    let s = e.newGame(3);
+    s = ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['pim', 'brann'], entrance: 0, packs: {} }).state;
+    s.delve!.rivals = null;
+    s.delve!.monsters = s.delve!.monsters.filter((m) => m.kind === 'dragon');
+    const dragon = s.delve!.monsters[0]!;
+    const pile = s.delve!.ground.find((g) => g.items.some((i) => i.kind === 'hoard'))!;
+    // Pim sneaks from just outside onto a hex next to the pile (not next to the Dragon).
+    const spot = posNeighborsOf(pile.at).find((p) => w.tile(p)?.room === 'lair' && w.tile(p)?.kind === 'floor' && Math.max(Math.abs(p.q - dragon.at.q), Math.abs(p.r - dragon.at.r), Math.abs(p.q + p.r - dragon.at.q - dragon.at.r)) > 1 && !s.delve!.ground.some((g) => samePos(g.at, p)))!;
+    put(s, 'pim', spot);
+    lairCheck(ctx(s), hero(s, 'pim'), true);
+    expect(dragon.awareness).toBe('asleep');
+    s = act(s, 'pim', 'take', { at: pile.at }).state;
+    expect(hero(s, 'pim').pack.some((i) => i.kind === 'hoard')).toBe(true);
+    expect(s.delve!.monsters[0]!.awareness).toBe('asleep');
+    // Brann moving elsewhere doesn't wake it either.
+    put(s, 'brann', at(3, 3, 5));
+    s = ok(s, { type: 'move', heroId: 'brann', path: [at(3, 4, 5)], sneak: false }).state;
+    expect(s.delve!.monsters[0]!.awareness).toBe('asleep');
+  });
+
+  it('wakes on noise 4+, not on less', () => {
+    const { s, dragon } = dragonDelve();
+    const c = ctx(s);
+    makeNoise(c, at(3, 15, 4), 3);
+    expect(dragon.awareness).toBe('asleep');
+    makeNoise(c, at(3, 15, 4), 4);
+    expect(dragon.awareness).toBe('hunting');
+  });
+
+  it('breath hits only the marked hexes, ignores armor, and alternates with other intents', () => {
+    const { s, dragon } = dragonDelve();
+    // Brann straight west of the Dragon at range 2 (inside the Lair); Hobart off the line.
+    put(s, 'brann', { level: 3, q: dragon.at.q - 2, r: dragon.at.r });
+    put(s, 'hobart', { level: 3, q: dragon.at.q - 1, r: dragon.at.r - 2 });
+    lairCheck(ctx(s), hero(s, 'brann'));
+    expect(dragon.awareness).toBe('hunting');
+    computeIntents(ctx(s));
+    const it = dragon.intent!;
+    expect(it.kind).toBe('breath');
+    expect(it.hexes!.length).toBeGreaterThan(0);
+    expect(it.hexes!.some((p) => samePos(p, hero(s, 'brann').at))).toBe(true);
+    expect(it.hexes!.some((p) => samePos(p, hero(s, 'hobart').at))).toBe(false);
+    const r = ok(s, { type: 'endTurn' });
+    expect(r.events.some((x) => x.type === 'breath')).toBe(true);
+    expect(hero(r.state, 'brann').hp).toBe(10 - 4);
+    expect(hero(r.state, 'hobart').hp).toBe(12);
+    const d2 = r.state.delve!.monsters.find((x) => x.kind === 'dragon')!;
+    expect(d2.intent!.kind).not.toBe('breath');
+    const r2 = ok(r.state, { type: 'endTurn' });
+    const d3 = r2.state.delve!.monsters.find((x) => x.kind === 'dragon')!;
+    expect(r2.events.some((x) => x.type === 'breath')).toBe(false);
+    expect(d3.intent!.kind).toBe('breath');
+  });
+
+  it('sweeps when 2+ heroes are adjacent and it is not breathing', () => {
+    const { s, dragon } = dragonDelve();
+    dragon.awareness = 'hunting';
+    (dragon as { breathNext?: boolean }).breathNext = false;
+    put(s, 'brann', { level: 3, q: dragon.at.q - 1, r: dragon.at.r });
+    put(s, 'hobart', { level: 3, q: dragon.at.q + 1, r: dragon.at.r });
+    computeIntents(ctx(s));
+    expect(dragon.intent!.kind).toBe('sweep');
+    const r = ok(s, { type: 'endTurn' });
+    const shoved = r.events.filter((x) => x.type === 'shoved').map((x) => (x as { id: string }).id).sort();
+    expect(shoved).toEqual(['brann', 'hobart']);
+  });
+
+  it('bites a lone adjacent hero and never leaves the Lair', () => {
+    const { s, dragon } = dragonDelve();
+    dragon.awareness = 'hunting';
+    (dragon as { breathNext?: boolean }).breathNext = false;
+    put(s, 'brann', { level: 3, q: dragon.at.q - 1, r: dragon.at.r });
+    computeIntents(ctx(s));
+    expect(dragon.intent).toMatchObject({ kind: 'attack', targetId: 'brann' });
+    // A hero outside the Lair: it doesn't follow out.
+    const t = dragonDelve();
+    t.dragon.awareness = 'hunting';
+    (t.dragon as { breathNext?: boolean }).breathNext = false;
+    put(t.s, 'brann', at(3, 10, 3));
+    let st = t.s;
+    for (let i = 0; i < 4; i++) {
+      st = ok(st, { type: 'endTurn' }).state;
+      const d = st.delve!.monsters.find((x) => x.kind === 'dragon')!;
+      expect(w.tile(d.at)?.room).toBe('lair');
+    }
+  });
+
+  it('the hoard: 3 pieces around the Dragon at delve start, 2 slots, 300 each', () => {
+    let s = e.newGame(3);
+    s = ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ALL, entrance: 0, packs: {} }).state;
+    const hoard = s.delve!.ground.flatMap((g) => g.items.map((i) => ({ i, at: g.at }))).filter((x) => x.i.kind === 'hoard');
+    expect(hoard).toHaveLength(3);
+    const sp = testCastle.spawns.find((x) => x.kind === 'dragon')!.at;
+    for (const h of hoard) {
+      expect(h.i.slots).toBe(2);
+      expect(h.i.amount).toBe(300);
+      expect(h.at.level).toBe(3);
+      expect(Math.abs(h.at.q - sp.q) + Math.abs(h.at.r - sp.r)).toBeLessThanOrEqual(4);
+    }
+  });
+});
+
+describe('slay contract', () => {
+  it('appears at reputation 3; done when the Dragon dies and a hero gets out', () => {
+    let s = e.newGame(5);
+    expect(s.campaign.board.some((k) => k.kind === 'slay')).toBe(false);
+    s.campaign.reputation = 3;
+    s = ok(s, { type: 'buy', kind: 'torch' }).state; // any camp command keeps the board; force a refresh:
+    s = e.newGame(5);
+    s.campaign.reputation = 3;
+    // Refresh the board by finishing a trivial delve.
+    s = ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} }).state;
+    put(s, 'brann', at(1, 2, 9));
+    s = act(s, 'brann', 'leave', {}).state;
+    s = ok(s, { type: 'backToCamp' }).state;
+    const k = s.campaign.board.find((x) => x.kind === 'slay')!;
+    expect(k).toBeTruthy();
+    expect(k.bounty).toBe(500);
+    expect(k.level).toBe(3);
+    s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: ['hobart', 'brann'], entrance: 0, packs: {} }).state;
+    s.delve!.rivals = null;
+    const dragon = s.delve!.monsters.find((m) => m.kind === 'dragon')!;
+    s.delve!.monsters = [dragon];
+    dragon.hp = 1;
+    put(s, 'brann', { level: 3, q: dragon.at.q - 1, r: dragon.at.r });
+    put(s, 'hobart', at(3, 1, 8)); // the cave mouth
+    s = act(s, 'brann', 'attack', { id: dragon.id }, 3).state;
+    expect(s.delve!.monsters).toHaveLength(0);
+    expect(s.delve!.kills.brann).toBe(1);
+    s = act(s, 'hobart', 'leave', {}).state;
+    s = ok(s, { type: 'abandon' }).state; // Brann is left behind, the contract still counts
+    const sum = s.summary!;
+    expect(sum.contractDone).toBe(true);
+    expect(sum.bounty).toBe(500);
+    expect(sum.xp.hobart).toBe(5 + 1 + 3);
+    expect(sum.dead).toEqual(['brann']);
+  });
+});
+
+describe('lift and winch (14.6)', () => {
+  it('the lift needs the winch; then it costs 1 like stairs', () => {
+    let s = delve();
+    put(s, 'brann', at(2, 1, 6));
+    expect(e.reachable(s, 'brann', false).some((r) => r.to.level === 3)).toBe(false);
+    const wo = e.actions(s, 'brann').find((o) => o.action === 'winch')!;
+    expect(wo.targets[0]!.at).toEqual(at(2, 1, 7));
+    expect(e.preview(s, 'brann', 'winch', wo.targets[0]!).noise).toBe(6);
+    const r = act(s, 'brann', 'winch', wo.targets[0]!);
+    expect(r.events.some((x) => x.type === 'liftWorking')).toBe(true);
+    expect(r.events.some((x) => x.type === 'noise' && x.radius === 6)).toBe(true);
+    s = r.state;
+    expect(s.delve!.liftWorking).toBe(true);
+    const down = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(3, 1, 6)))!;
+    expect(down.cost).toBe(1);
+    expect(e.actions(s, 'brann').some((o) => o.action === 'winch')).toBe(false);
+  });
+
+  it('props block movement but not sight; tallprops block both', () => {
+    const s = delve();
+    const d = s.delve as DelveX;
+    put(s, 'brann', at(1, 2, 2));
+    expect(e.reachable(s, 'brann', false).some((r) => samePos(r.to, at(1, 3, 2)))).toBe(false); // table
+    expect(e.reachable(s, 'brann', false).some((r) => samePos(r.to, at(1, 3, 4)))).toBe(false); // shelf
+    const g = glimpseSet(w, d, at(1, 2, 2)).map(posKey);
+    expect(g).toContain(posKey(at(1, 4, 2))); // past the table
+    const g2 = glimpseSet(w, d, at(1, 3, 3)).map(posKey);
+    expect(g2).not.toContain(posKey(at(1, 3, 6))); // behind the shelf and the wall
+  });
+});
+
+describe('sight and fixed light (14.5)', () => {
+  it('sight range by stage and depth, never below 2', () => {
+    const s = delve();
+    const cases: [number, number, number][] = [[40, 1, 8], [40, 2, 7], [40, 3, 6], [20, 1, 6], [20, 3, 4], [5, 1, 4], [5, 3, 2], [0, 1, 2], [0, 3, 2]];
+    for (const [light, level, want] of cases) {
+      s.delve!.light = light;
+      expect(e.sightRange(s, level)).toBe(want);
+    }
+  });
+
+  it('the glimpse uses the sight range', () => {
+    const s = delve();
+    put(s, 'brann', at(3, 2, 4));
+    s.delve!.light = 40;
+    const far = glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at).length;
+    s.delve!.light = 0;
+    const near = glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at).length;
+    expect(near).toBeLessThan(far);
+    for (const p of glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at)) {
+      expect(Math.max(Math.abs(p.q - hero(s, 'brann').at.q), Math.abs(p.r - hero(s, 'brann').at.r))).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('fixed lights light hexes for good and count for penalties', () => {
+    const s = delve({ heroes: ['brann'] });
+    put(s, 'brann', at(1, 10, 7)); // the lantern is with brann, far away
+    expect(e.inLight(s, at(1, 4, 6))).toBe(true); // the sconce
+    expect(e.inLight(s, at(1, 4, 8))).toBe(true);
+    expect(e.inLight(s, at(1, 2, 2))).toBe(false);
+    expect(e.visibility(s).lit.has(posKey(at(3, 3, 2)))).toBe(true); // fungus on L3
+  });
+
+  it('lit hexes in line of sight are visible from up to 14; dark ones only within range', () => {
+    const s = delve({ heroes: ['brann'] });
+    s.delve!.light = 5; // dark: range 4 on L3, lantern radius 2
+    put(s, 'brann', at(3, 12, 2));
+    const vis = e.visibility(s).visible;
+    expect(vis.has(posKey(at(3, 3, 2)))).toBe(true); // fungus-lit, 9 away
+    expect(vis.has(posKey(at(3, 6, 6)))).toBe(false); // dark, beyond range
+    expect(vis.has(posKey(at(3, 10, 2)))).toBe(true); // dark but within range
+  });
+
+  it('a hero ending a move on a fire vent takes 3', () => {
+    const s = delve();
+    put(s, 'brann', at(3, 15, 3));
+    const r = ok(s, { type: 'move', heroId: 'brann', path: [at(3, 15, 2)], sneak: false });
+    expect(hero(r.state, 'brann').hp).toBe(7);
   });
 });

@@ -10,6 +10,10 @@ export interface MonsterX extends Monster {
   shouted?: boolean;
   /** Spider: round of the last web. */
   lastWeb?: number;
+  /** Orc shove: the hex the orc shoves from. */
+  shoveFrom?: Pos;
+  /** Dragon: its next intent (once awake) is breath. */
+  breathNext?: boolean;
 }
 
 export interface CrewX extends RivalCrew {
@@ -35,6 +39,8 @@ export interface DelveX extends Delve {
   nextMonster?: number;
   /** Stash items taken into the delve. */
   taken?: string[];
+  /** The Dragon died this delve. */
+  dragonSlain?: boolean;
 }
 
 export interface GameStateX extends GameState {
@@ -43,6 +49,8 @@ export interface GameStateX extends GameState {
   nextId?: number;
   /** Counter for hero ids. */
   nextHero?: number;
+  /** Hoard pieces carried out so far (they don't come back). */
+  hoardTaken?: number;
 }
 
 export interface Ctx {

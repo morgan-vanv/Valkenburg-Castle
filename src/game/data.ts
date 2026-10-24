@@ -68,6 +68,8 @@ export interface MonsterDef {
   dmg: number;
   move: number;
   xp: number;
+  /** Armor: reduces each hit's damage, to a minimum of 1. */
+  armor?: number;
 }
 
 export const MONSTERS: Record<MonsterKind | 'gloam', MonsterDef> = {
@@ -76,6 +78,7 @@ export const MONSTERS: Record<MonsterKind | 'gloam', MonsterDef> = {
   spider: { name: 'Spider', hp: 5, slots: 2, chance: 65, dmg: 2, move: 3, xp: 1 },
   cutpurse: { name: 'Cutpurse', hp: 4, slots: 1, chance: 65, dmg: 1, move: 5, xp: 1 },
   berserker: { name: 'Berserker', hp: 10, slots: 4, chance: 60, dmg: 3, move: 4, xp: 3 },
+  dragon: { name: 'The Dragon', hp: 30, slots: 4, chance: 65, dmg: 3, move: 3, xp: 0, armor: 1 },
   gloam: { name: 'The Gloam', hp: 99, slots: 0, chance: 100, dmg: 4, move: 3, xp: 0 },
 };
 
@@ -86,8 +89,25 @@ export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
 export const LEVEL_XP = [0, 0, 5, 12, 20, 30, 45];
 export const MAX_LEVEL = 6;
 
-export const BOUNTY = { rescue: [0, 80, 150], recover: [0, 100, 180] } as const;
-export const HEIRLOOM_VALUE = [0, 60, 120];
+export const BOUNTY = { rescue: [0, 80, 150, 220], recover: [0, 100, 180, 260], slay: [0, 500, 500, 500] } as const;
+export const HEIRLOOM_VALUE = [0, 60, 120, 180];
+
+// Section 14 numbers.
+/** Reputation that puts Level 2, Level 3 and the slay contract on the board. */
+export const REP_FOR_LEVEL = [0, 0, 1, 2];
+export const REP_FOR_SLAY = 3;
+export const SLAY_XP = 10;
+export const HOARD_PIECES = 3;
+export const HOARD_VALUE = 300;
+export const HOARD_NAMES = ['Dragon-gold chalice', 'Crown of the old kings', 'Jeweled hauberk', 'Golden reliquary', 'Emerald idol'];
+export const VENT_DMG = 3;
+export const BREATH_DMG = 4;
+export const BREATH_LEN = 5;
+export const BREATH_NOISE = 6;
+export const WINCH_NOISE = 6;
+export const ORC_SHOVE_CHANCE = 60;
+/** Noise that wakes the Dragon. */
+export const DRAGON_WAKE_NOISE = 4;
 
 export const SHOP: ShopOffer[] = [
   { kind: 'torch', name: 'Torch', price: 10, text: '12 rounds of light around the bearer.' },

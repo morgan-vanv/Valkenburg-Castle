@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { hexToWorld, type Hex, type Pos } from '../game/hex';
 
 export const HEX = 1;
-export const LEVEL_GAP = 12;
+export const LEVEL_GAP = 9;
 /** Height of the walkable top of a plain floor tile. */
 export const FLOOR_TOP = 0.18;
 export const RAISED_TOP = 0.62;
@@ -36,6 +36,8 @@ export function hash2(x: number, y: number, s = 0): number {
 export const COLORS = {
   void: 0x050404,
   stone: 0x6e645a,
+  /** Pale wall caps: clearly lighter than any floor. */
+  wallCap: 0xd8cfbe,
   stoneLight: 0x7a6f62,
   stoneDark: 0x2c2722,
   floor: 0x6a5e50,

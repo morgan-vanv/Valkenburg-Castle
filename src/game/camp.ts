@@ -7,8 +7,11 @@ import type {
 } from './types';
 import {
   ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEAL_PRICE, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
-  MANA_MAX, MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_NAMES, SHOP, SISTER, SISTER_NAMES, WEAPON_PRICE,
+  MANA_MAX, MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP, SISTER,
+  SISTER_NAMES, WEAPON_PRICE,
 } from './data';
+import { placeHoard } from './dragon';
+import { HOARD_PIECES } from './data';
 import { int, pick, random, shuffle } from './rng';
 import type { Ctx, CrewX, DelveX, GameStateX, MonsterX } from './state';
 import { makeItem, packUsed, valueOf } from './common';
@@ -96,18 +99,21 @@ export function refreshCamp(w: World, s: GameStateX): void {
 }
 
 function makeBoard(w: World, s: GameStateX): Contract[] {
-  const maxLevel = s.campaign.reputation >= 1 ? 2 : 1;
-  const sites = w.castle.contractSites.filter((x) => x.at.level <= maxLevel);
+  const rep = s.campaign.reputation;
+  const open = (lv: number) => rep >= (REP_FOR_LEVEL[lv] ?? REP_FOR_LEVEL[REP_FOR_LEVEL.length - 1]!);
+  const sites = w.castle.contractSites.filter((x) => x.kind !== 'slay' && open(x.at.level));
+  const slay = rep >= REP_FOR_SLAY ? w.castle.contractSites.filter((x) => x.kind === 'slay') : [];
   const l1 = shuffle(s, sites.filter((x) => x.at.level === 1));
   const deep = shuffle(s, sites.filter((x) => x.at.level > 1));
-  // At least one Level 1 contract; mix in deeper ones when allowed.
-  const chosen = [...l1.slice(0, 1), ...shuffle(s, [...l1.slice(1), ...deep])].slice(0, 3);
+  // The slay contract stays on the board once unlocked; at least one Level 1 contract; deeper ones mixed in.
+  const chosen = [...slay.slice(0, 1), ...l1.slice(0, 1), ...shuffle(s, [...l1.slice(1), ...deep])].slice(0, 3);
   const out: Contract[] = [];
   const usedNames = new Set<string>();
   chosen.forEach((site, i) => {
-    const lvl = Math.min(2, site.at.level);
+    const lvl = Math.min(3, site.at.level);
+    const dragon = w.castle.spawns.find((sp) => sp.kind === 'dragon' && sp.at.level === site.at.level && distance(sp.at, site.at) <= 3);
     const pool = (site.kind === 'rescue' ? PRISONER_NAMES : HEIRLOOMS).filter((n) => !usedNames.has(n));
-    const subject = pick(s, pool);
+    const subject = site.kind === 'slay' ? (dragon?.name ?? 'the Dragon') : pick(s, pool);
     usedNames.add(subject);
     const bounty = BOUNTY[site.kind][lvl] ?? 0;
     const near = new Set<string>();
@@ -116,14 +122,17 @@ function makeBoard(w: World, s: GameStateX): Contract[] {
     }
     const warnings: string[] = [];
     if (site.at.level > 1) warnings.push(`Level ${site.at.level}`);
-    if (near.size) warnings.push(`Nearby: ${[...near].join(', ')}`);
+    if (site.kind === 'slay') warnings.push('30 HP, breathes fire', 'A long way down and back');
+    else if (near.size) warnings.push(`Nearby: ${[...near].join(', ')}`);
     const c: ContractX = {
       id: `k${s.campaign.delveCount}-${i}`,
       kind: site.kind,
-      title: site.kind === 'rescue' ? `Rescue ${subject}` : `Recover ${subject}`,
+      title: site.kind === 'rescue' ? `Rescue ${subject}` : site.kind === 'slay' ? `Slay ${subject}` : `Recover ${subject}`,
       brief: site.kind === 'rescue'
         ? `${subject} is held in ${site.where}.`
-        : `${cap(subject)} lies in ${site.where}.`,
+        : site.kind === 'slay'
+          ? `${cap(subject)} sleeps on its hoard in ${site.where}. Kill it and get out alive.`
+          : `${cap(subject)} lies in ${site.where}.`,
       siteId: site.id,
       level: lvl,
       bounty,
@@ -157,7 +166,7 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       return { events };
     }
     case 'sellAll': {
-      const sell = C.stash.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom');
+      const sell = C.stash.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard');
       if (!sell.length) return err('Nothing to sell.');
       const v = valueOf(sell);
       C.gold += v;
@@ -286,6 +295,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     lit: [...C.litBraziers],
     blown: [],
     ropes: [],
+    liftWorking: false,
     prisoner: null,
     explored: [],
     log: [],
@@ -307,9 +317,13 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     const it = makeItem({ s }, 'heirloom', HEIRLOOM_VALUE[contract.level] ?? 60, cap(contract.subject));
     it.contractId = contract.id;
     d.ground.push({ at: { ...site.at }, items: [it] });
+  } else if (contract.kind === 'slay') {
+    // Nothing to place: the Dragon is a castle spawn.
   } else {
     d.prisoner = { id: 'p1', name: contract.subject, at: { ...site.at }, hp: 5, freed: false, out: false, dead: false };
   }
+  // The Dragon's hoard: what's been carried out never comes back.
+  placeHoard(w, s, d, Math.max(0, HOARD_PIECES - (s.hoardTaken ?? 0)));
   // Rivals.
   if (w.castle.rivalEntrances.length && random(s) < 0.5) {
     const at = pick(s, w.castle.rivalEntrances);
@@ -385,6 +399,7 @@ export function xpLevel(xp: number): number {
 
 export function contractDone(d: DelveX): boolean {
   if (d.contract.kind === 'rescue') return !!d.prisoner?.out;
+  if (d.contract.kind === 'slay') return !!d.dragonSlain && d.heroes.some((h) => h.status === 'out');
   return d.heroes.some((h) => h.status === 'out' && h.pack.some((i) => i.kind === 'heirloom' && i.contractId === d.contract.id));
 }
 
@@ -430,6 +445,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   const out = d.heroes.filter((h) => h.status === 'out');
   // Loot.
   for (const h of out) {
+    s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
@@ -464,7 +480,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom');
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard');
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;

@@ -27,7 +27,11 @@ type Sfx =
   | 'chest'
   | 'levelup'
   | 'web'
-  | 'hurt';
+  | 'hurt'
+  | 'thud'
+  | 'roar'
+  | 'winch'
+  | 'whoosh';
 
 const MUTE_KEY = 'vc.muted';
 
@@ -331,6 +335,25 @@ class Audio {
       case 'hurt':
         this.tone('sawtooth', 180 * p, 90, t, 0.18, 0.18 * v, 0.005);
         this.hiss(t, 0.12, 0.3 * v, 'lowpass', 1600, 300, 0.8);
+        break;
+      case 'thud':
+        // A body hitting stone after a fall.
+        this.tone('sine', 110 * p, 35, t, 0.45, 0.9 * v, 0.003);
+        this.hiss(t, 0.25, 0.5 * v, 'lowpass', 900, 120, 0.8, 0.002);
+        break;
+      case 'whoosh':
+        this.hiss(t, 0.5, 0.25 * v, 'bandpass', 400, 1600, 1.2, 0.2);
+        break;
+      case 'roar':
+        // The Dragon's breath: a low growl under a roaring hiss.
+        this.tone('sawtooth', 70, 45, t, 1.1, 0.3 * v, 0.08);
+        this.tone('sawtooth', 104, 60, t, 1.0, 0.18 * v, 0.1);
+        this.hiss(t, 1.3, 0.7 * v, 'lowpass', 900, 3200, 0.6, 0.06);
+        break;
+      case 'winch':
+        // Ratchet clicks and a groaning rope.
+        for (let i = 0; i < 10; i++) this.tone('square', 520 + (i % 2) * 90, 380, t + i * 0.08, 0.03, 0.05 * v, 0.001);
+        this.tone('sawtooth', 70, 95, t, 0.9, 0.08 * v, 0.1);
         break;
       case 'spell': {
         for (let i = 0; i < 5; i++) this.tone('sine', (600 + i * 220) * p, (900 + i * 300) * p, t + i * 0.03, 0.35, 0.05 * v, 0.02);

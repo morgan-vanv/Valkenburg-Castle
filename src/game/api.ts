@@ -45,6 +45,22 @@ export interface RollPreview {
   noise: number;
   /** Light it costs or adds (negative = costs). Usually 0. */
   light: number;
+  /** Plain-words risk to show prominently, e.g. "Falls 2 levels into the Hollow: 7 damage. This will down Pim." */
+  warning?: string;
+  /** The UI must ask the player to confirm before sending this action (drops of more than one level). */
+  confirm?: boolean;
+}
+
+/** Where a fall from a pit hex ends up. */
+export interface FallInfo {
+  /** Landing hex. */
+  to: Pos;
+  /** Levels fallen (1 or 2). */
+  levels: number;
+  /** Damage on landing (4 for one level, 7 for two). */
+  damage: number;
+  /** Level name, e.g. "the Hollow". */
+  levelName: string;
 }
 
 /** One thing a hero can do right now, with its valid targets. */
@@ -80,8 +96,17 @@ export interface Engine {
   intents(state: GameState): Record<string, Intent>;
   /** Noise radius a move would make (for the ripple preview). */
   moveNoise(state: GameState, heroId: string, sneak: boolean): number;
-  /** Is this hex lit by the lantern, a torch or a brazier? Heroes outside light fight at Dark penalties. */
+  /** Is this hex lit by the lantern, a torch, a brazier or a fixed light? Heroes outside light fight at Dark penalties. */
   inLight(state: GameState, at: Pos): boolean;
+  /** Current sight range in hexes (lantern stage minus depth). */
+  sightRange(state: GameState, level: number): number;
+  /** Where something falling into this pit hex lands, or null if it isn't a pit. */
+  fallInfo(state: GameState, pit: Pos): FallInfo | null;
+  /**
+   * Is this hero standing where a shove could send them over? Returns the worst fall
+   * (the deepest pit hex next to them without a railing), or null. For the edge badge.
+   */
+  edgeRisk(state: GameState, heroId: string): FallInfo | null;
 
   // camp queries
   shop(): ShopOffer[];

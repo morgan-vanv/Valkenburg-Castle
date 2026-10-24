@@ -9,10 +9,17 @@ import type { Engine } from './game/api';
 import { App } from './ui/app';
 
 const engines = import.meta.glob<{ engine: Engine }>('./game/index.ts');
+const factories = import.meta.glob<{ createEngine: (c: import('./game/types').CastleDef) => Engine }>('./game/engine.ts');
 const castles = import.meta.glob<{ testCastle: import('./game/types').CastleDef }>('./game/test/testCastle.ts');
 
 async function pickEngine(): Promise<Engine> {
   const params = new URLSearchParams(location.search);
+  // ?castle=test: the real rules on the small test castle (UI checks while the real castle is built).
+  if (params.get('castle') === 'test' && params.get('fixture') !== '1') {
+    const f = factories['./game/engine.ts'];
+    const tc = castles['./game/test/testCastle.ts'];
+    if (f && tc) return (await f()).createEngine((await tc()).testCastle);
+  }
   const load = engines['./game/index.ts'];
   if (load && params.get('fixture') !== '1') {
     try {

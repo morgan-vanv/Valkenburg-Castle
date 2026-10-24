@@ -4,8 +4,8 @@
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent, Item } from './types';
-import { MONSTERS, SISTER } from './data';
-import { pick } from './rng';
+import { MONSTERS, ORC_SHOVE_CHANCE, SISTER } from './data';
+import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
   armorOf, chestLoot, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, makeNoise, nameOf, noteOnce, occupant,
@@ -15,6 +15,8 @@ import {
   canEnter, dijkstra, distField, doorAt, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within,
 } from './world';
 import { checkDelveEnd, refreshSight, setLight } from './delve';
+import { behind, fallInfo, figure, push, pushOutcome, railed } from './falls';
+import { dragonSpecial, planDragon } from './dragon';
 
 // ---------------------------------------------------------------- perception
 
@@ -121,8 +123,19 @@ function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): T
   return null;
 }
 
+/** Orc: shove instead of attack when the hero's back is to an unrailed pit. */
+function orcShove(c: Ctx, m: MonsterX, from: Pos, t: Target, path: Pos[]): Plan | null {
+  if (m.kind !== 'orc' || !t.hero) return null;
+  const dest = behind(from, t.at);
+  if (kindAt(c.w, c.d, dest) !== 'pit' || railed(c, t.at)) return null;
+  const f = fallInfo(c, dest, t.id);
+  if (!f) return null;
+  return { intent: { kind: 'shove', targetId: t.id, to: dest, damage: [0, f.damage] }, path };
+}
+
 export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>): Plan {
   if (m.kind === 'gloam') return planGloam(c, m);
+  if (m.kind === 'dragon') return planDragon(c, m);
   const def = MONSTERS[m.kind];
   if (m.awareness === 'asleep') return WAIT;
   // Cutpurse with loot: run for the farthest exit.
@@ -153,12 +166,19 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>): Plan {
   if (t) {
     const near = samePos(t.at, m.at) ? false : t.at.level === m.at.level && distance(t.at, m.at) === 1;
     const steal = m.kind === 'cutpurse' && canSteal(t);
-    const strike = (to: Pos, path: Pos[]): Plan => ({
-      intent: steal
-        ? { kind: 'steal', targetId: t.id, to }
-        : { kind: 'attack', targetId: t.id, to, damage: hitRange(def.slots, def.dmg, t.armor) },
-      path,
-    });
+    const strike = (to: Pos, path: Pos[]): Plan => {
+      const sh = orcShove(c, m, to, t, path);
+      if (sh) {
+        m.shoveFrom = { ...to };
+        return sh;
+      }
+      return {
+        intent: steal
+          ? { kind: 'steal', targetId: t.id, to }
+          : { kind: 'attack', targetId: t.id, to, damage: hitRange(def.slots, def.dmg, t.armor) },
+        path,
+      };
+    };
     if (m.kind === 'spider' && !near && t.hero && within(m.at, t.at, 3) && sees(c, m.at, t.at, lit) && (m.lastWeb === undefined || c.d.round - m.lastWeb >= 2)) {
       return { intent: { kind: 'web', targetId: t.id }, path: [] };
     }
@@ -236,7 +256,8 @@ function guardFor(c: Ctx, targetId: string): HeroInDelve | undefined {
   return c.d.heroes.find((h) => h.status === 'active' && h.guarding === targetId);
 }
 
-function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): void {
+/** Returns the id that was hit (after guard), or null on a miss. */
+function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): string | null {
   let tid = targetId;
   const g = guardFor(c, tid);
   if (g) {
@@ -246,17 +267,18 @@ function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: nu
   const r = roll(c, attacker, what, slots, p);
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: tid });
-    return;
+    return null;
   }
   const h = hd(c, tid);
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
   const total = r.hits * Math.max(1, dmg - armor) + (r.perfect ? 1 : 0);
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
+  return tid;
 }
 
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
-  if (m.kind === 'gloam' || m.awareness === 'asleep') return;
+  if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') return;
   const seen = targets(c).filter((t) => sees(c, m.at, t.at, lit)).sort(byDist(m.at));
   const t = seen[0];
   if (t) {
@@ -281,6 +303,24 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
 function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
   const it = m.intent;
   if (!it || it.kind === 'wait' || it.kind === 'flee') return null;
+  if (m.kind === 'dragon') {
+    // Breath and sweep always go off as shown; bites/moves re-plan if stale.
+    if (it.kind === 'breath' || it.kind === 'sweep') return { intent: it, path: [] };
+    return null;
+  }
+  if (it.kind === 'shove') {
+    const t = targets(c).find((x) => x.id === it.targetId);
+    const from = m.shoveFrom ?? m.at;
+    if (!t || !it.to || !samePos(behind(from, t.at), it.to)) return null;
+    let path: Pos[] = [];
+    if (!samePos(from, m.at)) {
+      if (occupant(c, from)) return null;
+      const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: m.awareness === 'hunting', budget: move });
+      if (!nodes.has(posKey(from))) return null;
+      path = pathTo(nodes, from);
+    }
+    return { intent: it, path };
+  }
   const t = it.targetId ? targets(c).find((x) => x.id === it.targetId) : undefined;
   if (it.kind !== 'move' && !t) return null;
   if (it.kind === 'web') return t?.hero && !adjacentTo(m.at, t.at) ? { intent: it, path: [] } : null;
@@ -305,12 +345,28 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   perceive(c, m, lit);
   if (!c.d.monsters.includes(m) || m.awareness === 'asleep') return;
   const def = MONSTERS[m.kind];
-  const plan = honored(c, m, def.move) ?? planMonster(c, m, lit);
+  let plan = honored(c, m, def.move) ?? planMonster(c, m, lit);
+  // The Dragon never breathes without showing it first.
+  if (m.kind === 'dragon' && plan.intent.kind === 'breath' && m.intent?.kind !== 'breath') plan = planDragon(c, m, true);
   m.intent = plan.intent;
+  const startAt = m.at;
   walk(c, m.id, m, plan.path);
+  const charged = plan.path.length >= 2 && startAt.level === m.at.level;
   const it = plan.intent;
   if (m.focusAt && samePos(m.focusAt, m.at)) m.focusAt = undefined;
+  if (m.kind === 'dragon' && dragonSpecial(c, m, it)) return;
   switch (it.kind) {
+    case 'shove': {
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t?.hero || t.hero.status !== 'active' || !adjacentTo(m.at, t.at)) break;
+      say(c, `${m.name} lunges to shove ${heroName(c, t.id)} over the edge.`);
+      if (chance(c.s, ORC_SHOVE_CHANCE)) push(c, t.id, m.at, m.id);
+      else {
+        c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
+        say(c, `${heroName(c, t.id)} keeps their footing.`);
+      }
+      break;
+    }
     case 'attack': {
       if (!it.targetId) break;
       const t = targets(c).find((x) => x.id === it.targetId);
@@ -322,7 +378,15 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         else hurtPrisoner(c, 4, m.id);
         break;
       }
-      strike(c, m.id, t.id, def.slots, def.chance, def.dmg, 'Attack');
+      const landed = strike(c, m.id, t.id, def.slots, def.chance, def.dmg, m.kind === 'dragon' ? 'Bite' : 'Attack');
+      // Berserker charge: moved 2+ hexes then hit: knock the target back.
+      if (m.kind === 'berserker' && charged && landed) {
+        const h = hd(c, landed);
+        if (h && h.status === 'active') {
+          say(c, `${m.name}'s charge knocks ${heroName(c, landed)} back.`);
+          push(c, landed, m.at, m.id);
+        }
+      }
       break;
     }
     case 'steal': {
@@ -579,6 +643,15 @@ export function blowCharges(c: Ctx): void {
     const pr = c.d.prisoner;
     if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= 2) hurt.push([pr.id, distance(pr.at, at) <= 1 ? 4 : 2]);
     for (const [id, dmg] of hurt) hurtAny(c, id, dmg, c.d.heroes.some((h) => h.heroId === id) ? null : ch.by, { noise: false });
+    // Anything within 1 standing with an unrailed pit straight behind it goes over.
+    for (const [id] of hurt) {
+      const f = figure(c, id);
+      if (!f) continue;
+      const p = f.kind === 'hero' ? f.h.at : f.kind === 'monster' ? f.m.at : f.kind === 'rival' ? f.r.at : c.d.prisoner!.at;
+      if (p.level !== at.level || distance(p, at) !== 1) continue;
+      const o = pushOutcome(c, at, p, id);
+      if (o.kind === 'fall') push(c, id, at, c.d.heroes.some((h) => h.heroId === id) ? null : ch.by);
+    }
     makeNoise(c, at, 8, { otherLevels: true });
   }
 }

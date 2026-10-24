@@ -2,7 +2,7 @@
 // view before the real engine lands. Not used once src/game/index.ts exists,
 // except by screenshots that want a fixed scene (`?fixture=1`).
 
-import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
+import type { ActionOption, Engine, FallInfo, Reach, RollPreview, Visibility } from '../game/api';
 import { distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, ApplyResult, CastleDef, Command, GameState, Hero, HeroClass, Item, ShopOffer } from '../game/types';
 
@@ -103,6 +103,7 @@ export function fixtureDelve(castle: CastleDef): GameState {
       lit: [posKey(castle.braziers[0]!)],
       blown: [],
       ropes: [],
+      liftWorking: false,
       prisoner: null,
       explored: [],
       log: ['The party enters the keep.', 'Rats skitter in the dark.'],
@@ -274,6 +275,18 @@ export function fixtureEngine(castle: CastleDef): Engine {
       return out;
     },
     moveNoise: (_s, _h, sneak) => (sneak ? 0 : 1),
+    sightRange: (s, level) => Math.max(2, (eng.brightness(s) === 'bright' ? 8 : eng.brightness(s) === 'dim' ? 6 : eng.brightness(s) === 'dark' ? 4 : 2) - (level - 1)),
+    fallInfo: (_s, pit) => fallFrom(castle, pit),
+    edgeRisk(s, heroId) {
+      const h = s.delve?.heroes.find((x) => x.heroId === heroId);
+      if (!h || tile(h.at)?.railing) return null;
+      let worst: FallInfo | null = null;
+      for (const n of posNeighbors(h.at)) {
+        const f = fallFrom(castle, n);
+        if (f && (!worst || f.levels > worst.levels)) worst = f;
+      }
+      return worst;
+    },
     inLight: (s, at) => lit(s).has(posKey(at)),
     shop: () => shop,
     heroById: (s, id) => s.campaign.roster.find((h) => h.id === id),
@@ -289,4 +302,27 @@ export function fixtureEngine(castle: CastleDef): Engine {
     },
   };
   return eng;
+}
+
+const WALKABLE_KINDS = ['floor', 'rubble', 'door', 'stairs', 'exit', 'lift'];
+
+/** Where a fall into this pit hex lands (fixture version of the rule in spec 14.2). */
+export function fallFrom(castle: CastleDef, pit: Pos): FallInfo | null {
+  const lv = (n: number) => castle.levels.find((l) => l.level === n);
+  if (lv(pit.level)?.tiles[hexKey(pit)]?.kind !== 'pit') return null;
+  for (let n = pit.level + 1; lv(n); n++) {
+    const t = lv(n)!.tiles[hexKey(pit)];
+    if (t?.kind === 'pit') continue;
+    const levels = n - pit.level;
+    let to: Pos = { level: n, q: pit.q, r: pit.r };
+    if (!t || !WALKABLE_KINDS.includes(t.kind)) {
+      const near = range(pit, 3)
+        .filter((h) => WALKABLE_KINDS.includes(lv(n)!.tiles[hexKey(h)]?.kind ?? ''))
+        .sort((a, b) => distance(a, pit) - distance(b, pit))[0];
+      if (!near) return null;
+      to = { level: n, ...near };
+    }
+    return { to, levels, damage: levels === 1 ? 4 : 7, levelName: lv(n)!.name };
+  }
+  return null;
 }

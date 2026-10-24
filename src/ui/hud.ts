@@ -3,10 +3,11 @@
 // diorama's highlights from hover and click. Commands go through host.send.
 
 import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
-import { hexKey, posKey, samePos, type Pos } from '../game/hex';
+import { add, hexKey, posKey, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, Brightness, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, Monster, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
+import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { ACTION_GLYPH, ACTION_KEY, BRIGHTNESS_NAME, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
@@ -129,7 +130,9 @@ export class Hud {
     const d = this.state?.delve;
     const sel = this.selected();
     if (!d || !sel || sel.status !== 'active' || !(sel.moved && sel.acted)) return;
-    const next = d.heroes.find((x) => x.status === 'active' && (!x.moved || !x.acted));
+    // Prefer a hero on the level in view (after a fall, stay with the faller's new level if nobody else is there).
+    const ready = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted));
+    const next = ready.find((x) => x.at.level === this.dio.shownLevel) ?? (sel.at.level === this.dio.shownLevel ? undefined : ready[0]);
     if (next) this.select(next.heroId);
   }
 
@@ -191,17 +194,20 @@ export class Hud {
   private drawHighlights(): void {
     this.dio.clearHighlights();
     if (this.busy || !this.state?.delve) return;
+    this.dio.showLanding(null, null, '', false);
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
       const friendly = ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free'].includes(this.pending.action);
-      this.dio.highlight(ats, friendly ? 'ally' : 'target');
+      this.dio.highlight(ats, this.pending.action === 'jump' ? 'danger' : friendly ? 'ally' : 'target');
+      this.applyHover();
       return;
     }
     if (this.pv) {
       const at = this.targetPos(this.pv.target);
-      if (at) this.dio.highlight([at], 'target');
+      if (at) this.dio.highlight([at], this.pv.option.action === 'jump' ? 'danger' : 'target');
       const sel = this.selected();
       if (sel && this.pv.preview.noise > 0) this.dio.showRipple(sel.at, this.pv.preview.noise);
+      this.showActionLanding(this.pv.option.action, this.pv.target);
       return;
     }
     this.dio.highlight(
@@ -213,6 +219,44 @@ export class Hud {
     const ats = atk.flatMap((o) => o.targets.map((t) => this.targetPos(t))).filter((p): p is Pos => !!p);
     this.dio.highlight(ats, 'target');
     this.applyHover();
+  }
+
+  /** Where a jump into this pit lands, as words. */
+  private fallWords(pit: Pos): { to: Pos; text: string; danger: boolean } | null {
+    const s = this.state;
+    if (!s) return null;
+    const f = this.engine.fallInfo(s, pit);
+    if (!f) return null;
+    const lvl = this.engine.castle().levels.find((l) => l.level === f.to.level);
+    const room = lvl?.rooms.find((r) => r.id === lvl.tiles[hexKey(f.to)]?.room)?.name;
+    const where = f.levels === 1 && room ? `on ${room.startsWith('the ') ? room : `the ${room}`}` : `into ${f.levelName}`;
+    const text = f.levels === 1 ? `Lands ${where}, 1 level, ${f.damage} damage` : `Falls ${f.levels} levels ${where}: ${f.damage} damage`;
+    return { to: f.to, text, danger: f.levels > 1 };
+  }
+
+  /** Where a shove from `from` sends whatever stands at `at`: one hex straight away. */
+  private shoveDest(from: Pos, at: Pos): Pos {
+    const dq = at.q - from.q;
+    const dr = at.r - from.r;
+    return { level: at.level, ...add(at, { q: dq, r: dr }) };
+  }
+
+  /** Landing marker for a jump or shove (preview or hover). */
+  private showActionLanding(action: ActionKind, t: ActionTarget): void {
+    const sel = this.selected();
+    const s = this.state;
+    if (!sel || !s) return;
+    if (action === 'jump' && t.at) {
+      const f = this.fallWords(t.at);
+      if (f) this.dio.showLanding(t.at, f.to, f.text, f.danger);
+    } else if (action === 'shove') {
+      const at = this.targetPos(t);
+      if (!at) return;
+      const dest = this.shoveDest(sel.at, at);
+      const f = this.fallWords(dest);
+      if (f) this.dio.showLanding(dest, f.to, `Shoved in: ${f.text.replace(/^Lands/, 'lands').replace(/^Falls/, 'falls')}`, true);
+      else this.dio.showLanding(null, dest, 'Lands here', false);
+    }
   }
 
   private targetPos(t: ActionTarget): Pos | null {
@@ -238,6 +282,11 @@ export class Hud {
     const at = this.hoverAt;
     const unitId = this.hoverUnit;
     const d = this.state.delve;
+    if (this.pending && (this.pending.action === 'jump' || this.pending.action === 'shove')) {
+      const t = this.pending.targets.find((x) => (unitId ? x.id === unitId : !!at && !!x.at && samePos(x.at, at)));
+      this.dio.showLanding(null, null, '', false);
+      if (t) this.showActionLanding(this.pending.action, t);
+    }
     // Path preview.
     const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
     const sel = this.selected();
@@ -295,7 +344,15 @@ export class Hud {
     const door = d.doors[k];
     if (t.kind === 'door' && door) parts.push(door.open ? 'Open door' : door.jammed ? 'Jammed door' : door.locked ? 'Locked door' : 'Closed door');
     else if (t.kind === 'brazier') parts.push(d.lit.includes(k) ? 'Brazier, lit' : 'Brazier, cold');
-    else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
+    else if (t.kind === 'prop' || t.kind === 'tallprop') parts.push(`${propName(t.prop)}${t.kind === 'tallprop' ? ' (blocks sight)' : ' (cover)'}${t.prop === 'winch' ? (d.liftWorking ? ': the lift runs' : ': work it to run the lift (loud)') : ''}`);
+    else if (t.kind === 'lift') parts.push(d.liftWorking ? 'Lift: runs between levels' : 'Lift: dead until the winch is worked');
+    else if (t.kind === 'pit') {
+      const f = this.fallWords(at);
+      parts.push(`<span class="neg">Pit${f ? `. ${f.text}` : ''}</span>`);
+    } else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
+    if (t.railing) parts.push('Railing');
+    const vent = this.engine.castle().lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
+    if (vent) parts.push('<span class="neg">Fire vent: 3 damage</span>');
     if (t.raised) parts.push('Raised');
     const chest = d.chests.find((c) => samePos(c.at, at));
     if (chest) parts.push(chest.opened ? 'Chest, empty' : chest.jammed ? 'Chest, jammed' : chest.locked ? 'Chest, locked' : 'Chest');
@@ -314,7 +371,7 @@ export class Hud {
       const t = this.pending.targets.find(match) ?? (at ? this.pending.targets.find((x) => x.at && samePos(x.at, at)) : undefined);
       return t ? { option: this.pending, target: t } : null;
     }
-    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'leave'];
+    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -475,6 +532,7 @@ export class Hud {
       el.classList.remove('hidden');
       return;
     }
+    if (pr.warning) el.append(h('div', { class: `pv-warning ${pr.confirm ? 'severe' : ''}` }, h('span', { class: 'pv-warn-icon' }, '⚠'), h('span', null, pr.warning)));
     if (pr.slots > 0) {
       const odds = hitOdds(pr.slots, pr.chance, p.focus);
       const slots = h('div', { class: 'pv-slots' });
@@ -501,11 +559,12 @@ export class Hud {
       // Outcomes with odds.
       const rows = pr.outcomes.map((text, hits) => {
         const pct = odds[hits] ?? 0;
-        return h('li', { class: `${pct < 0.0005 ? 'impossible' : ''} ${hits === pr.slots ? 'perfect' : ''}` }, h('span', { class: 'oc-hits num' }, `${hits}`), h('span', { class: 'oc-bar' }, h('i', { style: `width:${Math.round(pct * 100)}%` })), h('span', { class: 'oc-pct num' }, `${Math.round(pct * 100)}%`), h('span', { class: 'oc-text' }, text));
+        const fall = /fall|falls|pit|into the/i.test(text);
+        return h('li', { class: `${pct < 0.0005 ? 'impossible' : ''} ${hits === pr.slots ? 'perfect' : ''} ${fall ? 'falls' : ''}` }, h('span', { class: 'oc-hits num' }, `${hits}`), h('span', { class: 'oc-bar' }, h('i', { style: `width:${Math.round(pct * 100)}%` })), h('span', { class: 'oc-pct num' }, `${Math.round(pct * 100)}%`), h('span', { class: 'oc-text' }, text));
       });
       el.append(h('div', { class: 'kicker pv-oc-head' }, 'Hits → outcome'), h('ol', { class: 'pv-outcomes' }, ...rows));
     } else {
-      el.append(h('ul', { class: 'pv-outcomes plain' }, ...pr.outcomes.map((t) => h('li', null, t))));
+      el.append(h('ul', { class: 'pv-outcomes plain' }, ...pr.outcomes.map((t) => h('li', { class: /fall/i.test(t) ? 'falls' : '' }, t))));
     }
     const foot: (HTMLElement | string)[] = [];
     foot.push(h('span', { class: pr.noise > 0 ? 'pv-noise loud' : 'pv-noise' }, pr.noise > 0 ? `Noise ${pr.noise}` : 'Silent'));
@@ -516,7 +575,7 @@ export class Hud {
         'div',
         { class: 'pv-actions' },
         h('button', { class: 'btn btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
-        h('button', { class: 'btn btn-primary pv-go', onclick: () => this.confirmPreview() }, `${p.option.label} `, h('kbd', null, 'Enter')),
+        h('button', { class: `btn ${p.option.action === 'jump' ? 'btn-danger' : 'btn-primary'} pv-go`, onclick: () => this.confirmPreview() }, `${p.option.label} `, h('kbd', null, 'Enter')),
       ),
     );
     el.classList.remove('hidden');
@@ -533,6 +592,12 @@ export class Hud {
   private confirmPreview(): void {
     const p = this.pv;
     if (!p || !p.preview.ok) return;
+    if (p.preview.confirm) {
+      const sel = this.selected();
+      const name = sel ? (this.heroDef(sel.heroId)?.name ?? '') : '';
+      this.confirm(p.preview.warning ?? 'This is a long drop. Are you sure?', p.option.action === 'jump' ? 'Jump' : p.option.label, () => void this.act(p.option.action, p.target, p.focus), { title: p.option.action === 'jump' ? `${name} jumps?` : `${p.option.label}?`, cancel: 'Stay', danger: true });
+      return;
+    }
     void this.act(p.option.action, p.target, p.focus);
   }
 
@@ -673,19 +738,25 @@ export class Hud {
     if (k.kind === 'rescue') {
       const p = d.prisoner;
       status = !p ? '' : p.dead ? 'The prisoner is dead.' : p.out ? 'Out. Done.' : p.freed ? `Freed. Escort ${p.name} to an exit.` : `Find and free ${p.name}.`;
+    } else if (k.kind === 'slay') {
+      const dragon = d.monsters.find((m) => m.kind === 'dragon');
+      status = !dragon || dragon.hp <= 0 ? 'The Dragon is dead. Get out alive.' : `The Dragon: ${dragon.hp}/${dragon.maxHp} HP${dragon.awareness === 'asleep' ? ', asleep' : ''}.`;
     } else {
       const carrier = d.heroes.find((x) => x.pack.some((i) => i.kind === 'heirloom'));
       const rival = d.rivals?.members.find((r) => r.loot.some((i) => i.kind === 'heirloom'));
       status = carrier ? `${this.heroDef(carrier.heroId)?.name ?? ''} carries it. Get out.` : rival ? 'The Lantern Sisters have it!' : 'Find it and carry it out.';
     }
-    return h('div', { class: 'hud-goal' }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : 'Recover'} · ${k.bounty} gold`), h('b', null, k.title), h('span', { class: 'dim small' }, status));
+    return h('div', { class: 'hud-goal' }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : k.kind === 'slay' ? 'Slay' : 'Recover'} · ${k.bounty} gold`), h('b', null, k.title), h('span', { class: 'dim small' }, status));
   }
 
   private renderCards(): void {
     const s = this.state!;
     const d = s.delve!;
     clear(this.cards);
+    const edges: Pos[] = [];
     d.heroes.forEach((hd, i) => {
+      const risk = hd.status === 'active' ? this.engine.edgeRisk(s, hd.heroId) : null;
+      if (risk) edges.push(hd.at);
       const def = this.heroDef(hd.heroId);
       if (!def) return;
       const sel = hd.heroId === this.selectedId;
@@ -701,7 +772,7 @@ export class Hud {
         h(
           'div',
           { class: 'hc-body' },
-          h('div', { class: 'hc-name' }, def.name, hd.heroId === d.lanternBearer ? h('span', { class: 'hc-lantern', title: 'Carries the lantern' }, ' ◆') : '', h('span', { class: 'hc-lvl dim' }, ` L${def.level}`)),
+          h('div', { class: 'hc-name' }, def.name, hd.heroId === d.lanternBearer ? h('span', { class: 'hc-lantern', title: 'Carries the lantern' }, ' ◆') : '', h('span', { class: 'hc-lvl dim' }, ` L${def.level}`), risk ? h('span', { class: 'hc-edge', title: `On the edge: a shove would drop ${def.name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).` }, `Edge ${risk.damage}`) : ''),
           h('div', { class: 'hc-hp' }, hpBar(hd.hp, def.maxHp), h('span', { class: 'num small' }, `${hd.hp}/${def.maxHp}`)),
           h('div', { class: 'hc-row' }, h('span', { class: 'dim small' }, 'Focus'), pips(hd.focus, 3, 'focus'), def.cls === 'mage' ? [h('span', { class: 'dim small' }, ' Mana'), pips(hd.mana, 3, 'mana')] : '', def.cls === 'hobart' && hd.rallyCooldown > 0 ? h('span', { class: 'dim small' }, ` Rally in ${hd.rallyCooldown}`) : ''),
           packRow(hd.pack),
@@ -710,6 +781,7 @@ export class Hud {
       );
       this.cards.append(card);
     });
+    this.dio.showEdgeLips(edges);
   }
 
   private renderBar(): void {
@@ -835,18 +907,19 @@ export class Hud {
 
   // ------------------------------------------------------------ confirm and menu
 
-  confirm(text: string, okLabel: string, ok: () => void): void {
+  confirm(text: string, okLabel: string, ok: () => void, opts: { title?: string; cancel?: string; danger?: boolean } = {}): void {
     this.confirmBox = { text, ok };
     clear(this.modal);
     this.modal.append(
       h(
         'div',
-        { class: 'modal-box' },
+        { class: `modal-box ${opts.danger ? 'danger' : ''}` },
+        opts.title ? h('div', { class: 'modal-title' }, opts.title) : '',
         h('p', null, text),
         h(
           'div',
           { class: 'pv-actions' },
-          h('button', { class: 'btn btn-ghost', onclick: () => this.closeConfirm() }, 'Cancel ', h('kbd', null, 'Esc')),
+          h('button', { class: 'btn btn-ghost', onclick: () => this.closeConfirm() }, `${opts.cancel ?? 'Cancel'} `, h('kbd', null, 'Esc')),
           h(
             'button',
             {
@@ -943,7 +1016,7 @@ export class Hud {
     const name = this.engine.castle().levels.find((l) => l.level === lvl)?.name ?? `Level ${lvl}`;
     clear(this.emptyEl);
     if (s?.delve && !seen) {
-      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs or the pit.'));
+      this.emptyEl.append(h('div', { class: 'bn-title' }, name), h('div', { class: 'bn-sub' }, 'Unexplored. Find the stairs, the lift or the pit.'));
       this.emptyEl.classList.remove('hidden');
     } else this.emptyEl.classList.add('hidden');
   }
@@ -1050,6 +1123,10 @@ const TILE_NAME: Record<string, string> = {
   stairs: 'Stairs',
   exit: 'Exit: leave here',
   brazier: 'Brazier',
+  lift: 'Lift',
+  prop: 'Furniture',
+  tallprop: 'Furniture',
+  sealed: 'The Sealed Stair: sealed shut',
 };
 
 const GOAL_TEXT: Record<string, string> = { loot: 'looting', objective: 'after your objective', leave: 'leaving' };
@@ -1069,6 +1146,12 @@ export function intentText(s: GameState, it: Intent): string {
       return `steals from ${name(it.targetId)}`;
     case 'flee':
       return 'flees';
+    case 'shove':
+      return `shoves ${name(it.targetId)}`;
+    case 'breath':
+      return `breathes fire on ${it.hexes?.length ?? 5} hexes${dmg}`;
+    case 'sweep':
+      return `sweeps its tail: every adjacent hero shoved${dmg}`;
     default:
       return 'waits';
   }

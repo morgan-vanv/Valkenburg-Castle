@@ -14,10 +14,17 @@ import type { Hex, Pos } from './hex';
  * - pillar: solid, blocks sight, drawn as a column.
  * - rubble: walkable, costs 2 movement.
  * - door: walkable when open; blocks sight when closed.
- * - pit: open drop; impassable on foot, blocks nothing for sight. Jump or rope down.
+ * - pit: open drop; impassable on foot, blocks nothing for sight. Jump, rope or be shoved down.
+ *   Falling goes straight down the column: the first level below with a walkable tile at
+ *   the same (q, r) is where you land (Level 1's pit mouth over a Level 2 bridge lands on
+ *   the bridge; elsewhere it falls through Level 2's pit to the Hollow). See docs/v3-spec.md 14.
  * - stairs: walkable; a CastleLink joins it to a stairs hex on another level.
+ * - lift: walkable; the lift platform. A 'lift' link joins its two ends once the winch is worked.
  * - exit: walkable; a hero standing here may Leave the castle.
  * - brazier: solid, a fire bowl; light it from an adjacent hex.
+ * - prop: furniture that blocks movement but not sight (table, bunk, barrel, anvil, cage). Cover.
+ * - tallprop: furniture that blocks movement and sight (bookshelf, forge, winch, statue).
+ * - sealed: a sealed door, solid (the Sealed Stair). Not openable in the demo.
  */
 export type TileKind =
   | 'floor'
@@ -29,7 +36,32 @@ export type TileKind =
   | 'pit'
   | 'stairs'
   | 'exit'
-  | 'brazier';
+  | 'brazier'
+  | 'lift'
+  | 'prop'
+  | 'tallprop'
+  | 'sealed';
+
+/** What a prop or tallprop tile is, for the view's model. */
+export type PropKind =
+  | 'table'
+  | 'bench'
+  | 'bunk'
+  | 'barrel'
+  | 'crate'
+  | 'anvil'
+  | 'cage'
+  | 'bones'
+  | 'rock'
+  | 'shelf'
+  | 'forge'
+  | 'winch'
+  | 'statue'
+  | 'rack'
+  | 'stalagmite';
+
+/** Floor look, set per room. */
+export type Material = 'flagstone' | 'planks' | 'rug' | 'earth' | 'rock' | 'water' | 'bone';
 
 export interface TileDef {
   kind: TileKind;
@@ -38,6 +70,10 @@ export interface TileDef {
   locked?: boolean;
   /** Room id this hex belongs to (floor-like tiles). */
   room?: string;
+  /** prop / tallprop: what it is. */
+  prop?: PropKind;
+  /** Floor next to a pit: a railing on this hex's pit side stops anyone being shoved off here. */
+  railing?: boolean;
 }
 
 export interface RoomDef {
@@ -45,10 +81,14 @@ export interface RoomDef {
   name: string;
   /** Hex for the label in the view. */
   labelAt: Hex;
+  /** Floor look. Default flagstone. */
+  material?: Material;
+  /** Floor tint, '#rrggbb', so neighbouring rooms read apart. */
+  tint?: string;
 }
 
 export interface LevelDef {
-  /** 1 = top (the Ruined Keep), 2 = the Barracks and Cells. */
+  /** 1 = the Ruined Keep, 2 = the Crossing, 3 = the Hollow. */
   level: number;
   name: string;
   /** Tiles by hexKey. Hexes not listed are solid rock (void). */
@@ -56,7 +96,7 @@ export interface LevelDef {
   rooms: RoomDef[];
 }
 
-export type MonsterKind = 'rats' | 'orc' | 'spider' | 'cutpurse' | 'berserker';
+export type MonsterKind = 'rats' | 'orc' | 'spider' | 'cutpurse' | 'berserker' | 'dragon';
 
 export interface SpawnDef {
   at: Pos;
@@ -87,20 +127,29 @@ export interface TrapDef {
 /** Where a contract objective can be placed. */
 export interface ContractSiteDef {
   id: string;
-  kind: 'rescue' | 'recover';
+  /** 'slay': the Dragon's lair (the at hex is the Dragon's spawn). */
+  kind: 'rescue' | 'recover' | 'slay';
   at: Pos;
   /** e.g. "the cellblock", "the chapel crypt". Used in contract text. */
   where: string;
 }
 
 /**
- * Connections between levels.
- * - stairs: a and b are stairs tiles; stepping onto one and spending 1 movement moves you to the other.
- * - pit: hexes on the upper level's pit edge (`edge`, floor tiles adjacent to the pit) drop to `landing` hexes on the lower level.
+ * Connections between levels. Falls (pits) need no link: they go straight down the column.
+ * - stairs: a and b are stairs tiles; stepping from one to the other costs 1 movement.
+ * - lift: a and b are lift tiles on two levels; once the winch (a tallprop next to `winch`
+ *   on the upper level) is worked, stepping from one to the other costs 1 movement.
  */
 export type CastleLink =
   | { kind: 'stairs'; a: Pos; b: Pos }
-  | { kind: 'pit'; edge: Pos[]; landing: Pos[] };
+  | { kind: 'lift'; a: Pos; b: Pos; winch: Pos };
+
+/** A fixed light: lights its radius for good, no lantern needed. */
+export interface LightDef {
+  at: Pos;
+  radius: number;
+  kind: 'sconce' | 'daylight' | 'fire' | 'fungus' | 'glow';
+}
 
 export interface CastleDef {
   name: string;
@@ -116,6 +165,8 @@ export interface CastleDef {
   contractSites: ContractSiteDef[];
   /** Where rival crews enter (exit tiles). */
   rivalEntrances: Pos[];
+  /** Fixed lights: sconces, daylight, the forge, fungus, the Lair's fires. */
+  lights: LightDef[];
 }
 
 // ---------------------------------------------------------------- heroes and items
@@ -138,7 +189,8 @@ export type ItemKind =
   | 'potion' // heals 5
   | 'rope'
   | 'charge' // blasting charge
-  | 'heirloom'; // contract item, takes 2 slots
+  | 'heirloom' // contract item, takes 2 slots
+  | 'hoard'; // a piece of the Dragon's hoard: valuable, takes 2 slots
 
 export interface Item {
   id: string;
@@ -146,7 +198,7 @@ export interface Item {
   name: string;
   /** Gold for 'gold'; sale value for valuables and heirlooms; 1 for consumables. */
   amount: number;
-  /** Slots this item takes (heirloom 2, everything else 1). */
+  /** Slots this item takes (heirloom and hoard 2, everything else 1). */
   slots: number;
   /** Contract id, for contract items. */
   contractId?: string;
@@ -174,7 +226,8 @@ export interface Hero {
 
 export interface Contract {
   id: string;
-  kind: 'rescue' | 'recover';
+  /** 'slay': kill the Dragon (unlocks at reputation 3). */
+  kind: 'rescue' | 'recover' | 'slay';
   title: string;
   /** One-line brief, e.g. "Brother Edric is held in the cellblock." */
   brief: string;
@@ -259,7 +312,14 @@ export interface HeroInDelve {
 }
 
 export interface Intent {
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait';
+  /**
+   * shove: push targetId one hex away from the monster (`to` = where they'll end up; may be a pit).
+   * breath: the Dragon's fire; every hero on `hexes` takes the damage next world phase.
+   * sweep: the Dragon's tail; every adjacent hero is shoved one hex.
+   */
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep';
+  /** breath: the marked hexes. */
+  hexes?: Pos[];
   targetId?: string;
   /** Hex the monster will end on (move/flee). */
   to?: Pos;
@@ -363,6 +423,8 @@ export interface Delve {
   blown: string[];
   /** Ropes anchored at the pit, by posKey of the edge hex. */
   ropes: string[];
+  /** The winch has been worked: the lift runs between its two ends. */
+  liftWorking: boolean;
   prisoner: Prisoner | null;
   /** Hexes ever seen, by posKey. */
   explored: string[];
@@ -428,6 +490,7 @@ export type ActionKind =
   | 'kindle' // Mage spell: +12 light
   | 'mend' // Mage spell: heal 4 on an ally within 3
   | 'passLantern' // give the lantern to an adjacent hero
+  | 'winch' // next to the winch: work it so the lift runs (loud)
   | 'leave'; // on an exit: leave the castle
 
 export interface ActionTarget {
@@ -497,6 +560,10 @@ export type GameEvent =
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }
   | { type: 'delveOver'; summary: DelveSummary }
+  | { type: 'shoved'; id: string; from: Pos; to: Pos }
+  | { type: 'fell'; id: string; from: Pos; to: Pos; levels: number; damage: number }
+  | { type: 'breath'; by: string; hexes: Pos[] }
+  | { type: 'liftWorking' }
   | { type: 'say'; text: string };
 
 export interface ApplyResult {

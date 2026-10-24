@@ -23,7 +23,7 @@ export class CameraRig {
   enabled = true;
 
   constructor(dom: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 300);
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
       if (e.button === 1 || e.button === 2) {
@@ -143,7 +143,7 @@ export class CameraRig {
   }
 
   zoomBy(f: number): void {
-    this.distance = THREE.MathUtils.clamp(this.distance * f, 6, 64);
+    this.distance = THREE.MathUtils.clamp(this.distance * f, 6, 90);
   }
 
   addShake(amount: number): void {

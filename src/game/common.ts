@@ -3,7 +3,7 @@
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
-  BLEED_START, CLASSES, GEMS, JEWELRY, MONSTERS, PACK_SLOTS,
+  BLEED_START, CLASSES, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SLAY_XP,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX } from './state';
@@ -98,7 +98,7 @@ export function roll(c: Ctx, who: string, what: string, slots: number, p: number
 
 const SINGLE: Record<ItemKind, string> = {
   gold: 'Gold', gem: 'Gem', jewelry: 'Jewelry', torch: 'Torch', potion: 'Potion', rope: 'Rope',
-  charge: 'Blasting charge', heirloom: 'Heirloom',
+  charge: 'Blasting charge', heirloom: 'Heirloom', hoard: 'Hoard',
 };
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {
@@ -107,7 +107,7 @@ export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: 
     kind,
     name: name ?? (kind === 'gold' ? `${amount} gold` : SINGLE[kind]),
     amount,
-    slots: kind === 'heirloom' ? 2 : 1,
+    slots: kind === 'heirloom' || kind === 'hoard' ? 2 : 1,
   };
 }
 
@@ -169,7 +169,7 @@ export function chestLoot(c: Ctx, tier: number): Item[] {
 
 export function valueOf(items: { kind: string; amount: number }[]): number {
   let v = 0;
-  for (const i of items) if (i.kind === 'gold' || i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom') v += i.amount;
+  for (const i of items) if (i.kind === 'gold' || i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard') v += i.amount;
   return v;
 }
 
@@ -260,6 +260,19 @@ export function killMonster(c: Ctx, m: MonsterX, by: string | null): void {
     c.d.kills[by] = (c.d.kills[by] ?? 0) + 1;
     (c.d.xp ??= {})[by] = (c.d.xp[by] ?? 0) + (m.kind === 'gloam' ? 0 : MONSTERS[m.kind].xp);
   }
+  if (m.kind === 'dragon') {
+    c.d.dragonSlain = true;
+    say(c, `${m.name} is dead. The Hollow goes quiet.`);
+    noteOnce(c, `${m.name} was slain.`);
+    // Kill XP split among every hero in the delve; the remainder to the killer.
+    const xs = (c.d.xp ??= {});
+    const n = c.d.heroes.length;
+    const each = Math.floor(SLAY_XP / n);
+    for (const h of c.d.heroes) xs[h.heroId] = (xs[h.heroId] ?? 0) + each;
+    const rest = SLAY_XP - each * n;
+    const who = by && hd(c, by) ? by : c.d.heroes[0]!.heroId;
+    xs[who] = (xs[who] ?? 0) + rest;
+  }
 }
 
 /** Damage to any creature by id (monster, rival, prisoner, hero). Hero damage here ignores armor. */
@@ -325,6 +338,15 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;
+    if (m.kind === 'dragon') {
+      if (m.awareness === 'asleep' && radius >= DRAGON_WAKE_NOISE) {
+        m.awareness = 'hunting';
+        (m as MonsterX & { breathNext?: boolean }).breathNext = true;
+        c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
+        say(c, `${m.name} stirs at the noise.`);
+      }
+      continue;
+    }
     if (m.awareness === 'asleep') {
       m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
       m.focusAt = { ...at };
@@ -339,7 +361,7 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
 
 export function wakeAdjacent(c: Ctx, at: Pos): void {
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' && within(m.at, at, 1)) {
+    if (m.awareness === 'asleep' && m.kind !== 'dragon' && within(m.at, at, 1)) {
       m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
       m.focusAt = { ...at };
       c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });

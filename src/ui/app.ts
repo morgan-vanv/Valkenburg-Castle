@@ -12,7 +12,7 @@ import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v3';
+export const SAVE_KEY = 'vc.save.v31';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -32,8 +32,9 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   disarm: 'pick',
   charge: 'click',
   guard: 'sword',
+  winch: 'winch',
 };
-const LOADOUT_KEY = 'vc.loadout.v3';
+const LOADOUT_KEY = 'vc.loadout.v31';
 
 export class App {
   private state: GameState | null = null;
@@ -76,6 +77,9 @@ export class App {
     this.dio.onStep = (side) => sfx.play('step', { gain: side === 'hero' ? 0.8 : 0.5, pitch: side === 'hero' ? 1 : 0.8 });
     this.dio.onDoor = (open) => sfx.play(open ? 'creak' : 'slam');
     this.dio.onExplosion = () => sfx.play('explosion');
+    this.dio.onImpact = (levels) => sfx.play('thud', { gain: 0.7 + levels * 0.2, pitch: levels > 1 ? 0.8 : 1 });
+    this.dio.onBreath = () => sfx.play('roar');
+    this.dio.onLift = () => sfx.play('winch');
     this.hud = new Hud(
       {
         engine,
@@ -446,6 +450,27 @@ export class App {
           continue;
         case 'delveOver':
           if (!instant()) await wait(0.5);
+          continue;
+        case 'shoved':
+          sfx.play('smash', { pitch: 0.7, gain: 0.5 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'fell': {
+          const hero = this.isHero(e.id);
+          sfx.play('whoosh');
+          const lvl = this.engine.castle().levels.find((l) => l.level === e.to.level)?.name ?? `Level ${e.to.level}`;
+          this.hud.log(`${this.hud.nameOf(e.id)} falls ${e.levels === 1 ? '1 level' : `${e.levels} levels`} into ${lvl}: ${e.damage} damage.`, hero ? 'log-enemy' : '');
+          if (hero) this.hud.pulse('hurt');
+          await this.dio.playEvent(e);
+          continue;
+        }
+        case 'breath':
+          this.hud.log(`${this.hud.nameOf(e.by)} breathes fire!`, 'log-enemy');
+          await this.dio.playEvent(e);
+          continue;
+        case 'liftWorking':
+          this.hud.log('The winch groans. The lift runs.');
+          await this.dio.playEvent(e);
           continue;
         case 'out':
           this.hud.log(`${this.hud.nameOf(e.id)} is out.`);

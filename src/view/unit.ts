@@ -43,7 +43,7 @@ export class UnitView {
     this.body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: this.baseOpacity, emissive: 0x000000, depthWrite: !ghost || key === 'gloam' });
     this.glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: key !== 'gloam' });
     this.fig = makeFigure(this.model, { body: this.body, glow: this.glow });
-    this.scale = side === 'hero' ? 1.9 : key === 'berserker' ? 2.0 : key === 'gloam' ? 1.7 : key === 'rats' ? 1.8 : 1.75;
+    this.scale = side === 'hero' ? 1.9 : key === 'dragon' || key === 'dragonSleep' ? 1.0 : key === 'berserker' ? 2.0 : key === 'gloam' ? 1.7 : key === 'rats' ? 1.8 : 1.75;
     this.fig.scale.setScalar(this.scale);
     this.fig.traverse((o) => {
       o.userData.unitId = id;
