@@ -250,6 +250,8 @@ export class Diorama {
     if (instant && !this.state?.delve) this.frameLevel();
     this.refreshUnits();
     this.refreshProps();
+    this.refreshIntentVisibility();
+    for (const l of this.lips.children) l.visible = l.userData.level === level;
     if (changed) this.hooks.levelChanged(level);
   }
 
@@ -871,7 +873,7 @@ export class Diorama {
       el.className = `intent intent-${it.kind}`;
       const target = it.targetId ? targetName(state, it.targetId) : '';
       const glyph = INTENT_GLYPH[it.kind];
-      const dmg = it.damage ? `${it.damage[0]}–${it.damage[1]}` : '';
+      const dmg = it.damage && it.damage[1] > 0 ? (it.damage[0] === it.damage[1] ? `${it.damage[1]}` : `${it.damage[0]}–${it.damage[1]}`) : '';
       el.innerHTML = `<span class="intent-icon">${glyph}</span>${dmg ? `<span class="intent-dmg">${dmg}</span>` : ''}`;
       el.title = `${m.name}: ${INTENT_WORDS[it.kind]}${target ? ` ${target}` : ''}${dmg ? ` for ${dmg}` : ''}`;
       this.fx.appendChild(el);

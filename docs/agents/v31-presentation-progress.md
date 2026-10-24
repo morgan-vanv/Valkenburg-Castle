@@ -1,6 +1,6 @@
 # V3.1 presentation progress
 
-Status: look built; section 14 UI written (untested in browser). Next: scene screenshots of jump/shove/breath/fall.
+Status: look built; section 14 UI verified in screenshots on ?castle=test (jump hover/preview/confirm/fall, edge badge+lips, shove preview, breath/sweep/shove intents, breath jet, winch, slay card). Next: real castle when it typechecks; full tour + stress bot.
 
 ## Done (files)
 - src/ui/names.ts: dragon name, winch glyph + hotkey W, hoard glyph.
@@ -28,6 +28,8 @@ Status: look built; section 14 UI written (untested in browser). Next: scene scr
 3. app.ts: sfx for shoved/fell/breath/liftWorking events, hook dio.onImpact etc; css for .landing-tag, edge badge, jump confirm.
 4. Switch to real engine/castle (engine committed; check src/data/castle typechecks) and shoot all three levels.
 5. Run scripts/v3-shot.mjs full tour + v3-stress.mjs for errors.
+
+- scripts/v31-shot-scenes.mjs: scenes on ?castle=test. Fixed: intent marks now re-shown on level change.
 
 ## Contract requests
 - None.
