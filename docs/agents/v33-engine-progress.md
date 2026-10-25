@@ -20,8 +20,18 @@ Brief: docs/agents/v33-engine.md. Spec: docs/v3-spec.md section 16. Branch `v3.3
 - Tests: 122 pass (`source scripts/npmenv.sh && npx vitest run src/game`, ~8s). New blocks: 16.1 awareness and patrols (spawn defaults + tiers, patrol loop, noticing rules, knownRoutes, giving up), 16.2 light (shutter, per-hero sight, the Gloam in the Hollow, Gloam immunity, pitch rule on L1/L2), 16.4 new monsters (archer, captain, ghoul, spider drag), 16.5 the sisters' kit (classes, dart, overwatch, knockback, veil + smoke, burglar looting).
 - Sim updated (scripts/v3-engine-sim.ts): shutter discipline, oil for L3, `escape`, per-level table (done, deaths, dark rounds on L3, Gloam strikes). Test castle run: 6 delves, L1 3/3 done, L2 2/2, L3 slay 0/1 with 4 deaths.
 
-## In progress
-Sim on the real castle (SEED=1, 16 delves) to check L1 easy / L2 resistance / L3 deadly unlit; then tune if the bot's numbers look off.
+## Sim numbers (real castle, `SEED=1 npx tsx scripts/v3-engine-sim.ts 16`, ~5 min)
+Bot changes this pass: attacks before reviving (a hero revived under archer fire just went down again), closes in on hunters in sight within 4 (archers kite), squad cohesion (stay within 3 of the lantern bearer; the bearer waits for stragglers), shutter on L1 in fixed light, oil for L3, `escape` when held.
+- Per level: L1 10/10 done, 0 deaths. L2 2/4 done, 6 deaths (recover L2 2/3; rescue L2 0/1 ran the lantern to 0 at round 33). L3 (slay only came up) 0/2, 8 deaths; dark rounds 1 and 3, Gloam strikes 0 on L3 (the tier-3 monsters and the Dragon did it, not the dark).
+- Before the cohesion/attack-first bot fixes the same seed gave L2 1/4 with 14 deaths: scattered heroes got picked off by patrols and the two archers; a revive loop ate every action.
+- Reading: L1 is easy as wanted. L2 is real resistance for this bot (half the delves wiped). L3 is deadly with or without light for the bot; it never gets to test "deadly without light" because the tiered spawns kill it first. The lead may want to look at L3 tier-3 numbers (+4 HP, +10%, +1 dmg on cave spiders 9 HP 75% 3 dmg, ghouls 11 HP 70%) before judging the Gloam.
+
+- SEED=2, 16 delves: L1 9/9, 0 deaths. L2 2/5, 13 deaths (recover L2 2/3, rescue L2 0/2). L3 (slay) 0/2, 8 deaths, dark rounds 2, Gloam strikes 0. Same picture. Rescue L2 is 0/3 across both seeds: the cellblock is the far end of the Crossing and the walk back with the prisoner (escort move 3) runs through the patrols with the lantern near empty.
+
+- Slay trace (SEED=1 delve 13): the party marked an L2 patrol, lost HP crossing the Crossing, took the lift down; at the lift base they stood unlit for a phase and "The dark here is awake" fired (the Gloam rose, then fled when the lantern came back); ghouls rose at the Bone Pile and grabbed Hobart (he wrenched free); the Dragon breathed, swept and **died at round 23**; the three others were down or dead by then and Hobart walked out alone with the lantern burning down (light 2 at round 31) and died on the way. So L3 kills with tiers plus the Dragon and the long walk, and the Gloam only adds to it when the bot lingers unlit. Contract failed because nobody got out.
+
+## Done (status)
+Everything in the brief is implemented and tested; the sim prints the per-level table. Nothing committed (the lead commits); WIP snapshots pushed to wip/v3 throughout.
 
 ## Design calls (spec silent)
 - **Alert = searching.** Any monster that goes alert (noise, or lost its quarry) gets `searchRounds` 3; at zero it returns: patrollers to the nearest waypoint (awareness 'patrol'), others walk to `spawnedAt` and stand alert there with no `focusAt`. Fresh noise resets the clock. Berserkers never give up.

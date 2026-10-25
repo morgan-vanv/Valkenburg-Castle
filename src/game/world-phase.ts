@@ -421,7 +421,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   const stopped = walk(c, m.id, m, plan.path);
   if (!c.d.monsters.includes(m)) return;
   // A watched patrol gives its route away (spec 16.1).
-  if (visBefore && m.route && !c.d.knownRoutes.includes(m.id)) {
+  if (visBefore && m.route && !(c.d.knownRoutes ??= []).includes(m.id)) {
     if ([startAt, ...plan.path].some((p) => visBefore.has(posKey(p)))) {
       c.d.knownRoutes.push(m.id);
       c.ev.push({ type: 'routeKnown', id: m.id, route: m.route.map((p) => ({ ...p })) });

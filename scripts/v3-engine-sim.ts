@@ -40,6 +40,8 @@ const w = new World(castle);
 const ROUND_CAP = 80;
 /** The bot heads out when the lantern gets this low (it holds 20 since V3.3). */
 const LOW_LIGHT = 5;
+/** Heroes keep within this many hexes of the lantern bearer (a careless player still stays in the light). */
+const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
 const pits: Pos[] = [];
@@ -212,13 +214,32 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
       const here = field.get(posKey(me.at)) ?? 999;
       const reach = e.reachable(s, id, false);
+      // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
+      const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+      const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+      const isBearer = !bearer || bearer.heroId === id;
+      const stragglers = isBearer
+        ? d.heroes.filter((h) => h.status === 'active' && h.heroId !== id && h.at.level === me.at.level && !h.webbed && !h.grabbedBy && hexDist(h.at, me.at) > COHESION + 1)
+        : [];
       let best: (typeof reach)[0] | undefined;
       let bestD = here;
-      for (const r of reach) {
-        const dd = field.get(posKey(r.to)) ?? 999;
-        if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
-          bestD = dd;
-          best = r;
+      if (!(isBearer && stragglers.length && !hunters.length)) {
+        for (const r of reach) {
+          if (!isBearer && bearer && r.to.level === bearer.at.level && hexDist(r.to, bearer.at) > COHESION && hexDist(me.at, bearer.at) <= COHESION) continue;
+          const dd = field.get(posKey(r.to)) ?? 999;
+          if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
+            bestD = dd;
+            best = r;
+          }
+        }
+      }
+      // Fallen behind: catch up with the bearer instead.
+      if (!best && !isBearer && bearer && bearer.at.level === me.at.level && hexDist(me.at, bearer.at) > COHESION) {
+        const bf = distField(w, d, [bearer.at], { stairs: true, allowLocked: true });
+        let bd = bf.get(posKey(me.at)) ?? 999;
+        for (const r of reach) {
+          const dd = bf.get(posKey(r.to)) ?? 999;
+          if (dd < bd) { bd = dd; best = r; }
         }
       }
       if (best) s = run(s, { type: 'move', heroId: id, path: best.path, sneak: false });
@@ -234,8 +255,11 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const here = field.get(posKey(me2.at)) ?? 999;
     let best: ReturnType<typeof e.reachable>[0] | undefined;
     let bestD = here;
+    const d2 = s.delve as DelveX;
+    const bearer2 = d2.heroes.find((h) => h.heroId === d2.lanternBearer && h.status === 'active');
     for (const r of e.reachable(s, id, false)) {
       if (!r.dash) continue;
+      if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
       const dd = field.get(posKey(r.to)) ?? 999;
       if (dd < bestD) { bestD = dd; best = r; }
     }
