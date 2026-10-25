@@ -143,7 +143,7 @@ export class CameraRig {
   }
 
   zoomBy(f: number): void {
-    this.distance = THREE.MathUtils.clamp(this.distance * f, 6, 90);
+    this.distance = THREE.MathUtils.clamp(this.distance * f, 7, 90);
   }
 
   addShake(amount: number): void {

@@ -8,6 +8,28 @@ import { easeOutCubic } from './world';
 
 export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
 
+/**
+ * Spec 15.8: OSRS-like scale. A humanoid model is ~1.05 to the head and ~0.6 wide, so a
+ * hero at 2.5 stands about 2.6 high and 1.5 wide: as wide as its hex (1.73 across) and
+ * well over a hex tall. Monsters scale with menace: rats low, orcs hero-sized, the
+ * berserker a head taller, spiders wide, the Gloam looming. The Dragon is built in
+ * world units and drawn at 1.
+ */
+export const HERO_SCALE = 2.5;
+export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
+  hobart: 2.6,
+  rats: 2.6,
+  orc: 2.5,
+  cutpurse: 2.3,
+  berserker: 2.9,
+  spider: 2.6,
+  gloam: 2.3,
+  sister: 2.4,
+  prisoner: 2.3,
+  dragon: 1,
+  dragonSleep: 1,
+};
+
 export class UnitView {
   readonly root = new THREE.Group();
   /** Inner group for lunges and recoils (root holds the hex position). */
@@ -43,7 +65,7 @@ export class UnitView {
     this.body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: this.baseOpacity, emissive: 0x000000, depthWrite: !ghost || key === 'gloam' });
     this.glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: key !== 'gloam' });
     this.fig = makeFigure(this.model, { body: this.body, glow: this.glow });
-    this.scale = side === 'hero' ? 1.9 : key === 'dragon' || key === 'dragonSleep' ? 1.0 : key === 'berserker' ? 2.0 : key === 'gloam' ? 1.7 : key === 'rats' ? 1.8 : 1.75;
+    this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.3);
     this.fig.scale.setScalar(this.scale);
     this.fig.traverse((o) => {
       o.userData.unitId = id;
