@@ -403,6 +403,9 @@ export interface HeroInDelve {
   braced?: boolean;
   /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar: can't move or dash, can act. */
   rooted?: number;
+  /** V3.8 (spec 22.2): the walk order being stepped by ticks (explore), and the stance. */
+  walk?: { path: Pos[]; sneak: boolean };
+  sneaking?: boolean;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
   /** Downed only: world phases left before death (starts at 2). */
@@ -644,9 +647,12 @@ export interface Delve {
   blown: string[];
   /** V3.7 (spec 20.3): charges set or thrown with a fuse, by anyone; they go off at the end of a world phase. */
   fuses?: Fuse[];
-  /** V3.7 (spec 20.5): the party is calm (free movement). Steps walked since the castle's last turn. */
-  calm?: boolean;
-  calmSteps?: number;
+  /** V3.8 (spec 22.1): exploring (free movement on ticks) or combat (turns). Absent = combat (old saves). */
+  mode?: 'explore' | 'combat';
+  /** V3.8 (spec 22.2): ticks since exploring began (half a second each). */
+  ticks?: number;
+  /** V3.8 (spec 22.2): hexes the lantern bearer has walked since the lantern last burned in explore. */
+  lanternSteps?: number;
   /** Crates and barrels smashed, by posKey (the hex is floor now). */
   smashed?: string[];
   /** V3.7 (spec 20.3): floor blown open next to a pit, by posKey: the hex is a pit now (the column widens). */
@@ -794,12 +800,13 @@ export type Command =
   | { type: 'upgrade'; heroId: string; part: 'weapon' | 'armor' }
   | { type: 'startDelve'; contractId: string; heroIds: string[]; entrance: number; /** stash item ids per hero */ packs: Record<string, string[]> }
   // delve
-  /**
-   * Path of any length while the party is calm (spec 20.5 free movement): the engine walks it hex by
-   * hex, the castle taking a turn every CALM_STEPS steps, and stops when calm ends. `follow` brings
-   * the other active heroes within 3 along behind.
-   */
-  | { type: 'move'; heroId: string; path: Pos[]; sneak: boolean; follow?: boolean }
+  /** Combat only (spec 22): a budgeted move this player phase. */
+  | { type: 'move'; heroId: string; path: Pos[]; sneak: boolean }
+  // V3.8 explore only (spec 22.2, 22.6)
+  | { type: 'walk'; heroId: string; path: Pos[]; sneak?: boolean } // a walk order of any length; stepped by ticks
+  | { type: 'stopWalk'; heroId: string }
+  | { type: 'sneak'; heroId: string; on: boolean } // the hero's stance while exploring (free)
+  | { type: 'tick' } // half a second of game time
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
   | { type: 'deal'; heroId: string; deal: DealKind; job?: JobKind } // V3.5 parley (spec 18.6), free
@@ -857,8 +864,9 @@ export type GameEvent =
   | { type: 'blast'; at: Pos; by: string; broke: Pos[]; collapsed?: Pos[]; rubbled?: Pos[] } // a charge went off; walls broken, floor dropped into the pit, floor turned to rubble
   | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
   | { type: 'robbed'; hero: string; by: string; items: Item[] }
-  | { type: 'calm'; calm: boolean; why?: string } // spec 20.5: free movement starts or ends ("An orc has seen Pim")
-  | { type: 'walkStopped'; heroId: string; at: Pos; why: string } // spec 20.5: a calm walk halted early while still calm (a trap, a new monster in sight)
+  | { type: 'mode'; mode: 'explore' | 'combat'; why?: string; first?: 'party' | 'enemies'; by?: string } // spec 22.4/22.5; `by` = who noticed or who struck
+  | { type: 'walkStopped'; heroId: string; at: Pos; why: string } // a walk order ended early (a trap, a closed path, a level change)
+  | { type: 'investigate'; id: string; at: Pos } // spec 22.3: a monster goes to look at a noise
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }
   | { type: 'rooted'; id: string; by: string; rounds: number }
   | { type: 'braced'; id: string }
