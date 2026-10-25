@@ -2978,3 +2978,279 @@ input.seed {
 .hp-text.neg {
   color: #e05a4a;
 }
+
+/* ------------------------------------------------------------ V3.5: The Heir's Return (spec 18.7) */
+
+:root {
+  --ally: #7fe07a;
+  --toll: #ffb35c;
+  --ferry: #7f97ad;
+  --choir: #d8cfb8;
+  --lowgate: #f0c66a;
+}
+
+/* title intro */
+.intro-lines p { margin: 0 0 0.45em; }
+.intro-lines p:last-child { color: var(--ember-hot); margin-bottom: 0; }
+.intro-card {
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--lowgate);
+  background: linear-gradient(90deg, rgba(240, 198, 106, 0.08), transparent 70%);
+  font-style: italic;
+  color: var(--parch-dim);
+}
+.intro-card p { margin: 0.2em 0; }
+.intro-card p:last-child { color: var(--parchment); }
+
+/* stations: locked, partial, won back */
+.station.locked .st-glyph { color: var(--muted); border-style: dashed; filter: grayscale(1); }
+.station.locked .st-text b { color: var(--parch-dim); }
+.station.partial .st-glyph { border-style: dashed; }
+.st-lock { color: var(--muted); font-size: 1rem; }
+.st-badge-story { border-color: var(--lowgate); color: var(--lowgate); }
+.station.won {
+  border-color: var(--lowgate);
+  animation: station-won 1.6s ease-out 3;
+}
+.station.won .st-glyph { color: var(--lowgate); border-color: var(--lowgate); box-shadow: 0 0 14px rgba(240, 198, 106, 0.55); }
+@keyframes station-won {
+  0% { box-shadow: 0 0 0 rgba(240, 198, 106, 0); }
+  30% { box-shadow: 0 0 22px rgba(240, 198, 106, 0.55); }
+  100% { box-shadow: 0 0 0 rgba(240, 198, 106, 0); }
+}
+
+/* the won-back moment */
+.won-back {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border: 1px solid var(--lowgate);
+  background: radial-gradient(ellipse at 10% 0%, rgba(240, 198, 106, 0.22), rgba(240, 198, 106, 0.04) 60%), var(--panel-solid);
+  animation: won-in 0.7s ease-out;
+}
+.won-back .kicker { color: var(--lowgate); }
+.wb-line { font-size: 1.2rem; margin: 6px 0; font-family: var(--display); }
+.wb-glyph { color: var(--lowgate); margin-right: 8px; text-shadow: 0 0 10px var(--lowgate); }
+.wb-what { font-family: var(--serif); }
+.wb-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+@keyframes won-in {
+  from { opacity: 0; transform: translateY(-8px); box-shadow: 0 0 0 rgba(240, 198, 106, 0); }
+  60% { box-shadow: 0 0 40px rgba(240, 198, 106, 0.4); }
+}
+
+/* locked notes */
+.lock-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px dashed var(--line-hi);
+  background: rgba(0, 0, 0, 0.25);
+}
+.lock-note.slim { margin: 6px 0 10px; padding: 8px 12px; }
+.lock-note b { font-weight: 400; color: var(--parchment); }
+.lock-note .btn { margin-left: auto; flex: none; }
+.ln-glyph { font-size: 1.3rem; color: var(--muted); flex: none; }
+.lock-why { color: var(--ember); margin-top: 2px; }
+.shop-row.locked > :not(.btn):not(div) { opacity: 0.55; }
+.shop-row.locked .shop-glyph { filter: grayscale(1); opacity: 0.5; }
+.shop-row.locked b { color: var(--parch-dim); }
+
+/* the village panel under the roster */
+.village-panel { margin-top: 14px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-top: 2px solid var(--lowgate); }
+.village-panel .kicker { color: var(--lowgate); margin-bottom: 4px; }
+.vp-row { display: grid; grid-template-columns: 12px 1fr auto; gap: 6px; align-items: baseline; padding: 2px 0; color: var(--muted); font-size: 0.92rem; }
+.vp-row > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vp-row.home { color: var(--parchment); }
+.vp-row.home .vp-mark { color: var(--lowgate); text-shadow: 0 0 6px var(--lowgate); }
+.vp-state { font-family: var(--mono); font-size: 0.6rem; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.06em; }
+.vp-row.home .vp-state { color: var(--lowgate); }
+
+/* story contracts: pinned by the village */
+.board-h { font-family: var(--display); font-weight: 400; font-size: 1.1rem; margin: 6px 0 12px; color: var(--parch-dim); }
+.story-h { color: var(--lowgate); }
+.seal-mini { color: var(--lowgate); }
+.story-contracts { margin-bottom: 22px; }
+.contract.story {
+  background:
+    repeating-linear-gradient(0deg, rgba(90, 60, 30, 0.08) 0 2px, transparent 2px 5px),
+    linear-gradient(180deg, rgba(240, 210, 150, 0.16), rgba(240, 210, 150, 0.05) 50%),
+    #241a10;
+  border: 1px solid #8a6a3a;
+  border-top: 3px solid var(--lowgate);
+  transform: rotate(-0.6deg);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+.contract.story:nth-child(2n) { transform: rotate(0.5deg); }
+.contract.story::after { background: #b8862a; box-shadow: 0 0 6px rgba(240, 198, 106, 0.6), 0 2px 0 #000; }
+.ct-seal {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #c23a2a, #7a1610);
+  color: #ffd9a0;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+.contract.story .kicker { color: var(--lowgate); }
+.ct-unlock { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 1px solid rgba(240, 198, 106, 0.35); background: rgba(240, 198, 106, 0.07); }
+.ct-unlock b { font-weight: 400; color: var(--lowgate); }
+.ct-heavy { color: var(--ember); margin: 0; }
+.prep-contracts .btn.story { border-color: #8a6a3a; }
+.prep-story { color: var(--lowgate); margin: -4px 0 10px; }
+
+/* hero chips: ale badge */
+.hchip-body { flex: 1; min-width: 0; }
+.ale-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid #8a6a3a;
+  background: rgba(240, 198, 106, 0.1);
+  color: var(--lowgate);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.ale-g { font-size: 0.85rem; }
+.hchip .ale-badge .ale-n { display: none; }
+.pick-hero .ale-badge { margin-left: auto; }
+
+/* the Flagon's ale menu */
+.ale-menu { margin: 0 0 22px; padding: 14px 16px; border: 1px solid #6a4a24; background: linear-gradient(180deg, rgba(240, 198, 106, 0.08), transparent 60%), #1a120b; }
+.am-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.am-head h3 { font-family: var(--display); font-weight: 400; font-size: 1.3rem; color: var(--lowgate); }
+.am-who { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
+.am-who .kicker { margin-right: 4px; }
+.am-hero.on { border-color: var(--lowgate); background: rgba(240, 198, 106, 0.14); }
+.am-has { color: var(--lowgate); }
+.ale-glyph { color: var(--lowgate); font-size: 1.2rem; }
+.ales .shop-row { padding: 9px 0; }
+
+/* infirmary: drink */
+.heal-btns { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* game over */
+.over-line { font-family: var(--display); font-size: 1.4rem; }
+
+/* ---- delve: ale chip */
+.chip.ale { border-color: #8a6a3a; color: var(--lowgate); }
+.chip.ale.bad-ale { border-color: var(--red-dim); color: #ffb4ac; }
+
+/* ---- delve: rivals panel by stance and crew */
+.hud-rivals.crew-ferrymen { border-top-color: var(--ferry); }
+.hud-rivals.crew-gallows-choir { border-top-color: var(--choir); }
+.hud-rivals.st-enemy { box-shadow: inset 0 0 0 1px var(--red-dim); }
+.hud-rivals.st-ally { box-shadow: inset 0 0 0 1px #3a7a34; }
+.hud-rivals.st-warn { box-shadow: inset 0 0 0 1px var(--toll); }
+.rv-stance.st-demanding { color: var(--toll); }
+.rv-stance.st-hired { color: var(--ally); }
+.rv-stance.st-truce, .rv-stance.st-waiting { color: var(--parch-dim); }
+.rv-toll { margin: 4px 0; padding: 3px 6px; border: 1px solid var(--toll); color: var(--toll); font-size: 0.8rem; animation: toll-pulse 1.2s ease-in-out infinite; }
+.rv-parley { margin-top: 6px; width: 100%; justify-content: center; }
+@keyframes toll-pulse { 50% { background: rgba(255, 179, 92, 0.14); } }
+.st-word.st-enemy { color: var(--red); }
+.st-word.st-ally { color: var(--ally); }
+.st-word.st-warn { color: var(--toll); }
+.log-ally { color: var(--ally); }
+.log-deal { color: var(--lowgate); }
+
+/* ---- unit tags for crews */
+.tag-st-hired .hp-pips i.on { background: var(--ally); }
+.tag-st-hired .hp-pips { box-shadow: 0 0 0 1px var(--ally); }
+.tag-hired { color: var(--ally); }
+.tag-toll { color: var(--toll); }
+.tag-truce { color: var(--parch-dim); }
+
+/* ---- intents: the toll fuse, charge and firebolt */
+.intent-toll { border-color: var(--toll); background: rgba(40, 24, 4, 0.92); color: var(--toll); }
+.intent-toll .intent-dmg { color: #fff; }
+.intent-fuse {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--toll);
+  color: #1a0e02;
+  font-size: 0.65rem;
+  animation: toll-pulse 1s ease-in-out infinite;
+}
+.intent-charge { border-color: #ffc040; }
+.intent-firebolt { border-color: #ff7a20; }
+
+/* ---- the parley card */
+.hud-parley {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  width: min(500px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--hud-below, 130px) - 104px);
+  overflow-y: auto;
+  padding: 14px 16px 12px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line-hi);
+  border-top: 3px solid #b8ad98;
+  z-index: 40;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.hud-parley.crew-ferrymen { border-top-color: var(--ferry); }
+.hud-parley.crew-gallows-choir { border-top-color: var(--choir); }
+.pl-head { display: flex; gap: 12px; align-items: flex-start; }
+.pl-seal { font-size: 1.6rem; color: var(--ember); line-height: 1; }
+.pl-title { flex: 1; }
+.pl-title h3 { font-family: var(--display); font-weight: 400; font-size: 1.45rem; line-height: 1.1; }
+.pl-tags { display: flex; gap: 6px; margin-top: 4px; }
+.pl-tag { font-family: var(--mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 1px 6px; border: 1px solid var(--line-hi); color: var(--parch-dim); }
+.pl-tag.tm-cutthroat { border-color: var(--red-dim); color: #ffb4ac; }
+.pl-tag.st-enemy { border-color: var(--red); color: var(--red); }
+.pl-tag.st-ally { border-color: var(--ally); color: var(--ally); }
+.pl-tag.st-warn { border-color: var(--toll); color: var(--toll); }
+.pl-blurb { margin: 6px 0 8px; font-style: italic; }
+.pl-toll {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  margin: 8px 0 0;
+  border: 1px solid var(--toll);
+  background: rgba(255, 179, 92, 0.1);
+  color: var(--toll);
+}
+.pl-toll b { font-family: var(--display); font-weight: 400; font-size: 1.1rem; color: #ffd9a0; }
+.pl-fuse { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--toll); color: #1a0e02; font-family: var(--mono); font-weight: 700; animation: toll-pulse 1s ease-in-out infinite; }
+.pl-members { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0; }
+.pl-mem { display: flex; gap: 6px; align-items: center; }
+.pl-mem.dead { opacity: 0.45; text-decoration: line-through; }
+.pl-mem .cbadge { width: 22px; height: 22px; font-size: 0.75rem; }
+.pl-aim { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 3px 0; border-top: 1px dotted var(--line); border-bottom: 1px dotted var(--line); }
+.pl-aim b { font-weight: 400; }
+.pl-aim .btn { margin-left: auto; }
+.pl-purse { margin: 6px 0 2px; color: var(--gold); }
+.pl-purse .kicker { margin-right: 4px; }
+.pl-deals { display: flex; flex-direction: column; }
+.pl-deal { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 6px 0; border-bottom: 1px dotted var(--line); line-height: 1.25; }
+.pl-what { color: var(--parch-dim); }
+.pl-deal > .btn { align-self: center; min-width: 64px; justify-content: center; }
+.pl-deal.blocked .pl-glyph, .pl-deal.blocked .pl-text > b { opacity: 0.55; }
+.pl-glyph { font-size: 1.2rem; color: var(--ember); text-align: center; }
+.deal-hire .pl-glyph { color: var(--ally); }
+.pl-text b { font-weight: 400; font-family: var(--display); font-size: 1.05rem; }
+.pl-pays { color: var(--gold); }
+.pl-risk { color: var(--parch-dim); }
+.pl-risk.neg { color: #ffb4ac; }
+.pl-why { color: var(--ember); }
+.pl-jobs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.pl-jobs .btn { padding-top: 2px; padding-bottom: 2px; }
+.pl-foot { display: flex; align-items: center; gap: 8px; margin: 6px -16px -12px; padding: 8px 16px 10px; position: sticky; bottom: -12px; background: var(--panel-solid); border-top: 1px solid var(--line); }
+.pl-foot .dim { margin-right: auto; }
+.pl-fight { min-width: 96px; }
+.contract.story .ct-top { padding-right: 34px; }

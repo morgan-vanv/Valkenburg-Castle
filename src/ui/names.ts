@@ -1,6 +1,6 @@
 // Player-facing names, glyphs and short texts.
 
-import type { ActionKind, Brightness, HeroClass, Item, MonsterKind } from '../game/types';
+import type { ActionKind, AleEffect, AleKind, Brightness, CrewId, DealKind, HeroClass, Item, JobKind, MonsterKind, RivalCrew, StoryId } from '../game/types';
 import {
   BLINK_RANGE, BRAZIER_LIGHT, BREATH_DMG, BURN_ROUNDS, CALTROPS_DMG, CLASSES, DIG_NOISE, DRAGON_WAKE_NOISE, FIREBALL_NOISE, FIREBALL_RANGE,
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT,
@@ -12,7 +12,7 @@ import {
 export type AnyClass = HeroClass | 'mage' | 'sellsword' | 'burglar' | 'ranger' | 'sapper' | 'pyromancer' | 'shadowmancer' | 'hedgewitch';
 
 export const CLASS_NAME: Record<AnyClass, string> = {
-  heir: 'Lord',
+  heir: 'Heir',
   sellsword: 'Sellsword',
   burglar: 'Burglar',
   mage: 'Hedge Mage',
@@ -25,7 +25,7 @@ export const CLASS_NAME: Record<AnyClass, string> = {
 
 /** Counter-style badge glyph, 1980 style. */
 export const CLASS_GLYPH: Record<AnyClass, string> = {
-  heir: 'L',
+  heir: 'H',
   sellsword: 'S',
   burglar: 'B',
   mage: 'M',
@@ -206,6 +206,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   shove: '⇥',
   free: '⛓',
   bribe: '¤',
+  parley: '⚖',
   rally: '⚑',
   guard: '⛨',
   firebolt: '☄',
@@ -261,6 +262,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   shove: 'Push an enemy next to you 1 hex straight away: 2 Might slots (Sellsword 3), needs 2 hits. Into a pit it falls; into a wall it takes 1. Noise 2.',
   free: 'Unshackle the prisoner next to you. They follow this hero; an escort moves 3 at most. Get them to an exit.',
   bribe: 'Pay the rival crew 40 gold from the party\'s packs: they stop fighting and leave.',
+  parley: 'Talk to a rival crew within 4 hexes, in sight. Free. Opens the deal card: pay them to leave, buy a truce, give them a job, hire them, or fight. One deal per crew per round; paid from the party\'s packs.',
   rally: `Every other hero within 3 gains 1 Focus (max ${FOCUS_MAX}). Ready again after 3 rounds.`,
   guard: 'Until your next turn, attacks aimed at the ally next to you hit you instead.',
   firebolt: '1 mana. 3 Wits slots at range 5 in sight, 2 damage per hit; all 3 hit: +1. Noise 3.',
@@ -302,7 +304,7 @@ export function actionHelp(action: ActionKind, cls?: string): string {
 }
 
 /** Actions that don't use the hero's action, and those that take the whole turn. */
-export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter']);
+export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter', 'parley']);
 export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'jump', 'grapple']);
 
 /** What the bar tooltip says it costs. */
@@ -361,6 +363,8 @@ export function itemTip(i: Item): string {
   const tail = '\nDrop or Give it (free) to make room.';
   if (i.kind === 'gold') return `${name} · Coins, up to 100 to a slot. Yours when this hero gets out.${tail}`;
   if (i.kind === 'gem' || i.kind === 'jewelry') return `${name} · A valuable: sells for ${i.amount} gold at camp. Carry it out.${tail}`;
+  if (i.story) return `${i.name} · ${STORY[i.story].itemTip}${tail}`;
+  if (i.heavy) return `${i.name} · Heavy: whoever carries it moves 3 at most.${tail}`;
   if (i.kind === 'heirloom') return `${i.name} · The contract heirloom. Fills 2 slots. Carry it out of the castle to finish the job.${tail}`;
   if (i.kind === 'hoard') return `${i.name} · A piece of the Dragon's hoard, worth ${i.amount} gold. Fills 2 slots.${tail}`;
   return `${name} · ${ITEM_HELP[base] ?? ITEM_EFFECT[base] ?? ''}`;
@@ -387,6 +391,7 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   disarm: 'd',
   shove: 'z',
   bribe: 'b',
+  parley: 'b',
   charge: 'w',
   passLantern: 'n',
   rope: 'y',
@@ -476,4 +481,158 @@ export function itemLabel(i: Item): string {
   if (i.kind === 'gold') return `${i.amount} gold`;
   if (i.kind === 'gem' || i.kind === 'jewelry') return `${i.name} (${i.amount})`;
   return i.name;
+}
+
+// ------------------------------------------------------------ V3.5: Lowgate, story, ales, crews (spec 18)
+
+/** Story contracts: who or what comes home, from where, and what it wins back for Lowgate (18.2, 18.3). */
+export const STORY: Record<StoryId, {
+  /** The villager or thing. */
+  who: string;
+  /** Where in the castle, in words. */
+  where: string;
+  /** Contract kind word. */
+  verb: 'Rescue' | 'Recover';
+  /** What it unlocks, short ("The infirmary heals for gold"). */
+  unlocks: string;
+  /** The station it lights up. */
+  station: 'infirmary' | 'tavern' | 'smithy' | 'quartermaster';
+  /** The line on return to camp. */
+  line: string;
+  /** Pack tooltip for story items. */
+  itemTip: string;
+  /** When it goes up on the notice post. */
+  when: string;
+}> = {
+  surgeon: {
+    who: 'Brother Aldric',
+    where: 'Level 1, the library',
+    verb: 'Rescue',
+    unlocks: 'The infirmary: heal for gold',
+    station: 'infirmary',
+    line: 'Brother Aldric sets up in the old chapel. The infirmary is open.',
+    itemTip: '',
+    when: 'from the start',
+  },
+  innkeeper: {
+    who: 'Old Wim',
+    where: 'Level 1, the library',
+    verb: 'Rescue',
+    unlocks: 'The Gilded Flagon: four recruits, some seasoned',
+    station: 'tavern',
+    line: 'Old Wim lights the hearth of the Gilded Flagon. Better hands come looking for work.',
+    itemTip: '',
+    when: 'at reputation 1',
+  },
+  smith: {
+    who: 'Gerda the smith',
+    where: 'Level 2, the cellblock',
+    verb: 'Rescue',
+    unlocks: 'The forge, and metalwork at the peddler',
+    station: 'smithy',
+    line: 'Gerda stokes the forge. Steel can be bought and mended again.',
+    itemTip: '',
+    when: 'at reputation 1',
+  },
+  copper: {
+    who: 'the brewing copper',
+    where: 'Level 2, the forge',
+    verb: 'Recover',
+    unlocks: 'The first four ales at the Flagon',
+    station: 'tavern',
+    line: 'The brewing copper is back on its bricks. Wim pours the first ales.',
+    itemTip: 'Heavy: whoever carries it moves 3 at most. Carry it out and it goes home to Lowgate, not the cart. It can\'t be sold.',
+    when: 'once Old Wim is home',
+  },
+  caskbook: {
+    who: "Wim's cask book",
+    where: 'Level 3, the Drain',
+    verb: 'Recover',
+    unlocks: 'The rest of the ales, and level 3 recruits',
+    station: 'tavern',
+    line: "Wim reads his cask book by the fire. The old recipes are back, and so are the old hands.",
+    itemTip: 'Carry it out and it goes home to Lowgate, not the cart. It can\'t be sold.',
+    when: 'once the copper is home and Level 3 is open',
+  },
+};
+
+/** "Rescue Gerda the smith (Level 2, the cellblock)." */
+export function storyFix(id: StoryId): string {
+  const st = STORY[id];
+  return `${st.verb} ${st.who} (${st.where})`;
+}
+
+/** Ales (18.4): glyph and what it does, in the game's plain words; the engine's `text` wins when present. */
+export const ALE: Record<AleKind, { name: string; glyph: string; text: string }> = {
+  glowworm: { name: 'Glowworm Pale', glyph: '✦', text: 'The drinker glows: light radius 1 around them all delve. Never unlit, so the dark in the Hollow leaves them be.' },
+  featherfoot: { name: 'Featherfoot', glyph: '❦', text: "The drinker's first fall deals no damage." },
+  mole: { name: "Mole's Brown", glyph: '⛏', text: 'The drinker can Dig like a Sapper: rubble or a cracked wall next to them. Noise 4.' },
+  reserve: { name: "Hobart's Reserve", glyph: '♛', text: "The old lord's own. The drinker's Focus starts at 4, and 4 is the max." },
+  smuggler: { name: "Smuggler's Mead", glyph: '☾', text: 'The drinker sneaks 4 hexes, and sneaking makes no noise.' },
+  fireside: { name: 'Fireside Porter', glyph: '♨', text: 'The drinker heals 3 each time they change level: stairs, lift, fall, rope or hook (after any fall damage).' },
+  blackcask: { name: 'Black Cask', glyph: '⚑', text: 'Nobody knows what is in it. 7 in 10: one of the six other ales. 3 in 10: hiccups or a heavy head.' },
+};
+
+/** What an ale does in the delve (the Black Cask resolved). */
+export const ALE_EFFECT: Record<AleEffect, { name: string; glyph: string; text: string; bad?: boolean }> = {
+  glowworm: ALE.glowworm,
+  featherfoot: ALE.featherfoot,
+  mole: ALE.mole,
+  reserve: ALE.reserve,
+  smuggler: ALE.smuggler,
+  fireside: ALE.fireside,
+  hiccups: { name: 'Hiccups', glyph: '!', text: 'Black Cask gone wrong: noise 1 at the drinker every castle turn.', bad: true },
+  heavyhead: { name: 'Heavy head', glyph: '☁', text: 'Black Cask gone wrong: Focus starts at 1.', bad: true },
+};
+
+/** Where an ale's brewing gear comes from (locked ales say this). */
+export function aleNeeds(needs: 'copper' | 'caskbook'): string {
+  return needs === 'copper' ? 'Needs the brewing copper: recover it from the forge (Level 2).' : "Needs Wim's cask book: recover it from the Drain (Level 3).";
+}
+
+/** Rival crews (16.5, 18.5). */
+export const CREW: Record<CrewId, { name: string; blurb: string; colour: string }> = {
+  'lantern-sisters': { name: 'The Lantern Sisters', blurb: 'Pale-robed prospectors with lanterns of their own.', colour: '#b8ad98' },
+  ferrymen: { name: 'The Ferrymen', blurb: 'River toughs in blue-grey. They take a toll from anyone who crosses.', colour: '#7f97ad' },
+  'gallows-choir': { name: 'The Gallows Choir', blurb: 'Black and bone. They sing while they rob you.', colour: '#d8cfb8' },
+};
+
+export const TEMPERAMENT: Record<RivalCrew['temperament'], { name: string; text: string }> = {
+  prospector: { name: 'Prospectors', text: 'They race you for loot, then leave. They fight only if attacked or blocked.' },
+  cutthroat: { name: 'Cutthroats', text: 'They hold a choke point on Level 2 and demand a toll from anyone who comes close.' },
+};
+
+export const STANCE: Record<RivalCrew['stance'], { name: string; text: string; cls: 'enemy' | 'ally' | 'calm' | 'warn' }> = {
+  neutral: { name: 'Neutral', text: 'Looting, not fighting.', cls: 'calm' },
+  waiting: { name: 'Waiting', text: 'Holding their post. Come within 6 in sight, or make noise 4+ they hear, and they demand a toll.', cls: 'warn' },
+  demanding: { name: 'Demanding', text: 'Pay the toll or they attack in the next castle turn.', cls: 'warn' },
+  hostile: { name: 'Hostile', text: 'Fighting you.', cls: 'enemy' },
+  bribed: { name: 'Paid off', text: 'Paid to leave. They are heading out.', cls: 'calm' },
+  truce: { name: 'Truce', text: 'Paid not to attack. They never attack unless attacked.', cls: 'calm' },
+  hired: { name: 'Hired', text: 'Fighting beside you: they keep within 2 of the hero who hired them and attack monsters in reach.', cls: 'ally' },
+};
+
+export const DEAL_GLYPH: Record<DealKind, string> = { leave: '⇱', truce: '⚐', job: '⚒', hire: '⚔', fight: '✖' };
+export const JOB_NAME: Record<JobKind, string> = { winch: 'Work the winch', open: 'Open a lock', scout: 'Scout ahead' };
+export const JOB_TEXT: Record<JobKind, string> = {
+  winch: 'They walk to the winch on their level and work it: the lift runs.',
+  open: 'They open the nearest seen locked door or chest on their level, silently.',
+  scout: 'Every hex within 8 of each of them is explored now.',
+};
+
+/** Log line for a done deal. */
+export function dealLine(crew: string, deal: DealKind, job: JobKind | undefined, paid: string[]): string {
+  const took = paid.length ? `take ${paid.join(', ')}` : '';
+  switch (deal) {
+    case 'leave':
+      return `${crew} ${took ? `${took} and ` : ''}head for the way out.`;
+    case 'truce':
+      return `${crew} ${took ? `${took}. ` : ''}${took ? 'A truce: they' : 'agree a truce: they'} won't attack unless attacked.`;
+    case 'job':
+      return `${crew} ${took ? `${took} and ` : ''}take the job: ${job ? JOB_NAME[job].toLowerCase() : 'as agreed'}.`;
+    case 'hire':
+      return `${crew} ${took ? `${took}. ` : ''}${took ? 'They' : 'They'} fight beside you for 5 rounds.`;
+    case 'fight':
+      return `You draw steel on ${crew.replace(/^The /, 'the ')}.`;
+  }
 }

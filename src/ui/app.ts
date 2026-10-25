@@ -10,6 +10,7 @@ import { Diorama } from '../view/diorama';
 import { clear, h } from './dom';
 import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
+import { CREW, STANCE, STORY, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
 export const SAVE_KEY = 'vc.save.v35';
@@ -70,6 +71,8 @@ export class App {
   private loadout: Loadout | null = null;
   private hurry = false;
   private lastStage: string | null = null;
+  /** V3.5 (18.7): stories won back on the last return to camp, shown until dismissed. */
+  private wonBack: import('../game/types').StoryId[] = [];
 
   /** Dev only: `?reveal=1` shows the whole castle lit, for map review. */
   private readonly reveal = new URLSearchParams(location.search).get('reveal') === '1';
@@ -208,6 +211,11 @@ export class App {
         this.station = st;
         this.render();
       },
+      wonBack: this.wonBack,
+      dismissWonBack: () => {
+        this.wonBack = [];
+        this.render();
+      },
     };
   }
 
@@ -217,6 +225,7 @@ export class App {
     this.state = s;
     this.station = this.needsHire(s) ? 'tavern' : 'board';
     this.loadout = null;
+    this.wonBack = [];
     sfx.play('horn', { pitch: 0.8, gain: 0.5 });
     this.save();
     this.render(true);
@@ -265,7 +274,7 @@ export class App {
     const host = this.host();
     switch (s.stage) {
       case 'camp':
-        if (stageChanged) this.station = this.needsHire(s) ? 'tavern' : 'board';
+        if (stageChanged && !this.wonBack.length) this.station = this.needsHire(s) ? 'tavern' : 'board';
         host.station = this.station;
         return campScreen(this.screen, s, host);
       case 'summary':
@@ -313,6 +322,16 @@ export class App {
     } else if (cmd.type === 'startDelve') {
       sfx.play('horn', { pitch: 0.7, gain: 0.6 });
     }
+    // 18.7: the won-back moment on return to camp.
+    const won = res.events.filter((e): e is Extract<GameEvent, { type: 'villageUnlocked' }> => e.type === 'villageUnlocked').map((e) => e.story);
+    if (won.length) {
+      this.wonBack = won;
+      const st = STORY[won[won.length - 1]!].station;
+      this.station = st;
+      this.lastStage = 'camp';
+      sfx.play('levelup', { gain: 0.8 });
+      setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
+    } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
     // 16.2: "start shuttered" on the prepare screen: shutter is free, so send it right after the delve starts.
@@ -342,6 +361,8 @@ export class App {
     void before;
     let world = false;
     let panned = false;
+    /** 18.6: a deal already says what the crew now does; skip the stance line that follows it. */
+    let dealt = false;
     for (const e of events) {
       if (!this.root.isConnected) return;
       // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
@@ -512,12 +533,44 @@ export class App {
           this.hud.log(`${this.hud.nameOf(e.by)} stole ${e.item.name} from ${this.hud.nameOf(e.from)}.`, 'log-enemy');
           await this.dio.playEvent(e);
           continue;
-        case 'rivalsEnter':
+        case 'rivalsEnter': {
           sfx.play('horn', { pitch: 1.1, gain: 0.4 });
-          this.hud.log('Lantern light at the edge of the keep. Someone else is here.', 'log-enemy');
+          const crew = this.state?.delve?.rivals;
+          this.hud.log(crew && crew.temperament === 'cutthroat' ? `Somebody holds the way ahead. ${crew.name} are waiting.` : 'Lantern light at the edge of the keep. Someone else is here.', 'log-enemy');
           continue;
-        case 'rivalsStance':
-          this.hud.log(`The Lantern Sisters are now ${e.stance}.`, e.stance === 'hostile' ? 'log-enemy' : '');
+        }
+        case 'rivalsStance': {
+          const crew = this.state?.delve?.rivals;
+          const name = crew?.name ?? 'The rival crew';
+          const st = STANCE[e.stance];
+          if (e.stance === 'demanding') {
+            sfx.play('horn', { pitch: 0.9, gain: 0.5 });
+            this.hud.log(`${name}: "Your gold or your blood." Pay ${crew?.toll ?? 50} or they attack next turn.`, 'log-enemy');
+            this.hud.pulse('hurt');
+          } else if (e.stance === 'hostile') {
+            sfx.play('sword', { pitch: 0.8 });
+            if (!dealt) this.hud.log(`${name} draw steel. They are hostile.`, 'log-enemy');
+          } else if (!dealt) this.hud.log(`${name}: ${st.name.toLowerCase()}. ${st.text}`, e.stance === 'hired' ? 'log-ally' : '');
+          continue;
+        }
+        case 'deal': {
+          dealt = true;
+          const crew = this.state?.delve?.rivals ?? before.delve?.rivals;
+          sfx.play(e.deal === 'fight' ? 'sword' : 'coin', { pitch: e.deal === 'fight' ? 0.8 : 0.9 });
+          if (e.deal !== 'fight' && e.price > 0) setTimeout(() => sfx.play('coin', { pitch: 1.2, gain: 0.6 }), 90);
+          this.hud.log(dealLine(crew?.name ?? CREW['lantern-sisters'].name, e.deal, e.job, e.paid), e.deal === 'fight' ? 'log-enemy' : e.deal === 'hire' ? 'log-ally' : 'log-deal');
+          continue;
+        }
+        case 'betrayed': {
+          const crew = this.state?.delve?.rivals ?? before.delve?.rivals;
+          sfx.play('sword', { pitch: 0.6 });
+          sfx.play('horn', { pitch: 0.7, gain: 0.4 });
+          this.hud.log(`Betrayed! ${crew?.name ?? 'The sell-swords'} turn on you: they want what you carry.`, 'log-enemy');
+          this.hud.pulse('hurt');
+          if (!instant()) await this.hud.banner('Betrayed', `${crew?.name ?? 'The sell-swords'} turn on you`, (x) => wait(x * 0.8), true);
+          continue;
+        }
+        case 'villageUnlocked':
           continue;
         case 'freed':
           sfx.play('slam', { pitch: 1.6, gain: 0.4 });
@@ -610,7 +663,7 @@ export class App {
     if (panned) this.returnToSelected();
   }
 
-  /** Hobart alone (15.3): the camp opens on the tavern. */
+  /** Keven alone (15.3): the camp opens on the campfire. */
   private needsHire(s: GameState): boolean {
     return !s.campaign.roster.some((x) => x.cls !== 'heir' && x.wounded === 0);
   }

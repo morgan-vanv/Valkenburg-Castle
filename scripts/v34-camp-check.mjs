@@ -26,12 +26,13 @@ const s0 = await p.evaluate(() => {
   return { gold: s.campaign.gold, recruits: s.campaign.recruits.map((r) => [r.hero.level, r.price]) };
 });
 check('new campaign: 120 gold', s0.gold === 120, `${s0.gold}`);
-check('opening recruits all level 1 at 60', s0.recruits.every(([l, pr]) => l === 1 && pr === 60), JSON.stringify(s0.recruits));
+check('opening drifters: 3, all level 1 at 60 (18.2)', s0.recruits.length === 3 && s0.recruits.every(([l, pr]) => l === 1 && pr === 60), JSON.stringify(s0.recruits));
 // Hire two, hurt one, open the infirmary.
 await p.evaluate(async () => {
   for (const r of window.vc.state().campaign.recruits.slice(0, 2)) await window.vc.send({ type: 'hire', heroId: r.hero.id });
   const s = window.vc.state();
   s.campaign.gold = 50;
+  s.campaign.village.surgeon = true; // V3.5: healing for gold needs Brother Aldric home
   s.campaign.roster[1].hp = s.campaign.roster[1].maxHp - 4;
   window.vc.load(s);
 });

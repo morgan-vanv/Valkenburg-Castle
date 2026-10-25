@@ -1,6 +1,6 @@
 // Numbers from docs/v3-spec.md.
 
-import type { HeroClass, MonsterKind, ShopOffer, Stat, Stats } from './types';
+import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
 import type { ClassInfo } from './api';
 
 /** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
@@ -269,9 +269,9 @@ export const SHOP: ShopOffer[] = [
   { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
   { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
   { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
-  { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.' },
-  { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.' },
-  { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.' },
+  { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
+  { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
+  { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
   { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
 ];
@@ -329,3 +329,168 @@ export const HEIRLOOMS = [
 
 export const GEMS = ['Garnet', 'Moonstone', 'Amethyst', 'Jet cameo', 'River pearl'];
 export const JEWELRY = ['Silver ring', 'Gold torque', 'Signet ring', 'Pearl brooch', 'Jeweled pin'];
+
+// ---------------------------------------------------------------- V3.5 (spec 18)
+
+/** Spec 18.2: the campfire hires 3 drifters (all level 1); the Gilded Flagon 4. */
+export const CAMPFIRE_SIZE = 3;
+export const FLAGON_SIZE = TAVERN_SIZE;
+/** Level odds at the Flagon: without the cask book 35% level 2; with it 25% level 2 and 10% level 3. */
+export const FLAGON_L2 = 0.35;
+export const CASKBOOK_L2 = 0.25;
+export const CASKBOOK_L3 = 0.1;
+/** Spec 18.2: a camp potion (`drink`) heals this much, up to max. */
+export const DRINK_HEAL = 5;
+
+export interface StoryDef {
+  id: StoryId;
+  kind: 'rescue' | 'recover';
+  siteId: string;
+  /** The villager or thing. */
+  subject: string;
+  /** Short name for refusals ("Gerda the smith"). */
+  who: string;
+  /** Contract card brief. */
+  brief: string;
+  /** What it unlocks, for the card warnings. */
+  unlocks: string;
+  /** The line on return to camp. */
+  line: string;
+  /** Recover items: slots and heavy. */
+  slots?: number;
+  heavy?: boolean;
+}
+
+export const STORIES: StoryDef[] = [
+  {
+    id: 'surgeon', kind: 'rescue', siteId: 'l1-rescue-library', subject: 'Brother Aldric', who: 'Brother Aldric',
+    brief: 'Brother Aldric, the old castle surgeon, is held in the library.', unlocks: 'Unlocks the infirmary',
+    line: 'Brother Aldric sets up in the old chapel. The infirmary is open.',
+  },
+  {
+    id: 'innkeeper', kind: 'rescue', siteId: 'l1-rescue-library', subject: 'Old Wim', who: 'Old Wim',
+    brief: 'Old Wim, who kept the Gilded Flagon, is held in the library.', unlocks: 'Unlocks the Gilded Flagon',
+    line: 'Old Wim lights the hearth of the Gilded Flagon. Better blades drink there now.',
+  },
+  {
+    id: 'smith', kind: 'rescue', siteId: 'l2-rescue-cell-west', subject: 'Gerda the smith', who: 'Gerda the smith',
+    brief: 'Gerda the smith is chained in the cellblock.', unlocks: 'Unlocks the forge and metalwork',
+    line: 'Gerda rekindles the forge. Steel and metalwork are for sale again.',
+  },
+  {
+    id: 'copper', kind: 'recover', siteId: 'l2-recover-forge', subject: 'the brewing copper', who: 'the brewing copper',
+    brief: 'Wim\'s brewing copper lies in the forge. It is heavy: its carrier moves 3.', unlocks: 'Wim brews the first ales',
+    line: 'The brewing copper is back at the Flagon. Wim starts brewing.', slots: 2, heavy: true,
+  },
+  {
+    id: 'caskbook', kind: 'recover', siteId: 'l3-recover-drain', subject: 'Wim\'s cask book', who: 'Wim\'s cask book',
+    brief: 'Wim\'s cask book was lost in the Drain.', unlocks: 'The strong ales and seasoned recruits',
+    line: 'Wim pores over his cask book by the fire. The strong ales are back.', slots: 1,
+  },
+];
+
+export const ALES: AleOffer[] = [
+  { kind: 'glowworm', name: 'Glowworm Pale', price: 15, needs: 'copper', text: 'The drinker glows: their own light, radius 1. The Gloam never finds them unlit.' },
+  { kind: 'featherfoot', name: 'Featherfoot', price: 15, needs: 'copper', text: 'The drinker\'s first fall deals no damage.' },
+  { kind: 'mole', name: 'Mole\'s Brown', price: 20, needs: 'copper', text: 'The drinker can Dig like a Sapper: rubble or a cracked wall next to them, noise 4.' },
+  { kind: 'reserve', name: 'Hobart\'s Reserve', price: 20, needs: 'copper', text: 'The drinker\'s Focus starts at 4, and its max is 4.' },
+  { kind: 'smuggler', name: 'Smuggler\'s Mead', price: 20, needs: 'caskbook', text: 'Sneak moves 4, silently.' },
+  { kind: 'fireside', name: 'Fireside Porter', price: 25, needs: 'caskbook', text: 'Heal 3 each time the drinker changes level (after any fall damage).' },
+  { kind: 'blackcask', name: 'Black Cask', price: 10, needs: 'caskbook', text: '70%: one of the six ales above at random. 30%: hiccups (noise 1 every world phase) or a heavy head (Focus starts at 1).' },
+];
+/** The six real ales the Black Cask can turn into. */
+export const CASK_GOOD: AleEffect[] = ['glowworm', 'featherfoot', 'mole', 'reserve', 'smuggler', 'fireside'];
+export const CASK_BAD: AleEffect[] = ['hiccups', 'heavyhead'];
+export const CASK_GOOD_CHANCE = 0.7;
+export const RESERVE_FOCUS = 4;
+export const HEAVYHEAD_FOCUS = 1;
+export const SMUGGLER_SNEAK = 4;
+export const FIRESIDE_HEAL = 3;
+export const HICCUP_NOISE = 1;
+export const HEAVY_MOVE = 3;
+
+// ---------------------------------------------------------------- V3.5 crews (spec 18.5)
+
+export interface RivalStats {
+  hp: number;
+  slots: number;
+  chance: number;
+  dmg: number;
+  move: number;
+  armor: number;
+  /** Ranged reach (the Ranger's bow); melee = 1. */
+  range: number;
+}
+
+/** Base numbers per rival class (the Sisters' ranger, shadowmancer and burglar as in 16.5). */
+export const RIVAL_CLASSES: Record<RivalClass, RivalStats> = {
+  ranger: { ...SISTER, armor: 0, range: BOW_RANGE },
+  shadowmancer: { ...SISTER, armor: 0, range: 1 },
+  burglar: { ...SISTER, armor: 0, range: 1 },
+  sellsword: { hp: 10, slots: 3, chance: 60, dmg: 2, move: 4, armor: 1, range: 1 },
+  sapper: { hp: 9, slots: 3, chance: 55, dmg: 2, move: 4, armor: 0, range: 1 },
+  pyromancer: { hp: 6, slots: 2, chance: 50, dmg: 1, move: 4, armor: 0, range: 1 },
+};
+/** Level 2 tier for cutthroats (16.3): +2 HP, +5 hit. */
+export const CUTTHROAT_TIER = { hp: 2, chance: 5 };
+export const CUTTHROAT_PURSE = 30;
+export const CUTTHROAT_CHANCE = 0.6;
+export const PROSPECTOR_CHANCE = 0.5;
+/** Waiting cutthroats notice a hero this close in line of sight, or noise this loud. */
+export const CUTTHROAT_SIGHT = 6;
+export const CUTTHROAT_HEAR = 4;
+export const TOLL_MIN = 50;
+export const SAPPER_CHARGE_RANGE = 3;
+export const SAPPER_CHARGE_DMG = 3;
+export const SAPPER_CHARGE_NOISE = 8;
+export const PYRO_BOLTS = 3;
+export const PYRO_BOLT_RANGE = 5;
+export const PYRO_BOLT_SLOTS = 3;
+export const PYRO_BOLT_CHANCE = 60;
+export const PYRO_BOLT_DMG = 2;
+export const PYRO_BOLT_NOISE = 3;
+export const SELLSWORD_SHOVE_CHANCE = 60;
+
+export interface CrewDef {
+  id: CrewId;
+  name: string;
+  temperament: 'prospector' | 'cutthroat';
+  members: { name: string; cls: RivalClass }[];
+}
+
+export const CREWS: Record<CrewId, CrewDef> = {
+  'lantern-sisters': {
+    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector',
+    members: SISTER_NAMES.map((name, i) => ({ name, cls: SISTER_CLASSES[i]! })),
+  },
+  ferrymen: {
+    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat',
+    members: [
+      { name: 'Ferryman Joost', cls: 'sellsword' },
+      { name: 'Ferryman Sil', cls: 'ranger' },
+      { name: 'Ferryman Brecht', cls: 'sapper' },
+    ],
+  },
+  'gallows-choir': {
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat',
+    members: [
+      { name: 'Deacon Harl', cls: 'sellsword' },
+      { name: 'Little Mags', cls: 'burglar' },
+      { name: 'Cantor Vey', cls: 'pyromancer' },
+    ],
+  },
+};
+export const CUTTHROAT_POOL: CrewId[] = ['ferrymen', 'gallows-choir'];
+
+// ---------------------------------------------------------------- V3.5 parley (spec 18.6)
+
+export const DEAL_RANGE = 4;
+/** Base prices; ×1.5 on Level 2 and deeper (rounded to 5). Truce while demanding is the toll; 50 if hostile. */
+export const DEAL_PRICE: Record<Exclude<DealKind, 'fight'>, number> = { leave: 40, truce: 25, job: 30, hire: 60 };
+export const TRUCE_HOSTILE = 50;
+export const DEEP_PRICE = 1.5;
+export const HIRE_ROUNDS = 5;
+export const HIRE_KEEP = 2;
+export const BETRAY_LOOT = 150;
+export const BETRAY_CHANCE = 25;
+export const SCOUT_RANGE = 8;

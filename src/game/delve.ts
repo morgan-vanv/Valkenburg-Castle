@@ -5,13 +5,13 @@ import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type 
 import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
 import type { ActionOption } from './api';
 import {
-  BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, FOCUS_MAX, GHOUL_RISE_RANGE,
+  HEAVY_MOVE, SMUGGLER_SNEAK, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
   GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE,
 } from './data';
 import { say, type Ctx, type HeroX, type MonsterX } from './state';
 import {
-  activeHeroes, addToPack, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
+  activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
   LIGHT_PENALTY, makeHostile, makeNoise, monsterArmor, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
   releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent,
 } from './common';
@@ -22,7 +22,8 @@ import {
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
 import { lairCheck } from './dragon';
-import { rivalOverwatchFire } from './rivals';
+import { crewAim, crewNotice, rivalOverwatchFire } from './rivals';
+import { parleyTargets } from './parley';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -54,9 +55,16 @@ export function refreshSight(c: Ctx): void {
   const cr = c.d.rivals;
   if (cr && !cr.spotted && rivalsOnMap(c).some((r) => (r.veil ?? 0) <= 0 && vis.has(posKey(r.at)))) {
     cr.spotted = true;
-    say(c, `The Lantern Sisters. They want ${cr.goal === 'leave' ? 'out' : 'the loot'}.`);
+    if (cr.temperament === 'cutthroat') say(c, `${cr.name} hold the way ahead. Cutthroats.`);
+    else say(c, `${cr.name}. They want ${cr.goal === 'leave' ? 'out' : 'the loot'}.`);
     // The Shadowmancer sister slips into shadow the moment she's seen (spec 16.5): shown as an intent first.
-    for (const r of rivalsOnMap(c)) if (r.cls === 'shadowmancer' && !r.veiled) r.intent = { kind: 'veil', targetId: r.id };
+    for (const r of rivalsOnMap(c)) if (r.cls === 'shadowmancer' && !r.veiled && cr.stance !== 'hired') r.intent = { kind: 'veil', targetId: r.id };
+    crewAim(c);
+  }
+  // Spec 18.5: a waiting cutthroat crew sees a hero within 6 and demands the toll.
+  if (cr?.stance === 'waiting') {
+    crewNotice(c);
+    if (cr.stance !== 'waiting') crewAim(c);
   }
 }
 
@@ -85,8 +93,10 @@ export function setLight(c: Ctx, value: number): void {
 
 export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   const cls = heroDef(c, h.heroId)?.cls;
-  let b = sneak ? (cls === 'burglar' ? 4 : 2) : 4;
+  let b = sneak ? (cls === 'burglar' || h.ale === 'smuggler' ? SMUGGLER_SNEAK : 2) : 4;
   if (h.escorting) b = Math.min(b, 3);
+  // Spec 18.3: the brewing copper is heavy: its carrier moves 3 at most (dash too).
+  if (h.pack.some((i) => i.heavy)) b = Math.min(b, HEAVY_MOVE);
   return b;
 }
 
@@ -176,6 +186,8 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
       c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
       walked.length = 0;
       c.ev.push({ type: 'levelChanged', id: heroId, from: from.level, to: p.level });
+      h.at = { ...p };
+      levelHeal(c, h);
     }
     h.at = { ...p };
     from = p;
@@ -264,7 +276,7 @@ setAfterLanding((c, h) => {
 
 // ---------------------------------------------------------------- targets
 
-const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter'];
+const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley'];
 
 function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
@@ -410,9 +422,6 @@ function nextToWinch(c: Ctx, at: Pos): Pos | undefined {
   return c.w.winches.find((wp) => adjacent(wp, at));
 }
 
-function partyGold(c: Ctx): number {
-  return c.d.heroes.filter((h) => h.status === 'active' || h.status === 'downed').reduce((n, h) => n + h.pack.filter((i) => i.kind === 'gold').reduce((a, i) => a + i.amount, 0), 0);
-}
 
 /** Every valid target for an action right now (ignores move/act flags). */
 export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTarget[] {
@@ -441,7 +450,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
         .map((t) => ({ ...t, itemId: ch.id }));
     }
     case 'dig':
-      if (cls !== 'sapper') return [];
+      if (cls !== 'sapper' && h.ale !== 'mole') return [];
       return posNeighbors(h.at).filter((p) => { const k = kindAt(c.w, c.d, p); return k === 'rubble' || k === 'cracked'; }).map((at) => ({ at }));
     case 'fireball':
       if (!mage('pyromancer', 2)) return [];
@@ -595,11 +604,10 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (pr.freed && pr.escortedBy === h.heroId) return [];
       return [{ id: pr.id, at: pr.at }];
     }
-    case 'bribe': {
-      const cr = c.d.rivals;
-      if (!cr || cr.stance === 'bribed' || partyGold(c) < 40) return [];
-      return rivalsOnMap(c).filter((r) => within(r.at, h.at, 2)).map((r) => ({ id: r.id, at: r.at }));
-    }
+    case 'bribe':
+      return []; // V3.5: replaced by the parley deals (spec 18.6)
+    case 'parley':
+      return parleyTargets(c, h.heroId);
     case 'rally':
       return cls === 'heir' && h.rallyCooldown === 0 ? [{ id: h.heroId }] : [];
     case 'guard':
@@ -630,7 +638,7 @@ const LABELS: Record<ActionKind, string> = {
   attack: 'Attack', pick: 'Pick lock', smash: 'Smash', open: 'Open', take: 'Take', drop: 'Drop', give: 'Give',
   disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', potion: 'Potion', revive: 'Revive',
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
-  bribe: 'Bribe (40 gold)', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
+  bribe: 'Bribe', parley: 'Parley', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
   passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
   overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', dig: 'Dig', fireball: 'Fireball',
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust',
@@ -642,14 +650,14 @@ const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'fire
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'disarm', 'charge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
-  'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'bribe', 'passLantern', 'give', 'drop', 'leave',
+  'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
 /** How the UI targets each action (ActionOption.pick). */
 const PICK: Record<ActionKind, ActionOption['pick']> = {
   attack: 'enemy', pick: 'other', smash: 'other', open: 'other', take: 'hex', drop: 'item', give: 'other', disarm: 'hex',
   light: 'hex', torch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
-  shove: 'enemy', free: 'other', bribe: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
+  shove: 'enemy', free: 'other', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
@@ -945,16 +953,19 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'jump': {
       const f = fallInfo(c, t.at!, heroId)!;
       const lv = f.levels === 1 ? '1 level' : `${f.levels} levels`;
-      const s = simple(`Falls ${lv}: ${f.damage} dmg`);
-      let warn = `Falls ${lv} into ${f.levelName}: ${f.damage} damage.`;
-      if (h.hp <= f.damage) warn += ` This will down ${def.name}.`;
+      const soft = h.ale === 'featherfoot' && !h.aleSpent;
+      const dmg = soft ? 0 : f.damage;
+      const s = simple(`Falls ${lv}: ${dmg} dmg${soft ? ' (Featherfoot)' : ''}`);
+      let warn = `Falls ${lv} into ${f.levelName}: ${dmg} damage${soft ? ' (Featherfoot: the first fall is free)' : ''}.`;
+      if (h.hp <= dmg) warn += ` This will down ${def.name}.`;
       s.warning = warn;
       if (f.levels > 1) s.confirm = true;
       return s;
     }
     case 'winch': return simple(`The lift runs for the rest of the delve. Noise ${WINCH_NOISE}`, WINCH_NOISE);
     case 'free': return simple(c.d.prisoner?.freed ? 'Take over the escort' : 'Free the prisoner');
-    case 'bribe': return simple('Pay 40 gold: they leave');
+    case 'bribe': return no('Parley instead.');
+    case 'parley': return simple('Talk terms: pick a deal. Free.');
     case 'rally': return simple('+1 Focus to allies within 3');
     case 'guard': return simple(`Take hits meant for ${heroName(c, t.id!)}`);
     case 'kindle': return withMana(simple(`+${KINDLE_LIGHT} light`, 0, KINDLE_LIGHT), 1);
@@ -1237,6 +1248,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'moved', id: heroId, path: [h.at] });
       c.ev.push({ type: 'levelChanged', id: heroId, from: from.level, to: h.at.level });
       say(c, `${name} throws the hook and hauls up to ${c.w.levelName(h.at.level)}.`);
+      levelHeal(c, h);
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
       glimpse(c, h.at);
@@ -1427,7 +1439,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const from = h.at;
       h.at = { ...t.at! };
       c.ev.push({ type: 'moved', id: heroId, path: [h.at] });
-      if (from.level !== h.at.level) c.ev.push({ type: 'levelChanged', id: heroId, from: from.level, to: h.at.level });
+      if (from.level !== h.at.level) {
+        c.ev.push({ type: 'levelChanged', id: heroId, from: from.level, to: h.at.level });
+        levelHeal(c, h);
+      }
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
       ventCheck(c, h);
@@ -1462,36 +1477,13 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       h.escorting = pr.id;
       break;
     }
-    case 'bribe': {
-      let owe = 40;
-      for (const o of c.d.heroes) {
-        for (const it of o.pack) {
-          if (it.kind !== 'gold' || owe <= 0) continue;
-          const n = Math.min(it.amount, owe);
-          it.amount -= n;
-          it.name = `${it.amount} gold`;
-          owe -= n;
-        }
-        o.pack = o.pack.filter((i) => i.kind !== 'gold' || i.amount > 0);
-      }
-      const cr = c.d.rivals!;
-      cr.stance = 'bribed';
-      cr.goal = 'leave';
-      c.ev.push({ type: 'rivalsStance', stance: 'bribed' });
-      for (const r of cr.members) {
-        const hl = r.loot.filter((i) => i.kind === 'heirloom');
-        if (hl.length) {
-          r.loot = r.loot.filter((i) => i.kind !== 'heirloom');
-          putOnGround(c, r.at, hl);
-          say(c, `${r.name} drops the heirloom at your feet.`);
-        }
-      }
-      say(c, 'The sisters pocket the coin and make for the door.');
+    case 'bribe':
+    case 'parley':
+      // The deal itself is a 'deal' command (spec 18.6); opening the card does nothing.
       break;
-    }
     case 'rally': {
       h.rallyCooldown = 3;
-      for (const o of activeHeroes(c)) if (o !== h && within(o.at, h.at, 3)) o.focus = Math.min(FOCUS_MAX, o.focus + 1);
+      for (const o of activeHeroes(c)) if (o !== h && within(o.at, h.at, 3)) o.focus = Math.min(focusMax(o), o.focus + 1);
       say(c, `${name}: "Steady!"`);
       break;
     }
@@ -1514,7 +1506,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
   }
   checkHolds(c);
-  if (action !== 'shutter' && action !== 'leave') rivalOverwatchFire(c, heroId);
+  if (action !== 'shutter' && action !== 'leave' && action !== 'parley') rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
   return undefined;
@@ -1568,7 +1560,7 @@ export function endDelve(c: Ctx): void {
   const cr = c.d.rivals;
   if (cr && cr.entered) {
     const took = cr.members.flatMap((r) => r.loot);
-    if (took.length) noteOnce(c, `The Lantern Sisters made off with ${valueOf(took)} gold in loot.`);
+    if (took.length) noteOnce(c, `${cr.name} made off with ${valueOf(took)} gold in loot.`);
   }
   buildSummary(c);
 }

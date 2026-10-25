@@ -422,7 +422,17 @@ export type ModelKey =
   | 'sisterBurglar'
   | 'prisoner'
   | 'dragon'
-  | 'dragonSleep';
+  | 'dragonSleep'
+  | RivalModelKey;
+
+/** V3.5 (18.5): a cutthroat crew member, by crew and class ("rival-ferrymen-sapper"). */
+export type RivalModelKey = `rival-${'ferrymen' | 'gallows-choir'}-${'sellsword' | 'ranger' | 'burglar' | 'sapper' | 'pyromancer' | 'shadowmancer'}`;
+
+/** Crew colours (18.7): Ferrymen river blue-grey; the Gallows Choir black and bone. */
+const CREW_LOOK: Record<'ferrymen' | 'gallows-choir', { tunic: number; legs: number; cape: number; hood: number; trim: number; skin: number; eyes?: number }> = {
+  ferrymen: { tunic: 0x4f6272, legs: 0x2e3a44, cape: 0x6f8798, hood: 0x3e505e, trim: 0xa8bccb, skin: 0xc79a76 },
+  'gallows-choir': { tunic: 0x1c1a1a, legs: 0x121111, cape: 0x0c0b0b, hood: 0x161414, trim: 0xe0d6be, skin: 0xd9d0bb, eyes: 0x2a0a0a },
+};
 
 export function getModel(key: ModelKey): FigureModel {
   const hit = cache.get(key);
@@ -447,7 +457,8 @@ function tusks(k: Kit, f: Frame): void {
 function buildModel(key: ModelKey): FigureModel {
   const k = new Kit();
   let f: Frame;
-  switch (key) {
+  if (key.startsWith('rival-')) return crewMember(k, key as RivalModelKey);
+  switch (key as Exclude<ModelKey, RivalModelKey>) {
     case 'heir':
       f = humanoid(k, { skin: SKIN, tunic: 0x6f7378, legs: 0x3d3f44, helm: 'crown', helmColor: COLORS.gold, weapon: 'sword', shield: COLORS.gold, pauldrons: COLORS.steel, cape: 0x7a1414 });
       banner(k, 0xd9a93a, f);
@@ -637,6 +648,59 @@ function buildModel(key: ModelKey): FigureModel {
       return k.build(1.65, 0.45, { floats: true, ghost: true });
     }
   }
+}
+
+/**
+ * V3.5 (18.5, 18.7): a cutthroat by class in the crew's colours. Sellsword: shield and sword,
+ * kettle helm. Sapper: hammer and a pack of charges with a lit fuse. Pyromancer: robe, staff
+ * with a flame. Ranger: hood and bow. Burglar: hood, dagger, sack. The Gallows Choir wear
+ * bone-white faces and a noose round the neck; the Ferrymen a boat-cloak and a pole-hook badge.
+ */
+function crewMember(k: Kit, key: RivalModelKey): FigureModel {
+  const crew = key.startsWith('rival-ferrymen') ? 'ferrymen' : 'gallows-choir';
+  const cls = key.slice(`rival-${crew}-`.length);
+  const L = CREW_LOOK[crew];
+  const base = { skin: L.skin, tunic: L.tunic, legs: L.legs, eyes: L.eyes };
+  let f: Frame;
+  switch (cls) {
+    case 'sellsword':
+      f = humanoid(k, { ...base, helm: 'kettle', helmColor: crew === 'ferrymen' ? 0x5a6a78 : 0x2a2626, weapon: 'sword', shield: crew === 'ferrymen' ? 0x6f8798 : 0xd8cfb8, pauldrons: COLORS.steelDark, wide: 1.15, cape: L.cape });
+      break;
+    case 'sapper': {
+      f = humanoid(k, { ...base, helm: 'kettle', helmColor: L.hood, weapon: 'hammer', wide: 1.2, beard: crew === 'ferrymen' ? 0x5a4a3a : undefined });
+      const bz = f.backZ - 0.07;
+      k.box(0.26, 0.24, 0.13, L.cape, [0, f.backY + 0.02, bz], [f.hunch, 0, 0]);
+      for (const x of [-0.07, 0.07]) k.cyl(0.045, 0.045, 0.14, 6, 0xb03a2e, [x, f.backY + 0.18, bz]);
+      k.box(0.01, 0.07, 0.01, 0xffc860, [0.07, f.backY + 0.28, bz], undefined, true);
+      break;
+    }
+    case 'pyromancer':
+    case 'shadowmancer':
+      f = humanoid(k, { ...base, helm: cls === 'pyromancer' ? 'hat' : 'hood', helmColor: L.hood, weapon: 'staff', staffGlow: cls === 'pyromancer' ? 0xff6a1a : 0x9a6aff, cape: L.cape });
+      robe(k, L.tunic, f);
+      if (cls === 'pyromancer') {
+        // A flame cupped in the off hand.
+        k.ball(0.045, 0xffa040, [f.handL[0], f.handL[1] + 0.03, f.handL[2] + 0.04], undefined, true);
+        k.add(new THREE.ConeGeometry(0.03, 0.09, 4), 0xffd27a, [f.handL[0], f.handL[1] + 0.1, f.handL[2] + 0.04], undefined, undefined, true);
+      }
+      break;
+    case 'ranger':
+      f = humanoid(k, { ...base, helm: 'hood', helmColor: L.hood, weapon: 'bow', cape: L.cape });
+      break;
+    default:
+      f = humanoid(k, { ...base, helm: 'hood', helmColor: L.hood, weapon: 'dagger', hunch: 0.2, cape: L.cape });
+      k.ball(0.08, 0x4a4030, [-f.shoulderW * 0.3, f.backY + 0.02, f.backZ - 0.05]);
+  }
+  if (crew === 'gallows-choir') {
+    // A noose of bone-pale rope round the neck, its tail down the chest.
+    k.add(new THREE.TorusGeometry(f.headR * 0.62, 0.016, 4, 10), L.trim, [0, f.shoulderY + 0.01, f.depth * 0.1], [Math.PI / 2, 0, 0]);
+    k.box(0.02, 0.12, 0.02, L.trim, [0, f.shoulderY - 0.07, f.depth * 0.5]);
+  } else {
+    // A river-grey sash across the chest with a brass hook badge.
+    k.box(f.shoulderW * 0.9, 0.035, 0.02, L.trim, [0, f.shoulderY - 0.1, f.depth * 0.52], [0, 0, 0.5]);
+    k.ball(0.022, COLORS.gold, [f.shoulderW * 0.18, f.shoulderY - 0.04, f.depth * 0.56], undefined, true);
+  }
+  return k.build(f.top + 0.03, cls === 'sapper' || cls === 'sellsword' ? 0.24 : 0.2);
 }
 
 /**

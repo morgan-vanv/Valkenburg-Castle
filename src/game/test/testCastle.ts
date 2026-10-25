@@ -181,6 +181,8 @@ export const testCastle: CastleDef = {
     { id: 'slay', kind: 'slay', at: at(3, 16, 4), where: 'the Lair' },
   ],
   rivalEntrances: [at(1, 18, 7)],
+  // V3.5 (spec 18.5): a cutthroat post on the Crossing, east of the pit.
+  rivalPosts: [at(2, 14, 5)],
   lights: [
     { at: at(1, 4, 6), radius: 2, kind: 'sconce' },
     { at: at(1, 2, 8), radius: 3, kind: 'daylight' },

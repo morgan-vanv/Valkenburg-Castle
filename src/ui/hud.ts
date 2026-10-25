@@ -4,13 +4,13 @@
 
 import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
 import { add, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
-import type { ActionKind, ActionTarget, Brightness, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, Monster, SlotRoll } from '../game/types';
+import type { ActionKind, ActionTarget, Brightness, DealOption, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, JobKind, Monster, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { linkAt, linkButton, linkReach, linkTooltip, type LinkInfo } from '../view/links';
-import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, MONSTER_NOTE, actionCost, actionHelp, classGlyph, className, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, STANCE, TEMPERAMENT, actionCost, actionHelp, classGlyph, className, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
@@ -94,6 +94,9 @@ export class Hud {
   private picker = h('div', { class: 'hud-picker hidden' });
   private modal = h('div', { class: 'hud-modal hidden' });
   private rivalEl = h('div', { class: 'hud-rivals hidden' });
+  /** V3.5 (18.6): the parley card; open while `parleyHero` is set. */
+  private parleyEl = h('div', { class: 'hud-parley hidden' });
+  private parleyHero: string | null = null;
   private vignette = h('div', { class: 'hud-vignette' });
   private camBox = h('div', { class: 'hud-cam' });
   private menuEl = h('div', { class: 'hud-menu hidden' });
@@ -105,7 +108,7 @@ export class Hud {
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.gloamEl, this.hint, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.gloamEl, this.hint, this.bar, this.picker, this.previewEl, this.parleyEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
@@ -275,6 +278,7 @@ export class Hud {
     this.renderBar();
     this.renderLog();
     this.renderRivals();
+    this.renderParley();
     this.renderEmpty();
     this.drawHighlights();
   }
@@ -427,9 +431,17 @@ export class Hud {
         const def = this.heroDef(hero.heroId);
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
       } else if (rival && d.rivals) {
-        lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}${rival.cls ? ` · ${className(rival.cls)}` : ''}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
+        const st = STANCE[d.rivals.stance];
+        lines.push(
+          `<b>${rival.name}</b> <span class="dim">${d.rivals.name}${rival.cls ? ` · ${className(rival.cls)}` : ''}</span>`,
+          `HP ${rival.hp}/${rival.maxHp} · <span class="st-word st-${st.cls}">${st.name}</span>${d.rivals.stance === 'hired' && d.rivals.hiredRounds ? ` · ${d.rivals.hiredRounds} round${d.rivals.hiredRounds === 1 ? '' : 's'} left` : ''}`,
+          `<span class="dim">${RIVAL_KIT[rival.cls] ?? ''}</span>`,
+          d.rivals.spotted && d.rivals.stance !== 'hired' ? `Goal: ${GOAL_TEXT[d.rivals.goal]}${d.rivals.aim ? ` · after ${d.rivals.aim.what}` : ''}` : '',
+        );
         const rit = this.intents[rival.id] ?? rival.intent;
-        if (rit && rit.kind !== 'wait') lines.push(`<span class="neg">Next: ${intentText(this.state, rit)}</span>`);
+        if (rit && rit.kind !== 'wait') lines.push(`<span class="${d.rivals.stance === 'hired' ? 'pos' : 'neg'}">Next: ${intentText(this.state, rit)}</span>`);
+        const sel = this.selected();
+        if (sel && this.dealsFor(sel.heroId).length) lines.push(`<span class="tip-act">${d.rivals.stance === 'hostile' ? 'Parley (B): buy a truce' : 'Click: Parley'}</span>`);
       }
       else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
       const act = this.bestActionFor(unitId, at);
@@ -556,7 +568,10 @@ export class Hud {
       const t = this.pending.targets.find(match) ?? (at ? this.pending.targets.find((x) => x.at && samePos(x.at, at)) : undefined);
       return t ? { option: this.pending, target: t } : null;
     }
-    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'dig', 'jump'];
+    const crew = this.state?.delve?.rivals;
+    const isRival = !!unitId && !!crew?.members.some((m) => m.id === unitId);
+    // 18.6: clicking a crew member that isn't fighting you opens the deal card, not an attack.
+    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley', 'free', 'revive'] : ['attack', 'firebolt', 'free', 'revive', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'dig', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -570,6 +585,7 @@ export class Hud {
     const s = this.state;
     const d = s?.delve;
     if (!s || !d) return;
+    if (this.parleyHero && ev.button !== 2) return;
     if (ev.button === 2) {
       this.cancel();
       return;
@@ -610,6 +626,10 @@ export class Hud {
       this.closeConfirm();
       return;
     }
+    if (this.parleyHero) {
+      this.closeParley();
+      return;
+    }
     if (this.pv) this.closePreview();
     else if (this.pending) this.pending = null;
     else if (!this.menuEl.classList.contains('hidden')) this.menuEl.classList.add('hidden');
@@ -636,6 +656,11 @@ export class Hud {
 
   private startAction(o: ActionOption): void {
     if (this.busy) return;
+    if (o.action === 'parley' && !o.blocked) {
+      sfx.play('click');
+      this.openParley();
+      return;
+    }
     if (o.blocked) {
       this.flashBlocked(o, o.targets[0]);
       return;
@@ -678,6 +703,10 @@ export class Hud {
     this.picker.classList.add('hidden');
     const sel = this.selected();
     if (!sel || !this.state) return;
+    if (o.action === 'parley' && !o.blocked) {
+      this.openParley();
+      return;
+    }
     if (o.blocked) {
       this.flashBlocked(o, t);
       return;
@@ -1043,7 +1072,7 @@ export class Hud {
     } else {
       const carrier = d.heroes.find((x) => x.pack.some((i) => i.kind === 'heirloom'));
       const rival = d.rivals?.members.find((r) => r.loot.some((i) => i.kind === 'heirloom'));
-      status = carrier ? `${this.heroDef(carrier.heroId)?.name ?? ''} carries it. Get out.` : rival ? 'The Lantern Sisters have it!' : 'Find it and carry it out.';
+      status = carrier ? `${this.heroDef(carrier.heroId)?.name ?? ''} carries it. Get out.` : rival ? `${d.rivals?.name ?? 'A rival crew'} have it!` : 'Find it and carry it out.';
     }
     // 15.7: where it is. Before its hex is explored, only the brief's room; after, level + room + a click to pan there.
     const obj = this.dio.objectiveAt();
@@ -1104,7 +1133,7 @@ export class Hud {
           h(
             'div',
             { class: 'hc-row' },
-            h('span', { class: 'hc-res hc-focus', title: `Focus ${hd.focus} of ${FOCUS_MAX}\nIn a roll preview, spend Focus to turn slots into sure hits. ${FOCUS_MAX} per delve; Lord Hobart's Rally gives 1 back.` }, h('span', { class: 'hc-lab' }, 'Focus'), pips(hd.focus, FOCUS_MAX, 'focus')),
+            h('span', { class: 'hc-res hc-focus', title: `Focus ${hd.focus} of ${FOCUS_MAX}\nIn a roll preview, spend Focus to turn slots into sure hits. ${FOCUS_MAX} per delve; Keven's Rally gives 1 back.${hd.ale === 'reserve' ? "\nHobart's Reserve: this hero's Focus is 4 for this delve." : hd.ale === 'heavyhead' ? '\nHeavy head: Focus started at 1.' : ''}` }, h('span', { class: 'hc-lab' }, 'Focus'), pips(hd.focus, hd.ale === 'reserve' ? 4 : FOCUS_MAX, 'focus')),
             manaMax > 0 ? h('span', { class: 'hc-res hc-mana', title: `Mana ${hd.mana} of ${manaMax}\nPays for spells: Fireball 2, every other spell 1. ${manaMax} per delve, no refills inside.` }, h('span', { class: 'hc-lab' }, 'Mana'), pips(hd.mana, manaMax, 'mana')) : '',
           ),
           packRow(hd.pack),
@@ -1159,6 +1188,11 @@ export class Hud {
     if (hd.guarding) chip('', 'Guarding', `Guarding ${this.nameOf(hd.guarding)}: until your next turn, attacks aimed at them hit ${name} instead.`);
     if (hd.escorting) chip('good', 'Escorting', `Escorting ${this.nameOf(hd.escorting)}: they follow ${name}, who moves 3 at most.\nReach an exit to bring them out.`);
     if (hd.rallyCooldown > 0) chip('', `Rally in ${hd.rallyCooldown}`, `Rally is ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
+    if (hd.ale) {
+      const a = ALE_EFFECT[hd.ale];
+      const spent = hd.ale === 'featherfoot' && hd.aleSpent;
+      chip(`ale ${a.bad ? 'bad-ale' : ''} ${spent ? 'used' : ''}`, `${a.glyph} ${a.name}${spent ? ' · used' : ''}`, `${a.name} · ${a.bad ? 'a bad pull from the Black Cask' : 'ale from the Gilded Flagon'}, for this delve\n${a.text}${spent ? '\nUsed: the free fall is spent.' : ''}`);
+    }
     if (hd.revived && hd.status === 'active') chip('', 'Revived', 'Was downed and got back up: comes home wounded and sits out the next contract.');
     return out;
   }
@@ -1235,7 +1269,10 @@ export class Hud {
     }
     // The rest, grouped: Interact · Abilities · Items.
     const groups: Record<'interact' | 'ability' | 'item', ActionOption[]> = { interact: [], ability: [], item: [] };
-    for (const o of this.options) {
+    const opts = [...this.options];
+    // 18.6: deals are free, so the card is offered whenever deals() lists any, even after the action is spent.
+    if (sel && !opts.some((o) => o.action === 'parley') && this.dealsFor(sel.heroId).length) opts.push({ action: 'parley', label: 'Parley', targets: [{}], rolls: false, pick: 'self' });
+    for (const o of opts) {
       if (o.action === 'shutter') continue;
       groups[ITEM_ACTIONS.has(o.action) ? 'item' : SPELLS.has(o.action) || ABILITIES.has(o.action) ? 'ability' : 'interact'].push(o);
     }
@@ -1272,7 +1309,7 @@ export class Hud {
       }
       groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
     }
-    if (!this.options.some((o) => o.action !== 'shutter') && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
+    if (!opts.some((o) => o.action !== 'shutter') && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
     // End turn: how many heroes still have a move or an action.
     const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
     const end = h(
@@ -1367,14 +1404,209 @@ export class Hud {
     }
     clear(this.rivalEl);
     const alive = r.members.filter((m) => m.hp > 0 && !m.goneOut).length;
+    const st = STANCE[r.stance];
+    const tm = TEMPERAMENT[r.temperament ?? 'prospector'];
+    const sel = this.selected();
+    const canDeal = !!sel && this.dealsFor(sel.heroId).length > 0;
+    this.rivalEl.className = `hud-rivals crew-${r.crew} st-${st.cls}`;
     this.rivalEl.append(
-      h('div', { class: 'kicker' }, 'Rival crew'),
-      h('b', null, r.name),
-      h('div', { class: `rv-stance st-${r.stance}` }, r.stance === 'neutral' ? 'Neutral' : r.stance === 'hostile' ? 'Hostile' : 'Bribed'),
-      h('div', { class: 'small' }, `Goal: ${GOAL_TEXT[r.goal]}`),
+      h('div', { class: 'kicker', title: `${tm.name} · ${tm.text}` }, `Rival crew · ${tm.name}`),
+      h('b', { title: `${r.name} · ${CREW[r.crew]?.blurb ?? ''}` }, r.name),
+      h('div', { class: `rv-stance st-${r.stance}`, title: `${st.name} · ${st.text}` }, st.name, r.stance === 'hired' && r.hiredRounds ? ` · ${r.hiredRounds} round${r.hiredRounds === 1 ? '' : 's'}` : ''),
+      r.stance === 'demanding' ? h('div', { class: 'rv-toll', title: `The toll · Pay ${r.toll ?? 50} (gold first, then gems and jewelry) or they attack in the next castle turn. Parley to pay.` }, h('b', null, `Pay ${r.toll ?? 50}`), ' or they attack next turn') : '',
+      r.stance !== 'hired' ? h('div', { class: 'small' }, `Goal: ${GOAL_TEXT[r.goal]}`, r.aim ? h('span', { class: 'dim' }, ` · ${r.aim.what}`) : '') : h('div', { class: 'small pos' }, 'Fighting beside you'),
       h('div', { class: 'dim small' }, `${alive} on the map`),
+      canDeal ? h('button', { class: 'btn btn-small rv-parley', title: 'Parley · free · key B\nOpen the deal card: pay, hire, give a job, or fight.', onclick: () => this.openParley() }, '⚖ Parley ', h('kbd', null, 'B')) : '',
     );
     this.rivalEl.classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ parley (18.6)
+
+  /** engine.deals, tolerant of an engine without it. */
+  private dealsFor(heroId: string): DealOption[] {
+    const s = this.state;
+    if (!s?.delve?.rivals) return [];
+    try {
+      return this.engine.deals(s, heroId) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  openParley(): void {
+    const sel = this.selected();
+    if (!sel || this.busy) return;
+    if (!this.dealsFor(sel.heroId).length) {
+      this.toast('No crew close enough to talk to: within 4 hexes, in sight.');
+      return;
+    }
+    this.pending = null;
+    this.picker.classList.add('hidden');
+    this.closePreview();
+    this.parleyHero = sel.heroId;
+    sfx.play('flip', { pitch: 0.9 });
+    this.renderParley();
+    this.drawHighlights();
+  }
+
+  private closeParley(): void {
+    this.parleyHero = null;
+    this.parleyEl.classList.add('hidden');
+  }
+
+  private async makeDeal(o: DealOption, job?: JobKind): Promise<void> {
+    if (!this.parleyHero || this.busy) return;
+    if (!o.ok) {
+      sfx.play('error');
+      this.toast(o.blocked ?? 'Not now.');
+      return;
+    }
+    const heroId = this.parleyHero;
+    this.closeParley();
+    await this.host.send({ type: 'deal', heroId, deal: o.deal, job: job ?? o.job });
+  }
+
+  private renderParley(): void {
+    const el = this.parleyEl;
+    const d = this.state?.delve;
+    const r = d?.rivals;
+    const hd = d?.heroes.find((x) => x.heroId === this.parleyHero);
+    if (!this.parleyHero || !d || !r || !hd || hd.status !== 'active' || d.phase !== 'player') {
+      if (this.parleyHero) this.closeParley();
+      return;
+    }
+    const deals = this.dealsFor(hd.heroId);
+    if (!deals.length) {
+      this.closeParley();
+      return;
+    }
+    clear(el);
+    el.className = `hud-parley crew-${r.crew}`;
+    const st = STANCE[r.stance];
+    const tm = TEMPERAMENT[r.temperament ?? 'prospector'];
+    const who = this.heroDef(hd.heroId)?.name ?? hd.heroId;
+    // Head: crew, temperament, stance.
+    el.append(
+      h(
+        'div',
+        { class: 'pl-head' },
+        h('span', { class: 'pl-seal' }, '⚖'),
+        h(
+          'div',
+          { class: 'pl-title' },
+          h('div', { class: 'kicker' }, `Parley · ${who} speaks`),
+          h('h3', null, r.name),
+          h('div', { class: 'pl-tags' }, h('span', { class: `pl-tag tm-${r.temperament}`, title: `${tm.name} · ${tm.text}` }, tm.name), h('span', { class: `pl-tag st-${st.cls}`, title: `${st.name} · ${st.text}` }, st.name, r.stance === 'hired' && r.hiredRounds ? ` · ${r.hiredRounds} rounds` : '')),
+        ),
+        h('button', { class: 'btn btn-small btn-ghost pl-close', title: 'Close · Esc', onclick: () => this.cancel() }, '✕'),
+      ),
+    );
+    el.querySelector('.pl-title h3')?.setAttribute('title', `${r.name} · ${CREW[r.crew]?.blurb ?? ''}`);
+    // 18.5: the toll, a demand with a one-round fuse.
+    if (r.stance === 'demanding')
+      el.append(
+        h(
+          'div',
+          { class: 'pl-toll', title: 'The toll · Pay it with "Pay the toll" below, or they attack in the next castle turn.' },
+          h('span', { class: 'pl-fuse' }, '1'),
+          h('div', null, h('b', null, '"Your gold or your blood."'), h('div', null, `Pay ${r.toll ?? 50} or they attack next turn.`)),
+        ),
+      );
+    // Members.
+    el.append(
+      h(
+        'div',
+        { class: 'pl-members' },
+        ...r.members
+          .filter((m) => !m.goneOut)
+          .map((m) =>
+            h(
+              'div',
+              { class: `pl-mem ${m.hp <= 0 ? 'dead' : ''}`, title: `${m.name} · ${className(m.cls)}, HP ${m.hp}/${m.maxHp}\n${RIVAL_KIT[m.cls] ?? ''}` },
+              h('span', { class: `cbadge cls-${m.cls}` }, classGlyph(m.cls)),
+              h('span', null, h('b', null, m.name), h('span', { class: 'dim small' }, ` ${className(m.cls)} · `), h('span', { class: 'num small' }, m.hp > 0 ? `${m.hp}/${m.maxHp}` : 'dead')),
+            ),
+          ),
+      ),
+    );
+    // What they're after (aim).
+    if (r.aim && r.stance !== 'hired' && r.stance !== 'bribed')
+      el.append(
+        h(
+          'div',
+          { class: 'pl-aim', title: "What they're after · Where they are heading, how many rounds until they get there, and what you think it is worth." },
+          h('span', { class: 'kicker' }, 'After'),
+          h('b', null, r.aim.what),
+          h('span', { class: 'dim small' }, ` · ${r.aim.rounds <= 0 ? 'there now' : `${r.aim.rounds} round${r.aim.rounds === 1 ? '' : 's'} away`} · ~${r.aim.value} gold`),
+          h('button', { class: 'btn btn-small btn-ghost', title: 'Look there', onclick: () => this.dio.lookAt(r.aim!.at) }, '◎'),
+        ),
+      );
+    // Purse.
+    const purse = d.heroes.filter((x) => x.status === 'active').flatMap((x) => x.pack).filter((i) => i.kind === 'gold' || i.kind === 'gem' || i.kind === 'jewelry');
+    const coin = purse.filter((i) => i.kind === 'gold').reduce((a, i) => a + i.amount, 0);
+    const val = purse.filter((i) => i.kind !== 'gold').reduce((a, i) => a + i.amount, 0);
+    el.append(h('div', { class: 'pl-purse small', title: "The party's purse · They take gold coins first, then gems and jewelry, smallest first, until the price is covered. No change given. Heirlooms, hoard pieces and story items are never handed over." }, h('span', { class: 'kicker' }, 'You carry'), ` ${coin} gold${val ? ` + ${val} in gems and jewelry` : ''}`));
+    // Deals.
+    const list = h('div', { class: 'pl-deals' });
+    const jobs = deals.filter((x) => x.deal === 'job');
+    const fight = deals.find((x) => x.deal === 'fight');
+    for (const o of deals) {
+      if (o.deal === 'fight' || o.deal === 'job') continue;
+      list.append(this.dealRow(o));
+      if (o.deal === 'truce' && jobs.length) list.append(this.jobRow(jobs));
+    }
+    if (jobs.length && !deals.some((x) => x.deal === 'truce')) list.append(this.jobRow(jobs));
+    el.append(list);
+    el.append(
+      h(
+        'div',
+        { class: 'pl-foot' },
+        h('span', { class: 'dim small' }, 'Free · one deal per crew per round'),
+        h('button', { class: 'btn btn-ghost', onclick: () => this.cancel() }, 'Walk away ', h('kbd', null, 'Esc')),
+        fight ? h('button', { class: 'btn btn-danger pl-fight', disabled: !fight.ok, title: fight.ok ? `Fight · ${fight.text}` : `Fight · ${fight.blocked ?? ''}`, onclick: () => void this.makeDeal(fight) }, `${DEAL_GLYPH.fight} Fight`) : '',
+      ),
+    );
+    el.classList.remove('hidden');
+  }
+
+  private dealRow(o: DealOption): HTMLElement {
+    return h(
+      'div',
+      { class: `pl-deal deal-${o.deal} ${o.ok ? '' : 'blocked'}`, 'data-deal': o.deal },
+      h('span', { class: 'pl-glyph' }, DEAL_GLYPH[o.deal]),
+      h(
+        'div',
+        { class: 'pl-text' },
+        h('b', null, o.label),
+        h('div', { class: 'small pl-what' }, o.text),
+        o.pays && o.ok ? h('div', { class: 'small pl-pays' }, `They take: ${o.pays}`) : '',
+        o.risk ? h('div', { class: `small pl-risk ${/1 in|%|turn on/i.test(o.risk) && !/not turn/i.test(o.risk) ? 'neg' : ''}` }, `⚠ ${o.risk}`) : '',
+        !o.ok && o.blocked ? h('div', { class: 'small pl-why' }, o.blocked) : '',
+      ),
+      h('button', { class: `btn btn-small ${o.ok ? 'btn-primary' : ''}`, disabled: !o.ok, title: o.ok ? `${o.label} · ${o.price ? `${o.price} gold` : 'free'}${o.pays ? `\nThey take: ${o.pays}` : ''}` : `${o.label} · ${o.blocked ?? 'not now'}`, onclick: () => void this.makeDeal(o) }, o.price ? `${o.price}` : 'Free', o.price ? h('small', null, ' gold') : ''),
+    );
+  }
+
+  /** The three jobs share one row with a button each. */
+  private jobRow(jobs: DealOption[]): HTMLElement {
+    const any = jobs.find((x) => x.ok) ?? jobs[0]!;
+    return h(
+      'div',
+      { class: `pl-deal deal-job ${jobs.some((x) => x.ok) ? '' : 'blocked'}`, 'data-deal': 'job' },
+      h('span', { class: 'pl-glyph' }, DEAL_GLYPH.job),
+      h(
+        'div',
+        { class: 'pl-text' },
+        h('b', { title: 'A job · They do it, then go back to what they were doing.' }, `A job · ${any.price} gold`),
+        !jobs.some((x) => x.ok) && any.blocked ? h('span', { class: 'small pl-why' }, ` · ${any.blocked}`) : any.pays && any.ok ? h('span', { class: 'small pl-pays' }, ` · they take ${any.pays}`) : '',
+        h(
+          'div',
+          { class: 'pl-jobs' },
+          ...jobs.map((j) => h('button', { class: 'btn btn-small', 'data-job': j.job ?? '', disabled: !j.ok, title: `${j.job ? JOB_NAME[j.job] : j.label} · ${j.text}${j.ok ? '' : `\nCan't now: ${j.blocked ?? ''}`}`, onclick: () => void this.makeDeal(j) }, j.job ? JOB_NAME[j.job] : j.label)),
+        ),
+      ),
+    );
   }
 
   // ------------------------------------------------------------ tooltips, banners, toasts
@@ -1527,7 +1759,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
@@ -1629,6 +1861,7 @@ export class Hud {
       return;
     }
     if (this.busy) return;
+    if (this.parleyHero) return;
     if (this.pv) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -1658,6 +1891,10 @@ export class Hud {
       const next = (e.shiftKey ? [...order].reverse().slice(1) : order).find((x) => !x.moved || !x.acted) ?? order[0]!;
       this.select(next.heroId);
       return;
+    }
+    if (k === 'b' && !this.bar.querySelector('button.act[data-key="b"]:not([data-action="parley"])')) {
+      const sel = this.selected();
+      if (sel && this.dealsFor(sel.heroId).length) return this.openParley();
     }
     if (k === 's') return this.setSneak(!this.sneak);
     if (k === 'e') return this.endTurn();
@@ -1702,6 +1939,16 @@ const TILE_NAME: Record<string, string> = {
 
 const GOAL_TEXT: Record<string, string> = { loot: 'looting', objective: 'after your objective', leave: 'leaving' };
 
+/** What each rival class does (16.5, 18.5), for tooltips. */
+const RIVAL_KIT: Record<string, string> = {
+  ranger: 'Longbow at range 6. Goes on overwatch.',
+  shadowmancer: 'Veils herself; hard to see.',
+  burglar: 'Sleep darts. Picks locks.',
+  sellsword: 'Shield and sword: 3 slots, 2 damage, armor 1. Shoves a hero off an unrailed edge.',
+  sapper: 'Hammer, and one charge: marks the hexes a round ahead, then 3 damage to everyone there. Noise 8.',
+  pyromancer: 'Firebolts: marks a hero in range 5 a round ahead, then 3 Wits slots, 2 damage per hit.',
+};
+
 export function intentText(s: GameState, it: Intent): string {
   const d = s.delve;
   const name = (id?: string) => (id ? (s.campaign.roster.find((x) => x.id === id)?.name ?? (d?.prisoner?.id === id ? d.prisoner.name : undefined) ?? d?.rivals?.members.find((r) => r.id === id)?.name ?? id) : '');
@@ -1737,6 +1984,12 @@ export function intentText(s: GameState, it: Intent): string {
       return 'veils herself';
     case 'dart':
       return `throws a sleep dart at ${name(it.targetId)}`;
+    case 'toll':
+      return `demands a toll: pay ${d?.rivals?.toll ?? 50} or they attack next turn`;
+    case 'firebolt':
+      return `hurls a firebolt at ${name(it.targetId)} (3 Wits slots at 60%, 2 per hit)`;
+    case 'charge':
+      return `lights a charge: next turn 3 damage to everyone on the marked hexes`;
     default:
       return 'waits';
   }

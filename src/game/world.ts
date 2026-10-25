@@ -258,6 +258,8 @@ export function litSet(w: World, d: DelveX): Set<string> {
   if (lp) shine(lp, LANTERN_RADIUS[brightnessOf(d.light)]);
   for (const h of d.heroes) {
     if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) shine(h.at, 2);
+    // Spec 18.4: Glowworm Pale: the drinker sheds light radius 1.
+    if (h.ale === 'glowworm' && (h.status === 'active' || h.status === 'downed')) shine(h.at, 1);
   }
   for (const k of d.lit) {
     const [lv, rest] = k.split(':');
@@ -316,7 +318,7 @@ export function farLitTest(w: World, d: DelveX, lit: Set<string>): (k: string) =
   for (const [k, n] of Object.entries(d.burning ?? {})) if (n > 0) src.add(k);
   const lp = d.lanternOpen === false ? null : lanternPos(d);
   if (lp && LANTERN_RADIUS[brightnessOf(d.light)] > 0) src.add(posKey(lp));
-  for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) src.add(posKey(h.at));
+  for (const h of d.heroes) if ((h.torch > 0 || h.ale === 'glowworm') && (h.status === 'active' || h.status === 'downed')) src.add(posKey(h.at));
   return (k) => lit.has(k) && (day.has(k) || src.has(k));
 }
 
@@ -345,8 +347,9 @@ export function partyLights(w: World, d: DelveX, at: Pos): boolean {
   const r = LANTERN_RADIUS[brightnessOf(d.light)];
   if (lp && lp.level === at.level && r > 0 && distance(lp, at) <= r && lightLos(w, d, lp, at)) return true;
   for (const h of d.heroes) {
-    if (h.torch <= 0 || (h.status !== 'active' && h.status !== 'downed') || h.at.level !== at.level) continue;
-    if (distance(h.at, at) <= 2 && lightLos(w, d, h.at, at)) return true;
+    if ((h.status !== 'active' && h.status !== 'downed') || h.at.level !== at.level) continue;
+    const r = h.torch > 0 ? 2 : h.ale === 'glowworm' ? 1 : 0;
+    if (r && distance(h.at, at) <= r && lightLos(w, d, h.at, at)) return true;
   }
   return false;
 }

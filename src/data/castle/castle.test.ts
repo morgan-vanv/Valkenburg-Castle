@@ -131,6 +131,36 @@ describe('castle', () => {
     expect(bad).toEqual([]);
   });
 
+  it('puts the cutthroat posts on Level 2 floor, off spawns, reachable on foot from an entrance (spec 18.5)', () => {
+    const posts = castle.rivalPosts ?? [];
+    expect(posts.length).toBeGreaterThanOrEqual(3);
+    const seen = new Set<string>();
+    const queue: Pos[] = [...castle.entrances];
+    while (queue.length) {
+      const p = queue.pop()!;
+      const k = posKey(p);
+      if (seen.has(k) || !passable(p)) continue;
+      seen.add(k);
+      queue.push(...posNeighbors(p));
+      for (const link of castle.links) {
+        if (link.kind !== 'stairs') continue;
+        if (samePos(link.a, p)) queue.push(link.b);
+        if (samePos(link.b, p)) queue.push(link.a);
+      }
+    }
+    for (const p of posts) {
+      expect(p.level, show(p)).toBe(2);
+      expect(tile(p)?.kind, show(p)).toBe('floor');
+      expect(seen.has(posKey(p)), `reachable ${show(p)}`).toBe(true);
+      expect(castle.spawns.some((s) => samePos(s.at, p)), `spawn on ${show(p)}`).toBe(false);
+    }
+    // Choke points: each post touches a bridge or is in the winch room.
+    for (const p of posts) {
+      const rooms = new Set([p, ...posNeighbors(p)].map((n) => tile(n)?.room));
+      expect(rooms.has('bridges') || rooms.has('winch'), show(p)).toBe(true);
+    }
+  });
+
   it('lists every brazier tile as a brazier', () => {
     const listed = new Set(castle.braziers.map(posKey));
     for (const [p, t] of allTiles()) if (t.kind === 'brazier') expect(listed.has(posKey(p)), show(p)).toBe(true);
