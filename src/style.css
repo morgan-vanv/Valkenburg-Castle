@@ -3490,3 +3490,5 @@ input.seed {
 .ct-unlock.ct-captive b { color: #ffb4ac; }
 .hero-list li.taken b { color: #ffb4ac; }
 .taken-line { display: flex; gap: 6px; align-items: flex-start; }
+.hcard.st-captured { opacity: 0.6; filter: saturate(0.4); border-color: var(--red-dim); }
+.hcard.st-captured .hc-nm { color: #ffb4ac; }
