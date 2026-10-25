@@ -74,6 +74,8 @@ export interface TileDef {
   prop?: PropKind;
   /** Floor next to a pit: a railing on this hex's pit side stops anyone being shoved off here. */
   railing?: boolean;
+  /** V3.7 (spec 20.3): a built wall no charge can break (stair shafts, the lift, outer walls). */
+  unbreakable?: boolean;
 }
 
 export interface RoomDef {
@@ -359,6 +361,17 @@ export interface Campaign {
   lostGear: { at: Pos; items: Item[] }[];
   /** V3.5 (spec 18): what Lowgate has won back. */
   village: Village;
+  /** V3.7 (spec 20.4): heroes a crew carried off; each has a rescue contract on the board until freed or given up. */
+  captives: Captive[];
+}
+
+export interface Captive {
+  hero: Hero;
+  /** The crew that took them and where they're held (the crew's hideout site). */
+  crew: CrewId;
+  siteId: string;
+  /** Delve count when taken. */
+  delve: number;
 }
 
 // ---------------------------------------------------------------- delve
@@ -379,8 +392,8 @@ export interface HeroInDelve {
   aleSpent?: boolean;
   /** V3.6 (spec 19.3): rounds of night-eye left: no dark penalties to sight or rolls. */
   nightEyes?: number;
-  /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead'. */
-  status: 'active' | 'downed' | 'out' | 'dead';
+  /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
+  status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
   /** Downed only: world phases left before death (starts at 2). */
   bleed: number;
   /** Rounds of torchlight left on this hero's own torch (0 = none lit). */
@@ -422,7 +435,7 @@ export interface Intent {
    * targetId one hex toward it (`to`). grab: the ghoul holds targetId. Rivals also use
    * overwatch / smoke / veil / dart (spec 16.5): `to` = the hex a bomb lands on.
    */
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge';
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'drag' | 'rob' | 'potion' | 'item' | 'flee';
   /** breath: the marked hexes. */
   hexes?: Pos[];
   targetId?: string;
@@ -459,6 +472,11 @@ export interface Monster {
   shoutCooldown?: number;
   /** Buried ghoul: not on the map until it rises. */
   buried?: boolean;
+  /** V3.7 (spec 20.1): the hex direction (0..5, see hex.ts DIRS) it faces: the way it last moved or looked. */
+  facing?: number;
+  /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
+  feared?: number;
+  fearOf?: string;
 }
 
 /** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
@@ -505,6 +523,17 @@ export interface Rival {
   overwatch?: boolean;
   /** Sapper: charges left; Pyromancer: firebolts left (spec 18.5). */
   charges?: number;
+  /** V3.7 (spec 20.1, 20.2, 20.4). */
+  facing?: number;
+  feared?: number;
+  fearOf?: string;
+  /** Spec 20.4: level, tiers and a pack like a hero's. */
+  level?: number;
+  weaponTier?: 0 | 1 | 2;
+  armorTier?: 0 | 1 | 2;
+  pack?: Item[];
+  /** Spec 20.4: the downed hero this member is dragging out. */
+  dragging?: string;
 }
 
 export interface RivalCrew {
@@ -533,6 +562,14 @@ export interface RivalCrew {
   /** Round they enter; they're off the map before it. */
   entersRound: number;
   members: Rival[];
+}
+
+export interface Fuse {
+  at: Pos;
+  /** World phases left before it goes off (1 = the end of the coming world phase). */
+  rounds: number;
+  /** Who set it (hero or rival id), for kills and the blast shield. */
+  by: string;
 }
 
 export interface DoorState {
@@ -586,8 +623,10 @@ export interface Delve {
   traps: Record<string, { spotted: boolean }>;
   /** Braziers lit, by posKey (includes campaign.litBraziers). */
   lit: string[];
-  /** Cracked walls blown open and rubble/cracked walls dug out, by posKey. Engine kindAt treats these as floor. */
+  /** Cracked walls blown open, built walls broken, and rubble/cracked walls dug out, by posKey. Engine kindAt treats these as floor (rubble for broken walls, spec 20.3). */
   blown: string[];
+  /** V3.7 (spec 20.3): charges set or thrown with a fuse, by anyone; they go off at the end of a world phase. */
+  fuses?: Fuse[];
   /** Ropes anchored at the pit, by posKey of the edge hex. */
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
@@ -667,6 +706,8 @@ export type ActionKind =
   | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
   | 'nightsight' // V3.6: drink the night-eye draught (action)
+  | 'setCharge' // V3.7 Sapper [hex adjacent, floor or breakable wall]: set a charge with a fuse (target.fuse 1 or 2)
+  | 'dread' // V3.7 Shadowmancer [enemy]: 1 mana, 2 Wits slots at range 5, 1+ hits = feared 2 rounds
   | 'parley' // V3.5: open the deal card with a crew in sight within 4 (free; the deal is a 'deal' command)
   | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally
@@ -700,6 +741,8 @@ export type ActionKind =
   | 'grapple'; // [hex on the level above] uses move and action; the hook is kept
 
 export interface ActionTarget {
+  /** V3.7 setCharge: fuse length in world phases (1 or 2). */
+  fuse?: 1 | 2;
   /** Monster, rival, hero or prisoner id. */
   id?: string;
   at?: Pos;
@@ -768,6 +811,15 @@ export type GameEvent =
   | { type: 'deal'; deal: DealKind; job?: JobKind; price: number; paid: string[] } // V3.5
   | { type: 'betrayed' } // V3.5: sell-swords turn on the party when their deal ends
   | { type: 'villageUnlocked'; story: StoryId } // V3.5, on backToCamp
+  // V3.7
+  | { type: 'noticed'; by: string; hero: string } // an awake monster or crew member spots a hero (spec 20.1)
+  | { type: 'woke'; id: string; by: string } // a sleeper woken by a passing hero
+  | { type: 'swing'; by: string; target: string; hits: number; damage: number } // attack of opportunity (spec 20.2)
+  | { type: 'feared'; id: string; by: string }
+  | { type: 'fuseSet'; at: Pos; rounds: number; by: string }
+  | { type: 'blast'; at: Pos; by: string; broke: Pos[] } // a charge went off; walls it broke
+  | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
+  | { type: 'robbed'; hero: string; by: string; items: Item[] }
   | { type: 'freed'; prisonerId: string }
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }

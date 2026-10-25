@@ -46,6 +46,19 @@ export interface Reach {
    * the second colour. Send it as a normal 'move' command.
    */
   dash?: boolean;
+  /**
+   * V3.7 (spec 20.1, 20.2): what stepping along this path risks, for the move preview.
+   * wake: sleepers that could wake (hex where it happens, monster id, chance 0..100).
+   * notice: awake enemies that would notice the hero at the destination.
+   * swings: enemies that get a free swing as the hero leaves their reach (with damage range).
+   */
+  risks?: MoveRisks;
+}
+
+export interface MoveRisks {
+  wake: { at: Pos; id: string; chance: number }[];
+  notice: { id: string }[];
+  swings: { id: string; damage: [number, number] }[];
 }
 
 /** What a risky action will look like before the player commits. */

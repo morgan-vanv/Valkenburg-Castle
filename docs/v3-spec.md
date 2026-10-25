@@ -469,3 +469,53 @@ Briefs and the camp's "Lowgate" panel use these reasons (one sentence each). Sit
 - A hero standing on an exit gets a prominent bar button "Leave the castle" (hotkey), and the hex pulses, the same pattern as "Take stairs".
 - Once the contract's prize is in hand (heirloom in a pack, prisoner freed and escorted) the goal box switches to "Get out: nearest way out is the main gate, 14 hexes" with a click-to-pan, and known exits pulse softly on the map.
 - The context hint names a nearby exit ("Way out 3 hexes east").
+
+## 20. V3.7: stealth, free swings, the Sapper, crews that fight back (owner-approved 2026-10-25, https://claude.ai/artifact/CZWDajgUP9WrVr4L39HgXH)
+
+Overrides earlier sections where they disagree. Contract: `git diff v3.6 -- src/game/types.ts src/game/api.ts`. The owner's one addition: you can sneak up on an enemy from the hex directly behind it.
+
+### 20.1 Stealth and aggro
+
+- **Walking noise** is 1 at every hex passed (2 on rubble), not only the destination. Sneaking stays silent. Sleepers and alert monsters react per hex as they do to any noise, except the wake roll below replaces the old "ends adjacent" rule for sleepers.
+- **Sleeper wake roll.** For each hex a hero passes within 2 of a sleeping monster (not the Dragon: its own rule stands), roll once: walking 50%, sneaking 10%; halve it when the hero's hex is unlit. Ending the move adjacent to a sleeper: walking wakes it for sure; sneaking 25%. A woken sleeper goes alert at the hero's hex (`woke` event). Rolls use the seeded RNG; the same seed and path wake the same monsters.
+- **Noticing** (replaces 16.1's numbers): an awake monster (alert, hunting, patrol, waiting crew) notices a hero in line of sight within: lit and walking 6; lit and sneaking 4; unlit and walking 3; unlit and sneaking 1. In the Hollow, light doesn't matter: walking 6, sneaking 3. Noticing fires a `noticed` event and the usual hunting behaviour.
+- **Facing.** Every monster and crew member has `facing` (0..5): the direction it last moved, or toward the last thing it noticed or heard; sleepers face where they were placed (data may set it; default 0). The three hexes behind (the back direction and its two neighbours, at any distance) are its blind arc: a **sneaking** hero in the blind arc is noticed only when adjacent and walking in; a sneaking hero on the hex directly behind it is never noticed by it. Walking heroes are noticed in the blind arc at half range (3 lit, 1 unlit). Facing turns toward noise and toward any hero it notices or attacks.
+- **Cover.** A sneaking hero whose end hex has a wall, pillar, tall prop or closed door between them and the monster (i.e. no line of sight) is not noticed by it that round. (Line of sight already blocks; this just states that sneaking doesn't change LOS.)
+- **Sneak attack.** A hero's first attack on a monster that hasn't noticed them (asleep, or awake without that hero as `focus`): +1 slot. The Burglar's backstab stacks (+2 total on an unnoticed target).
+- **Move preview.** `Reach.risks` is filled for every reachable hex: sleepers that would roll to wake along the path (with the chance), awake enemies that would notice the hero at the destination, and the free swings leaving provokes (20.2). The UI colours the path and marks the monsters.
+- Veil, smoke and sleep work as before on top of this.
+
+### 20.2 Attacks of opportunity ("free swings") and Dread
+
+- **Provoke.** When a hero moves from a hex adjacent to an enemy to a hex not adjacent to it, that enemy gets one free swing: its normal attack with 1 slot fewer (min 1), no Focus, damage as usual. Enemies that can swing: hunting monsters and hostile crew members that have noticed the hero. Asleep, alert, patrol, webbed, glued, grabbed-holding, feared, downed, the Dragon and the Gloam don't swing. Once per enemy per hero move. Sneaking doesn't avoid it. Jumping into a pit from next to an enemy provokes. Being shoved, dragged, blinked, gusted or pulled by the hook doesn't.
+- **Heroes swing too.** When a monster or crew member moves from a hex adjacent to an active hero to a hex not adjacent, and that hero has not acted this round (action still ready), the hero gets a free swing with their weapon at 1 slot fewer (min 1). Ranged weapons (bow) swing at 1 slot. The hero's action is not spent. Fleeing rats and cutpurses provoke. Overwatch is separate and stacks.
+- **Events.** `swing` with hits and damage. The preview warns before the move: "Orc gets a free swing: 0–2."
+- **Dread** (Shadowmancer, 1 mana, action): 2 Wits slots at range ≤ 5 in sight; 1+ hits: the target is `feared` for 2 world phases (`fearOf` = the caster). A feared monster or crew member spends its world phase moving its full allowance away from the caster (farthest reachable hex) and takes free swings from heroes it leaves, does not attack, and drops any hold (ghoul grab, spider web intent). Not the Dragon or the Gloam; the captain's shield wall doesn't help. Intent `flee` shows the round before. Noise 0.
+
+### 20.3 The Sapper
+
+- **Charges** everywhere now have a fuse (`Delve.fuses`). A charge goes off at the end of the world phase when `rounds` reaches 0 (fuse 1 = the end of the coming world phase). Blast: 4 damage to everything within 1 of the hex (the hex included), 2 damage within 2, and everything in the inner ring is pushed 1 hex away from the blast with all shove outcomes (pits count; walls 1 damage). Noise 8, heard on the levels above and below. Opens locked doors and chests within 1; breaks cracked walls within 1; **breaks built walls** within 1 on Levels 1 and 2 into rubble (`blown`), unless `unbreakable` or cave rock (material rock/earth) or a pillar. The `blast` event lists what broke. Kills count for the setter.
+- **Set a charge** (`setCharge`, Sapper only, 1 charge, action): on an adjacent floor hex or an adjacent breakable wall/door/chest; `target.fuse` 1 or 2. Intent-like marker: the fuse number and the blast area show to everyone. Sappers also keep **Throw a charge** (range 3, fuse 1) with the same blast; the old `charge` (instant on a door/chest/cracked wall) and `throwCharge` are replaced: `charge` now means set with fuse 1 on the thing (for non-Sappers carrying a bought charge; the action name stays so the UI's Items group keeps working).
+- **Satchel:** the Sapper starts each delve with 3 charges (was 2); bought charges in the pack add to them. **Blast shield:** the Sapper who set a charge takes 0 from it; other heroes take half (rounded down).
+- **Dig** unchanged; digging clears blast rubble too.
+- **Map:** built walls between two floor hexes on L1 and L2 are breakable. Data marks `unbreakable` on the tower stair's shaft, the lift shaft, the outer curtain walls and anything whose breaking would skip the level (castle.test: from every entrance, the shortest path to each contract site with all breakable walls broken is at least 60% of the path without).
+- Rival Sappers use set-and-fuse charges on the party's path (intent `fuse`), with the same blast rules; they take 0 from their own.
+- Tripwire/traps: later, as a forge upgrade (ideas-later).
+
+### 20.4 Crews that fight back
+
+- **Built like a squad.** `makeCrew` builds each member as a hero of its class at the crew's level with the class table (spec 15.3) plus +2 HP and +5 main stat per level above 1, `weaponTier`/`armorTier`, Focus 0, and a 4-slot `pack` by class (members use items with the heroes' own rules, intents shown the round before: `item` with the item kind, `potion`):
+
+| Crew | Level | Tiers | Where | Members and packs |
+| --- | --- | --- | --- | --- |
+| Lantern Sisters | 2 | weapon 1 | L1 contracts (50%) | Ranger: 2 caltrops, potion. Shadowmancer: smoke, firecracker. Burglar: 2 sleep darts, smoke, lockpicks |
+| The Ferrymen | 3 | weapon 1, armor 1 | L2 contracts (60%, pooled) | Sellsword: potion, glue. Ranger: 2 caltrops, potion. Sapper: 2 charges, glue |
+| The Gallows Choir | 3 | weapon 1, armor 1 | L2 contracts (pooled) | Sellsword: potion, glue. Burglar: 2 darts, smoke, lockpicks. Pyromancer: potion, oil |
+| The Wake (new) | 4 | weapon 2, armor 1 | L3 contracts (60%) | Sellsword: 2 potions. Hedgewitch: 2 potions. Shadowmancer: smoke, firecracker. Sapper: 3 charges |
+
+- **How they use the pack.** Burglar: darts the lantern bearer first, smoke when two heroes have line of fire on a sister below half; Ranger: caltrops on the hex the nearest hero would charge through, overwatch when nobody is in reach; Sellsword: guards the crew's caster, glue on the hero front line when 2+ heroes are adjacent to each other; Sapper: set-and-fuse on the party's path (fuse 1), throw when a hero stands on a pit edge; Pyromancer: fireball when 3 heroes stand within 1 of a hex, else firebolt; Shadowmancer: veils the striker on first contact, firecracker to pull a nearby monster group toward the party, Blink away below half; Hedgewitch: Mend the member below half, Gust a hero at an edge, Ward the striker. Any member below half HP with a potion backs off one hex and drinks it (intent `potion`).
+- **Focus fire.** A hostile crew picks one target per round: the lantern bearer in reach, else the lowest-HP hero in reach, and every member who can attacks it. Members use doors and pillars (they path to hexes with line of sight to the target and not to other heroes when possible).
+- **Captives.** A hero downed by or within 2 of a hostile crew member is **robbed** (gold and gems to that member's loot, `robbed`) and then **dragged**: the member moves at 3 a round toward the crew's exit, the hero with it (`dragging`); other members keep fighting. Heroes can free them by killing or fearing the dragger, or by downing it; the hero stays downed where dropped. If the dragger reaches an exit: `captured`, hero status `captured`, the member leaves with them. On `backToCamp`: a captured hero leaves the roster into `campaign.captives`, keeping level and gear but losing gold and gems; a **rescue contract** "Bring back <name>" appears on the board (full rescue bounty for the level below where they were taken, site = the crew's hideout: a `ContractSiteDef` per crew, `story`-like so the regular board doesn't use it; the prisoner is the hero, HP 1; freed and extracted they rejoin at full roster state with the HP they came out with). A captured Keven ends the campaign: "The heir is taken. Valkenburg stays dark."
+- **Spoils.** Killed members drop their pack and purse (30 gold at level 2–3, 50 at level 4).
+- Parley, tolls, hire and betrayal (18.5–18.6) unchanged; hired members use their packs for the party. Deals pay from the heroes' packs as before.
+- **Balance target** (sim, careful bot): L1 Sisters winnable with one hero below half; L2 crews ~50% without a plan; L3 avoid or parley below hero level 3.
