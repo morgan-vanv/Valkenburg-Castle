@@ -31,3 +31,6 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-24** End turn asks once when any hero still has a move or action; a settings checkbox turns it off. Scripts turn it off through `vc.settings.noEndTurnAsk`.
 - **2026-10-24** Interactable hover = ember ring; hazard (pit, trap) = red ring; floor = parchment. Tooltip form is "Thing · what you can do".
 - **2026-10-24** Beacon colours by contract: recover gold, rescue green, slay red (diorama BEACON_COLOR and .beacon-tag CSS).
+- **2026-10-24** Walls are 2.2 high (hero ≈ 2.6) so thin panels still read as walls; the cutaway keeps the party visible.
+- **2026-10-24** Cave = room material rock, earth or bone; those walls stay thick. Water (the Drain) and bone-free built rooms get thin walls.
+- **2026-10-24** Figures start facing the camera.
