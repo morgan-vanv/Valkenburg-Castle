@@ -18,6 +18,7 @@ api.ts
 - `RollPreview.hexes?` (area affected) and `affects?` (figure ids hit or moved, allies included).
 - `Engine.classInfo(cls): ClassInfo {name, role, weapon, armor, mana, abilities[]}` for recruit cards.
 - `Engine.partyProblem(state, heroIds): string | null` (e.g. "Hire at least one hero at the tavern.").
+- `ActionOption.blocked?: string` (spec 15.7): the option applies here but can't be done now; a plain-words reason. Used by `take` ("Heirloom needs 2 pack slots. Drop something first.", "Pack is full. Drop something first.") and `grapple` (no free hex above). `take` picks the contract item first; its preview outcome lists exactly what will be taken ("Takes the Valkenburg Signet and 30 gold").
 
 ## Done
 - Contract above.

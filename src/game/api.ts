@@ -104,6 +104,12 @@ export interface ActionOption {
   area?: number;
   /** Mana it costs (spells). */
   mana?: number;
+  /**
+   * Spec 15.7: the option applies here but can't be done right now; this is the reason in plain
+   * words ("Heirloom needs 2 pack slots. Drop something first."). Show it greyed with the reason
+   * on hover and as a flash on click. `targets` still lists what it would apply to.
+   */
+  blocked?: string;
 }
 
 export interface Visibility {
