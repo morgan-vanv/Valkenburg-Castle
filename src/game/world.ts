@@ -1,7 +1,7 @@
 // Static castle indexes plus geometry that depends on the delve's runtime
 // state: tiles, doors, line of sight, light, sight and path finding.
 
-import { distance, hexKey, hexToWorld, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
+import { distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
 import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { LIGHT_MAX } from './data';
@@ -135,9 +135,18 @@ const CORNERS = Array.from({ length: 6 }, (_, i) => {
 });
 const POINTS = [{ x: 0, z: 0 }, ...CORNERS];
 
+/** The integer hex line (cheap): the usual case in open rooms. */
+function clearLine(w: World, d: DelveX, a: Pos, b: Pos, smoke: boolean): boolean {
+  const hs = line(a, b);
+  for (let i = 1; i < hs.length - 1; i++) {
+    if (blocksSight(w, d, { level: a.level, ...hs[i]! }, smoke)) return false;
+  }
+  return true;
+}
+
 function clearSegment(w: World, d: DelveX, a: Pos, b: Pos, bx: number, bz: number, smoke: boolean): boolean {
   const A = hexToWorld(a);
-  const n = Math.max(2, Math.ceil(distance(a, b) * 8));
+  const n = Math.max(2, Math.ceil(distance(a, b) * 4));
   for (let i = 1; i < n; i++) {
     const t = i / n;
     const h = worldToHex(A.x + (bx - A.x) * t, A.z + (bz - A.z) * t);
@@ -156,6 +165,7 @@ function clearSegment(w: World, d: DelveX, a: Pos, b: Pos, bx: number, bz: numbe
 export function los(w: World, d: DelveX, a: Pos, b: Pos, smoke = true): boolean {
   if (a.level !== b.level) return false;
   if (distance(a, b) <= 1) return true;
+  if (clearLine(w, d, a, b, smoke)) return true;
   const B = hexToWorld(b);
   for (const c of POINTS) if (clearSegment(w, d, a, b, B.x + c.x, B.z + c.z, smoke)) return true;
   return false;

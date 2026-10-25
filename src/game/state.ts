@@ -58,6 +58,8 @@ export interface Ctx {
   s: GameStateX;
   d: DelveX;
   ev: GameEvent[];
+  /** Memo of visibleSet for target queries; cleared by refreshSight/setLight. */
+  visCache?: Set<string>;
 }
 
 export function newItemId(s: GameStateX): string {

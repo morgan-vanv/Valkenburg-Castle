@@ -37,7 +37,13 @@ export function glimpse(c: Ctx, at: Pos, ex: Set<string> = new Set(c.d.explored)
 }
 
 /** After anything changes: explored grows, rivals get spotted, the Gloam fades in light. */
+/** The heroes' current visible set, memoized on the context (targets ask for it many times). */
+export function visNow(c: Ctx): Set<string> {
+  return (c.visCache ??= visibleSet(c.w, c.d));
+}
+
 export function refreshSight(c: Ctx): void {
+  c.visCache = undefined;
   const lit = litSet(c.w, c.d);
   const vis = visibleSet(c.w, c.d, lit);
   const ex = new Set(c.d.explored);
@@ -52,6 +58,7 @@ export function refreshSight(c: Ctx): void {
 }
 
 export function setLight(c: Ctx, value: number): void {
+  c.visCache = undefined;
   const before = c.d.light;
   c.d.light = clampLight(value);
   if (c.d.light !== before) c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
@@ -124,6 +131,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
   const mk = moveKind(h);
   if (!mk) return h.dashed ? `${heroName(c, heroId)} has already dashed.` : `${heroName(c, heroId)} has already moved.`;
   if (!path.length) return 'Pick a destination.';
+  c.visCache = undefined;
   // Validate.
   let cost = 0;
   let prev = h.at;
@@ -247,7 +255,7 @@ function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] 
 
 /** Enemies within `n` hexes that the heroes can see and the hero has a line to (monsters, rivals; no Gloam). */
 function enemiesInSight(c: Ctx, h: HeroInDelve, n: number, opts: { noDragon?: boolean; monstersOnly?: boolean } = {}): ActionTarget[] {
-  const vis = visibleSet(c.w, c.d);
+  const vis = visNow(c);
   const out: ActionTarget[] = [];
   const cands = [...c.d.monsters.filter((m) => m.kind !== 'gloam' && !(opts.noDragon && m.kind === 'dragon')), ...(opts.monstersOnly ? [] : rivalsOnMap(c))];
   for (const m of cands) {
@@ -258,7 +266,7 @@ function enemiesInSight(c: Ctx, h: HeroInDelve, n: number, opts: { noDragon?: bo
 
 /** Hexes within `n` of the hero that the heroes can see now (same level). */
 function hexesInSight(c: Ctx, h: HeroInDelve, n: number, filter: (p: Pos) => boolean = () => true): ActionTarget[] {
-  const vis = visibleSet(c.w, c.d);
+  const vis = visNow(c);
   const out: ActionTarget[] = [];
   for (const x of range(h.at, n)) {
     const p = { level: h.at.level, ...x };
