@@ -4,7 +4,7 @@
 import { distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
 import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
-import { LIGHT_MAX } from './data';
+import { DARK_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
 
 export class World {
   readonly levels = new Map<number, LevelDef>();
@@ -210,15 +210,29 @@ export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>
   if (dist <= 1) return true;
   if (smoky(d, p)) return false;
   if (dist > LIT_SIGHT) return false;
-  if (dist > sightRangeOf(d.light, from.level) && !lit.has(posKey(p))) return false;
+  if (dist > sightRangeAt(w, d, from, lit) && !lit.has(posKey(p))) return false;
   return los(w, d, from, p);
 }
 
+/** Lantern stage by oil (spec 16.2): bright > 12, dim 7..12, dark 1..6, pitch 0. */
 export function brightnessOf(light: number): Brightness {
-  if (light > 26) return 'bright';
-  if (light >= 13) return 'dim';
+  if (light > LIGHT_BRIGHT) return 'bright';
+  if (light >= LIGHT_DIM) return 'dim';
   if (light >= 1) return 'dark';
   return 'pitch';
+}
+
+/**
+ * Monster sight (spec 16.1): within MONSTER_SIGHT and line of sight, and the hero is lit or
+ * within MONSTER_DARK_SIGHT. In the Hollow (level 3) light doesn't matter. Smoke hides beyond 1.
+ */
+export function monsterSees(w: World, d: DelveX, from: Pos, t: Pos, lit: Set<string>): boolean {
+  if (from.level !== t.level) return false;
+  const dist = distance(from, t);
+  if (dist > MONSTER_SIGHT) return false;
+  if (dist > 1 && (smoky(d, t) || smoky(d, from))) return false;
+  if (from.level !== 3 && dist > MONSTER_DARK_SIGHT && !lit.has(posKey(t))) return false;
+  return los(w, d, from, t);
 }
 
 export const LANTERN_RADIUS: Record<Brightness, number> = { bright: 4, dim: 3, dark: 2, pitch: 0 };
@@ -240,7 +254,7 @@ export function litSet(w: World, d: DelveX): Set<string> {
       if (lightLos(w, d, src, p)) out.add(posKey(p));
     }
   };
-  const lp = lanternPos(d);
+  const lp = d.lanternOpen === false ? null : lanternPos(d);
   if (lp) shine(lp, LANTERN_RADIUS[brightnessOf(d.light)]);
   for (const h of d.heroes) {
     if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) shine(h.at, 2);
@@ -279,6 +293,14 @@ export const SIGHT_BY_STAGE: Record<Brightness, number> = { bright: 8, dim: 6, d
 export function sightRangeOf(light: number, level: number): number {
   return Math.max(2, SIGHT_BY_STAGE[brightnessOf(light)] - Math.max(0, level - 1));
 }
+/**
+ * Sight range of someone standing at `at` (spec 16.2): the stage range minus depth when the
+ * hex is lit; the level's dark range (L1 4, L2 2, L3 1) when not.
+ */
+export function sightRangeAt(w: World, d: DelveX, at: Pos, lit: Set<string> = litSet(w, d)): number {
+  if (lit.has(posKey(at))) return sightRangeOf(d.light, at.level);
+  return DARK_SIGHT[at.level] ?? 1;
+}
 /** Lit hexes in line of sight are visible from this far, whatever the sight range. */
 export const LIT_SIGHT = 14;
 
@@ -286,9 +308,9 @@ export const LIT_SIGHT = 14;
  * Hexes whose layout a hero at `from` can make out: every tile in line of
  * sight within the sight range, lit or not.
  */
-export function glimpseSet(w: World, d: DelveX, from: Pos): Pos[] {
+export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>): Pos[] {
   const seen = new Set<string>();
-  for (const h of range(from, sightRangeOf(d.light, from.level))) {
+  for (const h of range(from, sightRangeAt(w, d, from, lit))) {
     const p = { level: from.level, ...h };
     if (w.tile(p) && (distance(from, p) <= 1 || (!smoky(d, from) && los(w, d, from, p)))) seen.add(posKey(p));
   }
@@ -306,7 +328,7 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
   const out = new Set<string>();
   const eyes = d.heroes.filter((h) => h.status === 'active');
   for (const h of eyes) {
-    const sr = sightRangeOf(d.light, h.at.level);
+    const sr = sightRangeAt(w, d, h.at, L);
     for (const n of range(h.at, LIT_SIGHT)) {
       const p = { level: h.at.level, ...n };
       if (!w.tile(p)) continue;

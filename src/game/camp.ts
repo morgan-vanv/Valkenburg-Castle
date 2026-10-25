@@ -3,12 +3,12 @@
 
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type {
-  Campaign, Command, Contract, GameEvent, Hero, HeroClass, HeroInDelve, Item, Recruit,
+  Campaign, Command, Contract, GameEvent, Hero, HeroClass, HeroInDelve, Item, Recruit, SpawnDef,
 } from './types';
 import {
   ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEAL_PRICE, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP, SISTER,
-  SISTER_NAMES, START_GOLD, TAVERN_SIZE, WEAPON_PRICE,
+  SISTER_CLASSES, SISTER_DARTS, SISTER_NAMES, SISTER_SMOKE, START_GOLD, TAVERN_SIZE, TIERS, WEAPON_PRICE,
 } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES } from './data';
@@ -280,19 +280,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       if (t.kind === 'door') doors[`${l.level}:${k}`] = { open: false, locked: !!t.locked, jammed: false };
     }
   }
-  const monsters: MonsterX[] = w.castle.spawns.map((sp, i) => {
-    const def = MONSTERS[sp.kind];
-    return {
-      id: `m${i + 1}`,
-      kind: sp.kind,
-      name: sp.name ?? def.name,
-      at: { ...sp.at },
-      hp: def.hp + (sp.name ? 2 : 0),
-      maxHp: def.hp + (sp.name ? 2 : 0),
-      awareness: sp.asleep === false ? (sp.kind === 'berserker' ? 'hunting' : 'alert') : 'asleep',
-      spawnedAt: { ...sp.at },
-    };
-  });
+  const monsters: MonsterX[] = w.castle.spawns.map((sp, i) => spawnMonster(sp, `m${i + 1}`));
   const d: DelveX = {
     contract,
     round: 1,
@@ -310,6 +298,9 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     blown: [],
     ropes: [],
     liftWorking: false,
+    lanternOpen: true,
+    knownRoutes: [],
+    gloamCalm: 0,
     smoke: {},
     glue: {},
     burning: {},
@@ -352,9 +343,16 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       goal: 'loot',
       spotted: false,
       entersRound: int(s, 3, 6),
-      members: SISTER_NAMES.map((n, i) => ({
-        id: `r${i + 1}`, crew: 'lantern-sisters' as const, name: n, at: { ...at }, hp: SISTER.hp, maxHp: SISTER.hp, loot: [], goneOut: false,
-      })),
+      members: SISTER_NAMES.map((n, i) => {
+        const cls = SISTER_CLASSES[i % SISTER_CLASSES.length]!;
+        return {
+          id: `r${i + 1}`, crew: 'lantern-sisters' as const, name: n, at: { ...at }, hp: SISTER.hp, maxHp: SISTER.hp, loot: [], goneOut: false,
+          cls,
+          ...(cls === 'burglar' ? { darts: SISTER_DARTS } : {}),
+          ...(cls === 'shadowmancer' ? { smoke: SISTER_SMOKE, veil: 0 } : {}),
+          ...(cls === 'ranger' ? { overwatch: false } : {}),
+        };
+      }),
       pickups: 0,
       entered: false,
     };
@@ -394,6 +392,42 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   s.summary = null;
   s.stage = 'delve';
   return { events: [] };
+}
+
+/**
+ * A monster from a spawn (spec 16.1, 16.3): awake by default (patrollers walk their route,
+ * the rest stand alert at their post), asleep only when the map says so; ghouls start buried;
+ * tiers by spawn level for everything but the Dragon and the Gloam; named elites +2 HP.
+ */
+export function spawnMonster(sp: SpawnDef, id: string): MonsterX {
+  const def = MONSTERS[sp.kind];
+  const tiered = sp.kind !== 'dragon';
+  const tier = tiered ? Math.min(3, Math.max(1, sp.at.level)) : 1;
+  const hp = def.hp + (sp.name ? 2 : 0) + (tiered ? (TIERS[tier]?.hp ?? 0) : 0);
+  const buried = sp.kind === 'ghoul' ? sp.buried !== false : !!sp.buried;
+  const patrol = sp.patrol && sp.patrol.length > 1 ? sp.patrol.map((p) => ({ ...p })) : undefined;
+  let awareness: MonsterX['awareness'] = 'alert';
+  if (sp.asleep) awareness = 'asleep';
+  else if (buried || sp.kind === 'berserker') awareness = 'hunting';
+  else if (patrol) awareness = 'patrol';
+  const m: MonsterX = {
+    id,
+    kind: sp.kind,
+    name: sp.name ?? def.name,
+    at: { ...sp.at },
+    hp,
+    maxHp: hp,
+    awareness,
+    spawnedAt: { ...sp.at },
+  };
+  if (tier > 1) m.tier = tier;
+  if (patrol) {
+    m.route = patrol;
+    m.routeIndex = 1 % patrol.length;
+  }
+  if (buried) m.buried = true;
+  if (sp.kind === 'captain') m.shoutCooldown = 0;
+  return m;
 }
 
 /** n free walkable hexes, the entrance first then nearest by BFS. */

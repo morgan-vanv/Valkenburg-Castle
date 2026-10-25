@@ -2749,3 +2749,100 @@ input.seed {
 .hud-bar .bar-end { white-space: nowrap; min-width: 128px; padding-left: 14px; padding-right: 14px; }
 .act.act-link { min-width: 150px; }
 .act.act-link .act-label { max-width: 140px; }
+
+/* ---------------------------------------------------------------- V3.3: fear by depth (spec 16) */
+/* Light meter: shutter state and toggle. */
+.light-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.light-state {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ember-hot);
+}
+.light-state.shut { color: var(--muted); }
+.light-foot .light-next { margin-left: auto; white-space: nowrap; }
+.light-toggle {
+  padding: 1px 7px;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.light-toggle kbd { margin-left: 4px; font-size: 0.55rem; }
+.light-toggle.shut { border-color: var(--ember); color: var(--ember-hot); }
+.light-shut { border-top-color: #4a4038 !important; }
+.light-shut .light-stage { color: var(--muted); }
+.light-shut .light-fill { filter: grayscale(0.85) brightness(0.6); box-shadow: none; }
+.light-foot .light-hint {
+  color: var(--gold);
+  font-style: italic;
+}
+.light { width: 320px; }
+
+/* Bar: the Lantern group and the escape button. */
+.act.act-shutter .act-glyph { color: var(--ember-hot); }
+.act.act-shutter.shut .act-glyph { color: var(--muted); }
+.act.act-shutter.shut { border-color: var(--ember); }
+.act.act-escape { border-color: #8fb060; }
+.act.act-escape .act-glyph { color: #c8e090; }
+.bar-held { color: var(--red); white-space: nowrap; }
+
+/* Hero cards: in the dark, held. */
+.hcard.dark .hc-badge { filter: brightness(0.55) saturate(0.6); }
+.hcard.dark:not(.sel) { border-color: #1a1a24; }
+.chip.dark {
+  border-color: #3a3a50;
+  color: #a8a8c8;
+  background: rgba(10, 8, 20, 0.6);
+}
+.chip.grab { border-color: #8fb060; color: #d8f0a8; }
+.hint-dark { color: #b8b8d8; margin-right: 10px; }
+.hint-dark b { color: #d8d8f0; }
+
+/* Unit tags. */
+.tag-grab { color: #d8f0a8; }
+.tag-patrol { font-size: 0.72rem; background: rgba(0, 0, 0, 0.55) !important; }
+.tag-veil { color: #c9a8ff; }
+.tag-ow { color: #ffd060; }
+.tag-lantern.shut { color: var(--muted); text-shadow: none; }
+
+/* Intents. */
+.intent-shout { border-color: #ffa040; background: rgba(40, 20, 4, 0.9); color: #ffd0a0; }
+.intent-drag { border-color: #d8d8e8; background: rgba(20, 20, 28, 0.9); color: #e8e8f4; }
+.intent-grab { border-color: #8fb060; background: rgba(10, 24, 6, 0.9); color: #d8f0a8; }
+.intent-overwatch,
+.intent-dart { border-color: #c8a040; background: rgba(30, 22, 4, 0.9); color: #ffe0a0; }
+.intent-smoke { border-color: #9a9aa0; background: rgba(28, 28, 30, 0.9); color: #e0e0e4; }
+.intent-veil { border-color: #7a5ac0; background: rgba(16, 8, 30, 0.9); color: #d8c8ff; }
+
+/* The Gloam's warning line, above the hint. */
+.hud-gloam {
+  position: absolute;
+  left: 50%;
+  bottom: 158px;
+  transform: translateX(-50%);
+  padding: 5px 16px;
+  background: rgba(6, 3, 14, 0.88);
+  border: 1px solid #3a2a60;
+  color: #c8c0e8;
+  font-family: var(--display);
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: gloam-breathe 2.6s ease-in-out infinite;
+}
+.hud-gloam .gloam-eye { color: #dfe8ff; text-shadow: 0 0 10px #8ab0ff; margin-right: 6px; }
+@keyframes gloam-breathe {
+  0%, 100% { box-shadow: 0 0 18px rgba(60, 40, 120, 0.25); opacity: 0.85; }
+  50% { box-shadow: 0 0 34px rgba(60, 40, 120, 0.6); opacity: 1; }
+}
+.hud-vignette[data-b='pitch'] { transition: background 0.8s; }
+
+/* Prepare: the shutter option. */
+.prep-shutter { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }

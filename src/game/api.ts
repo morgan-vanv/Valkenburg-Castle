@@ -139,7 +139,10 @@ export interface Engine {
   /** Is this hex lit by the lantern, a torch, a brazier or a fixed light? Heroes outside light fight at Dark penalties. */
   inLight(state: GameState, at: Pos): boolean;
   /** Current sight range in hexes (lantern stage minus depth). */
-  sightRange(state: GameState, level: number): number;
+  /** This hero's sight range in hexes: lantern stage minus depth when lit, the level's dark range when not (spec 16.2). */
+  sightRange(state: GameState, heroId: string): number;
+  /** Is the hero standing in light (lantern, torch, brazier or fixed light)? */
+  heroLit(state: GameState, heroId: string): boolean;
   /** Where something falling into this pit hex lands, or null if it isn't a pit. */
   fallInfo(state: GameState, pit: Pos): FallInfo | null;
   /**

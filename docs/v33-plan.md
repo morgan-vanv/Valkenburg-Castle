@@ -1,0 +1,28 @@
+# V3.3 plan: fear by depth
+
+Goal: spec section 16 (awareness and patrols, lantern 20 with shutter, per-hero sight, the Gloam owning the Hollow, difficulty tiers, three new monsters with abilities, the Lantern Sisters' kit), one delivery, deployed. Branch `v3.3`. The scale/proportion direction (study in mockup/shots/scale-options.png) is a separate decision with the owner and is NOT part of this delivery.
+
+## Workstreams
+
+| Workstream | Owner | Paths |
+| --- | --- | --- |
+| Contract (done) and spec 16 | lead | src/game/types.ts, api.ts |
+| Rules: 16.1–16.5, tests, sim | engine agent | src/game/** (not types/api unless noted in progress) |
+| Data: spawns, sleepers, patrols, buried ghouls, lights per level, tests, preview | map agent | src/data/castle/** |
+| View and UI: shutter, per-hero darkness, patrol routes, Gloam in the Hollow, new monsters and rival classes, new intents and events | presentation agent | src/view/**, src/ui/**, src/audio/**, src/style.css |
+| Integration, sim check, deploy | lead | everything |
+
+## Checklist
+
+- [x] Spec 16, contract, plan, briefs
+- [x] Engine: rules, 122 engine tests, sim
+- [x] Castle data: sleepers, patrols, archers, captain, buried ghouls, lights per level (L1 83% lit by daylight); 22 castle tests
+- [x] Presentation: shutter, darkness, patrols, Gloam, new monsters, intents; scale option C applied
+- [x] Integration: typecheck clean, 147 tests, build OK, stress bot and 29 UI assertions clean. Sim: L1 19/19, L2 4/9 (19 deaths), L3 slay 0/4; owner to judge difficulty in play
+- [x] Merge to `main`, verify live; changelog and decisions
+
+## Resuming
+
+1. `cd /home/claude/valkenburg-castle && git fetch origin && git checkout v3.3 && git pull`.
+2. If `origin/wip/v3` is newer than `v3.3`, restore it: `git checkout origin/wip/v3 -- .`, review, commit.
+3. Read this checklist and docs/agents/v33-*-progress.md; continue from the first unchecked step, re-briefing from docs/agents/v33-*.md.

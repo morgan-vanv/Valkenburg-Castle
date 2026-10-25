@@ -265,7 +265,7 @@ describe('castle', () => {
     expect(dragon.length).toBe(1);
     expect(dragon[0]!.asleep ?? true).toBe(true);
     expect(tile(dragon[0]!.at)?.room).toBe('lair');
-    expect(castle.spawns.some((s) => s.name === 'Grub the Jailer' && s.asleep === false)).toBe(true);
+    expect(castle.spawns.some((s) => s.name === 'Grub the Jailer' && !s.asleep)).toBe(true);
     expect(castle.spawns.some((s) => s.name === 'Ugluk Red-Hand' && s.kind === 'berserker')).toBe(true);
     for (const lv of [1, 2, 3]) {
       expect(castle.traps.filter(on(lv)).length).toBe(2);
@@ -286,5 +286,188 @@ describe('castle', () => {
     expect([count('recover', 1), count('recover', 2), count('recover', 3)]).toEqual([2, 2, 2]);
     const ids = [...castle.chests.map((c) => c.id), ...sites.map((s) => s.id)];
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// ---------------------------------------------------------------- V3.3 (spec 16): awareness, patrols, light
+
+/** Walking path exists between a and b on one level; `doors` lets it pass doors. */
+function connected(a: Pos, b: Pos, doors: boolean): boolean {
+  if (a.level !== b.level) return false;
+  const ok = doors ? passable : standable;
+  if (!ok(a) || !ok(b)) return false;
+  const seen = new Set<string>([posKey(a)]);
+  const queue = [a];
+  while (queue.length) {
+    const p = queue.shift()!;
+    if (samePos(p, b)) return true;
+    for (const n of posNeighbors(p)) {
+      const k = posKey(n);
+      if (seen.has(k) || !ok(n)) continue;
+      seen.add(k);
+      queue.push(n);
+    }
+  }
+  return false;
+}
+
+describe('castle V3.3: awareness', () => {
+  const on = (lv: number) => castle.spawns.filter((s) => s.at.level === lv);
+  const room = (p: Pos) => tile(p)?.room;
+
+  it('marks exactly the brief’s sleepers: L1 rats and spider, L2 the barracks squad, L3 the Dragon', () => {
+    for (const s of castle.spawns) {
+      const shouldSleep =
+        (s.at.level === 1 && (s.kind === 'rats' || s.kind === 'spider')) ||
+        (s.at.level === 2 && room(s.at) === 'barracks') ||
+        s.kind === 'dragon';
+      expect(s.asleep === true, `${s.kind} at ${show(s.at)} asleep=${s.asleep}`).toBe(shouldSleep);
+      // Awake is the default now; nothing says asleep: false.
+      expect(s.asleep, `${s.kind} at ${show(s.at)}`).not.toBe(false);
+      // Sleepers don't walk.
+      if (s.asleep) expect(s.patrol, `${s.kind} at ${show(s.at)}`).toBeUndefined();
+    }
+    expect(on(1).filter((s) => s.asleep).map((s) => s.kind).sort()).toEqual(['rats', 'rats', 'spider']);
+    const squad = on(2).filter((s) => s.asleep);
+    expect(squad.length).toBeGreaterThanOrEqual(4);
+    expect(squad.filter((s) => s.kind === 'captain').length).toBe(1);
+    expect(squad.every((s) => s.kind === 'orc' || s.kind === 'captain')).toBe(true);
+    expect(on(3).filter((s) => s.asleep).map((s) => s.kind)).toEqual(['dragon']);
+  });
+
+  it('has the V3.3 roster per level', () => {
+    // L1: the orcs are up, one patrols the great hall.
+    const l1orcs = on(1).filter((s) => s.kind === 'orc');
+    expect(l1orcs.length).toBeGreaterThanOrEqual(5);
+    expect(l1orcs.every((s) => !s.asleep)).toBe(true);
+    const hallPatrols = on(1).filter((s) => s.patrol);
+    expect(hallPatrols.length).toBe(1);
+    expect(hallPatrols[0]!.patrol!.every((p) => room(p) === 'hall')).toBe(true);
+    expect(on(1).some((s) => s.kind === 'cutpurse' && !s.asleep)).toBe(true);
+    // L2: two orcs share the arcade loop, one walks guard post <-> barracks, one walks the ledge;
+    // two archers on the arcade and the ledges; a captain with the squad.
+    const l2patrols = on(2).filter((s) => s.patrol);
+    expect(l2patrols.length).toBe(4);
+    const loopKey = (s: (typeof l2patrols)[number]) => s.patrol!.slice(1).map(posKey).join('|');
+    const arcade = l2patrols.filter((s) => s.patrol!.every((p) => room(p) === 'arcade'));
+    expect(arcade.length).toBe(2);
+    expect(loopKey(arcade[0]!)).toBe(loopKey(arcade[1]!));
+    expect(distance(arcade[0]!.at, arcade[1]!.at)).toBe(1);
+    const guard = l2patrols.find((s) => room(s.at) === 'guard')!;
+    expect(guard).toBeDefined();
+    expect(guard.patrol!.some((p) => room(p) === 'barracks')).toBe(true);
+    const ledge = l2patrols.find((s) => room(s.at) === 'ledge-e')!;
+    expect(ledge).toBeDefined();
+    expect(ledge.patrol!.every((p) => room(p) === 'ledge-e')).toBe(true);
+    const archers = on(2).filter((s) => s.kind === 'archer');
+    expect(archers.length).toBe(2);
+    for (const a of archers) expect(['arcade', 'ledge-e'].includes(room(a.at) ?? ''), show(a.at)).toBe(true);
+    expect(archers.every((a) => !a.asleep)).toBe(true);
+    expect(on(2).filter((s) => s.kind === 'captain').length).toBe(1);
+    expect(on(2).length).toBeGreaterThanOrEqual(11 + 2); // V3.1 roster plus the brief's two of my choice
+    // L3: three ghouls under the Bone Pile, two cave spiders, nothing else of the kind elsewhere.
+    expect(on(3).filter((s) => s.kind === 'ghoul').length).toBe(3);
+    expect(on(3).filter((s) => s.kind === 'spider').length).toBe(2);
+    expect(castle.spawns.filter((s) => s.kind === 'ghoul').every((s) => s.at.level === 3)).toBe(true);
+    expect(castle.spawns.filter((s) => s.kind === 'captain' || s.kind === 'archer').every((s) => s.at.level === 2)).toBe(true);
+  });
+
+  it('buries every ghoul under the Bone Pile floor', () => {
+    for (const g of castle.spawns.filter((s) => s.kind === 'ghoul')) {
+      expect(g.buried, show(g.at)).toBe(true);
+      expect(tile(g.at)?.kind, show(g.at)).toBe('floor');
+      expect(room(g.at), show(g.at)).toBe('bones');
+      expect(g.patrol).toBeUndefined();
+    }
+    // Spread out: no two within 4 of each other.
+    const gs = castle.spawns.filter((s) => s.kind === 'ghoul');
+    for (const a of gs) for (const b of gs) if (a !== b) expect(distance(a.at, b.at)).toBeGreaterThan(4);
+    expect(castle.spawns.filter((s) => s.buried && s.kind !== 'ghoul')).toEqual([]);
+  });
+
+  it('runs every patrol route over standable hexes, same level, joined by walkable paths', () => {
+    for (const s of castle.spawns.filter((x) => x.patrol)) {
+      const route = s.patrol!;
+      const who = `${s.kind} at ${show(s.at)}`;
+      expect(route.length, who).toBeGreaterThanOrEqual(2);
+      expect(samePos(route[0]!, s.at), `${who}: first waypoint is the spawn hex`).toBe(true);
+      // Level 1's hall patrol never opens a door; elsewhere unlocked doors are allowed.
+      const doors = s.at.level !== 1;
+      for (let i = 0; i < route.length; i++) {
+        const a = route[i]!;
+        const b = route[(i + 1) % route.length]!;
+        expect(a.level, who).toBe(s.at.level);
+        expect(standable(a), `${who}: waypoint ${show(a)} on ${tile(a)?.kind}`).toBe(true);
+        expect(tile(a)?.kind, `${who}: waypoint ${show(a)} is a door`).not.toBe('door');
+        expect(samePos(a, b), `${who}: repeated waypoint ${show(a)}`).toBe(false);
+        expect(connected(a, b, doors), `${who}: ${show(a)} -> ${show(b)} not walkable${doors ? '' : ' without doors'}`).toBe(true);
+      }
+      // No waypoint on another spawn's hex.
+      for (const o of castle.spawns) if (o !== s) expect(route.some((p) => samePos(p, o.at)), `${who} vs ${o.kind} at ${show(o.at)}`).toBe(false);
+    }
+    const hall = castle.spawns.find((s) => s.patrol && s.at.level === 1)!.patrol!;
+    expect(hall.length).toBeGreaterThanOrEqual(4);
+    expect(hall.length).toBeLessThanOrEqual(6);
+    // No waypoint sits on a locked door (patrollers can open the others).
+    const locked = (p: Pos) => tile(p)?.kind === 'door' && tile(p)?.locked;
+    for (const s of castle.spawns.filter((x) => x.patrol)) for (const p of s.patrol!) expect(locked(p)).toBeFalsy();
+  });
+});
+
+describe('castle V3.3: light by depth', () => {
+  const lights = (lv: number) => castle.lights.filter((L) => L.at.level === lv);
+  const kinds = (lv: number) => lights(lv).reduce<Record<string, number>>((n, L) => ((n[L.kind] = (n[L.kind] ?? 0) + 1), n), {});
+
+  it('floods Level 1 with daylight', () => {
+    const k = kinds(1);
+    expect(k.daylight ?? 0).toBeGreaterThanOrEqual(15);
+    expect(lights(1).length).toBeGreaterThanOrEqual(25);
+    // The great hall's collapsed roof: several daylights on hall floor round the pit.
+    const hallDay = lights(1).filter((L) => L.kind === 'daylight' && tile(L.at)?.room === 'hall');
+    expect(hallDay.length).toBeGreaterThanOrEqual(5);
+    // Most of the level is within reach of a fixed light (distance only; walls ignored).
+    const floor = allTiles().filter(([p, t]) => p.level === 1 && STAND.includes(t.kind));
+    const lit = floor.filter(([p]) => lights(1).some((L) => distance(L.at, p) <= L.radius));
+    expect(lit.length / floor.length).toBeGreaterThan(0.75);
+    // The courtyard and gatehouse stay as they were.
+    for (const r of ['court', 'gate']) expect(lights(1).some((L) => L.kind === 'daylight' && tile(L.at)?.room === r), r).toBe(true);
+  });
+
+  it('keeps Level 2 sparse: a few sconces, the forge, the pit glow', () => {
+    const k = kinds(2);
+    expect(k.sconce ?? 0).toBeGreaterThanOrEqual(3);
+    expect(k.sconce ?? 0).toBeLessThanOrEqual(4);
+    expect(k.fire).toBe(1);
+    expect(k.glow ?? 0).toBeGreaterThanOrEqual(1);
+    expect(k.daylight ?? 0).toBe(0);
+    expect(k.fungus ?? 0).toBe(0);
+    expect(lights(2).length).toBeLessThanOrEqual(8);
+    // The glow is the pit's: on the Crossing or the bridges.
+    for (const L of lights(2).filter((x) => x.kind === 'glow')) expect(['crossing', 'bridges'].includes(tile(L.at)?.room ?? ''), show(L.at)).toBe(true);
+    // The arcade and the bridges are dark: no sconce faces them.
+    for (const L of lights(2).filter((x) => x.kind === 'sconce')) {
+      const faces = posNeighbors(L.at).map((n) => tile(n)?.room).filter(Boolean);
+      expect(faces.includes('bridges'), show(L.at)).toBe(false);
+    }
+  });
+
+  it('lights Level 3 only by the Lair’s fires and vents, the fungus grove and the pit glow', () => {
+    const k = kinds(3);
+    expect(k.sconce ?? 0).toBe(0);
+    expect(k.daylight ?? 0).toBe(0);
+    expect(k.fungus ?? 0).toBeGreaterThan(0);
+    expect(k.glow ?? 0).toBeGreaterThan(0);
+    expect(k.fire ?? 0).toBeGreaterThan(0);
+    for (const L of lights(3)) {
+      const r = tile(L.at)?.room;
+      if (L.kind === 'fire') expect(r, show(L.at)).toBe('lair');
+      if (L.kind === 'fungus') expect(r, show(L.at)).toBe('grove');
+      if (L.kind === 'glow') expect(r, show(L.at)).toBe('bones');
+    }
+  });
+
+  it('gets darker with depth', () => {
+    expect(lights(1).length).toBeGreaterThan(lights(2).length);
+    expect(lights(2).length).toBeLessThanOrEqual(lights(3).length + 2);
   });
 });

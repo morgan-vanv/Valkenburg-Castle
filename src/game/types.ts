@@ -96,15 +96,19 @@ export interface LevelDef {
   rooms: RoomDef[];
 }
 
-export type MonsterKind = 'rats' | 'orc' | 'spider' | 'cutpurse' | 'berserker' | 'dragon';
+export type MonsterKind = 'rats' | 'orc' | 'spider' | 'cutpurse' | 'berserker' | 'dragon' | 'archer' | 'captain' | 'ghoul';
 
 export interface SpawnDef {
   at: Pos;
   kind: MonsterKind;
-  /** Starts asleep (default true). */
+  /** Starts asleep (default false since V3.3; sleepers are chosen by the map). */
   asleep?: boolean;
   /** Named elite, if any. */
   name?: string;
+  /** Patrol route: looping waypoints, first = the spawn hex. Awareness starts 'patrol'. */
+  patrol?: Pos[];
+  /** Ghouls: buried until a hero ends a move within 2 (default true for ghouls). */
+  buried?: boolean;
 }
 
 export interface ChestDef {
@@ -302,7 +306,7 @@ export interface Campaign {
 // ---------------------------------------------------------------- delve
 
 export type Brightness = 'bright' | 'dim' | 'dark' | 'pitch';
-export type Awareness = 'asleep' | 'alert' | 'hunting';
+export type Awareness = 'asleep' | 'alert' | 'hunting' | 'patrol';
 
 export interface HeroInDelve {
   heroId: string;
@@ -333,6 +337,8 @@ export interface HeroInDelve {
   revived: boolean;
   /** Moved a second time this turn (a dash, spec 15.2); the action is spent. */
   dashed: boolean;
+  /** Held by a ghoul (monster id): can't move or dash until freed (spec 16.4). */
+  grabbedBy?: string;
   /** Ranger: on overwatch until the end of the next world phase. Draw the eye icon and a 6-hex cone. */
   overwatch: boolean;
   /** Veiled (Shadowmancer): rounds left; monsters can't see this hero while > 0. Draw translucent. */
@@ -347,7 +353,12 @@ export interface Intent {
    * breath: the Dragon's fire; every hero on `hexes` takes the damage next world phase.
    * sweep: the Dragon's tail; every adjacent hero is shoved one hex.
    */
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep';
+  /**
+   * shout: the captain rallies every orc within 8 next phase. drag: the spider pulls the webbed
+   * targetId one hex toward it (`to`). grab: the ghoul holds targetId. Rivals also use
+   * overwatch / smoke / veil / dart (spec 16.5): `to` = the hex a bomb lands on.
+   */
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart';
   /** breath: the marked hexes. */
   hexes?: Pos[];
   targetId?: string;
@@ -373,6 +384,17 @@ export interface Monster {
   spawnedAt: Pos;
   /** Glued: rounds left stuck in place (can still attack adjacent). Absent = 0. */
   stuck?: number;
+  /** Patrol route and the index of the waypoint it's heading to. */
+  route?: Pos[];
+  routeIndex?: number;
+  /** Alert rounds left before it gives up and returns to post/route. */
+  searchRounds?: number;
+  /** Ghoul: hero id it holds. */
+  holding?: string;
+  /** Captain: rounds until it may shout again. */
+  shoutCooldown?: number;
+  /** Buried ghoul: not on the map until it rises. */
+  buried?: boolean;
 }
 
 export interface Rival {
@@ -385,6 +407,14 @@ export interface Rival {
   /** Gold and items they've picked up. */
   loot: Item[];
   goneOut: boolean;
+  /** Her class and kit (spec 16.5). */
+  cls: 'ranger' | 'shadowmancer' | 'burglar';
+  intent?: Intent;
+  /** Kit uses left: darts, smoke; veil rounds left; overwatch armed. */
+  darts?: number;
+  smoke?: number;
+  veil?: number;
+  overwatch?: boolean;
 }
 
 export interface RivalCrew {
@@ -456,6 +486,12 @@ export interface Delve {
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
   liftWorking: boolean;
+  /** Lantern shutter (spec 16.2): open burns oil and lights; shuttered does neither. */
+  lanternOpen: boolean;
+  /** Patrollers whose route a hero has watched (monster ids). */
+  knownRoutes: string[];
+  /** Level 3 Gloam: world phases in a row with every hero lit (fades at 2). */
+  gloamCalm: number;
   /** Smoke clouds: rounds left by posKey. Smoke blocks sight (not light). */
   smoke: Record<string, number>;
   /** Glue puddles: rounds left by posKey (drawing only; the stuck state is Monster.stuck). */
@@ -530,6 +566,8 @@ export type ActionKind =
   | 'mend' // Mage spell: heal 4 on an ally within 3
   | 'passLantern' // give the lantern to an adjacent hero
   | 'winch' // next to the winch: work it so the lift runs (loud)
+  | 'shutter' // lantern bearer: open or shutter the lantern (free)
+  | 'escape' // held by a ghoul: 2 Might slots, 1 hit frees
   | 'leave' // on an exit: leave the castle
   // ---- V3.2 class abilities (target kind in brackets: self / ally id / enemy id / hex at)
   | 'overwatch' // Ranger [self]: shoot the first enemy that moves or acts in sight within 6 next world phase
@@ -633,6 +671,12 @@ export type GameEvent =
   | { type: 'dug'; at: Pos }
   /** A monster stepped on caltrops (they're gone). */
   | { type: 'caltrops'; id: string; at: Pos }
+  | { type: 'shout'; id: string }
+  | { type: 'dragged'; id: string; from: Pos; to: Pos }
+  | { type: 'grabbed'; by: string; id: string }
+  | { type: 'released'; id: string }
+  | { type: 'shutter'; open: boolean }
+  | { type: 'routeKnown'; id: string; route: Pos[] }
   | { type: 'say'; text: string };
 
 export interface ApplyResult {

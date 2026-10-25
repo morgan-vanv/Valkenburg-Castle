@@ -34,3 +34,10 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-24** Walls are 2.2 high (hero ≈ 2.6) so thin panels still read as walls; the cutaway keeps the party visible.
 - **2026-10-24** Cave = room material rock, earth or bone; those walls stay thick. Water (the Drain) and bone-free built rooms get thin walls.
 - **2026-10-24** Figures start facing the camera.
+- **2026-10-24** Scale: option C (RuneScape) from the three-panel study; hero 2.0 units, natural proportions, walls 2.6. The owner picked it as good enough for now and wants to revisit.
+- **2026-10-24** Scale direction C: a hero is 2.0 world units, walls 2.6, humanoids built parametrically (head 1/5, limb 0.07, shoulders 0.34, legs 0.44) and monsters scaled relative to the hero (unit.ts FIGURE_SCALE). The Dragon is unchanged. Delve camera 19.
+- **2026-10-24** Shutter is hotkey L and wins over Light (brazier) and Oil's L for the lantern bearer; L also toggles the lantern when another hero is selected and has no L button (it's free and any-time).
+- **2026-10-24** "Start shuttered" is a presentation option: the prepare screen remembers it and the app sends the free `shutter` action right after `startDelve` (no contract change).
+- **2026-10-24** The Gloam's creeping darkness is drawn on visible unlit hexes within 2 of the light, not on every dark hex, so it reads as an edge.
+- **2026-10-24** Known patrol routes are drawn as straight segments between waypoints (the engine's path between them isn't published); good enough for "where it walks".
+- **2026-10-24** V3.3 "fear by depth": monsters awake by default with patrols; lantern 20 with a free shutter; sight per hero (lit: stage range; dark: 4/2/1 by level); the Gloam hunts any unlit hero in the Hollow with no grace; depth tiers; archer, captain, ghoul; the Sisters use the heroes' own kit. The owner found the castle too forgiving and wanted Level 3 to be frightening.

@@ -5,10 +5,10 @@ import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Comm
 import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo, SHOP } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
-import { brightnessOf, litSet, sightRangeOf, visibleSet, World } from './world';
+import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
 import { backToCamp, campCommand, newGame, partyProblem } from './camp';
-import { hd, valueOf } from './common';
+import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
 
@@ -138,8 +138,12 @@ export function createEngine(castle: CastleDef): Engine {
       if (!c) return out;
       const vis = visibleSet(w, c.d);
       for (const m of c.d.monsters) {
-        if (m.awareness === 'asleep' || !m.intent) continue;
+        if (m.awareness === 'asleep' || m.buried || !m.intent) continue;
         if (vis.has(posKey(m.at)) || m.kind === 'gloam') out[m.id] = m.intent;
+      }
+      // The sisters show theirs too (spec 16.5), when seen and not veiled.
+      for (const r of rivalsOnMap(c)) {
+        if (r.intent && (r.veil ?? 0) <= 0 && vis.has(posKey(r.at))) out[r.id] = r.intent;
       }
       return out;
     },
@@ -154,8 +158,18 @@ export function createEngine(castle: CastleDef): Engine {
       return litSet(w, c.d).has(posKey(at));
     },
 
-    sightRange(state, level) {
-      return sightRangeOf(state.delve?.light ?? 0, level);
+    sightRange(state, heroId) {
+      const c = rctx(state);
+      const h = c ? hd(c, heroId) : undefined;
+      if (!c || !h) return 2;
+      return sightRangeAt(w, c.d, h.at);
+    },
+
+    heroLit(state, heroId) {
+      const c = rctx(state);
+      const h = c ? hd(c, heroId) : undefined;
+      if (!c || !h) return false;
+      return litSet(w, c.d).has(posKey(h.at));
     },
 
     fallInfo(state, pit: Pos) {

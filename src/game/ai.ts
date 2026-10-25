@@ -1,0 +1,210 @@
+// Shared AI helpers for monsters and rivals: who they can see, how they walk,
+// how they strike, and the Ranger's overwatch that fires at them.
+
+import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
+import type { HeroInDelve } from './types';
+import { CALTROPS_DMG, CLASSES, OVERWATCH_RANGE } from './data';
+import { say, type Ctx, type MonsterX } from './state';
+import {
+  armorOf, brightnessAt, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, LIGHT_PENALTY, makeNoise, monsterArmor, nameOf, occupant,
+  roll,
+} from './common';
+import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, monsterSees, pathTo, seesHex, within } from './world';
+import { figure } from './falls';
+
+// ---------------------------------------------------------------- perception
+
+export interface Target {
+  id: string;
+  at: Pos;
+  armor: number;
+  hero?: HeroInDelve;
+}
+
+/** Heroes (active, unveiled) and the freed prisoner: what monsters and hostile rivals go for. */
+export function targets(c: Ctx): Target[] {
+  const out: Target[] = [];
+  for (const h of c.d.heroes) {
+    if (h.status !== 'active' || h.veil > 0) continue; // veiled heroes are unseen (spec 15.3)
+    out.push({ id: h.heroId, at: h.at, armor: armorOf(heroDef(c, h.heroId)!), hero: h });
+  }
+  const pr = c.d.prisoner;
+  if (pr && pr.freed && !pr.dead && !pr.out) out.push({ id: pr.id, at: pr.at, armor: 0 });
+  return out;
+}
+
+/** Monster sight (spec 16.1). */
+export function sees(c: Ctx, from: Pos, t: Pos, lit: Set<string>): boolean {
+  return monsterSees(c.w, c.d, from, t, lit);
+}
+
+export function byDist(from: Pos) {
+  return (a: Target, b: Target) => {
+    const da = a.at.level === from.level ? distance(a.at, from) : 99;
+    const db = b.at.level === from.level ? distance(b.at, from) : 99;
+    return da - db || (a.id < b.id ? -1 : 1);
+  };
+}
+
+/** Ward: 1 less per hit, to a minimum of 0 (spec 15.3). */
+export function wardOf(h: HeroInDelve | undefined): number {
+  return h && h.ward > 0 ? 1 : 0;
+}
+
+export function adjacentTo(a: Pos, b: Pos): boolean {
+  return a.level === b.level && distance(a, b) === 1;
+}
+
+// ---------------------------------------------------------------- movement
+
+export function blocked(c: Ctx, p: Pos, self: string): boolean {
+  const o = occupant(c, p);
+  if ((c.d.burning?.[posKey(p)] ?? 0) > 0) return true; // nothing walks into fire
+  return !!o && o.id !== self;
+}
+
+export interface ApproachOpts {
+  stairs: boolean;
+  allowLocked?: boolean;
+  /** Extra hexes the walker won't enter (the Gloam keeps to the dark). */
+  avoid?: (p: Pos) => boolean;
+}
+
+/** Best path of at most `budget` toward the nearest of `goals` (stops on a free hex). */
+export function approach(c: Ctx, self: string, from: Pos, goals: Pos[], budget: number, stairs: boolean | ApproachOpts, allowLocked = false): Pos[] | null {
+  if (!goals.length) return null;
+  const o: ApproachOpts = typeof stairs === 'boolean' ? { stairs, allowLocked } : stairs;
+  const enter = (p: Pos) => !blocked(c, p, self) && !(o.avoid?.(p) ?? false);
+  const field = distField(c.w, c.d, goals, { stairs: o.stairs, allowLocked: o.allowLocked });
+  if (!field.has(posKey(from))) return null;
+  const nodes = dijkstra(c.w, c.d, from, { enter, stairs: o.stairs, allowLocked: o.allowLocked, budget });
+  let best = from;
+  let bestScore = field.get(posKey(from))! * 100;
+  for (const n of nodes.values()) {
+    const f = field.get(posKey(n.p));
+    if (f === undefined) continue;
+    if (!samePos(n.p, from) && occupant(c, n.p)) continue;
+    const score = f * 100 + n.cost;
+    if (score < bestScore) {
+      bestScore = score;
+      best = n.p;
+    }
+  }
+  return samePos(best, from) ? [] : pathTo(nodes, best);
+}
+
+/** Free hexes a figure could stand on to hit `t` in melee. */
+export function attackSpots(c: Ctx, t: Pos, self: string, allowLocked = false): Pos[] {
+  return posNeighbors(t).filter((p) => canEnter(c.w, c.d, p, allowLocked) && !blocked(c, p, self));
+}
+
+export function hitRange(slots: number, dmg: number, armor: number): [number, number] {
+  return [0, slots * Math.max(1, dmg - armor) + 1];
+}
+
+export function exitsBy(c: Ctx, from: Pos): Pos[] {
+  const field = distField(c.w, c.d, [from], { stairs: true });
+  return [...c.w.exits].filter((e) => field.has(posKey(e))).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
+}
+
+/** Walk a figure along `path`. Returns true if caltrops stopped it short (monsters only). */
+export function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): boolean {
+  if (!path.length) return false;
+  const seg: Pos[] = [];
+  let from = at.at;
+  const isMonster = c.d.monsters.some((m) => m.id === id);
+  for (const p of path) {
+    if (isMonster && c.d.caltrops.includes(posKey(p))) {
+      // Caltrops: 2 damage, the walk ends here (spec 15.4).
+      c.d.caltrops = c.d.caltrops.filter((k) => k !== posKey(p));
+      seg.push(p);
+      c.ev.push({ type: 'moved', id, path: [...seg] });
+      seg.length = 0;
+      at.at = { ...p };
+      c.ev.push({ type: 'caltrops', id, at: p });
+      say(c, `${nameOf(c, id)} treads on caltrops.`);
+      hurtAny(c, id, CALTROPS_DMG, null, { noise: false });
+      return true;
+    }
+    if (kindAt(c.w, c.d, p) === 'door') {
+      const door = doorAt(c.d, p);
+      if (door && !door.open) {
+        door.open = true;
+        door.locked = false;
+        c.ev.push({ type: 'doorChanged', at: p, open: true, locked: false });
+      }
+    }
+    seg.push(p);
+    if (p.level !== from.level) {
+      c.ev.push({ type: 'moved', id, path: [...seg] });
+      seg.length = 0;
+      c.ev.push({ type: 'levelChanged', id, from: from.level, to: p.level });
+    }
+    from = p;
+  }
+  if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
+  at.at = { ...path[path.length - 1]! };
+  return false;
+}
+
+// ---------------------------------------------------------------- striking
+
+/** Sellsword guarding the target takes the hit instead. */
+export function guardFor(c: Ctx, targetId: string): HeroInDelve | undefined {
+  return c.d.heroes.find((h) => h.status === 'active' && h.guarding === targetId);
+}
+
+/** An attack on a hero or the prisoner. Returns the id that was hit (after guard), or null on a miss. */
+export function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): string | null {
+  let tid = targetId;
+  const g = guardFor(c, tid);
+  if (g) {
+    tid = g.heroId;
+    say(c, `${heroName(c, g.heroId)} steps in front of ${nameOf(c, targetId)}.`);
+  }
+  const r = roll(c, attacker, what, slots, p);
+  if (!r.hits) {
+    c.ev.push({ type: 'miss', attacker, target: tid });
+    return null;
+  }
+  const h = hd(c, tid);
+  const armor = h ? armorOf(heroDef(c, tid)!) : 0;
+  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h)) + (r.perfect ? 1 : 0);
+  if (h) hurtHero(c, h, total, attacker, r.perfect);
+  else hurtPrisoner(c, total, attacker);
+  return tid;
+}
+
+// ---------------------------------------------------------------- overwatch (Ranger, spec 15.3)
+
+/**
+ * An enemy `id` at `at` moves or acts: the first Ranger on overwatch who can see it within 6 shoots
+ * (full bow roll). Returns true if the enemy died.
+ */
+export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
+  const lit = litSet(c.w, c.d);
+  for (const h of c.d.heroes) {
+    if (h.status !== 'active' || !h.overwatch) continue;
+    const def = heroDef(c, h.heroId)!;
+    if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit)) continue;
+    h.overwatch = false;
+    const cls = CLASSES[def.cls];
+    let slots = cls.weapon.slots;
+    if (distance(h.at, at) <= 1) slots -= 1;
+    let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + LIGHT_PENALTY[brightnessAt(c.w, c, h.at, lit)];
+    const m = c.d.monsters.find((x) => x.id === id);
+    if (m?.awareness === 'asleep') p += 20;
+    say(c, `${heroName(c, h.heroId)} looses an arrow at ${nameOf(c, id)}.`);
+    c.ev.push({ type: 'cast', by: h.heroId, spell: 'overwatch', targetId: id, at });
+    const r = roll(c, h.heroId, 'Overwatch', slots, p);
+    makeNoise(c, h.at, cls.weapon.noise ?? 1);
+    if (!r.hits) {
+      c.ev.push({ type: 'miss', attacker: h.heroId, target: id });
+      return false;
+    }
+    const armor = m ? monsterArmor(c, m as MonsterX) : 0;
+    hurtAny(c, id, r.hits * Math.max(1, cls.weapon.dmg - armor) + (r.perfect ? 1 : 0), h.heroId, { crit: r.perfect });
+    return !figure(c, id);
+  }
+  return false;
+}

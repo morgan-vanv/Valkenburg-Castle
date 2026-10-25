@@ -31,7 +31,8 @@ type Sfx =
   | 'thud'
   | 'roar'
   | 'winch'
-  | 'whoosh';
+  | 'whoosh'
+  | 'gloam';
 
 const MUTE_KEY = 'vc.muted';
 
@@ -354,6 +355,13 @@ class Audio {
         // Ratchet clicks and a groaning rope.
         for (let i = 0; i < 10; i++) this.tone('square', 520 + (i % 2) * 90, 380, t + i * 0.08, 0.03, 0.05 * v, 0.001);
         this.tone('sawtooth', 70, 95, t, 0.9, 0.08 * v, 0.1);
+        break;
+      case 'gloam':
+        // 16.2: the dark strikes: a sub thrum, a reversed-feeling swell of hiss, a cold high ring.
+        this.tone('sine', 48 * p, 30 * p, t, 0.9, 0.9 * v, 0.01);
+        this.tone('sawtooth', 62 * p, 40 * p, t + 0.05, 0.7, 0.14 * v, 0.2);
+        this.hiss(t, 0.8, 0.5 * v, 'lowpass', 300, 1800, 0.6, 0.35);
+        this.tone('sine', 2200 * p, 1900 * p, t + 0.1, 0.6, 0.04 * v, 0.1);
         break;
       case 'spell': {
         for (let i = 0; i < 5; i++) this.tone('sine', (600 + i * 220) * p, (900 + i * 300) * p, t + i * 0.03, 0.35, 0.05 * v, 0.02);

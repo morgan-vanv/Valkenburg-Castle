@@ -20,8 +20,8 @@ import { MapEffects, effectsFromState } from './effects';
 import { linkEnds, linkMarker } from './links';
 
 const MAX_LIGHTS = 12;
-/** 15.8: floating text starts above a hex-tall figure's head. */
-const FLOAT_LIFT = 2.8;
+/** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
+const FLOAT_LIFT = 2.25;
 /** How far below the shown level we draw through pits. */
 const BELOW_HALO = 3;
 
@@ -140,6 +140,21 @@ export class Diorama {
   private beaconTag: HTMLElement;
   private beaconAt: THREE.Vector3 | null = null;
   private beaconKey = '';
+  /** 16.2: the lantern shutter; shuttered = no lantern light, dark lantern model. */
+  lanternOpen = true;
+  /** 16.2: a small lantern that hangs beside the bearer (iron frame + glow). */
+  private lanternObj = new THREE.Group();
+  private lanternGlow: THREE.Sprite;
+  private lanternFlame: THREE.Mesh;
+  /** 16.2: heroes standing in the dark get a dark ring on the floor. */
+  private darkHeroes = new Set<string>();
+  private darkRings = new THREE.Group();
+  /** 16.1: known patrol routes, dotted, with arrows. */
+  private routes = new THREE.Group();
+  private routesKey = '';
+  /** 16.2: the Gloam's creeping darkness at the edge of the party's light (Level 3). */
+  private gloamEdge: THREE.InstancedMesh;
+  private gloamEdgeKey = '';
 
   constructor(
     private readonly container: HTMLElement,
@@ -214,7 +229,27 @@ export class Diorama {
     this.linkPulse = new THREE.Mesh(hexRing(0.62, 0.94), new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.linkPulse.visible = false;
     this.linkPulse.renderOrder = 4;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon);
+    // 16.2: creeping darkness tiles (Gloam) and dark rings under unlit heroes.
+    this.gloamEdge = new THREE.InstancedMesh(new THREE.CircleGeometry(0.9, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x04030a, transparent: true, opacity: 0.5, depthWrite: false }), 400);
+    this.gloamEdge.count = 0;
+    this.gloamEdge.renderOrder = 1;
+    this.gloamEdge.frustumCulled = false;
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon, this.routes, this.darkRings, this.gloamEdge);
+    // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
+    {
+      const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.26), iron);
+      const hook = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), iron);
+      hook.position.y = 0.3;
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.12, 6), iron);
+      cap.position.y = 0.22;
+      this.lanternFlame = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.16), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 1 }));
+      this.lanternGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffb862, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending }));
+      this.lanternGlow.scale.setScalar(1.6);
+      this.lanternObj.add(frame, hook, cap, this.lanternFlame, this.lanternGlow);
+      this.lanternObj.visible = false;
+      this.scene.add(this.lanternObj);
+    }
     this.landingTag = document.createElement('div');
     this.landingTag.className = 'landing-tag hidden';
     this.beaconTag = document.createElement('div');
@@ -283,7 +318,7 @@ export class Diorama {
       el.className = `link-tag ${l.kind === 'lift' ? 'lift' : 'stairs'} ${l.down ? 'down' : 'up'}`;
       el.textContent = linkMarker(l);
       this.fx.appendChild(el);
-      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.5), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
+      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.3), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
     }
     this.showLevel(def.levels[0]?.level ?? 1, true);
   }
@@ -450,9 +485,23 @@ export class Diorama {
     const srcs: Src[] = [];
     const radiusOf: Record<Brightness, number> = { bright: 4, dim: 3, dark: 2, pitch: 0 };
     const bearer = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
-    if (bearer && bearer.shown && bearer.at.level === this.shownLevel && !bearer.dead) {
+    const bearerShown = !!bearer && bearer.shown && bearer.at.level === this.shownLevel && !bearer.dead;
+    if (bearer && bearerShown && this.lanternOpen) {
       const r = radiusOf[this.brightness];
       if (r > 0) srcs.push({ at: bearer.root.position.clone().add(new THREE.Vector3(0.3, bearer.height + 0.5, 0.3)), radius: r, color: this.brightness === 'bright' ? 0xffb862 : this.brightness === 'dim' ? 0xf09a48 : 0xd0763a, power: 1, seed: 0 });
+    }
+    // 16.2: the lantern itself hangs at the bearer's right hip, dark when shuttered or empty.
+    this.lanternObj.visible = bearerShown;
+    if (bearer && bearerShown) {
+      const f = bearer.facing;
+      const side = new THREE.Vector3(Math.cos(f), 0, -Math.sin(f)).multiplyScalar(bearer.height * 0.28);
+      this.lanternObj.position.copy(bearer.root.position).add(side).add(new THREE.Vector3(0, bearer.height * 0.42 + bearer.fig.position.y, 0));
+      this.lanternObj.rotation.y = f;
+      const lit = this.lanternOpen && this.brightness !== 'pitch';
+      const k = lit ? 0.75 + Math.sin(t * 9) * 0.1 + Math.sin(t * 23) * 0.05 : 0;
+      (this.lanternGlow.material as THREE.SpriteMaterial).opacity = k;
+      (this.lanternFlame.material as THREE.MeshBasicMaterial).color.setHex(lit ? 0xffd27a : 0x2a1e14);
+      this.lanternFlame.scale.y = lit ? 0.9 + Math.sin(t * 11) * 0.12 : 0.6;
     }
     for (const id of this.torches) {
       const v = this.units.get(id);
@@ -536,6 +585,14 @@ export class Diorama {
         g.children[2]!.position.y = 0.25 + k * 0.15;
         ((g.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.3 * k;
       } else if (g.userData.sweep) g.rotation.y = t * 0.8;
+      else if (g.userData.shout) {
+        const p = g.children[1] as THREE.Mesh | undefined;
+        if (p) {
+          const k = (t * 0.45) % 1;
+          p.scale.setScalar(0.3 + k * (p.userData.max as number));
+          (p.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - k);
+        }
+      }
     }
     for (const g of this.lootGlow.children) {
       const k = 0.5 + 0.5 * Math.sin(t * 2.6 + g.position.x * 1.7 + g.position.z);
@@ -561,7 +618,136 @@ export class Diorama {
       const m = this.rippleMesh.material as THREE.MeshBasicMaterial;
       m.opacity = 0.25 + 0.15 * Math.sin(t * 5);
     }
+    // 16.2: dark rings follow unlit heroes; they breathe slowly.
+    for (const r of this.darkRings.children) {
+      const u = this.units.get(r.userData.unit as string);
+      r.visible = !!u && u.shown && u.root.visible;
+      if (u) {
+        r.position.set(u.root.position.x, u.root.position.y + 0.035, u.root.position.z);
+        const k = 0.5 + 0.5 * Math.sin(t * 1.6 + (r.userData.phase as number));
+        r.scale.setScalar(1 + k * 0.08);
+        ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.45 + 0.2 * k;
+      }
+    }
+    // 16.2: the Gloam's darkness creeps: tiles pulse out of phase, deeper when the Gloam is near.
+    if (this.gloamEdge.count) {
+      const m = this.gloamEdge.material as THREE.MeshBasicMaterial;
+      m.opacity = 0.42 + 0.18 * Math.sin(t * 1.3);
+    }
+    // 16.1: route arrows drift along their segment.
+    for (const g of this.routes.children) {
+      if (!g.userData.arrow) continue;
+      const a = g.userData.a as THREE.Vector3;
+      const b = g.userData.b as THREE.Vector3;
+      const k = ((t * 0.25 + (g.userData.phase as number)) % 1 + 1) % 1;
+      g.position.lerpVectors(a, b, k);
+    }
     void dt;
+  }
+
+  /** 16.2: heroes standing in the dark (from engine.heroLit) get a dark ring on the floor. */
+  setDarkHeroes(ids: string[]): void {
+    const next = new Set(ids);
+    const same = next.size === this.darkHeroes.size && [...next].every((id) => this.darkHeroes.has(id));
+    if (same) return;
+    this.darkHeroes = next;
+    this.darkRings.clear();
+    let i = 0;
+    for (const id of next) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.92, 1.55, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x030208, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      ring.userData = { unit: id, phase: i++ * 1.3 };
+      ring.renderOrder = 1;
+      this.darkRings.add(ring);
+    }
+  }
+
+  /** 16.2: open or shutter the lantern model and light. */
+  setLantern(open: boolean): void {
+    this.lanternOpen = open;
+  }
+
+  /**
+   * 16.1: known patrol routes on the shown level: a faint dotted loop through the waypoints
+   * with small arrows drifting along it.
+   */
+  private refreshRoutes(): void {
+    const d = this.state?.delve;
+    const known = new Set(d?.knownRoutes ?? []);
+    const list = (d?.monsters ?? []).filter((m) => m.hp > 0 && m.route && m.route.length > 1 && known.has(m.id) && m.route[0]!.level === this.shownLevel);
+    const key = list.map((m) => `${m.id}:${m.route!.length}`).join('|');
+    if (key === this.routesKey) return;
+    this.routesKey = key;
+    this.routes.clear();
+    if (!list.length) return;
+    const dotGeo = new THREE.CircleGeometry(0.09, 6).rotateX(-Math.PI / 2);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xc8a070, transparent: true, opacity: 0.4, depthWrite: false });
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xe0b078, transparent: true, opacity: 0.7, depthWrite: false });
+    let phase = 0;
+    for (const m of list) {
+      const pts = m.route!.map((p) => this.worldOf(p, 0.05));
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i]!;
+        const b = pts[(i + 1) % pts.length]!;
+        const len = a.distanceTo(b);
+        if (len < 0.05) continue;
+        const n = Math.max(1, Math.round(len / 0.55));
+        for (let j = 0; j < n; j++) {
+          const dot = new THREE.Mesh(dotGeo, dotMat);
+          dot.position.lerpVectors(a, b, j / n);
+          dot.renderOrder = 2;
+          this.routes.add(dot);
+        }
+        const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 3), arrowMat);
+        arrow.rotation.x = Math.PI / 2;
+        const g = new THREE.Group();
+        g.add(arrow);
+        g.position.copy(a);
+        g.lookAt(b);
+        g.position.y += 0.04;
+        g.userData = { arrow: true, a: a.clone().setY(a.y + 0.04), b: b.clone().setY(b.y + 0.04), phase: (phase += 0.37) };
+        g.renderOrder = 3;
+        this.routes.add(g);
+      }
+      // Waypoint rings.
+      for (const p of pts) {
+        const ring = new THREE.Mesh(hexRing(0.5, 0.6), dotMat);
+        ring.position.copy(p);
+        ring.renderOrder = 2;
+        this.routes.add(ring);
+      }
+    }
+  }
+
+  /**
+   * 16.2: while the Gloam is on the shown level (the Hollow), every visible unlit hex that
+   * touches the party's light is tiled with creeping darkness.
+   */
+  private refreshGloamEdge(): void {
+    const d = this.state?.delve;
+    const gloam = d?.monsters.find((m) => m.kind === 'gloam' && m.hp > 0);
+    const on = !!gloam && gloam.at.level === this.shownLevel;
+    const key = on ? `${this.shownLevel}:${this.vis.visible.size}:${this.vis.lit.size}:${gloam!.id}` : '';
+    if (key === this.gloamEdgeKey) return;
+    this.gloamEdgeKey = key;
+    if (!on) {
+      this.gloamEdge.count = 0;
+      return;
+    }
+    const lvPrefix = `${this.shownLevel}:`;
+    const m = new THREE.Matrix4();
+    let n = 0;
+    for (const k of this.vis.visible) {
+      if (!k.startsWith(lvPrefix) || this.vis.lit.has(k) || n >= 400) continue;
+      const p = parsePos(k);
+      // Only hexes within 2 of the light (the edge), so the dark reads as a ring and not a blanket.
+      let near = false;
+      for (const h of range(p, 2)) if (this.vis.lit.has(posKey({ level: p.level, ...h }))) near = true;
+      if (!near) continue;
+      m.makeTranslation(this.worldOf(p, 0.03));
+      this.gloamEdge.setMatrixAt(n++, m);
+    }
+    this.gloamEdge.count = n;
+    this.gloamEdge.instanceMatrix.needsUpdate = true;
   }
 
   // ------------------------------------------------------------ DOM overlay
@@ -683,6 +869,7 @@ export class Diorama {
     }
     this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
     this.lanternBearer = d.lanternBearer;
+    this.lanternOpen = d.lanternOpen !== false;
     this.liftWorking = !!d.liftWorking;
     this.torches = new Set(d.heroes.filter((h) => h.torch > 0 && h.status === 'active').map((h) => h.heroId));
     this.syncUnits(state);
@@ -705,6 +892,11 @@ export class Diorama {
   private modelFor(kind: string, awareness?: string): ModelKey {
     if (kind === 'dragon') return awareness === 'asleep' ? 'dragonSleep' : 'dragon';
     return kind as ModelKey;
+  }
+
+  /** 16.5: a sister's model by her class. */
+  private sisterModel(cls?: string): ModelKey {
+    return cls === 'ranger' ? 'sisterRanger' : cls === 'shadowmancer' ? 'sisterShadow' : cls === 'burglar' ? 'sisterBurglar' : 'sister';
   }
 
   private ensureUnit(id: string, key: ModelKey, side: UnitSide, at: Pos, name: string): UnitView {
@@ -755,10 +947,10 @@ export class Diorama {
       v.lieDown(h.status === 'downed');
       v.dead = false;
       v.setOpacity(1);
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer));
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen));
     }
     for (const m of d.monsters) {
-      if (m.hp <= 0) continue;
+      if (m.hp <= 0 || m.buried) continue;
       const want = this.modelFor(m.kind, m.awareness);
       const have = this.units.get(m.id);
       if (have && have.key !== want && !have.busy) this.removeUnit(m.id);
@@ -773,10 +965,14 @@ export class Diorama {
     if (d.rivals) {
       for (const r of d.rivals.members) {
         if (r.goneOut || r.hp <= 0 || d.round < d.rivals.entersRound) continue;
-        const v = this.ensureUnit(r.id, 'sister', 'rival', r.at, r.name);
+        const want = this.sisterModel(r.cls);
+        const have = this.units.get(r.id);
+        if (have && have.key !== want && !have.busy) this.removeUnit(r.id);
+        const v = this.ensureUnit(r.id, want, 'rival', r.at, r.name);
         keep.add(r.id);
         place(v, r.at);
-        this.setTag(r.id, pipsHtml(r.hp, r.maxHp, d.rivals.stance === 'hostile' ? 'enemy' : 'rival'));
+        v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
+        this.setTag(r.id, pipsHtml(r.hp, r.maxHp, d.rivals.stance === 'hostile' ? 'enemy' : 'rival') + ((r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : ''));
       }
     }
     if (d.prisoner && !d.prisoner.out && !d.prisoner.dead) {
@@ -946,7 +1142,7 @@ export class Diorama {
     glow.scale.setScalar(2.4);
     glow.userData = { phase: 2 };
     this.beacon.add(pillar, ring, glow);
-    this.beaconAt = this.worldOf(o.at, o.kind === 'slay' ? 4.6 : 2.8);
+    this.beaconAt = this.worldOf(o.at, o.kind === 'slay' ? 4.6 : 2.3);
     this.beaconTag.className = `beacon-tag ${o.kind}`;
     this.beaconTag.textContent = o.label;
     this.beaconTag.classList.remove('hidden');
@@ -955,6 +1151,8 @@ export class Diorama {
   private refreshProps(): void {
     this.refreshLootGlow();
     this.refreshBeacon();
+    this.refreshRoutes();
+    this.refreshGloamEdge();
     this.effects.set(effectsFromState(this.state));
     for (const p of this.props.values()) {
       const at = p.obj.userData.at as Pos;
@@ -1090,40 +1288,83 @@ export class Diorama {
     this.clearIntents();
     const d = state.delve;
     if (!d) return;
+    // 16.5: rivals carry their own intent; monsters' come from the engine.
+    const list: { id: string; name: string; at: Pos; it: Intent }[] = [];
     for (const [id, it] of Object.entries(intents)) {
-      const m = d.monsters.find((x) => x.id === id);
-      if (!m || it.kind === 'wait') continue;
+      const m = d.monsters.find((x) => x.id === id) ?? d.rivals?.members.find((x) => x.id === id);
+      if (m) list.push({ id, name: m.name, at: m.at, it });
+    }
+    if (d.rivals && d.rivals.spotted && d.round >= d.rivals.entersRound)
+      for (const r of d.rivals.members) {
+        if (r.intent && r.hp > 0 && !r.goneOut && this.vis.visible.has(posKey(r.at)) && !intents[r.id]) list.push({ id: r.id, name: r.name, at: r.at, it: r.intent });
+      }
+    for (const { id, name, at, it } of list) {
+      if (it.kind === 'wait') continue;
       const el = document.createElement('div');
       el.className = `intent intent-${it.kind}`;
       const target = it.targetId ? targetName(state, it.targetId) : '';
-      const glyph = INTENT_GLYPH[it.kind];
+      const glyph = INTENT_GLYPH[it.kind] ?? '?';
       const dmg = it.damage && it.damage[1] > 0 ? (it.damage[0] === it.damage[1] ? `${it.damage[1]}` : `${it.damage[0]}–${it.damage[1]}`) : '';
       el.innerHTML = `<span class="intent-icon">${glyph}</span>${dmg ? `<span class="intent-dmg">${dmg}</span>` : ''}`;
-      el.title = `${m.name}: ${INTENT_WORDS[it.kind]}${target ? ` ${target}` : ''}${dmg ? ` for ${dmg}` : ''}`;
+      el.title = `${name}: ${INTENT_WORDS[it.kind] ?? it.kind}${target ? ` ${target}` : ''}${dmg ? ` for ${dmg}` : ''}`;
       this.fx.appendChild(el);
       this.intentTags.set(id, el);
       if (it.kind === 'breath' && it.hexes?.length) {
         this.markBreath(it.hexes, id);
-        el.title = `${m.name}: breathes fire next turn on the marked hexes (${it.damage ? it.damage[1] : 4} damage, no roll, armor doesn't help)`;
+        el.title = `${name}: breathes fire next turn on the marked hexes (${it.damage ? it.damage[1] : 4} damage, no roll, armor doesn't help)`;
         continue;
       }
       if (it.kind === 'sweep') {
-        this.markSweep(m.at, id);
+        this.markSweep(at, id);
         continue;
       }
       if (it.kind === 'shove' && it.to) {
-        this.markShove(m, it.targetId ? targetPos(state, it.targetId) : null, it.to, id);
+        this.markShove(at, it.targetId ? targetPos(state, it.targetId) : null, it.to, id);
+        el.title = `${name}: knocks ${target} back to the marked hex${this.levels.get(it.to.level)?.pits.has(hexKey(it.to)) ? ' (a pit!)' : ''}`;
         continue;
       }
+      // 16.4: drag: the webbed hero is pulled one hex toward the spider (pits count).
+      if (it.kind === 'drag' && it.to) {
+        this.markShove(at, it.targetId ? targetPos(state, it.targetId) : null, it.to, id, 0xd8d8e8);
+        el.title = `${name}: drags ${target} one hex closer${this.levels.get(it.to.level)?.pits.has(hexKey(it.to)) ? ' (into a pit!)' : ''}`;
+        continue;
+      }
+      // 16.4: shout: every orc within 8 wakes and hunts next phase.
+      if (it.kind === 'shout') {
+        this.markRadius(at, 8, id, 0xffa040, 'shout');
+        el.title = `${name}: shouts next turn. Every orc within 8 hexes wakes and hunts${target ? ` ${target}` : ''}.`;
+        continue;
+      }
+      // 16.5: rival overwatch: a faint ring at range 6.
+      if (it.kind === 'overwatch') {
+        this.markRadius(at, 6, id, 0xffd060, 'ring');
+        el.title = `${name}: on overwatch. Shoots the first hero that moves or acts within 6.`;
+        continue;
+      }
+      if (it.kind === 'veil') {
+        el.title = `${name}: veils herself. Hard to see next turn.`;
+        continue;
+      }
+      // Smoke: the bomb lands on `to`; mark the hex and its neighbours.
+      if (it.kind === 'smoke' && it.to) {
+        const hexes = [it.to, ...range(it.to, 1).map((h) => ({ level: it.to!.level, ...h }))];
+        for (const p of hexes) {
+          const ring = new THREE.Mesh(hexRing(0.6, 0.8), new THREE.MeshBasicMaterial({ color: 0xb0b0b4, transparent: true, opacity: 0.5, depthWrite: false }));
+          ring.position.copy(this.worldOf(p, 0.04));
+          ring.userData = { monster: id, level: p.level };
+          this.intentLines.add(ring);
+        }
+        el.title = `${name}: throws a smoke bomb at the marked hexes${target ? ` (near ${target})` : ''}.`;
+      }
       // A line to the target or destination.
-      const from = this.worldOf(m.at, 1.1);
+      const from = this.worldOf(at, 0.9);
       let to: THREE.Vector3 | null = null;
       if (it.targetId) {
         const tp = targetPos(state, it.targetId);
-        if (tp && tp.level === m.at.level) to = this.worldOf(tp, 1.1);
-      } else if (it.to && it.to.level === m.at.level) to = this.worldOf(it.to, 0.08);
-      if (to && m.at.level === this.shownLevel) {
-        const col = it.kind === 'attack' || it.kind === 'steal' ? COLORS.danger : it.kind === 'web' ? 0xd8d8d8 : 0xb08a6a;
+        if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
+      } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
+      if (to && at.level === this.shownLevel) {
+        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' ? COLORS.danger : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
         const g = new THREE.BufferGeometry().setFromPoints([from, to]);
         const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: col, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.85, depthTest: false }));
         line.computeLineDistances();
@@ -1139,6 +1380,24 @@ export class Diorama {
       }
     }
     this.refreshIntentVisibility();
+  }
+
+  /** 16.4/16.5: a big ring of radius `r` hexes round a figure (shout, rival overwatch). */
+  private markRadius(at: Pos, r: number, monster: string, color: number, kind: 'shout' | 'ring'): void {
+    const g = new THREE.Group();
+    const R = r * Math.sqrt(3) * HEX;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(R - 0.18, R, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: kind === 'shout' ? 0.55 : 0.3, depthWrite: false, side: THREE.DoubleSide, depthTest: false }));
+    g.add(ring);
+    if (kind === 'shout') {
+      // An expanding pulse ring inside, animated in updateOverlay via userData.shout.
+      const pulse = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, depthTest: false, blending: THREE.AdditiveBlending }));
+      pulse.userData.max = R;
+      g.add(pulse);
+    }
+    g.position.copy(this.worldOf(at, 0.06));
+    g.renderOrder = 5;
+    g.userData = { monster, level: at.level, [kind]: true };
+    this.breathMarks.add(g);
   }
 
   private refreshIntentVisibility(): void {
@@ -1184,10 +1443,10 @@ export class Diorama {
   }
 
   /** Shove intent: an arrow from the victim to where they'll land; red if that's a pit. */
-  private markShove(m: Monster, victim: Pos | null, to: Pos, monster: string): void {
+  private markShove(mAt: Pos, victim: Pos | null, to: Pos, monster: string, color = 0xffa040): void {
     const pit = this.levels.get(to.level)?.pits.has(hexKey(to)) ?? false;
-    const col = pit ? COLORS.danger : 0xffa040;
-    const from = victim && victim.level === to.level ? this.worldOf(victim, 0.35) : this.worldOf(m.at, 0.35);
+    const col = pit ? COLORS.danger : color;
+    const from = victim && victim.level === to.level ? this.worldOf(victim, 0.35) : this.worldOf(mAt, 0.35);
     const end = this.worldOf(to, pit ? -0.1 : 0.35);
     if (pit) end.y = levelY(to.level) + FLOOR_TOP + 0.05;
     const dir = end.clone().sub(from);
@@ -1283,18 +1542,23 @@ export class Diorama {
     const d = next.delve;
     if (d) {
       for (const m of d.monsters) {
-        if (m.hp <= 0 || this.units.has(m.id)) continue;
+        if (m.hp <= 0 || m.buried || this.units.has(m.id)) continue;
         const v = this.ensureUnit(m.id, this.modelFor(m.kind, m.awareness), 'monster', m.spawnedAt ?? m.at, m.name);
         v.root.position.copy(this.worldOf(m.at));
         v.at = { ...m.at };
         v.setOpacity(0);
+        if (m.kind === 'ghoul') {
+          // 16.4: ghouls rise from the ground on their `spawned` event (see playEvent).
+          v.root.userData.rise = true;
+          continue;
+        }
         v.busy++;
         void this.clock.tween(0.4, (t) => v.setOpacity(t)).then(() => v.busy--);
       }
       if (d.rivals)
         for (const r of d.rivals.members) {
           if (r.goneOut || r.hp <= 0 || d.round < d.rivals.entersRound || this.units.has(r.id)) continue;
-          const v = this.ensureUnit(r.id, 'sister', 'rival', r.at, r.name);
+          const v = this.ensureUnit(r.id, this.sisterModel(r.cls), 'rival', r.at, r.name);
           v.at = { ...r.at };
         }
     }
@@ -1505,10 +1769,146 @@ export class Diorama {
         await clock.wait(0.12);
         return;
       }
-      case 'spawned':
+      case 'spawned': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        if (v.root.userData.rise) {
+          // 16.4: a ghoul claws its way up out of the ground.
+          delete v.root.userData.rise;
+          v.at = { ...e.at };
+          const rest = this.worldOf(e.at);
+          v.root.position.copy(rest);
+          this.refreshUnits();
+          if (!v.root.visible) {
+            v.setOpacity(1);
+            return;
+          }
+          v.busy++;
+          const depth = v.height * 0.95;
+          this.dustPuff(rest);
+          this.floatText(rest.clone().add(new THREE.Vector3(0, v.height + 0.6, 0)), 'Something rises', 'warn', 1.4);
+          if (!this.reduceShake) this.rig.addShake(0.12);
+          await clock.tween(0.55, (t) => {
+            const k = easeOutCubic(t);
+            v.setOpacity(Math.min(1, t * 3));
+            v.root.position.y = rest.y - depth * (1 - k);
+            v.fig.rotation.x = Math.sin(t * Math.PI) * 0.35;
+          });
+          v.fig.rotation.x = 0;
+          v.root.position.y = rest.y;
+          this.dustPuff(rest);
+          v.busy--;
+          return;
+        }
+        if (e.at.level === this.shownLevel) await clock.wait(0.25);
+        return;
+      }
       case 'gloam': {
-        const at = 'id' in e ? this.units.get(e.id)?.at : e.at;
-        if (at && at.level === this.shownLevel) await clock.wait(0.25);
+        if (e.at.level === this.shownLevel) {
+          this.floatText(this.worldOf(e.at, 1.4), 'The dark here is awake', 'warn', 2);
+          if (!this.reduceShake) this.rig.addShake(0.1);
+          await clock.wait(0.35);
+        }
+        return;
+      }
+      case 'shout': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), 'RALLY!', 'warn', 1.3);
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, v.height, 0)), 0xffa040, 2.5);
+        if (!this.reduceShake) this.rig.addShake(0.12);
+        // One big ring racing out to radius 8.
+        const R = 8 * Math.sqrt(3) * HEX;
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.05, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.8, depthWrite: false, depthTest: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+        ring.position.copy(v.root.position).add(new THREE.Vector3(0, 0.06, 0));
+        ring.renderOrder = 7;
+        this.overlay.add(ring);
+        await clock.tween(0.6, (t) => {
+          ring.scale.setScalar(Math.max(0.01, R * easeOutCubic(t)));
+          (ring.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+        });
+        this.overlay.remove(ring);
+        return;
+      }
+      case 'dragged': {
+        // 16.4: the webbed hero is hauled one hex toward the spider on a strand of web.
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const to = this.worldOf(e.to);
+        const watch = v.root.visible || e.from.level === this.shownLevel;
+        if (this.levels.get(e.to.level)?.pits.has(hexKey(e.to))) to.y = levelY(e.to.level) + FLOOR_TOP;
+        if (!watch) {
+          v.at = { ...e.to };
+          v.root.position.copy(to);
+          return;
+        }
+        v.busy++;
+        const from = v.root.position.clone();
+        const dir = to.clone().sub(from).setY(0).normalize();
+        const strandEnd = to.clone().add(dir.clone().multiplyScalar(Math.sqrt(3) * HEX * 1.4)).add(new THREE.Vector3(0, 0.9, 0));
+        const strand = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)), strandEnd]), new THREE.LineBasicMaterial({ color: 0xe8e8f0, transparent: true, opacity: 0.9, depthTest: false }));
+        strand.renderOrder = 7;
+        this.overlay.add(strand);
+        v.face(dir.x, dir.z);
+        v.flash(new THREE.Color(0.8, 0.8, 0.9), 0.4);
+        this.floatText(from.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), 'Dragged!', 'warn', 1.2);
+        await clock.tween(0.38, (t) => {
+          const k = easeInOut(t);
+          v.root.position.lerpVectors(from, to, k);
+          v.fig.rotation.x = -Math.sin(t * Math.PI) * 0.35;
+          (strand.geometry as THREE.BufferGeometry).setFromPoints([v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)), strandEnd]);
+        });
+        v.fig.rotation.x = 0;
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        v.at = { ...e.to };
+        this.overlay.remove(strand);
+        strand.geometry.dispose();
+        v.busy--;
+        if (!this.reduceShake) this.rig.addShake(0.06);
+        return;
+      }
+      case 'grabbed': {
+        const v = this.units.get(e.id);
+        const g = this.units.get(e.by);
+        if (!v || !v.root.visible) return;
+        if (g) await this.lunge(g, v);
+        v.flash(new THREE.Color(0.6, 1, 0.5), 0.5);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), '⛓ Grabbed!', 'warn', 1.5);
+        if (!this.reduceShake) this.rig.addShake(0.1);
+        await clock.wait(0.25);
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
+      case 'released': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), 'Free', 'heal', 1.2);
+        await this.recoil(v);
+        return;
+      }
+      case 'shutter': {
+        this.lanternOpen = e.open;
+        const b = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
+        if (b && b.root.visible) {
+          this.floatText(b.root.position.clone().add(new THREE.Vector3(0, b.height + 0.3, 0)), e.open ? 'Lantern open' : 'Lantern shuttered', 'info', 1.2);
+          if (e.open) this.flash(b.root.position.clone().add(new THREE.Vector3(0, b.height, 0)), 0xffb862, 4);
+        }
+        if (this.state?.delve) this.state.delve.lanternOpen = e.open;
+        for (const h of this.state?.delve?.heroes ?? []) if (h.heroId === this.lanternBearer) this.setTag(h.heroId, heroTag(h, this.state!.campaign.roster.find((r) => r.id === h.heroId)?.maxHp ?? 10, true, e.open));
+        await clock.wait(0.2);
+        return;
+      }
+      case 'routeKnown': {
+        // 16.1: the route lights up once, then stays as the faint dotted loop.
+        if (!e.route.length || e.route[0]!.level !== this.shownLevel) return;
+        if (this.state?.delve && !this.state.delve.knownRoutes.includes(e.id)) this.state.delve.knownRoutes = [...this.state.delve.knownRoutes, e.id];
+        const m = this.state?.delve?.monsters.find((x) => x.id === e.id);
+        if (m && !m.route) m.route = e.route;
+        this.routesKey = '';
+        this.refreshRoutes();
+        const v = this.units.get(e.id);
+        if (v && v.root.visible) this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), 'Patrol route known', 'info', 1.6);
+        await this.ringPulse(e.route, 0xe0b078);
         return;
       }
       case 'stolen': {
@@ -1647,7 +2047,7 @@ export class Diorama {
         return;
       }
       case 'thrown': {
-        const a = this.worldOf(e.from, 1.6);
+        const a = this.worldOf(e.from, 1.3);
         const b = this.worldOf(e.to, 0.2);
         const watch = e.from.level === this.shownLevel && (this.canSee(e.from) || this.canSee(e.to));
         if (!watch) return;
@@ -1967,6 +2367,13 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   shove: '⇥',
   breath: '🔥',
   sweep: '↻',
+  shout: '📣',
+  drag: '⇜',
+  grab: '⛓',
+  overwatch: '👁',
+  smoke: '☁',
+  veil: '◐',
+  dart: '➶',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -1978,6 +2385,13 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   shove: 'shoves',
   breath: 'breathes fire on',
   sweep: 'sweeps its tail at',
+  shout: 'shouts: every orc within 8 wakes and hunts',
+  drag: 'drags',
+  grab: 'grabs',
+  overwatch: 'goes on overwatch',
+  smoke: 'throws a smoke bomb at',
+  veil: 'veils herself',
+  dart: 'throws a sleep dart at',
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
@@ -2041,14 +2455,15 @@ function pipsHtml(hp: number, max: number, cls: string): string {
   return s + '</span>';
 }
 
-function heroTag(h: HeroInDelve, max: number, lantern: boolean): string {
-  const status = h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.webbed ? '<b class="tag-web">Webbed</b>' : '';
-  return `${lantern ? '<span class="tag-lantern" title="Lantern">◆</span>' : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
+function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true): string {
+  const status = h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : '';
+  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
 }
 
 function monsterTag(m: Monster): string {
-  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : '';
-  return `${aw}${pipsHtml(m.hp, m.maxHp, 'enemy')}`;
+  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
+  const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
+  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}`;
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

@@ -3,7 +3,7 @@
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
-  BLEED_START, CLASSES, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SLAY_XP,
+  BLEED_START, CLASSES, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS, SLAY_XP, TIERS,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX } from './state';
@@ -40,11 +40,35 @@ export function activeHeroes(c: Ctx): HeroInDelve[] {
   return c.d.heroes.filter((h) => h.status === 'active');
 }
 
+/** Monsters on the map: buried ghouls (spec 16.4) are not there until they rise. */
+export function onMap(c: Ctx): MonsterX[] {
+  return c.d.monsters.filter((m) => !m.buried);
+}
+
+/** A monster's fighting numbers with its spawn tier (spec 16.3). */
+export function monsterStats(m: MonsterX): { slots: number; chance: number; dmg: number; move: number; armor: number } {
+  const def = MONSTERS[m.kind];
+  const t = TIERS[m.tier ?? 1] ?? TIERS[1]!;
+  return { slots: def.slots, chance: def.chance + t.chance, dmg: def.dmg + t.dmg, move: def.move, armor: def.armor ?? 0 };
+}
+
+/** Armor against a hero's hit: the kind's armor plus the captain's shield wall (orcs and archers next to a captain, 16.4). */
+export function monsterArmor(c: Ctx, m: MonsterX): number {
+  let a = MONSTERS[m.kind].armor ?? 0;
+  if (shieldWalled(c, m)) a += 1;
+  return a;
+}
+
+export function shieldWalled(c: Ctx, m: MonsterX): boolean {
+  if (m.kind !== 'orc' && m.kind !== 'archer') return false;
+  return onMap(c).some((x) => x.kind === 'captain' && x !== m && x.at.level === m.at.level && distance(x.at, m.at) === 1);
+}
+
 // ---------------------------------------------------------------- occupancy
 
 /** Who stands at p: a hero (active/downed), monster, rival on the map, or the prisoner. */
 export function occupant(c: Ctx, p: Pos): { kind: 'hero' | 'monster' | 'rival' | 'prisoner'; id: string } | null {
-  for (const m of c.d.monsters) if (samePos(m.at, p)) return { kind: 'monster', id: m.id };
+  for (const m of c.d.monsters) if (!m.buried && samePos(m.at, p)) return { kind: 'monster', id: m.id };
   for (const r of rivalsOnMap(c)) if (samePos(r.at, p)) return { kind: 'rival', id: r.id };
   for (const h of c.d.heroes) {
     if ((h.status === 'active' || h.status === 'downed') && samePos(h.at, p)) return { kind: 'hero', id: h.heroId };
@@ -61,7 +85,7 @@ export function rivalsOnMap(c: Ctx) {
 }
 
 export function monsterAt(c: Ctx, p: Pos): MonsterX | undefined {
-  return c.d.monsters.find((m) => samePos(m.at, p));
+  return c.d.monsters.find((m) => !m.buried && samePos(m.at, p));
 }
 
 // ---------------------------------------------------------------- light
@@ -254,6 +278,7 @@ export function noteOnce(c: Ctx, text: string): void {
 export function killMonster(c: Ctx, m: MonsterX, by: string | null): void {
   c.d.monsters = c.d.monsters.filter((x) => x !== m);
   c.ev.push({ type: 'monsterDied', id: m.id });
+  if (m.holding) releaseHold(c, m);
   if (m.stolen) {
     putOnGround(c, m.at, [m.stolen]);
     say(c, `${m.name} drops the ${m.stolen.name.toLowerCase()}.`);
@@ -277,6 +302,36 @@ export function killMonster(c: Ctx, m: MonsterX, by: string | null): void {
   }
 }
 
+/** A ghoul lets go of the hero it holds (spec 16.4). */
+export function releaseHold(c: Ctx, m: MonsterX): void {
+  const id = m.holding;
+  m.holding = undefined;
+  if (!id) return;
+  const h = hd(c, id);
+  if (h && h.grabbedBy === m.id) {
+    h.grabbedBy = undefined;
+    c.ev.push({ type: 'released', id });
+    say(c, `${heroName(c, id)} is free of ${m.name}'s grip.`);
+  }
+}
+
+/** Holds that no longer make sense (the ghoul is gone, moved away, or the hero is down) are released. */
+export function checkHolds(c: Ctx): void {
+  for (const m of c.d.monsters) {
+    if (!m.holding) continue;
+    const h = hd(c, m.holding);
+    if (!h || h.status !== 'active' || h.at.level !== m.at.level || distance(h.at, m.at) !== 1) releaseHold(c, m);
+  }
+  for (const h of c.d.heroes) {
+    if (!h.grabbedBy) continue;
+    const m = c.d.monsters.find((x) => x.id === h.grabbedBy);
+    if (!m || m.holding !== h.heroId) {
+      h.grabbedBy = undefined;
+      c.ev.push({ type: 'released', id: h.heroId });
+    }
+  }
+}
+
 /** Damage to any creature by id (monster, rival, prisoner, hero). Hero damage here ignores armor. */
 export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts: { crit?: boolean; noise?: boolean } = {}): void {
   const m = c.d.monsters.find((x) => x.id === id);
@@ -285,10 +340,8 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     m.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit });
     if (m.awareness !== 'hunting') {
-      m.awareness = 'hunting';
       const src = by ? hd(c, by) : undefined;
-      if (src) m.focusAt = { ...src.at };
-      c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
+      goHunting(c, m, src?.at);
     }
     if (m.hp <= 0) {
       killMonster(c, m, by);
@@ -336,7 +389,7 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
   c.ev.push({ type: 'noise', at, radius });
   const heard = noiseField(c.w, c.d, at, radius);
   for (const m of c.d.monsters) {
-    if (m.kind === 'gloam') continue;
+    if (m.kind === 'gloam' || m.buried) continue;
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;
@@ -349,25 +402,41 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
       }
       continue;
     }
-    if (m.awareness === 'asleep') {
-      m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
-      m.focusAt = { ...at };
-      c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
+    if (m.awareness === 'asleep' || m.awareness === 'patrol') {
+      goAlert(c, m, at);
     } else if (m.awareness === 'alert') {
       m.focusAt = { ...at };
+      m.returning = undefined;
+      m.searchRounds = SEARCH_ROUNDS;
     } else if (m.kind === 'berserker' && !m.focusAt) {
       m.focusAt = { ...at };
     }
   }
 }
 
+/** The monster has a quarry: hunting, no longer searching or walking back. */
+export function goHunting(c: Ctx, m: MonsterX, at?: Pos): void {
+  if (m.buried) return;
+  const was = m.awareness;
+  m.awareness = 'hunting';
+  m.searchRounds = undefined;
+  m.returning = undefined;
+  if (at) m.focusAt = { ...at };
+  if (was !== 'hunting') c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
+}
+
+/** A sleeper or patroller hears something: alert at the source, searching for SEARCH_ROUNDS (berserkers hunt). */
+export function goAlert(c: Ctx, m: MonsterX, at: Pos): void {
+  m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
+  m.focusAt = { ...at };
+  m.returning = undefined;
+  if (m.awareness === 'alert') m.searchRounds = SEARCH_ROUNDS;
+  c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
+}
+
 export function wakeAdjacent(c: Ctx, at: Pos): void {
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' && m.kind !== 'dragon' && within(m.at, at, 1)) {
-      m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
-      m.focusAt = { ...at };
-      c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
-    }
+    if (m.awareness === 'asleep' && m.kind !== 'dragon' && !m.buried && within(m.at, at, 1)) goAlert(c, m, at);
   }
 }
 

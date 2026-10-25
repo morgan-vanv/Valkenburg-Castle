@@ -3,7 +3,10 @@
 import type { HeroClass, MonsterKind, ShopOffer, Stat, Stats } from './types';
 import type { ClassInfo } from './api';
 
-export const LIGHT_MAX = 40;
+/** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
+export const LIGHT_MAX = 20;
+export const LIGHT_BRIGHT = 12; // above this = bright
+export const LIGHT_DIM = 7; // this..LIGHT_BRIGHT = dim
 export const PACK_SLOTS = 4;
 export const FOCUS_MAX = 3;
 export const MANA_MAX = 3;
@@ -134,7 +137,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
     abilities: [
       'Firebolt (1 mana): 3 Wits slots at range 5, 2 dmg per hit.',
       'Fireball (2 mana): radius 1 at range 5, 3 Wits slots, 2 dmg per hit to everyone there, allies too. Burns 2 rounds. Noise 6.',
-      'Kindle (1 mana): +12 light.',
+      'Kindle (1 mana): +6 light.',
     ],
   },
   shadowmancer: {
@@ -188,7 +191,46 @@ export const MONSTERS: Record<MonsterKind | 'gloam', MonsterDef> = {
   berserker: { name: 'Berserker', hp: 10, slots: 4, chance: 60, dmg: 3, move: 4, xp: 3 },
   dragon: { name: 'The Dragon', hp: 30, slots: 4, chance: 65, dmg: 3, move: 3, xp: 0, armor: 1 },
   gloam: { name: 'The Gloam', hp: 99, slots: 0, chance: 100, dmg: 4, move: 3, xp: 0 },
+  // V3.3 (spec 16.4)
+  archer: { name: 'Orc archer', hp: 5, slots: 2, chance: 55, dmg: 2, move: 3, xp: 1 },
+  captain: { name: 'Orc captain', hp: 9, slots: 3, chance: 60, dmg: 2, move: 3, xp: 2, armor: 1 },
+  ghoul: { name: 'Ghoul', hp: 7, slots: 2, chance: 60, dmg: 2, move: 4, xp: 2 },
 };
+
+// Section 16 numbers.
+/** Difficulty tiers by spawn level (16.3), applied to every monster but the Dragon and the Gloam. */
+export const TIERS: Record<number, { hp: number; chance: number; dmg: number }> = {
+  1: { hp: 0, chance: 0, dmg: 0 },
+  2: { hp: 2, chance: 5, dmg: 0 },
+  3: { hp: 4, chance: 10, dmg: 1 },
+};
+/** Rounds a monster that lost its quarry searches before going back to its route or post (16.1). */
+export const SEARCH_ROUNDS = 3;
+/** Monsters see heroes this far (line of sight), lit or within MONSTER_DARK_SIGHT. */
+export const MONSTER_SIGHT = 6;
+export const MONSTER_DARK_SIGHT = 3;
+/** Sight range of a hero standing in an unlit hex, by level (16.2). */
+export const DARK_SIGHT: Record<number, number> = { 1: 4, 2: 2, 3: 1 };
+export const ARCHER_RANGE = 4;
+export const ARCHER_KEEP = 2; // archers stay at least this far away
+export const CAPTAIN_SHOUT_RANGE = 8;
+export const CAPTAIN_SHOUT_COOLDOWN = 4;
+export const SHOUT_NOISE = 5;
+export const GHOUL_RISE_RANGE = 2;
+export const GLOAM_DMG = 4;
+export const GLOAM_MOVE = 3;
+export const GLOAM_RISE_MIN = 4;
+export const GLOAM_RISE_MAX = 6;
+export const GLOAM_CALM_FADE = 2;
+export const BRAZIER_LIGHT = 4;
+export const KINDLE_LIGHT = 6;
+/** The Lantern Sisters' kit (16.5). */
+export const SISTER_CLASSES: ('ranger' | 'shadowmancer' | 'burglar')[] = ['ranger', 'shadowmancer', 'burglar'];
+export const SISTER_DARTS = 2;
+export const SISTER_DART_CHANCE = 65;
+export const SISTER_SMOKE = 1;
+/** Neutral sisters head out when the lantern gets this low (was 18 of 40). */
+export const SISTERS_LEAVE_LIGHT = 9;
 
 export const SISTER = { hp: 7, slots: 3, chance: 55, dmg: 2, move: 4 };
 export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
@@ -228,7 +270,7 @@ export const SHOP: ShopOffer[] = [
   { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.' },
   { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.' },
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.' },
-  { kind: 'oil', name: 'Oil flask', price: 20, text: '+10 lantern light.' },
+  { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
 ];
 
@@ -257,7 +299,7 @@ export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker', numb
 export const SMOKE_ROUNDS = 2;
 export const GLUE_ROUNDS = 2;
 export const CALTROPS_DMG = 2;
-export const OIL_LIGHT = 10;
+export const OIL_LIGHT = 8;
 export const FIRECRACKER_NOISE = 6;
 
 export const HEAL_PRICE = 30;

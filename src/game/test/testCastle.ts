@@ -148,13 +148,20 @@ export const testCastle: CastleDef = {
     { kind: 'lift', a: at(2, 1, 6), b: at(3, 1, 6), winch: at(2, 1, 7) },
   ],
   entrances: [at(1, 2, 9), at(1, 18, 7)],
+  // V3.3 (spec 16.1): awake by default; sleepers are marked. The east hall has a patrol, the
+  // Crossing an archer on the bridge and a captain with Grub, the Hollow a buried ghoul.
   spawns: [
-    { at: at(1, 4, 2), kind: 'rats' },
+    { at: at(1, 4, 2), kind: 'rats', asleep: true },
     { at: at(1, 16, 4), kind: 'orc' },
-    { at: at(2, 16, 2), kind: 'spider' },
+    { at: at(1, 15, 6), kind: 'orc', patrol: [at(1, 15, 6), at(1, 17, 6), at(1, 17, 8), at(1, 15, 8)] },
+    { at: at(2, 16, 2), kind: 'spider', asleep: true },
     { at: at(2, 9, 7), kind: 'orc', name: 'Grub the Jailer' },
+    { at: at(2, 10, 7), kind: 'captain' },
+    { at: at(2, 12, 3), kind: 'archer' },
     { at: at(3, 5, 3), kind: 'rats' },
-    { at: at(3, 16, 4), kind: 'dragon', name: 'Valkenburg Wyrm' },
+    { at: at(3, 9, 2), kind: 'spider' },
+    { at: at(3, 6, 7), kind: 'ghoul' },
+    { at: at(3, 16, 4), kind: 'dragon', name: 'Valkenburg Wyrm', asleep: true },
   ],
   chests: [
     { id: 'c1', at: at(1, 2, 1), tier: 1 },

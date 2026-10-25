@@ -9,23 +9,29 @@ import { easeOutCubic } from './world';
 export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
 
 /**
- * Spec 15.8: OSRS-like scale. A humanoid model is ~1.05 to the head and ~0.6 wide, so a
- * hero at 2.5 stands about 2.6 high and 1.5 wide: as wide as its hex (1.73 across) and
- * well over a hex tall. Monsters scale with menace: rats low, orcs hero-sized, the
- * berserker a head taller, spiders wide, the Gloam looming. The Dragon is built in
- * world units and drawn at 1.
+ * V3.3 scale direction "C RuneScape" (replaces 15.8): a humanoid model is 1.0 to the top of
+ * the head, so a hero at 2.0 stands 2.0 world units (hex size 1) with natural blocky
+ * proportions. Monsters are scaled relative to the hero: rats 0.35x (nose to rump), spider
+ * 0.8x wide, orc 1.05x, berserker a head taller, captain like an orc, ghoul gaunt at hero
+ * height, the Gloam looming. The Dragon is built in world units and drawn at 1 (unchanged).
  */
-export const HERO_SCALE = 2.5;
+export const HERO_SCALE = 2.0;
 export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
-  hobart: 2.6,
-  rats: 2.6,
-  orc: 2.5,
-  cutpurse: 2.3,
-  berserker: 2.9,
-  spider: 2.6,
-  gloam: 2.3,
-  sister: 2.4,
-  prisoner: 2.3,
+  hobart: 2.0,
+  rats: 1.3,
+  orc: 2.1,
+  archer: 2.0,
+  captain: 2.1,
+  ghoul: 2.0,
+  cutpurse: 1.9,
+  berserker: 2.5,
+  spider: 1.25,
+  gloam: 1.8,
+  sister: 1.95,
+  sisterRanger: 1.95,
+  sisterShadow: 1.95,
+  sisterBurglar: 1.95,
+  prisoner: 1.9,
   dragon: 1,
   dragonSleep: 1,
 };
@@ -65,7 +71,7 @@ export class UnitView {
     this.body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: this.baseOpacity, emissive: 0x000000, depthWrite: !ghost || key === 'gloam' });
     this.glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: key !== 'gloam' });
     this.fig = makeFigure(this.model, { body: this.body, glow: this.glow });
-    this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.3);
+    this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.0);
     this.fig.scale.setScalar(this.scale);
     this.fig.traverse((o) => {
       o.userData.unitId = id;

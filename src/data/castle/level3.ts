@@ -76,12 +76,11 @@ export function buildLevel3(): LevelBuilder {
   // The Drain: rocks in the water.
   b.props('rock', [[8, 18], [5, 23], [8, 20]]);
 
-  // Lights: fungus in the grove, the pit glow on the Bone Pile, the Lair's
-  // fires and its fire vents (radius 1 on walkable hexes around the hoard).
+  // Lights (V3.3, spec 16.2): only fungus in the grove, the pit glow on the Bone Pile, the
+  // Lair's fires and its fire vents (radius 1 on walkable hexes around the hoard). Nothing else.
   b.light('fungus', [[10, 11], [13, 13], [8, 14], [16, 15]]);
   b.light('glow', [[24, 13], [25, 18]]);
   b.light('fire', [[37, 10], [40, 14]], 2);
   b.light('fire', [[36, 9], [41, 15], [35, 15]], 1);
-  b.sconce(22, 23); // lift base: one lamp on the old works
   return b;
 }

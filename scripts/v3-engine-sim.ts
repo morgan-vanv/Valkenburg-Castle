@@ -12,6 +12,12 @@
 // tavern (a front-liner first, then a quiet one, then a mage), re-hiring when the roster thins.
 // Heroes dash (second move) toward the goal when nothing is in reach to hit.
 //
+// V3.3: the lantern holds 20 and can be shuttered. The bot shutters on Level 1 whenever the
+// bearer stands in fixed light (daylight, sconces), opens it otherwise and on Levels 2 and 3,
+// buys an oil flask for Level 3 contracts and drinks it when the lantern runs low, and breaks
+// free when a ghoul holds a hero. Per level it prints contracts done, deaths, world phases with a
+// hero in the dark on Level 3, and Gloam strikes.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -21,7 +27,7 @@ import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
 import { posKey, samePos, type Pos } from '../src/game/hex';
 import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '../src/game/types';
-import { World, distField, fallColumn, kindAt } from '../src/game/world';
+import { World, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
 import { posNeighbors } from '../src/game/hex';
 import type { DelveX } from '../src/game/state';
 
@@ -32,6 +38,10 @@ const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
 const e = createEngine(castle);
 const w = new World(castle);
 const ROUND_CAP = 80;
+/** The bot heads out when the lantern gets this low (it holds 20 since V3.3). */
+const LOW_LIGHT = 5;
+/** Heroes keep within this many hexes of the lantern bearer (a careless player still stays in the light). */
+const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
 const pits: Pos[] = [];
@@ -42,11 +52,14 @@ for (const l of castle.levels) for (const k of Object.keys(l.tiles)) {
 
 let errors = 0;
 const evCount: Record<string, number> = {};
+let gloamStrikes = 0;
 function run(s: GameState, cmd: Command): GameState {
   const r = e.apply(s, cmd);
+  const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
   for (const ev of r.events) {
     const key = ev.type === 'hit' ? (ev.target.startsWith('m') || ev.target.startsWith('r') ? 'hit:monster' : 'hit:hero') : ev.type === 'awake' ? `awake:${ev.awareness}` : ev.type;
     evCount[key] = (evCount[key] ?? 0) + 1;
+    if (ev.type === 'hit' && (ev.attacker === gloamId || r.state.delve?.monsters.find((m) => m.id === ev.attacker)?.kind === 'gloam')) gloamStrikes++;
   }
   if (r.error) {
     errors++;
@@ -105,7 +118,7 @@ function objectiveFailed(s: GameState): boolean {
 
 function goalFor(s: GameState): Pos[] {
   const d = s.delve!;
-  const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < 12 || d.round > 50;
+  const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
   if (leaving) return w.exits;
   if (d.contract.kind === 'slay') {
     const dr = d.monsters.find((m) => m.kind === 'dragon');
@@ -139,6 +152,23 @@ function routeFor(s: GameState, at: Pos): { goals: Pos[]; jump: Pos[]; winch: bo
   return { goals: edges, jump: good, winch: false };
 }
 
+/**
+ * Lantern discipline (spec 16.2): on Level 1 shutter while the bearer stands in fixed light
+ * (daylight and sconces light most of the level), open otherwise; always open on Levels 2 and 3.
+ */
+function lanternCheck(s: GameState, id: string): GameState {
+  const d = s.delve as DelveX;
+  if (d.lanternBearer !== id) return s;
+  const me = d.heroes.find((x) => x.heroId === id)!;
+  const fixed = fixedLit(w, d);
+  const wantOpen = me.at.level !== 1 || !fixed.has(posKey(me.at));
+  if (wantOpen !== d.lanternOpen) {
+    const o = option(s, id, 'shutter');
+    if (o) s = act(s, id, 'shutter', o.targets[0]!);
+  }
+  return s;
+}
+
 function heroTurn(s: GameState, h: HeroInDelve): GameState {
   const id = h.heroId;
   const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
@@ -147,13 +177,15 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     if (!alive() || hero()!.acted) return false;
     const me = hero()!;
     const def = e.heroById(s, id)!;
-    const order: ActionKind[] = ['revive', 'free', 'take', 'attack', 'firebolt', 'mend', 'kindle', 'open', 'pick', 'light', 'leave'];
+    // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
+    const order: ActionKind[] = ['escape', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
       const o = option(s, id, a);
       if (!o) continue;
-      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < 12 || s.delve!.round > 50)) continue;
+      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50)) continue;
       if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
-      if (a === 'kindle' && s.delve!.light > 30) continue;
+      if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
+      if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
       if (a === 'free' && s.delve!.prisoner?.escortedBy) continue;
       if (a === 'open' && !o.targets.some((t) => t.id)) continue;
       if (a === 'take' && me.pack.length >= 4) continue;
@@ -171,25 +203,49 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   if (!alive()) return s;
   const me = hero()!;
   if (!me.moved && !me.webbed) {
-    // Stay put next to an awake enemy we can hit.
+    // Stay put next to an awake enemy we can hit; close in on a hunter in sight within 4 (archers plink from range).
     const enemyNear = option(s, id, 'attack');
     if (!(enemyNear && !me.acted)) {
-      const goals = routeFor(s, me.at).goals;
+      const d = s.delve as DelveX;
+      const vis = e.visibility(s).visible;
+      const hunters = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness === 'hunting' && m.at.level === me.at.level
+        && vis.has(posKey(m.at)) && Math.max(Math.abs(m.at.q - me.at.q), Math.abs(m.at.r - me.at.r), Math.abs(m.at.q + m.at.r - me.at.q - me.at.r)) <= 4);
+      const goals = hunters.length && !me.acted ? hunters.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : routeFor(s, me.at).goals;
       const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
       const here = field.get(posKey(me.at)) ?? 999;
       const reach = e.reachable(s, id, false);
+      // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
+      const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+      const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+      const isBearer = !bearer || bearer.heroId === id;
+      const stragglers = isBearer
+        ? d.heroes.filter((h) => h.status === 'active' && h.heroId !== id && h.at.level === me.at.level && !h.webbed && !h.grabbedBy && hexDist(h.at, me.at) > COHESION + 1)
+        : [];
       let best: (typeof reach)[0] | undefined;
       let bestD = here;
-      for (const r of reach) {
-        const dd = field.get(posKey(r.to)) ?? 999;
-        if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
-          bestD = dd;
-          best = r;
+      if (!(isBearer && stragglers.length && !hunters.length)) {
+        for (const r of reach) {
+          if (!isBearer && bearer && r.to.level === bearer.at.level && hexDist(r.to, bearer.at) > COHESION && hexDist(me.at, bearer.at) <= COHESION) continue;
+          const dd = field.get(posKey(r.to)) ?? 999;
+          if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
+            bestD = dd;
+            best = r;
+          }
+        }
+      }
+      // Fallen behind: catch up with the bearer instead.
+      if (!best && !isBearer && bearer && bearer.at.level === me.at.level && hexDist(me.at, bearer.at) > COHESION) {
+        const bf = distField(w, d, [bearer.at], { stairs: true, allowLocked: true });
+        let bd = bf.get(posKey(me.at)) ?? 999;
+        for (const r of reach) {
+          const dd = bf.get(posKey(r.to)) ?? 999;
+          if (dd < bd) { bd = dd; best = r; }
         }
       }
       if (best) s = run(s, { type: 'move', heroId: id, path: best.path, sneak: false });
     }
   }
+  if (alive()) s = lanternCheck(s, id);
   tryAct();
   // Dash (spec 15.2): nothing to do with the action, so move again toward the goal.
   if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
@@ -199,8 +255,11 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const here = field.get(posKey(me2.at)) ?? 999;
     let best: ReturnType<typeof e.reachable>[0] | undefined;
     let bestD = here;
+    const d2 = s.delve as DelveX;
+    const bearer2 = d2.heroes.find((h) => h.heroId === d2.lanternBearer && h.status === 'active');
     for (const r of e.reachable(s, id, false)) {
       if (!r.dash) continue;
+      if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
       const dd = field.get(posKey(r.to)) ?? 999;
       if (dd < bestD) { bestD = dd; best = r; }
     }
@@ -231,6 +290,9 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
 interface Row {
   squad: string;
   contract: string;
+  level: number;
+  darkRounds: number;
+  gloamStrikes: number;
   done: boolean;
   rounds: number;
   light: number;
@@ -264,8 +326,14 @@ for (let i = 0; i < N; i++) {
   const fit = s.campaign.roster.filter((h) => !h.wounded).slice(0, 4).map((h) => h.id);
   if (!fit.length) break;
   const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? s.campaign.board[i % s.campaign.board.length]!;
+  // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
+  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
   const packs: Record<string, string[]> = {};
-  s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2).forEach((it, j) => {
+  const carry = [
+    ...(k.level >= 3 ? s.campaign.stash.filter((it) => it.kind === 'oil').slice(0, 1) : []),
+    ...s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2),
+  ];
+  carry.forEach((it, j) => {
     (packs[fit[j % fit.length]!] ??= []).push(it.id);
   });
   s = run(s, { type: 'startDelve', contractId: k.id, heroIds: fit, entrance: i % castle.entrances.length, packs });
@@ -274,15 +342,26 @@ for (let i = 0; i < N; i++) {
     break;
   }
   const rivals = !!s.delve!.rivals;
+  let darkRounds = 0;
+  const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
     for (const h of s.delve!.heroes.filter((x) => x.status === 'active')) {
       if (s.stage !== 'delve') break;
       s = heroTurn(s, h);
     }
     if (s.stage !== 'delve') break;
+    {
+      const d = s.delve as DelveX;
+      const lit = litSet(w, d);
+      if (d.heroes.some((h) => h.status === 'active' && h.at.level === 3 && !lit.has(posKey(h.at)))) darkRounds++;
+    }
     if (TRACE === i + 1) {
       const d = s.delve!;
-      console.log(`r${d.round} light ${d.light}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
+      console.log(`r${d.round} light ${d.light}${d.lanternOpen ? '' : ' (shut)'}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}${h.grabbedBy ? ' held' : ''}${h.webbed ? ' web' : ''}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
+      const near = d.monsters.filter((m) => !m.buried && d.heroes.some((h) => h.status === 'active' && h.at.level === m.at.level && Math.max(Math.abs(h.at.q - m.at.q), Math.abs(h.at.r - m.at.r), Math.abs(h.at.q + h.at.r - m.at.q - m.at.r)) <= 6));
+      if (near.length) console.log('   near:', near.map((m) => `${m.id}:${m.kind}@${posKey(m.at)} hp${m.hp} ${m.awareness} ${m.intent?.kind ?? '-'}${m.intent?.targetId ? '>' + m.intent.targetId : ''}`).join(' '));
+      if (d.rivals && (d.rivals as { entered?: boolean }).entered) console.log('   sisters:', d.rivals.stance, d.rivals.members.filter((r) => !r.goneOut && r.hp > 0).map((r) => `${r.cls}@${posKey(r.at)} hp${r.hp} ${r.intent?.kind ?? '-'}`).join(' '));
+      for (const t of d.log.slice(-6)) console.log('   |', t);
     }
     if (s.delve!.round >= ROUND_CAP) {
       s = run(s, { type: 'abandon' });
@@ -295,6 +374,9 @@ for (let i = 0; i < N; i++) {
   rows.push({
     squad: d.heroes.map((h) => e.heroById(s, h.heroId)?.cls.slice(0, 4) ?? '?').join('/'),
     contract: `${k.kind} L${k.level}`,
+    level: k.level,
+    darkRounds,
+    gloamStrikes: gloamStrikes - strikesBefore,
     done: sum.contractDone,
     rounds: d.round,
     light: d.light,
@@ -309,12 +391,19 @@ for (let i = 0; i < N; i++) {
   s = run(s, { type: 'backToCamp' });
 }
 
-console.log('delve  contract     done  rounds light  loot bounty deaths rivals  squad');
+console.log('delve  contract     done  rounds light  loot bounty deaths rivals  dark gloam  squad');
 rows.forEach((r, i) => {
   console.log(
-    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${(r.rivals ? 'yes' : '').padEnd(6)}  ${r.squad}`,
+    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${(r.rivals ? 'yes' : '').padEnd(6)} ${String(r.darkRounds).padStart(5)} ${String(r.gloamStrikes).padStart(5)}  ${r.squad}`,
   );
 });
+console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
+console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
+for (const lv of [1, 2, 3]) {
+  const rs = rows.filter((r) => r.level === lv);
+  if (!rs.length) continue;
+  console.log(`  L${lv}    ${String(rs.length).padStart(3)}  ${String(rs.filter((r) => r.done).length).padStart(4)}  ${String(rs.reduce((a, r) => a + r.deaths, 0)).padStart(6)}  ${String(rs.reduce((a, r) => a + r.darkRounds, 0)).padStart(16)}  ${String(rs.reduce((a, r) => a + r.gloamStrikes, 0)).padStart(13)}`);
+}
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);
 console.log(`first five L1 delves: done ${first.filter((r) => r.done).length}/${first.length}, deaths ${first.reduce((a, r) => a + r.deaths, 0)}`);

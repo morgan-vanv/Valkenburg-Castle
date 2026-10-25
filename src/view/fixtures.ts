@@ -108,6 +108,9 @@ export function fixtureDelve(castle: CastleDef): GameState {
       blown: [],
       ropes: [],
       liftWorking: false,
+      lanternOpen: true,
+      knownRoutes: [],
+      gloamCalm: 0,
       smoke: {},
       glue: {},
       burning: {},
@@ -139,8 +142,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
     const d = s.delve!;
     const out = new Set<string>();
     const b = d.heroes.find((h) => h.heroId === d.lanternBearer)!;
-    const r = d.light > 36 ? 4 : d.light >= 19 ? 3 : d.light >= 1 ? 2 : 0;
-    for (const h of range(b.at, r)) out.add(posKey({ level: b.at.level, ...h }));
+    const r = d.lanternOpen === false ? 0 : d.light > 36 ? 4 : d.light >= 19 ? 3 : d.light >= 1 ? 2 : 0;
+    if (r > 0) for (const h of range(b.at, r)) out.add(posKey({ level: b.at.level, ...h }));
     for (const h of d.heroes) if (h.torch > 0) for (const x of range(h.at, 2)) out.add(posKey({ level: h.at.level, ...x }));
     for (const k of d.lit) {
       const [l, rest] = k.split(':');
@@ -183,6 +186,11 @@ export function fixtureEngine(castle: CastleDef): Engine {
       if (cmd.type === 'act' && s.delve) {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
         h.acted = true;
+        if (cmd.action === 'shutter') {
+          h.acted = false;
+          s.delve.lanternOpen = !s.delve.lanternOpen;
+          return { state: s, events: [{ type: 'shutter', open: s.delve.lanternOpen }] };
+        }
         if (cmd.action === 'attack' && cmd.target.id) {
           const m = s.delve.monsters.find((x) => x.id === cmd.target.id)!;
           const results = [true, false, true].slice(0, 3);
@@ -288,7 +296,16 @@ export function fixtureEngine(castle: CastleDef): Engine {
       return out;
     },
     moveNoise: (_s, _h, sneak) => (sneak ? 0 : 1),
-    sightRange: (s, level) => Math.max(2, (eng.brightness(s) === 'bright' ? 8 : eng.brightness(s) === 'dim' ? 6 : eng.brightness(s) === 'dark' ? 4 : 2) - (level - 1)),
+    sightRange(s, heroId) {
+      const h = s.delve?.heroes.find((x) => x.heroId === heroId);
+      const level = h?.at.level ?? 1;
+      if (h && !eng.heroLit(s, heroId)) return level === 1 ? 4 : level === 2 ? 2 : 1;
+      return Math.max(2, (eng.brightness(s) === 'bright' ? 8 : eng.brightness(s) === 'dim' ? 6 : eng.brightness(s) === 'dark' ? 4 : 2) - (level - 1));
+    },
+    heroLit(s, heroId) {
+      const h = s.delve?.heroes.find((x) => x.heroId === heroId);
+      return !!h && lit(s).has(posKey(h.at));
+    },
     fallInfo: (_s, pit) => fallFrom(castle, pit),
     edgeRisk(s, heroId) {
       const h = s.delve?.heroes.find((x) => x.heroId === heroId);

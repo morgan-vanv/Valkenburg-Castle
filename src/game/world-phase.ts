@@ -1,98 +1,27 @@
 // The world phase: light burns, monsters act on their intents, rivals act,
 // the Gloam hunts, then new intents. Also blasting charges at the end of
-// the player phase.
+// the player phase. Monster behaviour: spec 7, 14.3, 14.4, 16.1, 16.3, 16.4.
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { HeroInDelve, Intent, Item } from './types';
-import { BURN_DMG, CALTROPS_DMG, CLASSES, MONSTERS, ORC_SHOVE_CHANCE, OVERWATCH_RANGE, SISTER } from './data';
+import type { Intent } from './types';
+import {
+  ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
+  GLOAM_RISE_MIN, ORC_SHOVE_CHANCE, SEARCH_ROUNDS, SHOUT_NOISE,
+} from './data';
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  armorOf, brightnessAt, chestLoot, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, LIGHT_PENALTY, makeNoise, nameOf, noteOnce, occupant,
-  putOnGround, rivalsOnMap, roll, valueOf,
+  activeHeroes, chestLoot, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, makeNoise, monsterStats, nameOf, noteOnce, occupant,
+  onMap, putOnGround, releaseHold, rivalsOnMap, roll,
 } from './common';
-import {
-  canEnter, dijkstra, distField, doorAt, isFloorish, kindAt, lanternPos, litSet, los, pathTo, seesHex, smoky, visibleSet, within,
-} from './world';
-import { checkDelveEnd, refreshSight, setLight } from './delve';
-import { behind, fallInfo, figure, push, pushOutcome, railed } from './falls';
+import { canEnter, dijkstra, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within } from './world';
+import { awayFrom, checkDelveEnd, pusherFor, refreshSight, setLight, unlitOnL3, visNow } from './delve';
+import { figure, push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
-
-// ---------------------------------------------------------------- perception
-
-interface Target {
-  id: string;
-  at: Pos;
-  armor: number;
-  hero?: HeroInDelve;
-}
-
-function targets(c: Ctx): Target[] {
-  const out: Target[] = [];
-  for (const h of c.d.heroes) {
-    if (h.status !== 'active' || h.veil > 0) continue; // veiled heroes are unseen (spec 15.3)
-    out.push({ id: h.heroId, at: h.at, armor: armorOf(heroDef(c, h.heroId)!), hero: h });
-  }
-  const pr = c.d.prisoner;
-  if (pr && pr.freed && !pr.dead && !pr.out) out.push({ id: pr.id, at: pr.at, armor: 0 });
-  return out;
-}
-
-function sees(c: Ctx, from: Pos, t: Pos, lit: Set<string>): boolean {
-  if (from.level !== t.level) return false;
-  const d = distance(from, t);
-  if (d > 6) return false;
-  if (d > 1 && (smoky(c.d, t) || smoky(c.d, from))) return false;
-  if (d > 2 && !lit.has(posKey(t))) return false;
-  return los(c.w, c.d, from, t);
-}
-
-/** Ward: 1 less per hit, to a minimum of 0 (spec 15.3). */
-function wardOf(h: HeroInDelve | undefined): number {
-  return h && h.ward > 0 ? 1 : 0;
-}
-
-// ---------------------------------------------------------------- overwatch (Ranger, spec 15.3)
-
-/**
- * An enemy `id` at `at` moves or acts: the first Ranger on overwatch who can see it within 6 shoots
- * (full bow roll). Returns true if the enemy died.
- */
-function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
-  const lit = litSet(c.w, c.d);
-  for (const h of c.d.heroes) {
-    if (h.status !== 'active' || !h.overwatch) continue;
-    const def = heroDef(c, h.heroId)!;
-    if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit)) continue;
-    h.overwatch = false;
-    const cls = CLASSES[def.cls];
-    let slots = cls.weapon.slots;
-    if (distance(h.at, at) <= 1) slots -= 1;
-    let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + LIGHT_PENALTY[brightnessAt(c.w, c, h.at, lit)];
-    const m = c.d.monsters.find((x) => x.id === id);
-    if (m?.awareness === 'asleep') p += 20;
-    say(c, `${heroName(c, h.heroId)} looses an arrow at ${nameOf(c, id)}.`);
-    c.ev.push({ type: 'cast', by: h.heroId, spell: 'overwatch', targetId: id, at });
-    const r = roll(c, h.heroId, 'Overwatch', slots, p);
-    makeNoise(c, h.at, cls.weapon.noise ?? 1);
-    if (!r.hits) {
-      c.ev.push({ type: 'miss', attacker: h.heroId, target: id });
-      return false;
-    }
-    const armor = m ? (MONSTERS[m.kind].armor ?? 0) : 0;
-    hurtAny(c, id, r.hits * Math.max(1, cls.weapon.dmg - armor) + (r.perfect ? 1 : 0), h.heroId, { crit: r.perfect });
-    return !figure(c, id);
-  }
-  return false;
-}
-
-function byDist(from: Pos) {
-  return (a: Target, b: Target) => {
-    const da = a.at.level === from.level ? distance(a.at, from) : 99;
-    const db = b.at.level === from.level ? distance(b.at, from) : 99;
-    return da - db || (a.id < b.id ? -1 : 1);
-  };
-}
+import {
+  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
+} from './ai';
+import { computeRivalIntents, rivalsAct } from './rivals';
 
 // ---------------------------------------------------------------- planning
 
@@ -103,55 +32,22 @@ interface Plan {
 
 const WAIT: Plan = { intent: { kind: 'wait' }, path: [] };
 
-function blocked(c: Ctx, p: Pos, self: string): boolean {
-  const o = occupant(c, p);
-  if ((c.d.burning?.[posKey(p)] ?? 0) > 0) return true; // nothing walks into fire
-  return !!o && o.id !== self;
-}
-
-/** Best path of at most `budget` toward the nearest of `goals` (stops on a free hex). */
-function approach(c: Ctx, self: string, from: Pos, goals: Pos[], budget: number, stairs: boolean, allowLocked = false): Pos[] | null {
-  if (!goals.length) return null;
-  const field = distField(c.w, c.d, goals, { stairs, allowLocked });
-  if (!field.has(posKey(from))) return null;
-  const nodes = dijkstra(c.w, c.d, from, { enter: (p) => !blocked(c, p, self), stairs, allowLocked, budget });
-  let best = from;
-  let bestScore = field.get(posKey(from))! * 100;
-  for (const n of nodes.values()) {
-    const f = field.get(posKey(n.p));
-    if (f === undefined) continue;
-    if (!samePos(n.p, from) && occupant(c, n.p)) continue;
-    const score = f * 100 + n.cost;
-    if (score < bestScore) {
-      bestScore = score;
-      best = n.p;
-    }
-  }
-  return samePos(best, from) ? [] : pathTo(nodes, best);
-}
-
-/** Free hexes a monster could stand on to hit `t`. */
-function attackSpots(c: Ctx, t: Pos, self: string, allowLocked = false): Pos[] {
-  return posNeighbors(t).filter((p) => canEnter(c.w, c.d, p, allowLocked) && !blocked(c, p, self));
-}
-
-function hitRange(slots: number, dmg: number, armor: number): [number, number] {
-  return [0, slots * Math.max(1, dmg - armor) + 1];
-}
+/** Abilities that must be shown as an intent the round before they go off (spec 16.4). */
+const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove'];
 
 function canSteal(t: Target): boolean {
   return !!t.hero && t.hero.pack.some((i) => i.kind !== 'heirloom');
 }
 
-function exitsBy(c: Ctx, from: Pos): Pos[] {
-  const field = distField(c.w, c.d, [from], { stairs: true });
-  return [...c.w.exits].filter((e) => field.has(posKey(e))).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
-}
-
 function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): Target | null {
-  const all = targets(c);
-  const seen = all.filter((t) => sees(c, m.at, t.at, lit));
   if (m.awareness === 'asleep') return null;
+  const all = targets(c);
+  // A ghoul keeps at the hero it holds.
+  if (m.holding) {
+    const held = all.find((t) => t.id === m.holding);
+    if (held && adjacentTo(held.at, m.at)) return held;
+  }
+  const seen = all.filter((t) => sees(c, m.at, t.at, lit));
   if (prefer) {
     const p = all.find((t) => t.id === prefer);
     if (p && (seen.includes(p) || (m.awareness === 'hunting' && p.at.level === m.at.level && distance(p.at, m.at) <= 2))) return p;
@@ -164,33 +60,123 @@ function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): T
   return null;
 }
 
-/** Orc: shove instead of attack when the hero's back is to an unrailed pit. */
-function orcShove(c: Ctx, m: MonsterX, from: Pos, t: Target, path: Pos[]): Plan | null {
-  if (m.kind !== 'orc' || !t.hero) return null;
-  const dest = behind(from, t.at);
-  if (kindAt(c.w, c.d, dest) !== 'pit' || railed(c, t.at)) return null;
-  const f = fallInfo(c, dest, t.id);
-  if (!f) return null;
-  return { intent: { kind: 'shove', targetId: t.id, to: dest, damage: [0, f.damage] }, path };
+/** Orc (adjacent) or archer (ranged, spec 16.4): shove instead of attack when the hero's back is to an unrailed pit. */
+function edgeShove(c: Ctx, m: MonsterX, from: Pos, t: Target, path: Pos[]): Plan | null {
+  if ((m.kind !== 'orc' && m.kind !== 'archer') || !t.hero) return null;
+  const o = pushOutcome(c, pusherFor(from, t.at), t.at, t.id);
+  if (o.kind !== 'fall' || !o.fall) return null;
+  return { intent: { kind: 'shove', targetId: t.id, to: o.dest, damage: [0, o.fall.damage] }, path };
 }
 
-export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>): Plan {
-  if (m.kind === 'gloam') return planGloam(c, m);
+/**
+ * Patrol (spec 16.1): walk the move allowance along the route toward the next waypoint, on
+ * through it when there's movement left. `routeAfter` is the waypoint to head for afterwards.
+ */
+function patrolPlan(c: Ctx, m: MonsterX, move: number): Plan {
+  const route = m.route;
+  if (!route || route.length < 2) return WAIT;
+  let idx = (m.routeIndex ?? 0) % route.length;
+  let cur = m.at;
+  let budget = move;
+  const path: Pos[] = [];
+  for (let guard = 0; budget > 0 && guard < route.length + 2; guard++) {
+    const wp = route[idx]!;
+    if (samePos(cur, wp)) {
+      idx = (idx + 1) % route.length;
+      continue;
+    }
+    const nodes = dijkstra(c.w, c.d, cur, { enter: (p) => !blocked(c, p, m.id), stairs: false, budget });
+    const n = nodes.get(posKey(wp));
+    const taken = occupant(c, wp);
+    if (n && (!taken || taken.id === m.id)) {
+      path.push(...pathTo(nodes, wp));
+      budget -= n.cost;
+      cur = wp;
+      idx = (idx + 1) % route.length;
+      continue;
+    }
+    // Can't reach the waypoint this round: get as close as the budget allows.
+    const seg = approach(c, m.id, cur, [wp], budget, false) ?? [];
+    path.push(...seg);
+    break;
+  }
+  if (!path.length) return WAIT;
+  m.routeAfter = idx;
+  return { intent: { kind: 'move', to: path[path.length - 1]! }, path };
+}
+
+/** Hexes an archer wants to shoot `t` from: ARCHER_KEEP..ARCHER_RANGE away with a line to the target. */
+function archerSpots(c: Ctx, m: MonsterX, t: Pos): Pos[] {
+  const out: Pos[] = [];
+  for (const h of range(t, ARCHER_RANGE)) {
+    const p = { level: t.level, ...h };
+    const d = distance(p, t);
+    if (d < ARCHER_KEEP || !canEnter(c.w, c.d, p) || blocked(c, p, m.id) || !los(c.w, c.d, p, t)) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+function archerPlan(c: Ctx, m: MonsterX, t: Target, move: number, lit: Set<string>, noAbility: boolean): Plan {
+  const st = monsterStats(m);
+  const shot = (to: Pos, path: Pos[]): Plan => {
+    const sh = noAbility ? null : edgeShove(c, m, to, t, path);
+    if (sh) {
+      m.shoveFrom = { ...to };
+      return sh;
+    }
+    return { intent: { kind: 'attack', targetId: t.id, to, damage: hitRange(st.slots, st.dmg, t.armor) }, path };
+  };
+  const d = m.at.level === t.at.level ? distance(m.at, t.at) : 99;
+  if (d > 1 && d <= ARCHER_RANGE && los(c.w, c.d, m.at, t.at) && sees(c, m.at, t.at, lit)) return shot(m.at, []);
+  // Too close or too far: find a shooting spot within reach (backing off when adjacent).
+  const spots = archerSpots(c, m, t.at);
+  const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: m.awareness === 'hunting', budget: move });
+  let best: Pos | null = null;
+  let bestScore = Infinity;
+  for (const n of nodes.values()) {
+    if (!spots.some((s) => samePos(s, n.p))) continue;
+    if (!samePos(n.p, m.at) && occupant(c, n.p)) continue;
+    const dd = distance(n.p, t.at);
+    // Prefer 3 away (middle of the band), then a short walk.
+    const score = Math.abs(dd - 3) * 100 + n.cost;
+    if (score < bestScore) {
+      bestScore = score;
+      best = n.p;
+    }
+  }
+  if (best) {
+    const path = samePos(best, m.at) ? [] : pathTo(nodes, best);
+    return shot(best, path);
+  }
+  if (d <= 1) {
+    // Nowhere good to back off to: shoot point-blank.
+    return shot(m.at, []);
+  }
+  const path = approach(c, m.id, m.at, spots.length ? spots : attackSpots(c, t.at, m.id), move, m.awareness === 'hunting') ?? [];
+  if (path.length) return { intent: { kind: 'move', to: path[path.length - 1]!, targetId: t.id }, path };
+  return WAIT;
+}
+
+export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbility?: boolean } = {}): Plan {
+  if (m.kind === 'gloam') return planGloam(c, m, lit);
   if (m.kind === 'dragon') return planDragon(c, m);
-  const def = { ...MONSTERS[m.kind], move: (m.stuck ?? 0) > 0 ? 0 : MONSTERS[m.kind].move };
-  if (m.awareness === 'asleep') return WAIT;
+  if (m.awareness === 'asleep' || m.buried) return WAIT;
+  const st = monsterStats(m);
+  const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
+  const noAbility = !!opts.noAbility;
   // Cutpurse with loot: run for the farthest exit.
   if (m.kind === 'cutpurse' && m.stolen) {
     const ex = exitsBy(c, m.at);
     const goal = ex[ex.length - 1];
     if (!goal) return WAIT;
-    const path = approach(c, m.id, m.at, [goal], def.move, true) ?? [];
+    const path = approach(c, m.id, m.at, [goal], move, true) ?? [];
     return { intent: { kind: 'flee', to: path[path.length - 1] ?? m.at }, path };
   }
   // Wounded rats run.
   if (m.kind === 'rats' && m.hp <= 1) {
     const ts = targets(c).filter((t) => t.at.level === m.at.level);
-    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: false, budget: def.move });
+    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: false, budget: move });
     let best = m.at;
     let bestD = -1;
     for (const n of nodes.values()) {
@@ -205,241 +191,316 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>): Plan {
   }
   const t = chooseTarget(c, m, lit, m.intent?.targetId);
   if (t) {
-    const near = samePos(t.at, m.at) ? false : t.at.level === m.at.level && distance(t.at, m.at) === 1;
+    // The captain rallies the orcs the first time it has a quarry, and every few rounds after (spec 16.4).
+    if (m.kind === 'captain' && !noAbility && (m.shoutCooldown ?? 0) <= 0) {
+      return { intent: { kind: 'shout', targetId: t.id, to: m.at }, path: [] };
+    }
+    if (m.kind === 'archer') return archerPlan(c, m, t, move, lit, noAbility);
+    const near = samePos(t.at, m.at) ? false : adjacentTo(t.at, m.at);
     const steal = m.kind === 'cutpurse' && canSteal(t);
-    const strike = (to: Pos, path: Pos[]): Plan => {
-      const sh = orcShove(c, m, to, t, path);
+    const strikePlan = (to: Pos, path: Pos[]): Plan => {
+      const sh = noAbility ? null : edgeShove(c, m, to, t, path);
       if (sh) {
         m.shoveFrom = { ...to };
         return sh;
       }
+      // A ghoul grabs first, then tears at what it holds with an extra slot (spec 16.4).
+      if (m.kind === 'ghoul' && t.hero) {
+        if (m.holding === t.id) return { intent: { kind: 'attack', targetId: t.id, to, damage: hitRange(st.slots + 1, st.dmg, t.armor) }, path };
+        if (!noAbility && !m.holding && !t.hero.grabbedBy) return { intent: { kind: 'grab', targetId: t.id, to }, path };
+      }
       return {
         intent: steal
           ? { kind: 'steal', targetId: t.id, to }
-          : { kind: 'attack', targetId: t.id, to, damage: hitRange(def.slots, def.dmg, t.armor) },
+          : { kind: 'attack', targetId: t.id, to, damage: hitRange(st.slots, st.dmg, t.armor) },
         path,
       };
     };
-    if (m.kind === 'spider' && !near && t.hero && within(m.at, t.at, 3) && sees(c, m.at, t.at, lit) && (m.lastWeb === undefined || c.d.round - m.lastWeb >= 2)) {
-      return { intent: { kind: 'web', targetId: t.id }, path: [] };
+    if (m.kind === 'spider' && t.hero && !near) {
+      // Webbed last round: drag them in (spec 16.4). Else web them when in reach.
+      if (t.hero.webbed && !noAbility && within(m.at, t.at, 3)) {
+        const to = { level: t.at.level, q: 2 * t.at.q - awayFrom(m.at, t.at).q, r: 2 * t.at.r - awayFrom(m.at, t.at).r };
+        return { intent: { kind: 'drag', targetId: t.id, to }, path: [] };
+      }
+      if (within(m.at, t.at, 3) && sees(c, m.at, t.at, lit) && (m.lastWeb === undefined || c.d.round - m.lastWeb >= 2)) {
+        return { intent: { kind: 'web', targetId: t.id }, path: [] };
+      }
     }
-    if (near) return strike(m.at, []);
+    if (near) return strikePlan(m.at, []);
     const spots = attackSpots(c, t.at, m.id);
-    const path = approach(c, m.id, m.at, spots, def.move, m.awareness === 'hunting');
+    const path = approach(c, m.id, m.at, spots, move, m.awareness === 'hunting');
     if (path) {
       const end = path[path.length - 1] ?? m.at;
-      if (end.level === t.at.level && distance(end, t.at) === 1) return strike(end, path);
+      if (adjacentTo(end, t.at)) return strikePlan(end, path);
       if (path.length) return { intent: { kind: 'move', to: end, targetId: t.id }, path };
     }
   }
+  if (m.awareness === 'patrol') return patrolPlan(c, m, move);
   if (m.focusAt && !samePos(m.focusAt, m.at)) {
-    const path = approach(c, m.id, m.at, [m.focusAt], def.move, m.awareness === 'hunting') ?? [];
+    const path = approach(c, m.id, m.at, [m.focusAt], move, m.awareness === 'hunting') ?? [];
     if (path.length) return { intent: { kind: 'move', to: path[path.length - 1]! }, path };
   }
   return WAIT;
 }
 
-function planGloam(c: Ctx, g: MonsterX): Plan {
-  const ts = targets(c).filter((t) => t.hero);
+/** The Gloam (spec 5, 16.2): hunts heroes standing in the dark, keeps to dark hexes, strikes for 4. */
+function planGloam(c: Ctx, g: MonsterX, lit: Set<string>): Plan {
+  const avoid = (p: Pos) => lit.has(posKey(p));
+  if (avoid(g.at)) {
+    // Light has reached it: it recoils to the nearest dark hex.
+    const nodes = dijkstra(c.w, c.d, g.at, { enter: (p) => !blocked(c, p, g.id), stairs: true, allowLocked: true, budget: GLOAM_MOVE });
+    let best: Pos | null = null;
+    let bestCost = Infinity;
+    for (const n of nodes.values()) {
+      if (samePos(n.p, g.at) || avoid(n.p) || occupant(c, n.p) || !isFloorish(c.w, c.d, n.p)) continue;
+      if (n.cost < bestCost) {
+        bestCost = n.cost;
+        best = n.p;
+      }
+    }
+    return best ? { intent: { kind: 'flee', to: best }, path: pathTo(nodes, best) } : WAIT;
+  }
+  const ts = targets(c).filter((t) => t.hero && !lit.has(posKey(t.at)));
   if (!ts.length) return WAIT;
-  const field = distField(c.w, c.d, [g.at], { stairs: true, allowLocked: true });
-  ts.sort((a, b) => (field.get(posKey(a.at)) ?? 999) - (field.get(posKey(b.at)) ?? 999));
+  const o = { stairs: true, allowLocked: true, avoid };
+  const field = new Map<string, number>();
+  {
+    // Walking distance through the dark from the Gloam to each candidate.
+    const nodes = dijkstra(c.w, c.d, g.at, { enter: (p) => !avoid(p) && !blocked(c, p, g.id), stairs: true, allowLocked: true, budget: 60 });
+    for (const t of ts) {
+      let best = 999;
+      for (const n of posNeighbors(t.at)) {
+        const node = nodes.get(posKey(n));
+        if (node && node.cost < best) best = node.cost;
+      }
+      field.set(t.id, best);
+    }
+  }
+  ts.sort((a, b) => (field.get(a.id) ?? 999) - (field.get(b.id) ?? 999) || byDist(g.at)(a, b));
   const t = ts[0]!;
-  if (t.at.level === g.at.level && distance(t.at, g.at) === 1) return { intent: { kind: 'attack', targetId: t.id, to: g.at, damage: [4, 4] }, path: [] };
-  const spots = posNeighbors(t.at).filter((p) => canEnter(c.w, c.d, p, true) && !blocked(c, p, g.id));
-  const path = approach(c, g.id, g.at, spots, 3, true, true) ?? [];
+  if (adjacentTo(t.at, g.at)) return { intent: { kind: 'attack', targetId: t.id, to: g.at, damage: [GLOAM_DMG, GLOAM_DMG] }, path: [] };
+  const spots = posNeighbors(t.at).filter((p) => canEnter(c.w, c.d, p, true) && !blocked(c, p, g.id) && !avoid(p));
+  const path = approach(c, g.id, g.at, spots, GLOAM_MOVE, o) ?? [];
   const end = path[path.length - 1] ?? g.at;
-  if (end.level === t.at.level && distance(end, t.at) === 1) return { intent: { kind: 'attack', targetId: t.id, to: end, damage: [4, 4] }, path };
+  if (adjacentTo(end, t.at)) return { intent: { kind: 'attack', targetId: t.id, to: end, damage: [GLOAM_DMG, GLOAM_DMG] }, path };
+  if (!path.length) return { intent: { kind: 'wait' }, path: [] };
   return { intent: { kind: 'move', to: end, targetId: t.id }, path };
 }
 
-/** Intents for every awake monster (pure apart from writing m.intent). */
+/** Intents for every awake monster on the map and every sister (pure apart from writing .intent). */
 export function computeIntents(c: Ctx): void {
   const lit = litSet(c.w, c.d);
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep') {
+    if (m.awareness === 'asleep' || m.buried) {
       m.intent = undefined;
       continue;
     }
     m.intent = planMonster(c, m, lit).intent;
   }
+  computeRivalIntents(c);
 }
 
 // ---------------------------------------------------------------- acting
 
-/** Walk a figure along `path`. Returns true if caltrops stopped it short (monsters only). */
-function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): boolean {
-  if (!path.length) return false;
-  const seg: Pos[] = [];
-  let from = at.at;
-  const isMonster = c.d.monsters.some((m) => m.id === id);
-  let stopped = false;
-  for (const p of path) {
-    if (isMonster && c.d.caltrops.includes(posKey(p))) {
-      // Caltrops: 2 damage, the walk ends here (spec 15.4).
-      c.d.caltrops = c.d.caltrops.filter((k) => k !== posKey(p));
-      seg.push(p);
-      c.ev.push({ type: 'moved', id, path: [...seg] });
-      seg.length = 0;
-      at.at = { ...p };
-      c.ev.push({ type: 'caltrops', id, at: p });
-      say(c, `${nameOf(c, id)} treads on caltrops.`);
-      hurtAny(c, id, CALTROPS_DMG, null, { noise: false });
-      return true;
-    }
-    if (kindAt(c.w, c.d, p) === 'door') {
-      const door = doorAt(c.d, p);
-      if (door && !door.open) {
-        door.open = true;
-        door.locked = false;
-        c.ev.push({ type: 'doorChanged', at: p, open: true, locked: false });
-      }
-    }
-    seg.push(p);
-    if (p.level !== from.level) {
-      c.ev.push({ type: 'moved', id, path: [...seg] });
-      seg.length = 0;
-      c.ev.push({ type: 'levelChanged', id, from: from.level, to: p.level });
-    }
-    from = p;
-  }
-  if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
-  at.at = { ...path[path.length - 1]! };
-  return stopped;
-}
-
-/** Sellsword guarding the target takes the hit instead. */
-function guardFor(c: Ctx, targetId: string): HeroInDelve | undefined {
-  return c.d.heroes.find((h) => h.status === 'active' && h.guarding === targetId);
-}
-
-/** Returns the id that was hit (after guard), or null on a miss. */
-function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): string | null {
-  let tid = targetId;
-  const g = guardFor(c, tid);
-  if (g) {
-    tid = g.heroId;
-    say(c, `${heroName(c, g.heroId)} steps in front of ${nameOf(c, targetId)}.`);
-  }
-  const r = roll(c, attacker, what, slots, p);
-  if (!r.hits) {
-    c.ev.push({ type: 'miss', attacker, target: tid });
-    return null;
-  }
-  const h = hd(c, tid);
-  const armor = h ? armorOf(heroDef(c, tid)!) : 0;
-  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h)) + (r.perfect ? 1 : 0);
-  if (h) hurtHero(c, h, total, attacker, r.perfect);
-  else hurtPrisoner(c, total, attacker);
-  return tid;
-}
-
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
-  if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') return;
+  if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || m.buried) return;
   const seen = targets(c).filter((t) => sees(c, m.at, t.at, lit)).sort(byDist(m.at));
   const t = seen[0];
   if (t) {
-    if (m.awareness !== 'hunting') {
-      m.awareness = 'hunting';
-      c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
-    }
-    m.focusAt = { ...t.at };
+    goHunting(c, m, t.at);
     if (m.kind === 'orc' && !m.shouted) {
       m.shouted = true;
       say(c, `${m.name} bellows.`);
       makeNoise(c, m.at, 5);
     }
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
-    // Lost sight: go alert and search the last hex it saw a hero on (focusAt).
+    // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1).
     m.awareness = 'alert';
+    m.searchRounds = SEARCH_ROUNDS;
+    m.returning = undefined;
     c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
   }
+}
+
+/** An alert searcher's clock runs down; at zero it goes back to its route or post (spec 16.1). */
+function searchTick(c: Ctx, m: MonsterX): void {
+  if (m.awareness !== 'alert' || m.returning) return;
+  if (m.searchRounds === undefined) return;
+  m.searchRounds -= 1;
+  if (m.searchRounds > 0) return;
+  m.searchRounds = undefined;
+  if (m.route && m.route.length > 1) {
+    // Back to the patrol: head for the nearest waypoint.
+    let best = 0;
+    let bestD = Infinity;
+    m.route.forEach((wp, i) => {
+      const d = wp.level === m.at.level ? distance(wp, m.at) : 99;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    m.routeIndex = best;
+    m.awareness = 'patrol';
+    m.focusAt = undefined;
+    c.ev.push({ type: 'awake', id: m.id, awareness: 'patrol' });
+  } else if (!samePos(m.at, m.spawnedAt)) {
+    m.returning = true;
+    m.focusAt = { ...m.spawnedAt };
+  } else {
+    m.focusAt = undefined;
+  }
+}
+
+/** Where a monster at `from` would push the figure at `at` (adjacent: straight behind; at range: the rounded direction). */
+function pushDest(from: Pos, at: Pos): Pos {
+  return awayFrom(from, at);
 }
 
 /** The shown intent, if it can still be carried out as shown. */
 function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
   const it = m.intent;
   if (!it || it.kind === 'wait' || it.kind === 'flee') return null;
+  if (m.kind === 'gloam') return null; // always re-plans: the light may have moved
   if (m.kind === 'dragon') {
     // Breath and sweep always go off as shown; bites/moves re-plan if stale.
     if (it.kind === 'breath' || it.kind === 'sweep') return { intent: it, path: [] };
     return null;
   }
+  const stairs = m.awareness === 'hunting';
+  const pathTo2 = (to: Pos): Pos[] | null => {
+    if (samePos(to, m.at)) return [];
+    if (occupant(c, to)) return null;
+    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs, budget: move });
+    if (!nodes.has(posKey(to))) return null;
+    return pathTo(nodes, to);
+  };
+  if (it.kind === 'shout') return targets(c).some((x) => x.id === it.targetId) ? { intent: it, path: [] } : null;
   if (it.kind === 'shove') {
     const t = targets(c).find((x) => x.id === it.targetId);
     const from = m.shoveFrom ?? m.at;
-    if (!t || !it.to || !samePos(behind(from, t.at), it.to)) return null;
-    let path: Pos[] = [];
-    if (!samePos(from, m.at)) {
-      if (occupant(c, from)) return null;
-      const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: m.awareness === 'hunting', budget: move });
-      if (!nodes.has(posKey(from))) return null;
-      path = pathTo(nodes, from);
-    }
-    return { intent: it, path };
+    if (!t || !it.to || !samePos(pushDest(from, t.at), it.to)) return null;
+    if (m.kind === 'archer' ? !within(from, t.at, ARCHER_RANGE) || !los(c.w, c.d, from, t.at) : !adjacentTo(from, t.at)) return null;
+    const path = pathTo2(from);
+    return path ? { intent: it, path } : null;
   }
   const t = it.targetId ? targets(c).find((x) => x.id === it.targetId) : undefined;
   if (it.kind !== 'move' && !t) return null;
   if (it.kind === 'web') return t?.hero && !adjacentTo(m.at, t.at) ? { intent: it, path: [] } : null;
+  if (it.kind === 'drag') return t?.hero?.webbed && !adjacentTo(m.at, t.at) && within(m.at, t.at, 3) ? { intent: it, path: [] } : null;
   const to = it.to ?? m.at;
-  let path: Pos[] = [];
-  if (!samePos(to, m.at)) {
-    if (occupant(c, to)) return null;
-    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: m.awareness === 'hunting' || m.kind === 'gloam', allowLocked: m.kind === 'gloam', budget: move });
-    if (!nodes.has(posKey(to))) return null;
-    path = pathTo(nodes, to);
+  const path = pathTo2(to);
+  if (!path) return null;
+  if (it.kind === 'grab' && (!t?.hero || t.hero.grabbedBy || !adjacentTo(to, t.at))) return null;
+  if (it.kind === 'attack' || it.kind === 'steal') {
+    if (m.kind === 'archer') {
+      if (!within(to, t!.at, ARCHER_RANGE) || !los(c.w, c.d, to, t!.at)) return null;
+    } else if (!adjacentTo(to, t!.at)) return null;
   }
-  if ((it.kind === 'attack' || it.kind === 'steal') && !adjacentTo(to, t!.at)) return null;
   return { intent: it, path };
-}
-
-function adjacentTo(a: Pos, b: Pos): boolean {
-  return a.level === b.level && distance(a, b) === 1;
 }
 
 function monsterAct(c: Ctx, m: MonsterX): void {
   const lit = litSet(c.w, c.d);
+  const wasPatrol = m.awareness === 'patrol';
   perceive(c, m, lit);
-  if (!c.d.monsters.includes(m) || m.awareness === 'asleep') return;
-  const def = MONSTERS[m.kind];
-  let plan = honored(c, m, (m.stuck ?? 0) > 0 ? 0 : def.move) ?? planMonster(c, m, lit);
-  // The Dragon never breathes without showing it first.
+  if (!c.d.monsters.includes(m) || m.awareness === 'asleep' || m.buried) return;
+  const st = monsterStats(m);
+  const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
+  let plan = honored(c, m, move) ?? planMonster(c, m, lit);
+  // Abilities go off only after being shown as the intent (spec 16.4); the Dragon never breathes unannounced.
   if (m.kind === 'dragon' && plan.intent.kind === 'breath' && m.intent?.kind !== 'breath') plan = planDragon(c, m, true);
+  if (m.kind !== 'dragon' && SHOWN_FIRST.includes(plan.intent.kind) && m.intent?.kind !== plan.intent.kind) plan = planMonster(c, m, lit, { noAbility: true });
   m.intent = plan.intent;
   const startAt = m.at;
+  const patrolling = m.awareness === 'patrol';
+  const visBefore = (patrolling || wasPatrol) && plan.path.length ? visNow(c) : null;
   // Overwatch: moving or acting in a Ranger's sight draws the shot first.
-  if ((plan.path.length || plan.intent.kind !== 'wait') && overwatchCheck(c, m.id, m.at)) return;
+  if (m.kind !== 'gloam' && (plan.path.length || plan.intent.kind !== 'wait') && overwatchCheck(c, m.id, m.at)) return;
   if (!c.d.monsters.includes(m)) return;
   const stopped = walk(c, m.id, m, plan.path);
   if (!c.d.monsters.includes(m)) return;
+  // A watched patrol gives its route away (spec 16.1).
+  if (visBefore && m.route && !(c.d.knownRoutes ??= []).includes(m.id)) {
+    if ([startAt, ...plan.path].some((p) => visBefore.has(posKey(p)))) {
+      c.d.knownRoutes.push(m.id);
+      c.ev.push({ type: 'routeKnown', id: m.id, route: m.route.map((p) => ({ ...p })) });
+      say(c, `${m.name} walks a beat. You've marked its round.`);
+    }
+  }
+  if (patrolling && plan.intent.kind === 'move' && plan.intent.to && samePos(m.at, plan.intent.to) && m.routeAfter !== undefined) {
+    m.routeIndex = m.routeAfter;
+    m.routeAfter = undefined;
+  }
   const charged = !stopped && plan.path.length >= 2 && startAt.level === m.at.level;
   const it = plan.intent;
-  if (m.focusAt && samePos(m.focusAt, m.at)) m.focusAt = undefined;
+  if (m.focusAt && samePos(m.focusAt, m.at)) {
+    m.focusAt = undefined;
+    m.returning = undefined;
+  }
   if (m.kind === 'dragon' && dragonSpecial(c, m, it)) return;
   switch (it.kind) {
+    case 'shout': {
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t) break;
+      m.shoutCooldown = CAPTAIN_SHOUT_COOLDOWN;
+      c.ev.push({ type: 'shout', id: m.id });
+      say(c, `${m.name} roars an order. Every orc in earshot turns on ${nameOf(c, t.id)}.`);
+      for (const x of onMap(c)) {
+        if (x === m || (x.kind !== 'orc' && x.kind !== 'archer' && x.kind !== 'captain')) continue;
+        if (x.at.level !== m.at.level || distance(x.at, m.at) > CAPTAIN_SHOUT_RANGE) continue;
+        goHunting(c, x, t.at);
+        x.intent = { kind: 'wait', targetId: t.id };
+      }
+      makeNoise(c, m.at, SHOUT_NOISE);
+      break;
+    }
     case 'shove': {
       const t = targets(c).find((x) => x.id === it.targetId);
-      if (!t?.hero || t.hero.status !== 'active' || !adjacentTo(m.at, t.at)) break;
-      say(c, `${m.name} lunges to shove ${heroName(c, t.id)} over the edge.`);
-      if (chance(c.s, ORC_SHOVE_CHANCE)) push(c, t.id, m.at, m.id);
+      if (!t?.hero || t.hero.status !== 'active') break;
+      if (m.kind === 'archer' ? !within(m.at, t.at, ARCHER_RANGE) || !los(c.w, c.d, m.at, t.at) : !adjacentTo(m.at, t.at)) break;
+      say(c, m.kind === 'archer' ? `${m.name} aims to knock ${heroName(c, t.id)} off the edge.` : `${m.name} lunges to shove ${heroName(c, t.id)} over the edge.`);
+      if (chance(c.s, ORC_SHOVE_CHANCE)) push(c, t.id, pusherFor(m.at, t.at), m.id);
       else {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
         say(c, `${heroName(c, t.id)} keeps their footing.`);
       }
       break;
     }
+    case 'grab': {
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t?.hero || t.hero.status !== 'active' || t.hero.grabbedBy || m.holding || !adjacentTo(m.at, t.at)) break;
+      m.holding = t.id;
+      t.hero.grabbedBy = m.id;
+      c.ev.push({ type: 'grabbed', by: m.id, id: t.id });
+      c.ev.push({ type: 'hit', attacker: m.id, target: t.id, damage: 0, crit: false });
+      say(c, `${m.name} seizes ${heroName(c, t.id)}. Break free, or cut it down.`);
+      break;
+    }
+    case 'drag': {
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t?.hero || !t.hero.webbed || adjacentTo(m.at, t.at)) break;
+      say(c, `${m.name} hauls on the web. ${heroName(c, t.id)} is dragged in.`);
+      push(c, t.id, awayFrom(m.at, t.at), m.id, 'dragged');
+      break;
+    }
     case 'attack': {
       if (!it.targetId) break;
       const t = targets(c).find((x) => x.id === it.targetId);
-      if (!t || t.at.level !== m.at.level || distance(t.at, m.at) !== 1) break;
+      if (!t || t.at.level !== m.at.level) break;
       if (m.kind === 'gloam') {
+        if (distance(t.at, m.at) !== 1 || lit.has(posKey(t.at))) break;
         const h = hd(c, t.id);
         say(c, 'The Gloam touches ' + nameOf(c, t.id) + '.');
-        if (h) hurtHero(c, h, 4 - wardOf(h), m.id);
-        else hurtPrisoner(c, 4, m.id);
+        if (h) hurtHero(c, h, GLOAM_DMG - wardOf(h), m.id);
+        else hurtPrisoner(c, GLOAM_DMG, m.id);
         break;
       }
-      const landed = strike(c, m.id, t.id, def.slots, def.chance, def.dmg, m.kind === 'dragon' ? 'Bite' : 'Attack');
+      if (m.kind === 'archer') {
+        if (!within(m.at, t.at, ARCHER_RANGE) || !los(c.w, c.d, m.at, t.at)) break;
+      } else if (distance(t.at, m.at) !== 1) break;
+      const slots = st.slots + (m.kind === 'ghoul' && m.holding === t.id ? 1 : 0);
+      const landed = strike(c, m.id, t.id, slots, st.chance, st.dmg, m.kind === 'dragon' ? 'Bite' : m.kind === 'archer' ? 'Shot' : 'Attack');
       // Berserker charge: moved 2+ hexes then hit: knock the target back.
       if (m.kind === 'berserker' && charged && landed) {
         const h = hd(c, landed);
@@ -453,14 +514,14 @@ function monsterAct(c: Ctx, m: MonsterX): void {
     case 'steal': {
       const t = targets(c).find((x) => x.id === it.targetId);
       if (!t || !t.hero || distance(t.at, m.at) !== 1 || t.at.level !== m.at.level) break;
-      const r = roll(c, m.id, 'Steal', def.slots, def.chance);
+      const r = roll(c, m.id, 'Steal', st.slots, st.chance);
       if (!r.hits) {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
         break;
       }
       const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom');
       if (!pool.length) {
-        hurtHero(c, t.hero, Math.max(1, def.dmg - t.armor), m.id);
+        hurtHero(c, t.hero, Math.max(1, st.dmg - t.armor), m.id);
         break;
       }
       const item = pick(c.s, pool);
@@ -488,166 +549,53 @@ function monsterAct(c: Ctx, m: MonsterX): void {
       }
       break;
   }
-}
-
-// ---------------------------------------------------------------- rivals
-
-function rivalEnter(c: Ctx): void {
-  const cr = c.d.rivals;
-  if (!cr || cr.entered || c.d.round < cr.entersRound) return;
-  const at = cr.members[0]!.at;
-  const spots: Pos[] = [];
-  const seen = new Set([posKey(at)]);
-  const q = [at];
-  for (let i = 0; i < q.length && spots.length < cr.members.length; i++) {
-    const p = q[i]!;
-    if (canEnter(c.w, c.d, p) && kindAt(c.w, c.d, p) !== 'door' && !occupant(c, p)) spots.push(p);
-    for (const n of posNeighbors(p)) {
-      if (seen.has(posKey(n)) || !canEnter(c.w, c.d, n)) continue;
-      seen.add(posKey(n));
-      q.push(n);
+  if (c.d.monsters.includes(m)) {
+    // A hold only lasts while the ghoul stands next to its hero.
+    if (m.holding) {
+      const h = hd(c, m.holding);
+      if (!h || h.status !== 'active' || !adjacentTo(h.at, m.at)) releaseHold(c, m);
     }
-  }
-  if (spots.length < cr.members.length) return; // blocked: try next round
-  cr.entered = true;
-  cr.members.forEach((r, i) => (r.at = spots[i]!));
-  c.ev.push({ type: 'rivalsEnter', at });
-  say(c, 'Lanterns at the door. Someone else is here.');
-}
-
-interface LootGoal {
-  at: Pos;
-  chestId?: string;
-  objective: boolean;
-}
-
-function lootGoals(c: Ctx): LootGoal[] {
-  const out: LootGoal[] = [];
-  for (const ch of c.d.chests) if (!ch.opened && !ch.jammed) out.push({ at: ch.at, chestId: ch.id, objective: false });
-  for (const g of c.d.ground) {
-    if (!g.items.length) continue;
-    if (c.d.heroes.some((h) => (h.status === 'active' || h.status === 'downed') && samePos(h.at, g.at))) continue;
-    out.push({ at: g.at, objective: g.items.some((i) => i.kind === 'heirloom') });
-  }
-  return out;
-}
-
-function rivalsAct(c: Ctx): void {
-  const cr = c.d.rivals;
-  if (!cr) return;
-  rivalEnter(c);
-  if (!cr.entered) return;
-  if (cr.stance !== 'hostile' && cr.goal !== 'leave' && ((cr.pickups ?? 0) >= 3 || c.d.light <= 18)) cr.goal = 'leave';
-  for (const r of rivalsOnMap(c)) {
-    if (cr.stance === 'hostile') {
-      const ts = targets(c).filter((t) => t.hero);
-      const field = distField(c.w, c.d, [r.at], { stairs: true });
-      ts.sort((a, b) => (field.get(posKey(a.at)) ?? 999) - (field.get(posKey(b.at)) ?? 999));
-      const t = ts[0];
-      if (!t) continue;
-      if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) continue;
-      if (!(t.at.level === r.at.level && distance(t.at, r.at) === 1)) {
-        const path = approach(c, r.id, r.at, attackSpots(c, t.at, r.id), SISTER.move, true) ?? [];
-        walk(c, r.id, r, path);
-      }
-      if (t.at.level === r.at.level && distance(t.at, r.at) === 1 && t.hero?.status === 'active') {
-        strike(c, r.id, t.id, SISTER.slots, SISTER.chance, SISTER.dmg, 'Attack');
-      }
-      continue;
-    }
-    if (cr.goal === 'leave') {
-      const ex = exitsBy(c, r.at)[0];
-      if (!ex) continue;
-      if (samePos(ex, r.at)) {
-        r.goneOut = true;
-        c.ev.push({ type: 'out', id: r.id });
-        continue;
-      }
-      const path = approach(c, r.id, r.at, [ex], SISTER.move, true) ?? [];
-      walk(c, r.id, r, path);
-      if (samePos(r.at, ex)) {
-        r.goneOut = true;
-        c.ev.push({ type: 'out', id: r.id });
-      }
-      continue;
-    }
-    // Loot.
-    const goals = lootGoals(c);
-    if (!goals.length) {
-      cr.goal = 'leave';
-      continue;
-    }
-    const field = distField(c.w, c.d, [r.at], { stairs: true });
-    const reach = (g: LootGoal) => Math.min(999, ...[g.at, ...posNeighbors(g.at)].map((p) => field.get(posKey(p)) ?? 999));
-    goals.sort((a, b) => reach(a) - reach(b));
-    const g = goals[0]!;
-    if (reach(g) >= 999) continue;
-    cr.goal = g.objective ? 'objective' : 'loot';
-    if (!within(r.at, g.at, 1)) {
-      const spots = [g.at, ...posNeighbors(g.at)].filter((p) => canEnter(c.w, c.d, p) && !blocked(c, p, r.id));
-      const before = r.at;
-      const path = approach(c, r.id, r.at, spots, SISTER.move, true);
-      walk(c, r.id, r, path ?? []);
-      if (samePos(before, r.at) && !within(r.at, g.at, 1)) {
-        // Stuck: a hero in the way two rounds running makes them angry.
-        cr.blocked = (cr.blocked ?? 0) + 1;
-        if (cr.blocked >= 2 && cr.spotted) {
-          cr.stance = 'hostile';
-          c.ev.push({ type: 'rivalsStance', stance: 'hostile' });
-          say(c, '"Move, or be moved." The sisters draw steel.');
-        }
-      } else cr.blocked = 0;
-    }
-    if (within(r.at, g.at, 1)) {
-      let items: Item[] = [];
-      if (g.chestId) {
-        const ch = c.d.chests.find((x) => x.id === g.chestId)!;
-        ch.opened = true;
-        ch.locked = false;
-        items = chestLoot(c, ch.tier);
-        c.ev.push({ type: 'chestOpened', id: ch.id, items: [] });
-        noteOnce(c, `The Lantern Sisters took the ${c.w.roomName(ch.at).toLowerCase()} chest.`);
-      } else {
-        const pile = c.d.ground.find((x) => samePos(x.at, g.at));
-        if (pile) {
-          items = pile.items;
-          pile.items = [];
-          c.d.ground = c.d.ground.filter((x) => x.items.length);
-        }
-        if (items.some((i) => i.kind === 'heirloom')) {
-          say(c, 'A sister pockets the heirloom.');
-          noteOnce(c, 'The Lantern Sisters took the heirloom.');
-        }
-      }
-      r.loot.push(...items);
-      cr.pickups = (cr.pickups ?? 0) + 1;
-      c.ev.push({ type: 'looted', id: r.id, items });
-    }
-  }
-  // Gone?
-  for (const r of cr.members) if (r.goneOut && r.loot.length) {
-    noteOnce(c, `The Lantern Sisters left with ${valueOf(r.loot)} gold in loot.`);
+    searchTick(c, m);
   }
 }
-
 
 // ---------------------------------------------------------------- the Gloam
 
+/**
+ * Spec 5 and 16.2. The Gloam is present when the lantern is out (any level) or when an active
+ * hero stands in the dark on Level 3. It rises near its quarry, out of sight if it can, and acts
+ * at once. It fades after GLOAM_CALM_FADE world phases with nobody in the dark.
+ */
 function gloamPhase(c: Ctx): void {
+  const lit = litSet(c.w, c.d);
   let g = c.d.monsters.find((m) => m.kind === 'gloam');
-  if (c.d.light > 0) return;
+  const unlit3 = unlitOnL3(c, lit);
+  const pitch = c.d.light <= 0 && activeHeroes(c).length > 0;
+  if (!pitch && !unlit3.length) {
+    if (g) {
+      c.d.gloamCalm = (c.d.gloamCalm ?? 0) + 1;
+      if (c.d.gloamCalm >= GLOAM_CALM_FADE) {
+        c.d.monsters = c.d.monsters.filter((m) => m !== g);
+        c.d.gloamCalm = 0;
+        c.ev.push({ type: 'monsterDied', id: g.id });
+        say(c, 'The dark settles. For now.');
+      }
+    } else c.d.gloamCalm = 0;
+    return;
+  }
+  c.d.gloamCalm = 0;
   if (!g) {
-    const lp = lanternPos(c.d) ?? c.d.heroes.find((h) => h.status === 'active')?.at;
-    if (!lp) return;
-    const vis = visibleSet(c.w, c.d);
-    const ring = range(lp, 10)
-      .map((h) => ({ level: lp.level, ...h }))
-      .filter((p) => distance(p, lp) >= 8 && kindAt(c.w, c.d, p) === 'floor' && !occupant(c, p));
+    const hollow = unlit3.length > 0;
+    const anchor = hollow ? unlit3[0]!.at : (lanternPos(c.d) ?? activeHeroes(c)[0]!.at);
+    const [lo, hi] = hollow ? [GLOAM_RISE_MIN, GLOAM_RISE_MAX] : [8, 10];
+    const vis = visibleSet(c.w, c.d, lit);
+    const dark = (p: Pos) => kindAt(c.w, c.d, p) === 'floor' && !occupant(c, p) && !lit.has(posKey(p));
+    const ring = range(anchor, hi).map((h) => ({ level: anchor.level, ...h })).filter((p) => distance(p, anchor) >= lo && dark(p));
     const hidden = ring.filter((p) => !vis.has(posKey(p)));
-    const pool = hidden.length ? hidden : ring;
-    const near = pool.length ? pool : (c.w.floors.get(lp.level) ?? []).filter((p) => !occupant(c, p) && isFloorish(c.w, c.d, p));
-    if (!near.length) return;
-    const at = pick(c.s, near);
+    let pool = hidden.length ? hidden : ring;
+    if (!pool.length) pool = (c.w.floors.get(anchor.level) ?? []).filter((p) => dark(p) && isFloorish(c.w, c.d, p));
+    if (!pool.length) return;
+    const at = pick(c.s, pool);
     g = {
       id: `m${c.d.nextMonster ?? 99}`,
       kind: 'gloam',
@@ -662,8 +610,7 @@ function gloamPhase(c: Ctx): void {
     c.d.monsters.push(g);
     c.ev.push({ type: 'gloam', at });
     c.ev.push({ type: 'spawned', id: g.id, at });
-    say(c, 'Something moves in the dark.');
-    return; // it hunts from next round
+    say(c, hollow ? 'The dark here is awake.' : 'Something moves in the dark.');
   }
   monsterAct(c, g);
 }
@@ -679,7 +626,7 @@ export function blowCharges(c: Ctx): void {
     const k = kindAt(c.w, c.d, at);
     if (k === 'cracked') c.d.blown.push(posKey(at));
     if (k === 'door') {
-      const door = doorAt(c.d, at)!;
+      const door = c.d.doors[posKey(at)]!;
       door.open = true;
       door.locked = false;
       door.jammed = false;
@@ -697,7 +644,7 @@ export function blowCharges(c: Ctx): void {
     say(c, 'BOOM.');
     // Damage.
     const hurt: [string, number][] = [];
-    for (const m of c.d.monsters) if (m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, distance(m.at, at) <= 1 ? 4 : 2]);
+    for (const m of onMap(c)) if (m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, distance(m.at, at) <= 1 ? 4 : 2]);
     for (const r of rivalsOnMap(c)) if (r.at.level === at.level && distance(r.at, at) <= 2) hurt.push([r.id, distance(r.at, at) <= 1 ? 4 : 2]);
     for (const h of c.d.heroes) {
       if ((h.status === 'active' || h.status === 'downed') && h.at.level === at.level && distance(h.at, at) <= 2) hurt.push([h.heroId, distance(h.at, at) <= 1 ? 4 : 2]);
@@ -734,7 +681,7 @@ function burnPhase(c: Ctx): void {
   if (!burning.length) return;
   const keys = new Set(burning);
   const ids: string[] = [];
-  for (const m of c.d.monsters) if (m.kind !== 'gloam' && keys.has(posKey(m.at))) ids.push(m.id);
+  for (const m of onMap(c)) if (m.kind !== 'gloam' && keys.has(posKey(m.at))) ids.push(m.id);
   for (const r of rivalsOnMap(c)) if (keys.has(posKey(r.at))) ids.push(r.id);
   for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at))) ids.push(h.heroId);
   const pr = c.d.prisoner;
@@ -753,8 +700,8 @@ export function worldPhase(c: Ctx): void {
   d.phase = 'world';
   c.ev.push({ type: 'phase', phase: 'world', round: d.round });
   const webbedBefore = new Set(d.heroes.filter((h) => h.webbed).map((h) => h.heroId));
-  // 1. Light, torches, bleeding, fire.
-  setLight(c, d.light - 1);
+  // 1. Light (an open lantern burns), torches, bleeding, fire.
+  if (d.lanternOpen !== false) setLight(c, d.light - 1);
   burnPhase(c);
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
   for (const h of d.heroes) {
@@ -766,6 +713,7 @@ export function worldPhase(c: Ctx): void {
   const order = [...d.monsters].filter((m) => m.kind !== 'gloam').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   for (const m of order) {
     if (!d.monsters.includes(m)) continue;
+    c.visCache = undefined;
     monsterAct(c, m);
   }
   // 3. Rivals. 4. The Gloam.
@@ -781,9 +729,15 @@ export function worldPhase(c: Ctx): void {
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;
-    if (webbedBefore.has(h.heroId)) h.webbed = false;
+    if (webbedBefore.has(h.heroId)) {
+      h.webbed = false;
+      h.dozing = undefined;
+    }
   }
-  for (const m of d.monsters) if ((m.stuck ?? 0) > 0) m.stuck! -= 1;
+  for (const m of d.monsters) {
+    if ((m.stuck ?? 0) > 0) m.stuck! -= 1;
+    if ((m.shoutCooldown ?? 0) > 0) m.shoutCooldown! -= 1;
+  }
   tick(d.smoke);
   tick(d.glue);
   tick(d.burning);

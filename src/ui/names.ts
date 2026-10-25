@@ -84,7 +84,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   ],
   mage: [
     ['Firebolt', '1 mana', 'Fire at range.'],
-    ['Kindle', '1 mana', '+12 lantern light.'],
+    ['Kindle', '1 mana', '+6 lantern oil.'],
     ['Mend', '1 mana', 'Heal 4 within 3.'],
   ],
   ranger: [
@@ -100,7 +100,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   pyromancer: [
     ['Firebolt', '1 mana', 'Fire at range.'],
     ['Fireball', '2 mana', 'Radius 1 at range ≤ 5, 3 Wits slots, 2 dmg per hit to everything there (allies too). Burns 2 rounds. Noise 6.'],
-    ['Kindle', '1 mana', '+12 lantern light.'],
+    ['Kindle', '1 mana', '+6 lantern oil.'],
   ],
   shadowmancer: [
     ['Veil', '1 mana', 'An ally within 3 is unseen by monsters for 2 rounds (until they attack or make noise ≥ 4).'],
@@ -129,6 +129,18 @@ export const MONSTER_NAME: Record<MonsterKind | 'gloam', string> = {
   berserker: 'Berserker',
   dragon: 'The Dragon',
   gloam: 'The Gloam',
+  archer: 'Orc archer',
+  captain: 'Orc captain',
+  ghoul: 'Ghoul',
+};
+
+/** V3.3 (spec 16.4): one line per new monster, for tooltips. */
+export const MONSTER_NOTE: Partial<Record<MonsterKind | 'gloam', string>> = {
+  archer: 'Shoots at range 4, keeps its distance. Knockback shot if a pit is behind you.',
+  captain: 'Armor 1. Orcs beside it take 1 less per hit. Shouts: every orc within 8 wakes and hunts.',
+  ghoul: 'Rises from the ground when you come within 2. Grabs: you can’t move until you Escape or kill it.',
+  spider: 'Webs you, then drags you one hex toward it (pits count).',
+  gloam: 'Cannot be harmed. Only hunts heroes standing in the dark. Get into the light.',
 };
 
 export const BRIGHTNESS_NAME: Record<Brightness, string> = {
@@ -209,6 +221,8 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   key: '⚷',
   oil: '♁',
   grapple: '⚓',
+  shutter: '◑',
+  escape: '⛓',
 };
 
 /** One-line help per V3.2 action, shown in the action button tooltip. */
@@ -229,8 +243,10 @@ export const ACTION_HELP: Partial<Record<ActionKind, string>> = {
   caltrops: 'Scatter on an adjacent hex: the first monster on it takes 2 and stops.',
   firecracker: 'Throw 6: noise 6 at the hex. Lures monsters.',
   key: 'Open an adjacent locked door or chest, silently. One use.',
-  oil: '+10 lantern light.',
+  oil: '+8 lantern oil.',
   grapple: 'Climb straight up to the level above. Uses move and action.',
+  shutter: 'Free. Shuttered: the lantern burns no oil and gives no light. Open it again any time. Level 1 has daylight in most rooms.',
+  escape: '2 Might slots: 1 hit frees you from the ghoul’s grip. Killing it frees you too.',
 };
 
 /** Hotkey per action (letters not used by the global keys). */
@@ -280,6 +296,8 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   key: 'p',
   oil: 'l',
   grapple: 'y',
+  shutter: 'l',
+  escape: 'x',
 };
 
 export const ITEM_GLYPH: Record<string, string> = {
@@ -333,7 +351,7 @@ export const ITEM_EFFECT: Record<string, string> = {
   caltrops: 'Scatter next to you: the first monster on it takes 2 and stops. Lasts the delve.',
   grapple: 'From a pit floor or landing, climb straight up a level. Reusable. Move and action.',
   key: 'Opens one locked door or chest, silently, for anyone. One use.',
-  oil: '+10 lantern light.',
+  oil: '+8 lantern oil. Light burns 1 per round while the lantern is open.',
   firecracker: 'Throw 6: noise 6 at the target hex. Lure monsters away.',
 };
 

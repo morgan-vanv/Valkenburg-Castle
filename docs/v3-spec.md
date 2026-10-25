@@ -263,3 +263,54 @@ Don't spoonfeed, but once something is in view, use visual hints to say what mat
 - **The Dragon is big.** About three hexes long and two tall, with a wingspan over the hoard; asleep it fills the Lair's centre, awake it rears higher than any wall.
 - **Thin walls, visually.** Tiles and rules stay as they are (a wall is still a whole hex). The renderer draws a built wall hex as a thin wall panel along each of its edges that faces floor, with the pale cap and dark face, instead of a solid block, so rooms have thin walls between them and the floor area reads larger. Interior wall hexes with no floor neighbour stay solid fill, so the castle still has mass. Cave walls (the Hollow, and any room with material rock/earth) stay thick rock. Pillars stay columns. Walls still drop low between the camera and the party.
 - Keep the look consistent across the three levels and recheck that doors, railings, braziers and sconces sit correctly on the thinner walls.
+
+## 16. V3.3: fear by depth (owner's play-test, 2026-10-24 night; plan approved 22:00)
+
+Overrides earlier sections where they disagree. One delivery.
+
+### 16.1 Awareness and patrols
+
+- **Default awake.** `SpawnDef.asleep` defaults to false. Sleepers are chosen by the map: Level 1 rats and the spider; Level 2 only the barracks squad; Level 3 only the Dragon.
+- **Patrols.** `SpawnDef.patrol?: Pos[]` is a looping route of waypoints (first waypoint = spawn hex). Awareness 'patrol': each world phase the monster walks its move allowance along the route (shortest path to the next waypoint). It notices heroes by the sight rule below and goes hunting. Once a hero has seen a patroller walk, its route is known (`Delve.knownRoutes` holds the monster id) and the UI may draw it.
+- **Noticing.** An awake monster sees a hero within its sight (6) and line of sight if the hero is lit or within 3 hexes. In the Hollow (level 3) monsters see heroes in sight regardless of light. Seeing a hero → hunting. Noise rules unchanged.
+- **Giving up.** A hunting monster that loses sight goes alert at the last seen hex and searches for 3 rounds (`searchRounds`), then returns: patrollers to the nearest waypoint and resume, others to their post (`spawnedAt`) and go alert-at-post (not asleep).
+
+### 16.2 Light
+
+- **Lantern 20.** `LIGHT_MAX` 20; a delve starts full. Stages: bright > 12, dim 7..12, dark 1..6, pitch 0. Lantern radius by stage unchanged (4/3/2/0). Burns 1 per world phase while open, on every level.
+- **Shutter.** `shutter` is a free action for the lantern bearer, any time in the player phase, toggling `Delve.lanternOpen`. Shuttered: no burn, no lantern light. Passing the lantern keeps its state. The delve starts with it open; the UI may offer to start shuttered on Level 1.
+- **Sight per hero.** `sightRange(state, heroId)`: if the hero's hex is lit (lantern, torch, brazier, fixed light) the stage range (8/6/4/2), minus the depth penalty as before (−1 on L2, −2 on L3, min 2). If unlit: Level 1 → 4, Level 2 → 2, Level 3 → 1. The glimpse (layout reveal) uses the same per-hero range. Visibility is the union over active heroes. Lit hexes in line of sight remain visible from up to 14 regardless.
+- **Fuel economy.** Oil flask +8 (price 15). Torch unchanged (10 gold, 12 rounds, radius 2). Brazier relight +4. Kindle +6. Everything else as before.
+- **The Gloam in the Hollow.** On Level 3, whenever any active hero stands in an unlit hex, the Gloam is present: if absent it rises at a dark hex 4..6 from the nearest unlit hero (out of sight if possible), awareness hunting. Each world phase it moves 3 toward the nearest unlit hero (any route through dark hexes; it never enters a lit hex) and strikes an adjacent unlit hero for 4, ignoring armor. It cannot be harmed or shoved. If no hero on Level 3 is unlit for 2 consecutive world phases, it fades. Levels 1 and 2 keep the pitch-black rule (section 5). Message on rising: "The dark here is awake." No grace period.
+- **Light sources per level** (data): Level 1 abundant daylight (courtyard, gatehouse, the great hall's collapsed roof, corridors), so most of the level is navigable shuttered. Level 2 sparse: a few sconces, the forge, the pit glow. Level 3: only the Lair's fires and vents, the fungus grove, the pit glow.
+
+### 16.3 Difficulty by depth
+
+- **Tiers** applied at spawn to every monster except the Dragon and the Gloam: Level 2 +2 max HP, +5 hit chance; Level 3 +4 max HP, +10 hit chance, +1 damage.
+- **Roster** (data): Level 1 adds two awake orcs and one patrol through the great hall. Level 2: orcs move as squads of 3–4, two more spawns, and orc archers on the arcade and ledges; an orc captain with the barracks squad. Level 3: ghouls buried in the Bone Pile; cave spiders; all awake.
+
+### 16.4 New monsters and abilities (every ability shows as an intent the round before)
+
+| Kind | HP | Slots | Hit | Dmg | Move | Behaviour |
+| --- | --- | --- | --- | --- | --- | --- |
+| archer (orc) | 5 | 2 | 55 | 2 | 3 | Shoots at range ≤ 4 in sight; keeps 2–4 away, backs off if adjacent. Knockback shot (intent `shove`, 60%) when a hero within 4 has an unrailed pit straight behind them. |
+| captain (orc) | 9 | 3 | 60 | 2 | 3 | Armor 1. Shield wall: orcs/archers adjacent to it take 1 less per hit (min 1). Shout (intent `shout`, cooldown 4): the next phase every orc/archer/captain within 8 wakes and hunts the shouter's target. Shouts on first sight. |
+| ghoul | 7 | 2 | 60 | 2 | 4 | Buried (not on the map) until a hero ends a move within 2 of its hex; then rises hunting (`spawned` event). Grab (intent `grab`, adjacent): the hero is held (`grabbedBy`): can't move or dash; the ghoul gets +1 slot against them. Escape: the hero's action, 2 Might slots, 1 hit frees; killing the ghoul frees. One hold per ghoul. |
+| spider | as now | | | | | Web, then next round `drag`: pulls the webbed hero 1 hex toward it with shove outcomes (pits count). |
+
+Existing: berserker knockback, cutpurse theft, orc shove on edges, the Dragon.
+
+### 16.5 The Lantern Sisters' kit
+
+Each sister has a class (`Rival.cls`) and uses the heroes' own rules, intents shown like monsters:
+- **Ranger sister:** overwatch when hostile and no hero in reach; knockback shot on a hero within 5 with a pit behind them.
+- **Shadowmancer sister:** veils herself when first spotted; drops a smoke bomb on the hero nearest her when any sister falls below half HP (once per delve).
+- **Burglar sister:** sleep dart (1 slot, 65%) on the nearest hero within 5 when hostile (two darts per delve); when neutral, loots chests the heroes have opened but not emptied.
+
+### 16.6 Data defaults
+
+- Monster hit/damage/HP tables stay in src/game/data.ts; tiers in the same file. Patrol routes, sleepers, buried ghouls and lights are castle data (src/data/castle).
+
+### 15.8a Scale decision (owner, 2026-10-24 22:07)
+
+From the three-panel study (mockup/shots/scale-options.png, mockup/scale-options.ts): **option C, "RuneScape"**: hero 2.0 units tall, natural blocky proportions (head 1/5, limb thickness 0.07, shoulders 0.34, legs 0.44 of height), rat 0.35x, spider 0.8x, orc 1.05x, walls 2.6 (thin), Dragon as is. "Good enough for now"; the owner wants to revisit scale and proportion later.
