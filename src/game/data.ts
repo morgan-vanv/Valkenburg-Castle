@@ -1,6 +1,7 @@
 // Numbers from docs/v3-spec.md.
 
 import type { HeroClass, MonsterKind, ShopOffer, Stat, Stats } from './types';
+import type { ClassInfo } from './api';
 
 export const LIGHT_MAX = 40;
 export const PACK_SLOTS = 4;
@@ -14,6 +15,10 @@ export interface Weapon {
   slots: number;
   stat: Stat;
   dmg: number;
+  /** Ranged weapons (the Ranger's longbow): reach in hexes, needs sight. */
+  range?: number;
+  /** Noise of an attack (default 2). */
+  noise?: number;
 }
 
 export interface ClassDef {
@@ -23,6 +28,8 @@ export interface ClassDef {
   weapon: Weapon;
   armor: number;
   main: Stat;
+  /** Mana per delve (the three mage schools). */
+  mana: number;
 }
 
 export const CLASSES: Record<HeroClass, ClassDef> = {
@@ -33,6 +40,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     weapon: { name: 'Longsword', slots: 3, stat: 'might', dmg: 2 },
     armor: 1,
     main: 'might',
+    mana: 0,
   },
   sellsword: {
     name: 'Sellsword',
@@ -41,6 +49,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     weapon: { name: 'Sword', slots: 3, stat: 'might', dmg: 2 },
     armor: 1,
     main: 'might',
+    mana: 0,
   },
   burglar: {
     name: 'Burglar',
@@ -49,16 +58,115 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     weapon: { name: 'Dagger', slots: 2, stat: 'finesse', dmg: 2 },
     armor: 0,
     main: 'finesse',
+    mana: 0,
   },
-  mage: {
-    name: 'Mage',
+  ranger: {
+    name: 'Ranger',
+    hp: 8,
+    stats: { might: 45, finesse: 75, wits: 60, nerve: 55 },
+    weapon: { name: 'Longbow', slots: 3, stat: 'finesse', dmg: 2, range: 6, noise: 1 },
+    armor: 0,
+    main: 'finesse',
+    mana: 0,
+  },
+  sapper: {
+    name: 'Sapper',
+    hp: 10,
+    stats: { might: 65, finesse: 50, wits: 45, nerve: 60 },
+    weapon: { name: 'Hammer', slots: 3, stat: 'might', dmg: 2 },
+    armor: 1,
+    main: 'might',
+    mana: 0,
+  },
+  pyromancer: {
+    name: 'Pyromancer',
     hp: 6,
     stats: { might: 30, finesse: 50, wits: 75, nerve: 55 },
     weapon: { name: 'Staff', slots: 2, stat: 'might', dmg: 1 },
     armor: 0,
     main: 'wits',
+    mana: 3,
+  },
+  shadowmancer: {
+    name: 'Shadowmancer',
+    hp: 6,
+    stats: { might: 30, finesse: 55, wits: 75, nerve: 50 },
+    weapon: { name: 'Staff', slots: 2, stat: 'might', dmg: 1 },
+    armor: 0,
+    main: 'wits',
+    mana: 3,
+  },
+  hedgewitch: {
+    name: 'Hedgewitch',
+    hp: 7,
+    stats: { might: 35, finesse: 50, wits: 70, nerve: 65 },
+    weapon: { name: 'Staff', slots: 2, stat: 'might', dmg: 1 },
+    armor: 0,
+    main: 'wits',
+    mana: 3,
   },
 };
+
+/** Classes the tavern hires (spec 15.3). */
+export const RECRUIT_CLASSES: HeroClass[] = ['sellsword', 'burglar', 'ranger', 'sapper', 'pyromancer', 'shadowmancer', 'hedgewitch'];
+
+const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
+  hobart: { role: 'The heir: steady, rallies the squad.', abilities: ['Rally: allies within 3 gain 1 Focus. Cooldown 3.'] },
+  sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.'] },
+  burglar: {
+    role: 'Quiet: picks locks, sneaks fast.',
+    abilities: ['Pick locks.', 'Sneak 4.', 'Backstab: +1 slot on monsters not hunting.', 'Opens chests silently and takes loot without using the action.'],
+  },
+  ranger: {
+    role: 'Eyes: shoots from range, holds a lane.',
+    abilities: [
+      'Longbow: range 6, noise 1. Adjacent shots lose 1 slot.',
+      'Overwatch: shoot the first enemy that moves or acts in sight within 6 next world phase.',
+      'Knockback shot: 2 Finesse slots at range 5; 2 hits push the target 1 hex back (pits!).',
+    ],
+  },
+  sapper: {
+    role: 'Breacher: blows walls, digs through.',
+    abilities: ['Starts each delve with 2 free charges.', 'Throw a charge up to 3 hexes.', 'Dig: clear adjacent rubble or a cracked wall. Noise 4.'],
+  },
+  pyromancer: {
+    role: 'Fire: burns crowds, lights the way.',
+    abilities: [
+      'Firebolt (1 mana): 3 Wits slots at range 5, 2 dmg per hit.',
+      'Fireball (2 mana): radius 1 at range 5, 3 Wits slots, 2 dmg per hit to everyone there, allies too. Burns 2 rounds. Noise 6.',
+      'Kindle (1 mana): +12 light.',
+    ],
+  },
+  shadowmancer: {
+    role: 'Shadow: hides allies, sleeps foes, blinks.',
+    abilities: [
+      'Veil (1 mana): an ally within 3 is unseen by monsters for 2 rounds, until they attack or make noise 4+.',
+      'Sleep (1 mana): 2 Wits slots at range 5; a hit puts a monster to sleep.',
+      'Blink (1 mana): teleport up to 4 to a free hex in sight, over pits. Silent.',
+    ],
+  },
+  hedgewitch: {
+    role: 'Warden: heals, shields, blows foes back.',
+    abilities: [
+      'Mend (1 mana): heal 4 within 3.',
+      'Ward (1 mana): an ally within 3 takes 1 less per hit for 2 rounds.',
+      'Gust (1 mana): everyone within 1 of a hex at range 4 is pushed 1 hex away from it. Noise 2.',
+    ],
+  },
+};
+
+export function classInfo(cls: HeroClass): ClassInfo {
+  const c = CLASSES[cls];
+  const w = c.weapon;
+  return {
+    name: c.name,
+    role: ROLES[cls].role,
+    weapon: `${w.name}: ${w.slots} ${w.stat[0]!.toUpperCase()}${w.stat.slice(1)} slots, ${w.dmg} dmg${w.range ? `, range ${w.range}` : ''}`,
+    armor: c.armor,
+    mana: c.mana,
+    abilities: [...ROLES[cls].abilities],
+  };
+}
 
 export interface MonsterDef {
   name: string;
@@ -114,7 +222,43 @@ export const SHOP: ShopOffer[] = [
   { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
   { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
   { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Opens locks and cracked walls. Very loud.' },
+  { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
+  { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
+  { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
+  { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.' },
+  { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.' },
+  { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.' },
+  { kind: 'oil', name: 'Oil flask', price: 20, text: '+10 lantern light.' },
+  { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
 ];
+
+// Section 15 numbers.
+export const START_GOLD = 160;
+export const TAVERN_SIZE = 4;
+export const SAPPER_CHARGES = 2;
+export const BOW_RANGE = 6;
+export const OVERWATCH_RANGE = 6;
+export const KNOCKBACK_RANGE = 5;
+export const THROW_CHARGE_RANGE = 3;
+export const DIG_NOISE = 4;
+export const FIREBALL_RANGE = 5;
+export const FIREBALL_NOISE = 6;
+export const BURN_ROUNDS = 2;
+export const BURN_DMG = 1;
+export const SPELL_RANGE = 3; // veil, ward, mend
+export const SLEEP_RANGE = 5;
+export const BLINK_RANGE = 4;
+export const GUST_RANGE = 4;
+export const GUST_NOISE = 2;
+export const VEIL_ROUNDS = 2;
+export const WARD_ROUNDS = 2;
+export const VEIL_BREAK_NOISE = 4;
+export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker', number> = { smoke: 4, glue: 4, dart: 5, firecracker: 6 };
+export const SMOKE_ROUNDS = 2;
+export const GLUE_ROUNDS = 2;
+export const CALTROPS_DMG = 2;
+export const OIL_LIGHT = 10;
+export const FIRECRACKER_NOISE = 6;
 
 export const HEAL_PRICE = 30;
 export const WEAPON_PRICE = [0, 60, 150];

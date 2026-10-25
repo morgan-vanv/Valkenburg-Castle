@@ -9,7 +9,7 @@ import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
-import { ACTION_GLYPH, ACTION_KEY, BRIGHTNESS_NAME, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, BRIGHTNESS_NAME, classGlyph, className, itemGlyph, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
 
 export interface HudHost {
@@ -29,6 +29,10 @@ interface PreviewState {
   preview: RollPreview;
   focus: number;
 }
+
+const MAGES = new Set<string>(['pyromancer', 'shadowmancer', 'hedgewitch']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge']);
+const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust']);
 
 const SPEEDS: { label: string; value: number }[] = [
   { label: '½×', value: 0.5 },
@@ -197,22 +201,28 @@ export class Hud {
     this.dio.showLanding(null, null, '', false);
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
-      const friendly = ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free'].includes(this.pending.action);
-      this.dio.highlight(ats, this.pending.action === 'jump' ? 'danger' : friendly ? 'ally' : 'target');
+      const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
+      const hexPick = this.pending.pick === 'hex' && !['jump', 'dig', 'key'].includes(this.pending.action);
+      this.dio.highlight(ats, this.pending.action === 'jump' ? 'danger' : friendly ? 'ally' : hexPick ? 'dash' : 'target');
       this.applyHover();
       return;
     }
     if (this.pv) {
       const at = this.targetPos(this.pv.target);
+      const area = this.pv.preview.hexes ?? (this.pv.option.area && at ? this.areaAround(at, this.pv.option.area) : []);
+      if (area.length) this.dio.highlight(area, 'area');
+      const hit = (this.pv.preview.affects ?? []).map((id) => this.targetPos({ id })).filter((p): p is Pos => !!p);
+      if (hit.length) this.dio.highlight(hit, 'danger');
       if (at) this.dio.highlight([at], this.pv.option.action === 'jump' ? 'danger' : 'target');
       const sel = this.selected();
       if (sel && this.pv.preview.noise > 0) this.dio.showRipple(sel.at, this.pv.preview.noise);
       this.showActionLanding(this.pv.option.action, this.pv.target);
       return;
     }
+    const dash = this.reach.some((r) => r.dash);
     this.dio.highlight(
       this.reach.map((r) => r.to),
-      this.sneak ? 'sneak' : 'walk',
+      dash ? 'dash' : this.sneak ? 'sneak' : 'walk',
     );
     // Attackable enemies get a red ring.
     const atk = this.options.filter((o) => o.action === 'attack' || o.action === 'firebolt');
@@ -266,6 +276,20 @@ export class Hud {
     return d.heroes.find((x) => x.heroId === t.id)?.at ?? d.monsters.find((m) => m.id === t.id)?.at ?? d.rivals?.members.find((r) => r.id === t.id)?.at ?? (d.prisoner?.id === t.id ? d.prisoner.at : null);
   }
 
+  /** Hexes within `r` of `at` that exist on the map. */
+  private areaAround(at: Pos, r: number): Pos[] {
+    const lv = this.engine.castle().levels.find((l) => l.level === at.level);
+    if (!lv) return [];
+    const out: Pos[] = [];
+    for (let dq = -r; dq <= r; dq++)
+      for (let dr = Math.max(-r, -dq - r); dr <= Math.min(r, -dq + r); dr++) {
+        const p = { level: at.level, q: at.q + dq, r: at.r + dr };
+        const t = lv.tiles[hexKey(p)];
+        if (t && t.kind !== 'wall') out.push(p);
+      }
+    return out;
+  }
+
   // ------------------------------------------------------------ hover and click
 
   onHover(at: Pos | null, unitId: string | null): void {
@@ -287,6 +311,11 @@ export class Hud {
       this.dio.showLanding(null, null, '', false);
       if (t) this.showActionLanding(this.pending.action, t);
     }
+    // Area preview while aiming a hex action (fireball, gust, smoke, glue).
+    if (this.pending?.area && at) {
+      const t = this.pending.targets.find((x) => x.at && samePos(x.at, at));
+      this.drawPendingArea(t ? at : null);
+    }
     // Path preview.
     const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
     const sel = this.selected();
@@ -307,13 +336,13 @@ export class Hud {
       if (m) lines.push(...this.monsterLines(m));
       else if (hero) {
         const def = this.heroDef(hero.heroId);
-        lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? CLASS_NAME[def.cls] : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
+        lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
       } else if (rival && d.rivals) lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
       else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
       const act = this.bestActionFor(unitId, at);
       if (act) lines.push(`<span class="tip-act">Click: ${act.option.label}</span>`);
     } else if (at) {
-      if (r) lines.push(`<b>${this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}`);
+      if (r) lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
       const act = this.bestActionFor(null, at);
@@ -321,6 +350,18 @@ export class Hud {
     }
     if (lines.filter(Boolean).length) this.showTip(lines.filter(Boolean).join('<br>'));
     else this.hideTip();
+  }
+
+  private areaDrawn = '';
+  /** Highlight the area a hex action would cover around `at` (null: just the valid targets). */
+  private drawPendingArea(at: Pos | null): void {
+    const key = at ? posKey(at) : '';
+    if (key === this.areaDrawn || !this.pending) return;
+    this.areaDrawn = key;
+    this.dio.clearHighlights();
+    const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
+    this.dio.highlight(ats, 'dash');
+    if (at && this.pending.area) this.dio.highlight(this.areaAround(at, this.pending.area), 'area');
   }
 
   private monsterLines(m: Monster): string[] {
@@ -371,7 +412,7 @@ export class Hud {
       const t = this.pending.targets.find(match) ?? (at ? this.pending.targets.find((x) => x.at && samePos(x.at, at)) : undefined);
       return t ? { option: this.pending, target: t } : null;
     }
-    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'jump'];
+    const order: ActionKind[] = unitId ? ['attack', 'firebolt', 'free', 'revive', 'bribe', 'shove'] : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'dig', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -437,10 +478,21 @@ export class Hud {
       return;
     }
     this.pending = o;
+    this.areaDrawn = '';
     this.closePreview();
-    this.showPicker(o);
+    if (o.pick === 'hex' || o.pick === 'enemy' || o.pick === 'ally') this.showAimHint(o);
+    else this.showPicker(o);
     this.drawHighlights();
     this.renderBar();
+  }
+
+  /** Map-targeted actions: a short hint instead of a list (the list is still there for keyboard users). */
+  private showAimHint(o: ActionOption): void {
+    clear(this.picker);
+    const what = o.pick === 'hex' ? (o.area ? 'a hex (the orange area is hit)' : 'a highlighted hex') : o.pick === 'ally' ? 'an ally' : 'an enemy';
+    const list = o.targets.length <= 6 && o.pick !== 'hex' ? o.targets.map((t) => h('button', { class: 'btn btn-small picker-row', onclick: () => this.choose(o, t) }, this.targetLabel(t))) : [];
+    this.picker.append(h('div', { class: 'kicker' }, `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}`), h('div', { class: 'small' }, `Click ${what}.`), ...list, h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')));
+    this.picker.classList.remove('hidden');
   }
 
   private showPicker(o: ActionOption): void {
@@ -458,7 +510,7 @@ export class Hud {
     this.picker.classList.add('hidden');
     const sel = this.selected();
     if (!sel || !this.state) return;
-    if (o.rolls || o.action === 'jump') {
+    if (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink') {
       const p = this.engine.preview(this.state, sel.heroId, o.action, t);
       this.openPreview({ option: o, target: t, preview: p, focus: 0 });
       return;
@@ -768,13 +820,13 @@ export class Hud {
           onclick: () => this.select(hd.heroId),
           disabled: hd.status !== 'active',
         },
-        h('div', { class: 'hc-badge' }, h('span', null, CLASS_GLYPH[def.cls]), h('kbd', null, `${i + 1}`)),
+        h('div', { class: 'hc-badge' }, h('span', null, classGlyph(def.cls)), h('kbd', null, `${i + 1}`)),
         h(
           'div',
           { class: 'hc-body' },
           h('div', { class: 'hc-name' }, def.name, hd.heroId === d.lanternBearer ? h('span', { class: 'hc-lantern', title: 'Carries the lantern' }, ' ◆') : '', h('span', { class: 'hc-lvl dim' }, ` L${def.level}`), risk ? h('span', { class: 'hc-edge', title: `On the edge: a shove would drop ${def.name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).` }, `Edge ${risk.damage}`) : ''),
           h('div', { class: 'hc-hp' }, hpBar(hd.hp, def.maxHp), h('span', { class: 'num small' }, `${hd.hp}/${def.maxHp}`)),
-          h('div', { class: 'hc-row' }, h('span', { class: 'dim small' }, 'Focus'), pips(hd.focus, 3, 'focus'), def.cls === 'mage' ? [h('span', { class: 'dim small' }, ' Mana'), pips(hd.mana, 3, 'mana')] : '', def.cls === 'hobart' && hd.rallyCooldown > 0 ? h('span', { class: 'dim small' }, ` Rally in ${hd.rallyCooldown}`) : ''),
+          h('div', { class: 'hc-row' }, h('span', { class: 'dim small' }, 'Focus'), pips(hd.focus, 3, 'focus'), MAGES.has(def.cls) ? [h('span', { class: 'dim small' }, ' Mana'), pips(hd.mana, 3, 'mana')] : '', def.cls === 'hobart' && hd.rallyCooldown > 0 ? h('span', { class: 'dim small' }, ` Rally in ${hd.rallyCooldown}`) : ''),
           packRow(hd.pack),
           h('div', { class: 'hc-status' }, ...statusChips(hd)),
         ),
@@ -793,7 +845,7 @@ export class Hud {
     const def = sel ? this.heroDef(sel.heroId) : undefined;
     const left = h('div', { class: 'bar-who' });
     if (sel && def) {
-      left.append(h('b', null, def.name), h('span', { class: 'dim small' }, ` ${CLASS_NAME[def.cls]}`), h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved ? 'used' : 'ready' }, sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.acted ? 'Acted' : 'Action ready')));
+      left.append(h('b', null, def.name), h('span', { class: 'dim small' }, ` ${className(def.cls)}`), h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved ? 'used' : 'ready' }, sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.dashed ? 'Dashed' : sel.acted ? 'Acted' : 'Action ready'), this.reach.some((r) => r.dash) ? h('span', { class: 'dash-note', title: 'Moving again spends the action (a dash)' }, ' · Dash ready') : ''));
     }
     const modes = h(
       'div',
@@ -809,11 +861,12 @@ export class Hud {
       if (key) usedKeys.add(key);
       const btn = h(
         'button',
-        { class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''}`, onclick: () => this.startAction(o), disabled: this.busy, 'data-key': key ?? '', title: `${o.label}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}` },
+        { class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''} ${ITEM_ACTIONS.has(o.action) ? 'act-item' : SPELLS.has(o.action) ? 'act-spell' : ''}`, onclick: () => this.startAction(o), disabled: this.busy, 'data-key': key ?? '', title: `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}${ACTION_HELP[o.action] ? `\n${ACTION_HELP[o.action]}` : ''}` },
         h('span', { class: 'act-glyph' }, ACTION_GLYPH[o.action] ?? '•'),
         h('span', { class: 'act-label' }, o.label),
         key ? h('kbd', null, key.toUpperCase()) : '',
         o.targets.length > 1 ? h('span', { class: 'act-count num' }, `${o.targets.length}`) : '',
+        o.mana ? h('span', { class: 'act-mana num' }, `${o.mana}`) : '',
       );
       acts.append(btn);
     }
@@ -1166,7 +1219,7 @@ function packRow(pack: Item[]): HTMLElement {
   const row = h('div', { class: 'hc-pack' });
   let used = 0;
   for (const it of pack) {
-    row.append(h('span', { class: `pk pk-${it.kind} ${it.slots > 1 ? 'wide' : ''}`, title: itemLabel(it) }, ITEM_GLYPH[it.kind], it.kind === 'gold' ? h('small', { class: 'num' }, `${it.amount}`) : ''));
+    row.append(h('span', { class: `pk pk-${it.kind} ${it.slots > 1 ? 'wide' : ''}`, title: itemLabel(it) }, itemGlyph(it.kind), it.kind === 'gold' ? h('small', { class: 'num' }, `${it.amount}`) : ''));
     used += it.slots;
   }
   for (let i = used; i < 4; i++) row.append(h('span', { class: 'pk empty' }));

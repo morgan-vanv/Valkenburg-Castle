@@ -143,6 +143,8 @@ export class LevelView {
   readonly drums: THREE.Object3D[] = [];
   /** Cracked walls by posKey, so a blast can hide them. */
   readonly cracked = new Map<string, Extra>();
+  /** Rubble heaps by posKey (hidden once dug out, V3.2). */
+  readonly rubble = new Map<string, THREE.Object3D>();
   /** Hexes that can be clicked (walkable-ish), by hexKey. */
   readonly walkable = new Set<string>();
   /** Pit hexes by hexKey. */
@@ -710,6 +712,7 @@ export class LevelView {
     }
     this.place(h, g);
     this.extra(h, g, [rock]);
+    this.rubble.set(this.pk(h), g);
   }
 
   private addRailing(h: Hex): void {
@@ -994,6 +997,7 @@ export class LevelView {
       for (const c of e.obj.children) c.visible = c.name === 'floor' ? blown : !blown;
       if (blown) this.walkable.add(k.split(':')[1] ?? '');
     }
+    for (const [k, g] of this.rubble) for (const c of g.children) c.visible = !keys.has(k);
   }
 
   // ------------------------------------------------------------ room labels

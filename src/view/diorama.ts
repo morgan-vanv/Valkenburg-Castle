@@ -16,6 +16,7 @@ import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
+import { MapEffects, effectsFromState } from './effects';
 
 const MAX_LIGHTS = 12;
 /** How far below the shown level we draw through pits. */
@@ -27,7 +28,7 @@ export interface DioramaHooks {
   levelChanged(level: number): void;
 }
 
-export type HighlightStyle = 'walk' | 'sneak' | 'target' | 'ally' | 'danger';
+export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area';
 
 export type FloatKind = 'damage' | 'heal' | 'info' | 'warn' | 'gold' | 'miss';
 
@@ -52,6 +53,8 @@ function hexRing(rIn: number, rOut: number): THREE.BufferGeometry {
 const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
   walk: 0xffd08a,
   sneak: 0x9ec0ff,
+  dash: 0x5ae0d0,
+  area: 0xffa040,
   target: COLORS.danger,
   ally: 0x7fbf5a,
   danger: COLORS.danger,
@@ -120,11 +123,18 @@ export class Diorama {
   private landingTag: HTMLElement;
   private landingAt: THREE.Vector3 | null = null;
   private breathMarks = new THREE.Group();
+  /** 15.6: gold glow under unlooted piles (opened chests, seen ground loot), plus DOM coin markers. */
+  private lootGlow = new THREE.Group();
+  private lootTags = new Map<string, { el: HTMLElement; at: THREE.Vector3 }>();
+  /** V3.2 effects: smoke, glue, caltrops, fire, veil, ward, overwatch, sleep. */
+  readonly effects: MapEffects;
 
   constructor(
     private readonly container: HTMLElement,
     private readonly hooks: DioramaHooks,
   ) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
     const canvas = document.createElement('canvas');
     canvas.className = 'dio-canvas';
     container.appendChild(canvas);
@@ -160,7 +170,7 @@ export class Diorama {
 
     // Overlays.
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
-      const fill = style === 'walk' || style === 'sneak';
+      const fill = style === 'walk' || style === 'sneak' || style === 'dash';
       const m = new THREE.InstancedMesh(
         fill ? hexRing(0.7, 0.8) : hexRing(0.68, 0.88),
         new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.6 : 0.9, depthWrite: false }),
@@ -189,9 +199,21 @@ export class Diorama {
     this.rippleMesh.count = 0;
     this.rippleMesh.renderOrder = 2;
     this.rippleMesh.frustumCulled = false;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow);
     this.landingTag = document.createElement('div');
     this.landingTag.className = 'landing-tag hidden';
+    this.effects = new MapEffects({
+      worldOf: (p, lift) => this.worldOf(p, lift ?? 0),
+      get shownLevel() {
+        return self.shownLevel;
+      },
+      known: (p) => this.vis.explored.has(posKey(p)) || this.vis.visible.has(posKey(p)),
+      visible: (p) => this.vis.visible.has(posKey(p)),
+      unit: (id) => this.units.get(id),
+      fx: this.fx,
+      project: (v) => this.project(v),
+    });
+    this.overlay.add(this.effects.group);
 
     // Dust motes drifting in the lantern light.
     const n = 160;
@@ -349,6 +371,7 @@ export class Diorama {
       for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
+      this.effects.update(t);
       this.renderer.render(this.scene, this.rig.camera);
       this.updateDom();
     }
@@ -468,6 +491,11 @@ export class Diorama {
         ((g.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.3 * k;
       } else if (g.userData.sweep) g.rotation.y = t * 0.8;
     }
+    for (const g of this.lootGlow.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 2.6 + g.position.x * 1.7 + g.position.z);
+      (g as THREE.Sprite).material.opacity = 0.45 + 0.35 * k;
+      g.scale.setScalar(1.25 + 0.2 * k);
+    }
     for (const l of this.lips.children) ((l as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(t * 5);
     // Ripple: hex rings fade outward in a wave.
     if (this.rippleData && this.rippleMesh.count) {
@@ -521,6 +549,11 @@ export class Diorama {
       el.style.display = p.behind ? 'none' : '';
       el.style.transform = `translate(${p.x}px, ${p.y - 22}px) translate(-50%, -100%)`;
     }
+    for (const t of this.lootTags.values()) {
+      const p = this.project(t.at);
+      t.el.style.display = p.behind ? 'none' : '';
+      t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
     if (this.landingAt) {
       const p = this.project(this.landingAt);
       this.landingTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
@@ -566,6 +599,7 @@ export class Diorama {
       for (const v of [...this.units.values()]) this.removeUnit(v.id);
       for (const id of [...this.props.keys()]) this.removeProp(id);
       this.clearIntents();
+      this.refreshLootGlow();
       return;
     }
     this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
@@ -773,6 +807,8 @@ export class Diorama {
   }
 
   private refreshProps(): void {
+    this.refreshLootGlow();
+    this.effects.set(effectsFromState(this.state));
     for (const p of this.props.values()) {
       const at = p.obj.userData.at as Pos;
       const k = posKey(at);
@@ -780,6 +816,45 @@ export class Diorama {
       p.obj.visible = at.level === this.shownLevel && fog > 0;
       setMaterialFog(p.mats, fog);
     }
+  }
+
+  /** 15.6: every pile on an explored hex of the shown level glows gold until taken. */
+  private refreshLootGlow(): void {
+    const d = this.state?.delve;
+    const want = new Map<string, Pos>();
+    if (d)
+      for (const g of d.ground) {
+        if (!g.items.length || g.at.level !== this.shownLevel) continue;
+        const k = posKey(g.at);
+        if (this.vis.explored.has(k)) want.set(k, g.at);
+      }
+    for (const [k, t] of this.lootTags)
+      if (!want.has(k)) {
+        t.el.remove();
+        this.lootTags.delete(k);
+      }
+    this.lootGlow.clear();
+    for (const [k, at] of want) {
+      const sp = new THREE.Sprite(this.lootGlowMat());
+      sp.position.copy(this.worldOf(at, 0.25));
+      sp.renderOrder = 3;
+      this.lootGlow.add(sp);
+      if (!this.lootTags.has(k)) {
+        const el = document.createElement('div');
+        el.className = 'loot-marker';
+        el.textContent = '';
+        el.title = 'Unlooted';
+        this.fx.appendChild(el);
+        this.lootTags.set(k, { el, at: this.worldOf(at, 0.9) });
+      }
+    }
+  }
+
+  private lootMat: THREE.SpriteMaterial | null = null;
+  private lootGlowMat(): THREE.SpriteMaterial {
+    // One material per sprite so each can pulse on its own phase.
+    if (!this.lootMat) this.lootMat = new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc040, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
+    return this.lootMat.clone();
   }
 
   // ------------------------------------------------------------ highlights
@@ -1094,6 +1169,26 @@ export class Diorama {
     return !!v && v.root.visible;
   }
 
+  /** Can any hero see this hex, in the current or the incoming state (level independent)? */
+  canSee(p: Pos | null | undefined): boolean {
+    if (!p) return false;
+    const k = posKey(p);
+    return this.vis.visible.has(k) || !!this.extraVisible?.has(k);
+  }
+
+  /**
+   * 15.5: move the camera to an event on any level and hold a beat (scaled by the clock speed).
+   * Skips the pan when already looking close by.
+   */
+  async panTo(p: Pos, hold = 0.35): Promise<void> {
+    const w = this.worldOf(p);
+    const cur = this.rig.currentTarget();
+    const near = p.level === this.shownLevel && Math.hypot(cur.x - w.x, cur.z - w.z) < 2.5;
+    if (p.level !== this.shownLevel) this.showLevel(p.level);
+    this.lookAt(p);
+    if (!near) await this.clock.wait(hold);
+  }
+
   async playEvent(e: GameEvent): Promise<void> {
     const clock = this.clock;
     switch (e.type) {
@@ -1403,11 +1498,147 @@ export class Diorama {
         await clock.wait(0.6);
         return;
       }
+      case 'thrown': {
+        const a = this.worldOf(e.from, 0.9);
+        const b = this.worldOf(e.to, 0.2);
+        const watch = e.from.level === this.shownLevel && (this.canSee(e.from) || this.canSee(e.to));
+        if (!watch) return;
+        const by = this.units.get(e.by);
+        if (by) by.face(b.x - a.x, b.z - a.z);
+        const color = THROW_COLOR[e.kind] ?? 0xd8d0c0;
+        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color }));
+        this.overlay.add(m);
+        const dist = a.distanceTo(b);
+        await clock.tween(0.18 + dist * 0.035, (t) => {
+          m.position.lerpVectors(a, b, t);
+          m.position.y += Math.sin(t * Math.PI) * (0.4 + dist * 0.12);
+          m.rotation.set(t * 9, t * 7, 0);
+        });
+        this.overlay.remove(m);
+        m.geometry.dispose();
+        if (e.kind === 'smoke' || e.kind === 'glue') this.dustPuff(b);
+        if (e.kind === 'firecracker') this.flash(b.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xffe080, 3);
+        return;
+      }
+      case 'cast': {
+        const by = this.units.get(e.by);
+        const at = e.at ?? (e.targetId ? this.units.get(e.targetId)?.at : undefined);
+        const watch = (by?.root.visible ?? false) || (at ? this.canSee(at) && at.level === this.shownLevel : false);
+        if (!watch) return;
+        const color = SPELL_COLOR[e.spell] ?? 0xb48cff;
+        if (by && at) {
+          const w = this.worldOf(at);
+          by.face(w.x - by.root.position.x, w.z - by.root.position.z);
+        }
+        if (by) {
+          by.flash(new THREE.Color(color), 0.6);
+          this.flash(by.root.position.clone().add(new THREE.Vector3(0, by.height, 0)), color, 1.5);
+        }
+        const label = SPELL_LABEL[e.spell];
+        if (label && by) this.floatText(by.root.position.clone().add(new THREE.Vector3(0, by.height + 0.3, 0)), label, 'info', 1.2);
+        // A bolt to the target for ranged spells and shots.
+        if (by && at && !samePos(by.at, at) && e.spell !== 'blink') {
+          const from = by.root.position.clone().add(new THREE.Vector3(0, by.height * 0.7, 0));
+          const to = this.worldOf(at, 0.5);
+          const bolt = new THREE.Mesh(new THREE.SphereGeometry(e.spell === 'fireball' ? 0.2 : 0.1, 8, 6), new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+          this.overlay.add(bolt);
+          await clock.tween(0.12 + from.distanceTo(to) * 0.025, (t) => {
+            bolt.position.lerpVectors(from, to, t);
+            if (e.spell === 'fireball') bolt.position.y += Math.sin(t * Math.PI) * 0.8;
+          });
+          this.overlay.remove(bolt);
+          bolt.geometry.dispose();
+        }
+        if (e.hexes?.length) {
+          const c = e.hexes.reduce((acc, p) => acc.add(this.worldOf(p, 0.4)), new THREE.Vector3()).multiplyScalar(1 / e.hexes.length);
+          this.flash(c, color, e.spell === 'fireball' ? 6 : 3);
+          if (e.spell === 'fireball' && !this.reduceShake) this.rig.addShake(0.2);
+          if (e.spell === 'fireball' || e.spell === 'gust') this.onSpellBurst?.(e.spell);
+          await this.ringPulse(e.hexes, color);
+        } else if (at) {
+          this.flash(this.worldOf(at, 0.6), color, 2.5);
+        }
+        if (by) by.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
+      case 'blinked': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const watch = v.root.visible || this.canSee(e.to);
+        const to = this.worldOf(e.to);
+        if (!watch) {
+          v.at = { ...e.to };
+          v.root.position.copy(to);
+          this.refreshUnits();
+          return;
+        }
+        v.busy++;
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x9a6aff, 3);
+        await clock.tween(0.15, (t) => {
+          v.setOpacity(1 - t);
+          v.fig.scale.set(v.scale * (1 - t * 0.6), v.scale * (1 + t * 0.6), v.scale * (1 - t * 0.6));
+        });
+        v.root.position.copy(to);
+        v.at = { ...e.to };
+        if (v.side === 'hero' && v.id === this.selectedId) this.lookAt(e.to);
+        this.refreshUnits();
+        this.flash(to.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x9a6aff, 3);
+        await clock.tween(0.18, (t) => {
+          v.setOpacity(t);
+          v.fig.scale.set(v.scale * (0.4 + t * 0.6), v.scale * (1.6 - t * 0.6), v.scale * (0.4 + t * 0.6));
+        });
+        v.fig.scale.setScalar(v.scale);
+        v.setOpacity(1);
+        v.busy--;
+        return;
+      }
+      case 'dug': {
+        const lv = this.levels.get(e.at.level);
+        if (lv && this.state?.delve) lv.setBlown(new Set([...this.state.delve.blown, posKey(e.at)]));
+        if (e.at.level === this.shownLevel) {
+          const w = this.worldOf(e.at, 0.2);
+          this.dustPuff(w);
+          if (!this.reduceShake) this.rig.addShake(0.08);
+          await clock.wait(0.2);
+        }
+        return;
+      }
+      case 'caltrops': {
+        const v = this.units.get(e.id);
+        if (e.at.level !== this.shownLevel || !this.canSee(e.at)) return;
+        this.floatText(this.worldOf(e.at, 1), 'Caltrops! −2', 'damage', 1.3);
+        if (v) {
+          v.flash(new THREE.Color(1, 0.2, 0.1), 0.9);
+          await clock.wait(0.2);
+          v.flash(new THREE.Color(0, 0, 0), 0);
+        }
+        return;
+      }
       default:
         return;
     }
   }
 
+  /** Expanding hex rings over an area (fireball, gust, smoke, glue). */
+  private async ringPulse(hexes: Pos[], color: number): Promise<void> {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+    for (const p of hexes) {
+      if (p.level !== this.shownLevel) continue;
+      const m = new THREE.Mesh(hexRing(0.4, 0.86), mat);
+      m.position.copy(this.worldOf(p, 0.05));
+      group.add(m);
+    }
+    this.overlay.add(group);
+    await this.clock.tween(0.4, (t) => {
+      mat.opacity = 0.8 * (1 - t);
+      for (const m of group.children) m.scale.setScalar(0.6 + t * 0.5);
+    });
+    this.overlay.remove(group);
+    mat.dispose();
+  }
+
+  onSpellBurst?: (spell: string) => void;
   onStep?: (side: UnitSide) => void;
   onImpact?: (levels: number) => void;
   onBreath?: () => void;
@@ -1599,6 +1830,31 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   shove: 'shoves',
   breath: 'breathes fire on',
   sweep: 'sweeps its tail at',
+};
+
+const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
+const SPELL_COLOR: Partial<Record<string, number>> = {
+  firebolt: 0xff7a20,
+  fireball: 0xff5a10,
+  kindle: 0xffd27a,
+  mend: 0x7fe08a,
+  veil: 0x8a6aff,
+  sleep: 0x9ab0ff,
+  blink: 0x9a6aff,
+  ward: 0x8ad0ff,
+  gust: 0xd0f0ff,
+  overwatch: 0xffd060,
+  knockback: 0xffd060,
+};
+const SPELL_LABEL: Partial<Record<string, string>> = {
+  fireball: 'Fireball!',
+  veil: 'Veil',
+  sleep: 'Sleep',
+  ward: 'Ward',
+  gust: 'Gust',
+  overwatch: 'Overwatch!',
+  knockback: 'Knockback',
+  mend: 'Mend',
 };
 
 function hashStr(s: string): number {

@@ -22,7 +22,7 @@ export function fixtureCampaign(): GameState['campaign'] {
       hero('hobart', 'Lord Hobart', 'hobart', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
       hero('brann', 'Brann', 'sellsword', 10, { might: 70, finesse: 45, wits: 40, nerve: 60 }),
       hero('pim', 'Pim', 'burglar', 7, { might: 40, finesse: 75, wits: 60, nerve: 50 }),
-      { ...hero('aldous', 'Aldous', 'mage', 6, { might: 30, finesse: 50, wits: 75, nerve: 55 }), wounded: 1 },
+      { ...hero('aldous', 'Aldous', 'pyromancer', 6, { might: 30, finesse: 50, wits: 75, nerve: 55 }), wounded: 1 },
     ],
     recruits: [
       { hero: hero('h5', 'Berta', 'sellsword', 10, { might: 70, finesse: 45, wits: 40, nerve: 60 }), price: 40 },
@@ -64,6 +64,10 @@ export function fixtureDelve(castle: CastleDef): GameState {
     mana: id === 'aldous' ? 3 : 0,
     rallyCooldown: 0,
     revived: false,
+    dashed: false,
+    overwatch: false,
+    veil: 0,
+    ward: 0,
   }));
   return {
     version: 3,
@@ -104,6 +108,10 @@ export function fixtureDelve(castle: CastleDef): GameState {
       blown: [],
       ropes: [],
       liftWorking: false,
+      smoke: {},
+      glue: {},
+      burning: {},
+      caltrops: [],
       prisoner: null,
       explored: [],
       log: ['The party enters the keep.', 'Rats skitter in the dark.'],
@@ -221,13 +229,13 @@ export function fixtureEngine(castle: CastleDef): Engine {
       if (h.acted) return [];
       const out: ActionOption[] = [];
       const adj = d.monsters.filter((m) => distance(m.at, h.at) === 1 && m.at.level === h.at.level);
-      if (adj.length) out.push({ action: 'attack', label: 'Attack', targets: adj.map((m) => ({ id: m.id, at: m.at })), rolls: true });
+      if (adj.length) out.push({ action: 'attack', label: 'Attack', targets: adj.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy' });
       if (heroId === 'aldous') {
         const far = d.monsters.filter((m) => distance(m.at, h.at) <= 5 && m.at.level === h.at.level);
-        if (far.length) out.push({ action: 'firebolt', label: 'Firebolt', targets: far.map((m) => ({ id: m.id, at: m.at })), rolls: true });
-        out.push({ action: 'kindle', label: 'Kindle', targets: [{}], rolls: false });
+        if (far.length) out.push({ action: 'firebolt', label: 'Firebolt', targets: far.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy', mana: 1 });
+        out.push({ action: 'kindle', label: 'Kindle', targets: [{}], rolls: false, pick: 'self', mana: 1 });
       }
-      if (h.pack.some((i) => i.kind === 'torch')) out.push({ action: 'torch', label: 'Light torch', targets: [{}], rolls: false });
+      if (h.pack.some((i) => i.kind === 'torch')) out.push({ action: 'torch', label: 'Light torch', targets: [{}], rolls: false, pick: 'self' });
       return out;
     },
     preview(_s, heroId, action: ActionKind, _t: ActionTarget): RollPreview {
@@ -290,6 +298,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
     inLight: (s, at) => lit(s).has(posKey(at)),
     shop: () => shop,
     heroById: (s, id) => s.campaign.roster.find((h) => h.id === id),
+    classInfo: (cls) => ({ name: cls, role: '', weapon: '', armor: 0, mana: 0, abilities: [] }),
+    partyProblem: () => null,
     value: (items) => items.reduce((a, i) => a + (['gold', 'gem', 'jewelry', 'heirloom'].includes(i.kind) ? i.amount : 0), 0),
     serialize: (s) => JSON.stringify(s),
     deserialize: (t) => {

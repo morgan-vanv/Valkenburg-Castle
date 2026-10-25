@@ -2335,3 +2335,76 @@ input.seed {
   color: var(--red);
   filter: drop-shadow(0 0 6px rgba(255, 60, 30, 0.6));
 }
+
+/* ---------------------------------------------------------------- V3.2 */
+
+/* 15.6 unlooted piles: a small coin above the hex. */
+.loot-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1;
+  color: #3a2400;
+  background: radial-gradient(circle at 35% 35%, #ffe9a0, #e0a22a 60%, #9a6410);
+  border: 1px solid #5a3a08;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 8px rgba(255, 190, 60, 0.75);
+  animation: loot-bob 1.6s ease-in-out infinite;
+}
+.loot-marker::after { content: ''; }
+@keyframes loot-bob {
+  0%, 100% { margin-top: 0; }
+  50% { margin-top: -3px; }
+}
+
+/* 15.3 new class badges */
+.cls-ranger .hc-badge span, .cbadge.cls-ranger { background: #9cc84a; }
+.cls-sapper .hc-badge span, .cbadge.cls-sapper { background: #e5913a; }
+.cls-pyromancer .hc-badge span, .cbadge.cls-pyromancer { background: #ff6a2a; }
+.cls-shadowmancer .hc-badge span, .cbadge.cls-shadowmancer { background: #8a66ff; }
+.cls-hedgewitch .hc-badge span, .cbadge.cls-hedgewitch { background: #62d494; }
+
+/* 15.3 hire first */
+.hire-first {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--ember);
+  background: linear-gradient(90deg, rgba(232, 163, 61, 0.18), rgba(232, 163, 61, 0.04));
+}
+.hire-first b { color: var(--ember-hot); font-family: var(--display); font-size: 1.15rem; }
+.hire-first .btn { margin-left: auto; }
+.station.call { border-color: var(--ember); animation: station-call 1.4s ease-in-out infinite; }
+@keyframes station-call {
+  0%, 100% { box-shadow: 0 0 0 rgba(232, 163, 61, 0); }
+  50% { box-shadow: 0 0 14px rgba(232, 163, 61, 0.55); }
+}
+
+/* 15.3 recruit cards */
+.recruit .rc-role { color: var(--parchment); font-size: 1.02rem; font-style: italic; }
+.rc-stats { display: grid; gap: 3px; }
+.rc-stat { display: grid; grid-template-columns: 56px 1fr 26px; align-items: center; gap: 6px; }
+.rc-bar { height: 5px; background: var(--stone-3); position: relative; }
+.rc-bar i { position: absolute; inset: 0 auto 0 0; background: var(--ember-dim); }
+.rc-stat b { text-align: right; }
+.rc-gear { border-top: 1px solid var(--line); padding-top: 6px; }
+.rc-kit { list-style: none; padding: 0; display: grid; gap: 4px; }
+.rc-kit li { display: grid; grid-template-columns: auto auto 1fr; gap: 0 6px; align-items: baseline; }
+.rc-kit li > span:last-child { grid-column: 1 / -1; color: var(--parch-dim); }
+.rc-cost { font-family: var(--mono); font-size: 0.68rem; color: var(--ember); text-transform: uppercase; letter-spacing: 0.04em; }
+.recruit.cls-ranger { border-top: 3px solid #9cc84a; }
+.recruit.cls-sapper { border-top: 3px solid #e5913a; }
+.recruit.cls-pyromancer { border-top: 3px solid #ff6a2a; }
+.recruit.cls-shadowmancer { border-top: 3px solid #8a66ff; }
+.recruit.cls-hedgewitch { border-top: 3px solid #62d494; }
+.recruit.cls-sellsword { border-top: 3px solid #c0473a; }
+.recruit.cls-burglar { border-top: 3px solid #4fae5c; }
