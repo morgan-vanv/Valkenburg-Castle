@@ -34,6 +34,8 @@ interface PreviewState {
 const MAGES = new Set<string>(['pyromancer', 'shadowmancer', 'hedgewitch']);
 const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge']);
 const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust']);
+/** Class abilities that aren't spells (the Abilities group of the bar). */
+const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig']);
 
 const SPEEDS: { label: string; value: number }[] = [
   { label: '½×', value: 0.5 },
@@ -80,6 +82,8 @@ export class Hud {
   private topbar = h('div', { class: 'hud-top' });
   private cards = h('div', { class: 'hud-cards' });
   private bar = h('div', { class: 'hud-bar' });
+  /** 15.7 context hint line under the bar. */
+  private hint = h('div', { class: 'hud-hint hidden' });
   private logEl = h('div', { class: 'hud-log' });
   private tip = h('div', { class: 'hud-tip hidden' });
   private previewEl = h('div', { class: 'hud-preview hidden' });
@@ -98,7 +102,7 @@ export class Hud {
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.hint, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
@@ -366,13 +370,19 @@ export class Hud {
       } else if (rival && d.rivals) lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
       else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
       const act = this.bestActionFor(unitId, at);
-      if (act) lines.push(`<span class="tip-act">Click: ${act.option.label}</span>`);
+      const link = unitId === this.selectedId ? this.linkHere() : null;
+      if (link) lines.push(`<span class="tip-act">Click: ${linkButton(link.info)}</span>`);
+      else if (act) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
+      this.dio.setHoverStyle('plain');
     } else if (at) {
       if (r) lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
+      const link = sel && samePos(sel.at, at) ? this.linkHere() : null;
       const act = this.bestActionFor(null, at);
-      if (act && !r) lines.push(`<span class="tip-act">Click: ${act.option.label}</span>`);
+      if (link) lines.push(`<span class="tip-act">Click: ${linkButton(link.info)}</span>`);
+      else if (act && !r) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
+      this.dio.setHoverStyle(this.hoverKind(at));
     }
     if (lines.filter(Boolean).length) this.showTip(lines.filter(Boolean).join('<br>'));
     else this.hideTip();
@@ -498,6 +508,12 @@ export class Hud {
       return;
     }
     if (this.pv) return;
+    // Clicking the hex you stand on (or your own figure) takes the stairs or lift (15.7).
+    const sel = this.selected();
+    if (!this.pending && sel && ((unitId && unitId === this.selectedId) || (!unitId && at && samePos(at, sel.at))) && this.linkHere()) {
+      this.takeLink();
+      return;
+    }
     const best = this.bestActionFor(unitId, at);
     const activeHero = d.heroes.some((x) => x.heroId === unitId && x.status === 'active');
     if (best && (this.pending || !activeHero)) {
@@ -537,8 +553,26 @@ export class Hud {
 
   // ------------------------------------------------------------ actions
 
+  /** 15.7: a blocked option says why, as a flash on the bar and at the target. */
+  private flashBlocked(o: ActionOption, t?: ActionTarget): void {
+    sfx.play('flip', { pitch: 0.7 });
+    this.toast(o.blocked ?? 'Not now.');
+    const at = t ? this.targetPos(t) : null;
+    if (at) this.dio.floatText(at, o.blocked ?? 'Blocked', 'warn', 1.8);
+    const btn = [...this.bar.querySelectorAll<HTMLButtonElement>('button.act.blocked')].find((b) => b.dataset.action === o.action);
+    if (btn) {
+      btn.classList.remove('shake');
+      void btn.offsetWidth;
+      btn.classList.add('shake');
+    }
+  }
+
   private startAction(o: ActionOption): void {
     if (this.busy) return;
+    if (o.blocked) {
+      this.flashBlocked(o, o.targets[0]);
+      return;
+    }
     sfx.play('click');
     if (o.targets.length === 1) {
       this.choose(o, o.targets[0]!);
@@ -577,6 +611,10 @@ export class Hud {
     this.picker.classList.add('hidden');
     const sel = this.selected();
     if (!sel || !this.state) return;
+    if (o.blocked) {
+      this.flashBlocked(o, t);
+      return;
+    }
     if (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink') {
       const p = this.engine.preview(this.state, sel.heroId, o.action, t);
       this.openPreview({ option: o, target: t, preview: p, focus: 0 });
@@ -914,33 +952,127 @@ export class Hud {
     if (sel && def) {
       left.append(h('b', null, def.name), h('span', { class: 'dim small' }, ` ${className(def.cls)}`), h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved ? 'used' : 'ready' }, sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.dashed ? 'Dashed' : sel.acted ? 'Acted' : 'Action ready'), this.reach.some((r) => r.dash) ? h('span', { class: 'dash-note', title: 'Moving again spends the action (a dash)' }, ' · Dash ready') : ''));
     }
+    // Move group: walk/sneak, and the stairs or lift under the hero (15.7).
+    const usedKeys = new Set<string>(['s', 'e', 'c']);
+    const link = this.linkHere();
     const modes = h(
       'div',
       { class: 'bar-modes' },
       h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy }, 'Walk'),
       h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: 'Sneak: shorter moves, no noise' }, 'Sneak ', h('kbd', null, 'S')),
     );
-    const acts = h('div', { class: 'bar-actions' });
-    const usedKeys = new Set<string>();
-    for (const o of this.options) {
-      let key = ACTION_KEY[o.action];
-      if (key && usedKeys.has(key)) key = undefined;
-      if (key) usedKeys.add(key);
-      const btn = h(
-        'button',
-        { class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''} ${ITEM_ACTIONS.has(o.action) ? 'act-item' : SPELLS.has(o.action) ? 'act-spell' : ''}`, onclick: () => this.startAction(o), disabled: this.busy, 'data-key': key ?? '', title: `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}${ACTION_HELP[o.action] ? `\n${ACTION_HELP[o.action]}` : ''}` },
-        h('span', { class: 'act-glyph' }, ACTION_GLYPH[o.action] ?? '•'),
-        h('span', { class: 'act-label' }, o.label),
-        key ? h('kbd', null, key.toUpperCase()) : '',
-        o.targets.length > 1 ? h('span', { class: 'act-count num' }, `${o.targets.length}`) : '',
-        o.mana ? h('span', { class: 'act-mana num' }, `${o.mana}`) : '',
+    const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
+    if (link) {
+      usedKeys.add('t');
+      const l = link.info;
+      move.append(
+        h(
+          'button',
+          { class: 'act act-link', onclick: () => this.takeLink(), disabled: this.busy, 'data-key': 't', 'data-action': 'link', title: `${linkButton(l)}: 1 movement. ${l.kind === 'lift' ? 'The lift' : 'The stairs'} come out on Level ${l.to.level}.` },
+          h('span', { class: 'act-glyph' }, l.down ? '⇓' : '⇑'),
+          h('span', { class: 'act-label' }, linkButton(l)),
+          h('kbd', null, 'T'),
+        ),
       );
-      acts.append(btn);
     }
-    if (!this.options.length && sel && !this.busy) acts.append(h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing to do here. Move closer to something.'));
-    const allDone = d.heroes.filter((x) => x.status === 'active').every((x) => x.moved && x.acted);
-    const end = h('button', { class: `btn btn-primary bar-end ${allDone ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy }, 'End turn ', h('kbd', null, 'E'));
-    this.bar.append(left, modes, acts, end);
+    // The rest, grouped: Interact · Abilities · Items.
+    const groups: Record<'interact' | 'ability' | 'item', ActionOption[]> = { interact: [], ability: [], item: [] };
+    for (const o of this.options) groups[ITEM_ACTIONS.has(o.action) ? 'item' : SPELLS.has(o.action) || ABILITIES.has(o.action) ? 'ability' : 'interact'].push(o);
+    const groupEls: HTMLElement[] = [move];
+    for (const [name, list] of [
+      ['Interact', groups.interact],
+      ['Abilities', groups.ability],
+      ['Items', groups.item],
+    ] as const) {
+      if (!list.length) continue;
+      const acts = h('div', { class: 'bar-actions' });
+      for (const o of list) {
+        let key = ACTION_KEY[o.action];
+        if (key && usedKeys.has(key)) key = undefined;
+        if (key) usedKeys.add(key);
+        const btn = h(
+          'button',
+          {
+            class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''} ${o.blocked ? 'blocked' : ''} ${ITEM_ACTIONS.has(o.action) ? 'act-item' : SPELLS.has(o.action) ? 'act-spell' : ''}`,
+            onclick: () => this.startAction(o),
+            disabled: this.busy,
+            'data-key': key ?? '',
+            'data-action': o.action,
+            'aria-disabled': o.blocked ? 'true' : 'false',
+            title: o.blocked ? `${o.label} · ${o.blocked}` : `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}${ACTION_HELP[o.action] ? `\n${ACTION_HELP[o.action]}` : ''}`,
+          },
+          h('span', { class: 'act-glyph' }, ACTION_GLYPH[o.action] ?? '•'),
+          h('span', { class: 'act-label' }, o.label),
+          key ? h('kbd', null, key.toUpperCase()) : '',
+          o.targets.length > 1 ? h('span', { class: 'act-count num' }, `${o.targets.length}`) : '',
+          o.mana ? h('span', { class: 'act-mana num' }, `${o.mana}`) : '',
+          o.blocked ? h('span', { class: 'act-why' }, o.blocked) : '',
+        );
+        acts.append(btn);
+      }
+      groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
+    }
+    if (!this.options.length && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
+    // End turn: how many heroes still have a move or an action.
+    const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
+    const end = h(
+      'button',
+      { class: `btn btn-primary bar-end ${waiting === 0 ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy, title: waiting ? `${waiting} hero${waiting === 1 ? '' : 'es'} still ha${waiting === 1 ? 's' : 've'} a move or an action.` : 'Everyone is spent.' },
+      h('span', null, 'End turn ', h('kbd', null, 'E')),
+      h('span', { class: `bar-end-note ${waiting ? 'waiting' : ''}` }, waiting ? `${waiting} still waiting` : 'all spent'),
+    );
+    this.bar.append(left, ...groupEls, end);
+    this.hint.replaceChildren(...this.contextHint());
+    this.hint.classList.toggle('hidden', !this.hint.childNodes.length || this.busy);
+  }
+
+  /**
+   * 15.7: one line under the bar naming what's near the selected hero, explored hexes only
+   * ("Stairs here · Chest 2 hexes north").
+   */
+  private contextHint(): (HTMLElement | string)[] {
+    const s = this.state;
+    const d = s?.delve;
+    const sel = this.selected();
+    if (!s || !d || !sel || !this.vis) return [];
+    const castle = this.engine.castle();
+    const lv = castle.levels.find((l) => l.level === sel.at.level);
+    if (!lv) return [];
+    const found: { text: string; dist: number; at: Pos; danger?: boolean }[] = [];
+    const seen = (p: Pos) => this.vis!.explored.has(posKey(p)) || this.vis!.visible.has(posKey(p));
+    const R = 4;
+    for (let dq = -R; dq <= R; dq++)
+      for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
+        const p = { level: sel.at.level, q: sel.at.q + dq, r: sel.at.r + dr };
+        const t = lv.tiles[hexKey(p)];
+        if (!t || !seen(p)) continue;
+        const dist = (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+        const k = posKey(p);
+        let text = '';
+        if (t.kind === 'stairs' || t.kind === 'lift') {
+          const l = linkAt(castle, p);
+          text = l ? `${l.kind === 'lift' ? 'Lift' : 'Stairs'} ${l.down ? '↓' : '↑'} L${l.to.level}${l.kind === 'lift' && !d.liftWorking ? ' (dead)' : ''}` : '';
+        } else if (t.kind === 'exit') text = 'Way out';
+        else if (t.kind === 'brazier' && !d.lit.includes(k)) text = 'Cold brazier';
+        else if (t.prop === 'winch' && !d.liftWorking) text = 'Winch';
+        else if (t.kind === 'door' && d.doors[k] && !d.doors[k]!.open) text = d.doors[k]!.locked ? 'Locked door' : 'Door';
+        else if (t.kind === 'cracked') text = 'Cracked wall';
+        const chest = d.chests.find((c) => samePos(c.at, p) && !c.opened);
+        if (chest) text = chest.locked ? 'Locked chest' : 'Chest';
+        const g = d.ground.find((x) => samePos(x.at, p) && x.items.length);
+        if (g) text = g.items.some((i) => i.contractId === d.contract.id) ? 'The objective' : 'Loot';
+        if (d.prisoner && !d.prisoner.freed && samePos(d.prisoner.at, p)) text = d.prisoner.name;
+        if (d.traps[k]?.spotted) text = 'Trap';
+        if (text) found.push({ text, dist, at: p, danger: text === 'Trap' });
+      }
+    found.sort((a, b) => a.dist - b.dist);
+    const out: (HTMLElement | string)[] = [];
+    for (const f of found.slice(0, 4)) {
+      const where = f.dist === 0 ? 'here' : f.dist === 1 ? 'next to you' : `${f.dist} hexes ${compass(sel.at, f.at)}`;
+      if (out.length) out.push(h('span', { class: 'hint-sep' }, ' · '));
+      out.push(h('button', { class: `hint-item ${f.danger ? 'neg' : ''}`, title: 'Look there', onclick: () => this.dio.lookAt(f.at) }, h('b', null, f.text), ` ${where}`));
+    }
+    return out;
   }
 
   private renderLog(): void {
@@ -1088,6 +1220,19 @@ export class Hud {
         }),
         ' Reduce camera shake',
       ),
+      h(
+        'label',
+        { class: 'menu-check' },
+        h('input', {
+          type: 'checkbox',
+          checked: !st.noEndTurnAsk,
+          onchange: (e: Event) => {
+            st.noEndTurnAsk = !(e.target as HTMLInputElement).checked;
+            this.host.saveSettings();
+          },
+        }),
+        ' Ask before ending a turn with moves left',
+      ),
       h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
@@ -1159,6 +1304,16 @@ export class Hud {
   private endTurn(): void {
     if (this.busy) return;
     this.cancel();
+    const d = this.state?.delve;
+    const waiting = d ? d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)) : [];
+    // 15.7: ask once when anyone still has a move or an action.
+    if (waiting.length && !this.host.settings.noEndTurnAsk) {
+      const names = waiting.map((x) => this.heroDef(x.heroId)?.name ?? x.heroId);
+      const what = waiting.map((x) => (!x.moved && !x.acted ? 'move and action' : !x.moved ? 'move' : 'action'));
+      const list = names.map((n, i) => `${n} (${what[i]})`).join(', ');
+      this.confirm(`${list} still ha${waiting.length === 1 ? 's' : 've'} something left. End the turn anyway?`, 'End turn', () => void this.host.send({ type: 'endTurn' }), { title: `${waiting.length} still waiting`, cancel: 'Keep playing' });
+      return;
+    }
     void this.host.send({ type: 'endTurn' });
   }
 

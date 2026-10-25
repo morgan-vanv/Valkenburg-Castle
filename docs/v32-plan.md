@@ -14,7 +14,7 @@ Goal: the owner's seven play-test notes (2026-10-24 evening) built and deployed.
 ## Checklist
 
 - [x] Spec section 15, plan, briefs, safeguards
-- [ ] Engine: contract + 15.1-15.4 rules; tests; sim
+- [x] Engine: contract + 15.1-15.4 rules + take feedback (15.7); 102 tests; sim hires a squad (20 delves: 19 done, 3 deaths)
 - [x] Presentation: 15.2-15.6 UI; screenshots (effects in src/view/effects.ts)
 - [ ] Clarity pass: 15.7 (stairs/lift, objective beacons, take feedback, interactable tooltips, HUD hierarchy); screenshots
 - [ ] Integration: typecheck, tests, build
