@@ -1,6 +1,6 @@
 # V3.2 clarity progress
 
-Status: 2026-10-24. Steps A (stairs/lift), B (beacons, blocked take), C (tooltips) and most of D (bar, cards, hint) are in and verified by DOM assertions; refining D and verifying with the stress bot next. Owner instruction (via the coordinator): screenshot testing is expensive. At most 4 targeted screenshots for the critique, cheap checks first (tsc, headless stairs walk asserting the level, stress bot, DOM assertions), one before/after pair for the report.
+Status: 2026-10-24, done. Steps A–D are in; verified by tsc (0 errors), scripts/v32-stairs-walk.ts (PASS), scripts/v32-clarity-check.mjs (15/15, 0 console errors), scripts/v3-stress.mjs 2 delves (0 errors), scripts/v3-shot.mjs full and fixture tours (0 errors). Owner instruction (via the coordinator): screenshot testing is expensive. At most 4 targeted screenshots for the critique, cheap checks first (tsc, headless stairs walk asserting the level, stress bot, DOM assertions), one before/after pair for the report.
 
 Before shots (taken once with scripts/v3-shot.mjs on a static build, seed 1980, before the owner's instruction arrived): /tmp/claude-0/-home-claude/692da2aa-d3ab-5f2c-8721-44a0aca79867/scratchpad/shots-before/ (00-title … 15-after). Looked at 00, 03, 04, 05 plus the owner's docs/agents/v32-los-bug.png. The rest of the critique is from reading src/ui/hud.ts, src/view/diorama.ts, src/view/level.ts and src/style.css. After shot (the one pair): …/scratchpad/shots-after/stairs-hud.png (Hobart on the tower stair; before = shots-before/05-delve.png).
 
@@ -37,9 +37,24 @@ Before shots (taken once with scripts/v3-shot.mjs on a static build, seed 1980, 
 - scripts/v3-shot.mjs: hires two recruits after the tavern shot (V3.2 starts Hobart alone; the tour broke at "Take the job").
 - CSS: new block "V3.2 clarity (spec 15.7)" at the end of src/style.css.
 
-## Next
-- Stress bot run (scripts/v3-stress.mjs) for errors; the before/after pair for the report.
-- Possible: lower the "↓ L2" marker when a figure stands on the hex (it overlaps the unit tag).
+- scripts/v3-stress.mjs: hires a recruit in camp while `partyProblem` says the party is too small (V3.2), so the bot can start delves again.
+- Link marker rises 1.4 above a figure standing on the hex (so it doesn't sit on the HP tag). "Take stairs" as a dash (after a move, action free) shows a small "dash" tag and says so in the title. Menu key help lists T.
+
+## Before / after (one pair, same moment: start of the delve, seed 1980, 1440x900)
+- Before: /tmp/claude-0/-home-claude/692da2aa-d3ab-5f2c-8721-44a0aca79867/scratchpad/shots-before/05-delve.png
+- After: /tmp/claude-0/-home-claude/692da2aa-d3ab-5f2c-8721-44a0aca79867/scratchpad/shots-tour/05-delve.png
+- Plus the one critique shot of the new state: …/scratchpad/shots-after/stairs-hud.png (Hobart on the tower stair: marker, pulsing hex, "Take stairs ↓ Level 2" button, hint line, goal location, slim cards).
+
+## Decisions (for docs/decisions.md, which isn't in my paths; the lead may copy)
+- 2026-10-24: Take stairs/lift is hotkey T and wins over Torch's T on that hex (no free letter left; torch is rare while standing on stairs).
+- 2026-10-24: End turn asks once when any hero still has a move or action; a settings checkbox turns it off. Scripts turn it off through `vc.settings.noEndTurnAsk`.
+- 2026-10-24: Interactable hover = ember ring; hazard (pit, trap) = red ring; floor = parchment. Tooltip form is "Thing · what you can do".
+- 2026-10-24: Beacon colours by contract: recover gold, rescue green, slay red (diorama BEACON_COLOR and .beacon-tag CSS).
+
+## Next (if wanted)
+- Compass in the hint line follows world north; rotate it with the camera yaw.
+- The lift cage is ~45 small meshes per end; fine for two lifts, batch it if more are added.
+- The sealed door and cracked walls have tooltips but no hover model change; a faint crack glow on hover would finish the set.
 
 ## Contract requests
 - None. `ActionOption.blocked` as published is enough.
