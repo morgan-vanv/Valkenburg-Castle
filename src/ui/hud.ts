@@ -10,7 +10,9 @@ import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { linkAt, linkButton, linkReach, linkTooltip, type LinkInfo } from '../view/links';
-import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, BRIGHTNESS_NAME, MONSTER_NOTE, classGlyph, className, itemGlyph, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, MONSTER_NOTE, actionCost, actionHelp, classGlyph, className, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
+import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
+import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
 
 export interface HudHost {
@@ -31,7 +33,6 @@ interface PreviewState {
   focus: number;
 }
 
-const MAGES = new Set<string>(['pyromancer', 'shadowmancer', 'hedgewitch']);
 const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge']);
 const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust']);
 /** Class abilities that aren't spells (the Abilities group of the bar). */
@@ -111,6 +112,38 @@ export class Hud {
       if (!this.tip.classList.contains('hidden')) this.placeTip();
     });
     addEventListener('keydown', (e) => this.onKey(e));
+    addEventListener('resize', () => this.placeBelowTop());
+    // V3.4: every HUD element with a title gets the HUD's own tooltip, at once and styled (15.7 pass).
+    this.root.addEventListener('pointerover', (e) => this.onHudOver(e));
+    this.root.addEventListener('pointerout', (e) => {
+      if (this.hudTipOn && !(e.relatedTarget instanceof Node && this.hudTipOn.contains(e.relatedTarget))) {
+        this.hudTipOn = null;
+        this.hideTip();
+      }
+    });
+  }
+
+  private hudTipOn: HTMLElement | null = null;
+
+  private onHudOver(e: PointerEvent): void {
+    const t = e.target instanceof Element ? e.target.closest<HTMLElement>('[title],[data-tip]') : null;
+    if (!t || !this.root.contains(t) || t === this.hudTipOn) return;
+    if (t.hasAttribute('title')) {
+      t.dataset.tip = t.getAttribute('title') ?? '';
+      t.removeAttribute('title');
+    }
+    const text = t.dataset.tip ?? '';
+    if (!text) return;
+    this.hudTipOn = t;
+    this.mouse = { x: e.clientX, y: e.clientY };
+    this.showTip(tipHtml(text));
+  }
+
+  /** Cards, rivals and camera buttons sit under the top bar, however tall it gets (no overlap at any size). */
+  private placeBelowTop(): void {
+    const hgt = this.topbar.offsetHeight;
+    if (!hgt) return;
+    this.root.style.setProperty('--hud-below', `${this.topbar.offsetTop + hgt + 8}px`);
   }
 
   get engine(): Engine {
@@ -238,6 +271,7 @@ export class Hud {
     this.options = canAct && !this.busy ? this.engine.actions(s, sel.heroId) : [];
     this.renderTop();
     this.renderCards();
+    this.placeBelowTop();
     this.renderBar();
     this.renderLog();
     this.renderRivals();
@@ -431,11 +465,12 @@ export class Hud {
 
   private monsterLines(m: Monster): string[] {
     const it = this.intents[m.id];
-    const out = [`<b>${m.name}</b> <span class="dim">${m.awareness}</span>`];
-    if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}`);
+    const out = [`<b>${m.name}</b> <span class="dim">${m.awareness === 'patrol' ? 'on patrol' : m.awareness}</span>`];
+    if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}${m.stuck ? ` · <span class="neg">glued ${m.stuck}</span>` : ''}`);
     const note = MONSTER_NOTE[m.kind];
     if (note) out.push(`<span class="dim">${note}</span>`);
-    if (m.awareness === 'patrol') out.push(`<span class="dim">On patrol${this.state?.delve?.knownRoutes.includes(m.id) ? ': route known (drawn on the map)' : ''}</span>`);
+    const aw = AWARENESS_TEXT[m.awareness];
+    if (aw && m.kind !== 'gloam') out.push(`<span class="dim">${aw}${m.awareness === 'patrol' && this.state?.delve?.knownRoutes.includes(m.id) ? ' Route known (drawn on the map).' : ''}</span>`);
     if (m.holding) out.push(`<span class="neg">Holding ${this.nameOf(m.holding)}</span>`);
     if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
     return out;
@@ -463,7 +498,7 @@ export class Hud {
       else act('Door', 'Open, then walk through');
     } else if (t.kind === 'brazier') {
       if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
-      else act('Brazier', 'Light: +4 lantern oil, lit for good');
+      else act('Brazier', `Light: +${BRAZIER_LIGHT} lantern light, lit for good`);
     } else if (t.kind === 'prop' || t.kind === 'tallprop') {
       if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
       else parts.push(`${propName(t.prop)} <span class="dim">${t.kind === 'tallprop' ? 'blocks sight' : 'cover'}</span>`);
@@ -729,15 +764,25 @@ export class Hud {
         const locked = i < p.focus;
         slots.append(h('div', { class: `slot ${locked ? 'locked' : ''}` }, h('span', { class: 'slot-mark' }, locked ? '◆' : ''), h('span', { class: 'slot-pct num' }, locked ? '100%' : `${pr.chance}%`)));
       }
-      el.append(h('div', { class: 'pv-stat' }, h('span', { class: 'dim' }, `${pr.slots} slot${pr.slots > 1 ? 's' : ''} of ${STAT_NAME[pr.stat ?? 'might']}`), h('b', { class: 'num' }, ` ${pr.chance}% each`)));
+      el.append(h('div', { class: 'pv-stat', title: `Each slot hits on its own at ${pr.chance}%. Focus turns a slot into a sure hit. The table below lists every number of hits with its odds.` }, h('span', { class: 'dim' }, `${pr.slots} slot${pr.slots > 1 ? 's' : ''} of ${STAT_NAME[pr.stat ?? 'might']}`), h('b', { class: 'num' }, ` ${pr.chance}% each`)));
       el.append(slots);
-      if (pr.modifiers.length) el.append(h('ul', { class: 'pv-mods' }, ...pr.modifiers.map((m) => h('li', { class: /[−-]/.test(m) ? 'neg' : 'pos' }, m))));
+      if (pr.modifiers.length)
+        el.append(
+          h(
+            'ul',
+            { class: 'pv-mods' },
+            ...pr.modifiers.map((m) => {
+              const why = modifierHelp(m);
+              return h('li', { class: /[−-]/.test(m) ? 'neg' : 'pos', title: why ? `${m}: ${why}` : m }, m, why ? h('span', { class: 'pv-why dim' }, ` · ${why}`) : '');
+            }),
+          ),
+        );
       // Focus.
       const max = Math.min(pr.maxFocus, pr.slots);
       el.append(
         h(
           'div',
-          { class: 'pv-focus' },
+          { class: 'pv-focus', title: `Focus: each point locks one slot as a sure hit. ${FOCUS_MAX} per delve; spent Focus is gone.` },
           h('span', { class: 'kicker' }, 'Focus'),
           h('button', { class: 'btn btn-sq btn-small', 'aria-label': 'Less Focus', disabled: p.focus <= 0, onclick: () => this.setFocus(p.focus - 1) }, '−'),
           h('output', { class: 'num' }, `${p.focus}`),
@@ -756,8 +801,8 @@ export class Hud {
       el.append(h('ul', { class: 'pv-outcomes plain' }, ...pr.outcomes.map((t) => h('li', { class: /fall/i.test(t) ? 'falls' : '' }, t))));
     }
     const foot: (HTMLElement | string)[] = [];
-    foot.push(h('span', { class: pr.noise > 0 ? 'pv-noise loud' : 'pv-noise' }, pr.noise > 0 ? `Noise ${pr.noise}` : 'Silent'));
-    if (pr.light) foot.push(h('span', { class: pr.light > 0 ? 'pos' : 'neg' }, `Light ${pr.light > 0 ? '+' : ''}${pr.light}`));
+    foot.push(h('span', { class: pr.noise > 0 ? 'pv-noise loud' : 'pv-noise', title: pr.noise > 0 ? `Monsters within ${pr.noise} hexes (by path; a closed door counts 2) hear it and come to look. Sleepers wake.` : 'Nobody hears it.' }, pr.noise > 0 ? `Noise ${pr.noise}` : 'Silent'));
+    if (pr.light) foot.push(h('span', { class: pr.light > 0 ? 'pos' : 'neg', title: `${pr.light > 0 ? '+' : ''}${pr.light} rounds of lantern light.` }, `Light ${pr.light > 0 ? '+' : ''}${pr.light}`));
     el.append(h('div', { class: 'pv-foot' }, ...foot));
     el.append(
       h(
@@ -842,7 +887,7 @@ export class Hud {
     const light = d.light;
     const b = this.engine.brightness(s);
     this.topbar.append(this.lightMeter(light, b));
-    this.topbar.append(h('div', { class: 'hud-round' }, h('span', { class: 'kicker' }, 'Round'), h('b', { class: 'num' }, `${d.round}`)));
+    this.topbar.append(h('div', { class: 'hud-round', title: `Round ${d.round}.\nA round is your turn (each hero moves once and acts once), then the castle's turn: the lantern burns 1 if open, torches burn, monsters act. End turn (E) starts the castle's turn.` }, h('span', { class: 'kicker' }, 'Round'), h('b', { class: 'num' }, `${d.round}`)));
     this.topbar.append(this.goalBox());
     const levels = h('div', { class: 'hud-levels' });
     for (const lv of this.engine.castle().levels) {
@@ -852,7 +897,7 @@ export class Hud {
           'button',
           {
             class: `btn btn-small level-btn ${lv.level === this.dio.shownLevel ? 'on' : ''} ${here ? 'occupied' : ''}`,
-            title: lv.name,
+            title: `Level ${lv.level} · ${lv.name}${here ? ' · heroes here' : ''}\nShow this level. Heroes on other levels keep their place.`,
             onclick: () => {
               this.dio.showLevel(lv.level);
               this.refresh();
@@ -867,8 +912,8 @@ export class Hud {
       h(
         'div',
         { class: 'hud-sys' },
-        h('button', { class: 'btn btn-small btn-sq', title: 'Sound', onclick: () => this.toggleMute() }, sfx.muted ? '🔇' : '🔊'),
-        h('button', { class: 'btn btn-small', title: 'Menu', onclick: () => this.toggleMenu() }, 'Menu'),
+        h('button', { class: 'btn btn-small btn-sq', title: sfx.muted ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.', onclick: () => this.toggleMute() }, sfx.muted ? '🔇' : '🔊'),
+        h('button', { class: 'btn btn-small', title: 'Menu: playback speed, settings, keys, abandon the delve', onclick: () => this.toggleMenu() }, 'Menu'),
       ),
     );
   }
@@ -950,19 +995,38 @@ export class Hud {
     );
     return h(
       'div',
-      { class: `light light-${b} ${open ? '' : 'light-shut'}`, title: `Lantern oil burns 1 per round while the lantern is open. Bright ${sc.min.bright}+, Dim ${sc.min.dim}–${sc.min.bright - 1}, Dark 1–${sc.min.dim - 1}, Pitch black at 0. In the Hollow, the dark itself hunts anyone standing unlit.` },
-      h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, open ? BRIGHTNESS_NAME[b] : 'Shuttered'), h('span', { class: 'light-num num' }, `${light}`)),
+      { class: `light light-${b} ${open ? '' : 'light-shut'}`, title: this.lightTip(light, sc, open) },
+      h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, open ? BRIGHTNESS_NAME[b] : 'Shuttered'), h('span', { class: 'light-num num', title: `${light} rounds of light left in the lantern (it holds ${LIGHT_MAX}).` }, `${light}`)),
       h('div', { class: 'light-track' }, h('div', { class: 'light-fill', style: `width:${pct}%` }), h('i', { class: 'mark', style: at(sc.min.dim) }), h('i', { class: 'mark', style: at(sc.min.bright) })),
       h(
         'div',
         { class: 'light-foot' },
-        h('span', { class: `light-state ${open ? 'open' : 'shut'}` }, open ? 'Open · burning' : 'Shuttered · not burning'),
-        daylight
-          ? h('span', { class: 'light-next light-hint small', title: 'Most of the Ruined Keep is daylit. A shuttered lantern burns no oil; open it when it gets dark.' }, 'Daylight here: shutter to save oil')
-          : h('span', { class: 'light-next dim small' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
+        h('span', { class: `light-state ${open ? 'open' : 'shut'}`, title: open ? 'Open: the lantern lights the bearer\'s surroundings and burns 1 per round.' : 'Shuttered: no light from the lantern, and it burns nothing.' }, open ? 'Open · burning' : 'Shuttered · not burning'),
         toggle,
       ),
+      h(
+        'div',
+        { class: 'light-sub' },
+        daylight
+          ? h('span', { class: 'light-next light-hint small', title: 'Most of the Ruined Keep is daylit. A shuttered lantern burns no oil; open it when it gets dark.' }, 'Daylight here: shutter to save oil')
+          : h('span', { class: 'light-next dim small', title: open ? 'When the light drops to the next stage at 1 per round.' : 'Light kept in the shuttered lantern.' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
+      ),
     );
+  }
+
+  /** The light panel explained: stages with their numbers, sight, shutter, daylight (spec 16.2). */
+  private lightTip(light: number, sc: LightScale, open: boolean): string {
+    const st = (b: Brightness, range: string) => `${BRIGHTNESS_NAME[b]} ${range}: lantern lights ${LANTERN_RADIUS[b]} around the bearer, sight ${SIGHT_BY_STAGE[b]}${b === 'bright' ? '' : `, rolls ${b === 'dim' ? '−10%' : b === 'dark' ? '−20%' : '−30%'}`}`;
+    return [
+      `Lantern · ${light} rounds of light left. Burns 1 per round while open.`,
+      st('bright', `${sc.min.bright}+`),
+      st('dim', `${sc.min.dim}–${sc.min.bright - 1}`),
+      st('dark', `1–${sc.min.dim - 1}`),
+      `Pitch black at 0: no lantern light; lit braziers and torches still shine.`,
+      `Sight is 1 less on Level 2, 2 less on Level 3 (never below 2). A hero standing unlit sees ${DARK_SIGHT[1]} / ${DARK_SIGHT[2]} / ${DARK_SIGHT[3]} on Levels 1 / 2 / 3.`,
+      `Shutter (L, free): ${open ? 'no light and no burn until you open it again' : 'it is shuttered now: no light, no burn'}. Daylight on Level 1 lets you save oil.`,
+      `Refill: Kindle +${KINDLE_LIGHT}, oil flask +${OIL_LIGHT}, light a brazier +${BRAZIER_LIGHT}. In the Hollow the dark itself hunts anyone standing unlit.`,
+    ].join('\n');
   }
 
   private goalBox(): HTMLElement {
@@ -1010,40 +1074,41 @@ export class Hud {
       const def = this.heroDef(hd.heroId);
       if (!def) return;
       const sel = hd.heroId === this.selectedId;
-      const done = hd.status === 'active' && hd.moved && hd.acted;
-      const dark = hd.status === 'active' && !this.isLit(hd.heroId);
+      const active = hd.status === 'active';
+      const done = active && hd.moved && hd.acted;
+      const dark = active && !this.isLit(hd.heroId);
       if (dark) darks.push(hd.heroId);
+      const word = def.cls === 'hobart' ? 'Heir' : className(def.cls);
+      const role = CLASS_ROLE[def.cls as keyof typeof CLASS_ROLE] ?? '';
+      const manaMax = CLASSES[def.cls]?.mana ?? 0;
       const card = h(
         'button',
         {
           class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${done ? 'done' : ''} ${dark ? 'dark' : ''}`,
           onclick: () => this.select(hd.heroId),
-          disabled: hd.status !== 'active',
+          disabled: !active,
+          'data-hero': hd.heroId,
         },
-        h('div', { class: 'hc-badge' }, h('span', null, classGlyph(def.cls)), h('kbd', null, `${i + 1}`)),
+        h('div', { class: 'hc-badge', title: `${def.name} · ${word}, level ${def.level}\n${role}\nClick the card or press ${i + 1} to select.` }, h('span', null, classGlyph(def.cls)), h('kbd', null, `${i + 1}`)),
         h(
           'div',
           { class: 'hc-body' },
+          h('div', { class: 'hc-name' }, h('b', { class: 'hc-nm' }, def.name), h('span', { class: 'hc-cls', title: `${word} · level ${def.level}\n${role}` }, `${word} L${def.level}`), this.turnMarks(hd)),
           h(
             'div',
-            { class: 'hc-name' },
-            def.name,
-            hd.heroId === d.lanternBearer ? h('span', { class: 'hc-lantern', title: 'Carries the lantern' }, ' ◆') : '',
-            h('span', { class: 'hc-lvl dim' }, ` L${def.level}`),
-            // Turn state as two small marks (the bar spells it out for the selected hero).
-            hd.status === 'active'
-              ? h('span', { class: 'hc-turn', title: `${hd.moved ? 'Moved' : 'Move ready'} · ${hd.dashed ? 'Dashed' : hd.acted ? 'Acted' : 'Action ready'}` }, h('i', { class: `tm ${hd.moved ? 'used' : ''}` }), h('i', { class: `ta ${hd.acted ? 'used' : ''}` }))
-              : '',
+            { class: 'hc-hp', title: `HP ${hd.hp} of ${def.maxHp}\nAt 0 a hero is downed and bleeds out unless someone next to them revives them or gives a potion.` },
+            h('span', { class: 'hc-lab' }, 'HP'),
+            hpBar(hd.hp, def.maxHp),
+            h('span', { class: 'num hc-hpn' }, `${hd.hp}/${def.maxHp}`),
           ),
-          h('div', { class: 'hc-hp' }, hpBar(hd.hp, def.maxHp), h('span', { class: 'num small' }, `${hd.hp}/${def.maxHp}`)),
           h(
             'div',
             { class: 'hc-row' },
-            h('span', { class: 'hc-res', title: `Focus ${hd.focus}/3: spend it in a roll preview to lock slots as hits` }, pips(hd.focus, 3, 'focus')),
-            MAGES.has(def.cls) ? h('span', { class: 'hc-res', title: `Mana ${hd.mana}/3` }, pips(hd.mana, 3, 'mana')) : '',
-            packRow(hd.pack),
+            h('span', { class: 'hc-res hc-focus', title: `Focus ${hd.focus} of ${FOCUS_MAX}\nIn a roll preview, spend Focus to turn slots into sure hits. ${FOCUS_MAX} per delve; Lord Hobart's Rally gives 1 back.` }, h('span', { class: 'hc-lab' }, 'Focus'), pips(hd.focus, FOCUS_MAX, 'focus')),
+            manaMax > 0 ? h('span', { class: 'hc-res hc-mana', title: `Mana ${hd.mana} of ${manaMax}\nPays for spells: Fireball 2, every other spell 1. ${manaMax} per delve, no refills inside.` }, h('span', { class: 'hc-lab' }, 'Mana'), pips(hd.mana, manaMax, 'mana')) : '',
           ),
-          h('div', { class: 'hc-status' }, ...statusChips(hd, risk, def.name, dark ? this.sightOf(hd.heroId) : null, hd.grabbedBy ? d.monsters.find((m) => m.id === hd.grabbedBy)?.name : undefined)),
+          packRow(hd.pack),
+          h('div', { class: 'hc-status' }, ...this.statusChips(hd, def.name, risk, dark ? this.sightOf(hd.heroId) : null)),
         ),
       );
       this.cards.append(card);
@@ -1052,6 +1117,50 @@ export class Hud {
     this.dio.setDarkHeroes(darks);
     this.renderGloam(darks);
     this.applyDark();
+  }
+
+  /** Turn state on a card: Move and Act marks, or the hero's fate when off the board. */
+  private turnMarks(hd: HeroInDelve): HTMLElement {
+    if (hd.status === 'downed') return h('span', { class: 'hc-fate bad', title: `Downed: bleeding out, dies after ${hd.bleed} more castle turn${hd.bleed === 1 ? '' : 's'}.\nA hero next to them can Revive (up with 3 HP) or give a Potion (up with 5).` }, `Downed · ${hd.bleed}`);
+    if (hd.status === 'dead') return h('span', { class: 'hc-fate dead', title: 'Dead. Gone for good.' }, 'Dead');
+    if (hd.status === 'out') return h('span', { class: 'hc-fate good', title: 'Out of the castle: safe, with everything in the pack.' }, 'Out');
+    const held = !!hd.grabbedBy;
+    const mv = held ? 'Held: can\'t move' : hd.webbed ? 'Webbed: can\'t move' : hd.moved ? 'Moved this round' : 'Move ready';
+    const ac = hd.dashed ? 'Dashed: the action went on a second move' : hd.acted ? 'Acted this round' : 'Action ready';
+    return h(
+      'span',
+      { class: 'hc-turn', title: `${mv} · ${ac}\nEach round a hero may move once and act once, in either order. A hero who has moved can spend the action on a second move (a dash).` },
+      h('i', { class: `tp ${hd.moved || held || hd.webbed ? 'used' : ''}` }, 'Move'),
+      h('i', { class: `tp ${hd.acted ? 'used' : ''}` }, 'Act'),
+    );
+  }
+
+  /** Status badges, each with what it means and what to do about it (15.7). */
+  private statusChips(hd: HeroInDelve, name: string, risk: { levels: number; damage: number; levelName: string } | null, darkSight: number | null): HTMLElement[] {
+    const d = this.state!.delve!;
+    const out: HTMLElement[] = [];
+    const chip = (cls: string, text: string, tip: string) => out.push(h('span', { class: `chip ${cls}`, title: tip }, text));
+    if (hd.heroId === d.lanternBearer && hd.status === 'active') {
+      const open = this.lanternOpen();
+      chip(`lantern ${open ? '' : 'shut'}`, open ? '◆ Lantern' : '◇ Lantern', `${name} carries the lantern${open ? '' : ' (shuttered)'}.\nIts light goes where ${name} goes. Shutter or open it with L (free); Pass lantern hands it to a hero next to you.`);
+    }
+    if (hd.status === 'active' && darkSight !== null)
+      chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}\nStep into the lantern's light, a brazier's or a torch's.`);
+    if (hd.grabbedBy) {
+      const by = d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul';
+      chip('bad grab', '⛓ Held', `Held by ${by}: can't move or dash.\nBreak free (2 Might slots, 1 hit frees you) or kill it.`);
+    }
+    if (risk) chip('edge', `Edge · ${risk.damage}`, `On the edge: a shove would drop ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
+    if (hd.webbed) chip('bad', 'Webbed', 'Stuck in a web: can\'t move this turn, can still act. It clears next round.');
+    if (hd.veil > 0) chip('veil', `Veiled · ${hd.veil}`, `Veiled for ${hd.veil} more round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}.\nAttacking or making noise ${VEIL_BREAK_NOISE}+ breaks it.`);
+    if (hd.ward > 0) chip('ward', `Warded · ${hd.ward}`, `Warded for ${hd.ward} more round${hd.ward === 1 ? '' : 's'}: takes 1 less damage per hit.`);
+    if (hd.overwatch) chip('ow', 'Overwatch', `On overwatch: in the castle's turn, shoots the first enemy that moves or acts in sight within ${OVERWATCH_RANGE}.`);
+    if (hd.torch > 0) chip('warm', `Torch · ${hd.torch}`, `Torch lit: light around ${name} (radius 2) for ${hd.torch} more round${hd.torch === 1 ? '' : 's'}, whatever the lantern does.`);
+    if (hd.guarding) chip('', 'Guarding', `Guarding ${this.nameOf(hd.guarding)}: until your next turn, attacks aimed at them hit ${name} instead.`);
+    if (hd.escorting) chip('good', 'Escorting', `Escorting ${this.nameOf(hd.escorting)}: they follow ${name}, who moves 3 at most.\nReach an exit to bring them out.`);
+    if (hd.rallyCooldown > 0) chip('', `Rally in ${hd.rallyCooldown}`, `Rally is ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
+    if (hd.revived && hd.status === 'active') chip('', 'Revived', 'Was downed and got back up: comes home wounded and sits out the next contract.');
+    return out;
   }
 
   /** 16.2: the Gloam line shows while it is up and a hero on Level 3 stands unlit. */
@@ -1085,8 +1194,8 @@ export class Hud {
     const modes = h(
       'div',
       { class: 'bar-modes' },
-      h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy }, 'Walk'),
-      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: 'Sneak: shorter moves, no noise' }, 'Sneak ', h('kbd', null, 'S')),
+      h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: 'Walk: up to 4 hexes, noise 1 where you stop. Click a blue hex to move.\nAfter moving, a second move (a dash) spends the action.' }, 'Walk'),
+      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: 'Sneak (S): up to 2 hexes (Burglar 4), silent. Sleeping monsters stay asleep.' }, 'Sneak ', h('kbd', null, 'S')),
     );
     const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
     if (link) {
@@ -1115,7 +1224,7 @@ export class Hud {
           h('span', { class: 'bar-group-name' }, 'Lantern'),
           h(
             'button',
-            { class: `act act-shutter ${open ? 'open' : 'shut'}`, onclick: () => this.toggleShutter(), disabled: this.busy, 'data-key': 'l', 'data-action': 'shutter', title: `${open ? 'Shutter the lantern' : 'Open the lantern'} · free\n${ACTION_HELP.shutter ?? ''}` },
+            { class: `act act-shutter ${open ? 'open' : 'shut'}`, onclick: () => this.toggleShutter(), disabled: this.busy, 'data-key': 'l', 'data-action': 'shutter', title: `${open ? 'Shutter the lantern' : 'Open the lantern'} · free · key L\n${ACTION_HELP.shutter}` },
             h('span', { class: 'act-glyph' }, open ? '◑' : '◐'),
             h('span', { class: 'act-label' }, open ? 'Shutter' : 'Open'),
             h('kbd', null, 'L'),
@@ -1150,7 +1259,7 @@ export class Hud {
             'data-key': key ?? '',
             'data-action': o.action,
             'aria-disabled': o.blocked ? 'true' : 'false',
-            title: o.blocked ? `${o.label} · ${o.blocked}` : `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}${o.rolls ? ' (roll)' : ''}${o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}${ACTION_HELP[o.action] ? `\n${ACTION_HELP[o.action]}` : ''}`,
+            title: `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}${key ? ` · key ${key.toUpperCase()}` : ''}${o.blocked ? `\nCan't now: ${o.blocked}` : o.targets.length > 1 ? ` · ${o.targets.length} targets` : ''}\n${actionHelp(o.action, def?.cls)}`,
           },
           h('span', { class: 'act-glyph' }, ACTION_GLYPH[o.action] ?? '•'),
           h('span', { class: 'act-label' }, o.label),
@@ -1168,7 +1277,7 @@ export class Hud {
     const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
     const end = h(
       'button',
-      { class: `btn btn-primary bar-end ${waiting === 0 ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy, title: waiting ? `${waiting} hero${waiting === 1 ? '' : 'es'} still ha${waiting === 1 ? 's' : 've'} a move or an action.` : 'Everyone is spent.' },
+      { class: `btn btn-primary bar-end ${waiting === 0 ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy, title: `End turn (E): the castle takes its turn: the lantern burns 1 if open, monsters do what their marks say.\n${waiting ? `${waiting} hero${waiting === 1 ? '' : 'es'} still ha${waiting === 1 ? 's' : 've'} a move or an action.` : 'Everyone is spent.'}` },
       h('span', null, 'End turn ', h('kbd', null, 'E')),
       h('span', { class: `bar-end-note ${waiting ? 'waiting' : ''}` }, waiting ? `${waiting} still waiting` : 'all spent'),
     );
@@ -1278,8 +1387,11 @@ export class Hud {
 
   private placeTip(): void {
     const w = this.tip.offsetWidth;
-    const x = Math.min(innerWidth - w - 12, this.mouse.x + 18);
-    this.tip.style.transform = `translate(${x}px, ${this.mouse.y + 18}px)`;
+    const th = this.tip.offsetHeight;
+    const x = Math.max(8, Math.min(innerWidth - w - 12, this.mouse.x + 18));
+    const below = this.mouse.y + 18;
+    const y = below + th > innerHeight - 8 ? Math.max(8, this.mouse.y - th - 12) : below;
+    this.tip.style.transform = `translate(${x}px, ${y}px)`;
   }
 
   private hideTip(): void {
@@ -1401,6 +1513,20 @@ export class Hud {
         }),
         ' Ask before ending a turn with moves left',
       ),
+      h(
+        'label',
+        { class: 'menu-check', title: 'Walls between the camera and your heroes drop low so you can see past them. Off: every wall stands at full height.' },
+        h('input', {
+          type: 'checkbox',
+          checked: !!st.cutaway,
+          onchange: (e: Event) => {
+            st.cutaway = (e.target as HTMLInputElement).checked;
+            this.host.saveSettings();
+            this.host.applySettings();
+          },
+        }),
+        ' Lower walls near the camera',
+      ),
       h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
@@ -1423,15 +1549,15 @@ export class Hud {
   private buildCamBox(): void {
     clear(this.camBox);
     this.camBox.append(
-      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate left [', onclick: () => this.dio.rig.snapRotate(1) }, '⟲'),
-      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate right ]', onclick: () => this.dio.rig.snapRotate(-1) }, '⟳'),
-      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom in', onclick: () => this.dio.rig.zoomBy(0.8) }, '+'),
-      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom out', onclick: () => this.dio.rig.zoomBy(1.25) }, '−'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate the view left 60° ([). Right-drag to orbit freely.', onclick: () => this.dio.rig.snapRotate(1) }, '⟲'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Rotate the view right 60° (]).', onclick: () => this.dio.rig.snapRotate(-1) }, '⟳'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom in (mouse wheel).', onclick: () => this.dio.rig.zoomBy(0.8) }, '+'),
+      h('button', { class: 'btn btn-sq btn-small', title: 'Zoom out (mouse wheel).', onclick: () => this.dio.rig.zoomBy(1.25) }, '−'),
       h(
         'button',
         {
           class: 'btn btn-sq btn-small',
-          title: 'Center on hero (C)',
+          title: 'Center the view on the selected hero (C).',
           onclick: () => {
             const s = this.selected();
             if (s) this.dio.lookAt(s.at);
@@ -1627,39 +1753,37 @@ function compass(from: Pos, to: Pos): string {
   return names[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8]!;
 }
 
+/** A HUD title as tooltip HTML: escaped, line breaks kept, the name before the first " · " in bold. */
+function tipHtml(text: string): string {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const [first = '', ...rest] = text.split('\n');
+  const cut = first.indexOf(' · ');
+  const head = cut > 0 ? `<b>${esc(first.slice(0, cut))}</b><span class="tip-how"> · ${esc(first.slice(cut + 3))}</span>` : `<b>${esc(first)}</b>`;
+  return [head, ...rest.map((l) => `<span class="tip-line">${esc(l)}</span>`)].join('<br>');
+}
+
 function hpBar(hp: number, max: number): HTMLElement {
   const pct = Math.max(0, Math.min(1, hp / max));
   return h('span', { class: `hp-bar ${pct <= 0.34 ? 'low' : ''}` }, h('i', { style: `width:${pct * 100}%` }));
 }
 
-/** 15.7: the pack as item icons with a slot count (empty slots aren't drawn). */
+/** V3.4: the pack as a first-class row: all sockets drawn, a 2-slot item spans two, free count in words. */
 function packRow(pack: Item[]): HTMLElement {
-  const row = h('span', { class: 'hc-pack' });
+  const socks: HTMLElement[] = [];
   let used = 0;
   for (const it of pack) {
-    row.append(h('span', { class: `pk pk-${it.kind} ${it.slots > 1 ? 'wide' : ''}`, title: itemLabel(it) }, itemGlyph(it.kind), it.kind === 'gold' ? h('small', { class: 'num' }, `${it.amount}`) : ''));
+    const span = Math.max(1, Math.min(it.slots, PACK_SLOTS - used));
+    const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
+    socks.push(h('span', { class: `pk-sock pk-${itemBase(it.kind)} ${span > 1 ? 'wide' : ''}`, 'data-span': `${span}`, title: itemTip(it) }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), val ? h('small', { class: 'num' }, `${it.amount}`) : ''));
     used += it.slots;
   }
-  row.append(h('span', { class: `pk-count num ${used >= 4 ? 'full' : ''}`, title: `${used} of 4 pack slots used` }, `${used}/4`));
-  return row;
-}
-
-/** 15.7: statuses as small badges; the turn state lives in the name row. */
-function statusChips(hd: HeroInDelve, risk: { levels: number; damage: number; levelName: string } | null, name: string, darkSight: number | null = null, heldBy?: string): (HTMLElement | string)[] {
-  const out: HTMLElement[] = [];
-  if (hd.status === 'downed') out.push(h('span', { class: 'chip bad' }, `Downed · dies in ${hd.bleed}`));
-  if (hd.status === 'active' && darkSight !== null) out.push(h('span', { class: 'chip dark', title: `${name} stands in the dark: sight ${darkSight}${hd.at.level === 3 ? '. In the Hollow the dark itself hunts the unlit.' : ', and monsters only notice within 3.'}` }, `In the dark · sight ${darkSight}`));
-  if (hd.grabbedBy) out.push(h('span', { class: 'chip bad grab', title: `Held by ${heldBy ?? 'a ghoul'}: can’t move. Escape (2 Might slots) or kill it.` }, `⛓ Held`));
-  if (hd.status === 'out') out.push(h('span', { class: 'chip good' }, 'Out'));
-  if (hd.status === 'dead') out.push(h('span', { class: 'chip bad' }, 'Dead'));
-  if (risk) out.push(h('span', { class: 'chip edge', title: `On the edge: a shove would drop ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).` }, `Edge ${risk.damage}`));
-  if (hd.webbed) out.push(h('span', { class: 'chip bad' }, 'Webbed'));
-  if (hd.veil > 0) out.push(h('span', { class: 'chip veil', title: 'Monsters can’t see this hero' }, `Veiled ${hd.veil}`));
-  if (hd.ward > 0) out.push(h('span', { class: 'chip ward', title: 'Takes 1 less per hit' }, `Warded ${hd.ward}`));
-  if (hd.overwatch) out.push(h('span', { class: 'chip ow', title: 'Shoots the first enemy that moves or acts in sight' }, 'Overwatch'));
-  if (hd.torch > 0) out.push(h('span', { class: 'chip warm' }, `Torch ${hd.torch}`));
-  if (hd.guarding) out.push(h('span', { class: 'chip' }, 'Guarding'));
-  if (hd.escorting) out.push(h('span', { class: 'chip good' }, 'Escorting'));
-  if (hd.rallyCooldown > 0) out.push(h('span', { class: 'chip' }, `Rally in ${hd.rallyCooldown}`));
-  return out;
+  for (let i = used; i < PACK_SLOTS; i++) socks.push(h('span', { class: 'pk-sock empty', 'data-span': '1', title: 'Empty pack slot · Take loot or an item to fill it.\nHeirlooms and hoard pieces need 2 free slots.' }));
+  const free = Math.max(0, PACK_SLOTS - used);
+  return h(
+    'div',
+    { class: 'hc-pack' },
+    h('span', { class: 'hc-lab', title: `Pack · ${PACK_SLOTS} slots per hero\nEverything a hero carries out of the castle. Take, Drop and Give are free.` }, 'Pack'),
+    h('span', { class: 'pk-socks' }, ...socks),
+    h('span', { class: `pk-free ${free === 0 ? 'full' : ''}`, title: free === 0 ? 'Pack full: Drop or Give something (free) to take more.' : `${free} of ${PACK_SLOTS} pack slots free.` }, free === 0 ? 'Full' : `${free} free`),
+  );
 }

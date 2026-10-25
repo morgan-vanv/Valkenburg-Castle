@@ -36,6 +36,10 @@ export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
   dragonSleep: 1,
 };
 
+/** Colour and opacity of a hero seen through a wall. */
+const SILHOUETTE_COLOR = 0xffb24a;
+const SILHOUETTE_OPACITY = 0.42;
+
 export class UnitView {
   readonly root = new THREE.Group();
   /** Inner group for lunges and recoils (root holds the hex position). */
@@ -43,6 +47,8 @@ export class UnitView {
   readonly fig: THREE.Group;
   readonly body: THREE.MeshLambertMaterial;
   readonly glow: THREE.MeshBasicMaterial;
+  /** Heroes: the through-wall silhouette material (see the constructor). */
+  readonly silhouette?: THREE.MeshBasicMaterial;
   readonly model: FigureModel;
   at: Pos;
   /** Shown at all (fog, other level). */
@@ -71,6 +77,17 @@ export class UnitView {
     this.body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: this.baseOpacity, emissive: 0x000000, depthWrite: !ghost || key === 'gloam' });
     this.glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: key !== 'gloam' });
     this.fig = makeFigure(this.model, { body: this.body, glow: this.glow });
+    // V3.4: walls stand at full height (no cutaway), so a hero behind one shows as a faint
+    // silhouette through it. Drawn before the figure bodies (renderOrder −1 in the transparent
+    // pass) and only where something nearer is already in the depth buffer (GreaterDepth), so it
+    // never tints the visible hero itself. Heroes only.
+    if (side === 'hero') {
+      this.silhouette = new THREE.MeshBasicMaterial({ color: SILHOUETTE_COLOR, transparent: true, opacity: SILHOUETTE_OPACITY, depthWrite: false, depthFunc: THREE.GreaterDepth });
+      const sil = new THREE.Mesh(this.model.body, this.silhouette);
+      sil.name = 'silhouette';
+      sil.renderOrder = -1;
+      this.fig.add(sil);
+    }
     this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.0);
     this.fig.scale.setScalar(this.scale);
     this.fig.traverse((o) => {
@@ -105,6 +122,7 @@ export class UnitView {
   setOpacity(k: number): void {
     this.body.opacity = this.baseOpacity * k;
     this.glow.opacity = k;
+    if (this.silhouette) this.silhouette.opacity = SILHOUETTE_OPACITY * k;
   }
 
   /** Fall over and fade. */
@@ -131,12 +149,13 @@ export class UnitView {
 
   pickables(): THREE.Object3D[] {
     const out: THREE.Object3D[] = [];
-    this.fig.traverse((o) => (o as THREE.Mesh).isMesh && out.push(o));
+    this.fig.traverse((o) => (o as THREE.Mesh).isMesh && o.name !== 'silhouette' && out.push(o));
     return out;
   }
 
   dispose(): void {
     this.body.dispose();
     this.glow.dispose();
+    this.silhouette?.dispose();
   }
 }

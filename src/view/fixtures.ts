@@ -7,7 +7,7 @@ import { distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from
 import type { ActionKind, ActionTarget, ApplyResult, CastleDef, Command, GameState, Hero, HeroClass, Item, ShopOffer } from '../game/types';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
-  return { id, name, cls, level: 1, xp: 0, maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
+  return { id, name, cls, level: 1, xp: 0, maxHp, hp: maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
 }
 
 function item(id: string, kind: Item['kind'], name: string, amount = 1, slots = 1): Item {

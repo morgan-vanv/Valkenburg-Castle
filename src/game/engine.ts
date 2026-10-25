@@ -197,6 +197,8 @@ export function createEngine(castle: CastleDef): Engine {
       try {
         const s = JSON.parse(text) as GameState;
         if (!s || s.version !== 3 || !s.campaign || typeof s.rng !== 'number') return null;
+        // V3.4 (spec 17.2): saves from before HP carried over start everyone at full HP.
+        for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
         return s;
       } catch {
         return null;

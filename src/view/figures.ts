@@ -140,6 +140,9 @@ export interface Frame {
   backZ: number;
   backY: number;
   hunch: number;
+  /** Torso height (hip to shoulder top) and its half-width/half-depth at a torso-local height. */
+  torsoH: number;
+  torsoAt: (y: number) => { hw: number; hd: number };
 }
 
 function humanoid(k: Kit, o: HumanOpts): Frame {
@@ -167,9 +170,16 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     k.cyl(legR, legR * 0.9, legL, 6, o.legs, [sx * hip * 0.5, legL / 2, 0]);
     k.box(legR * 2.2, legR * 0.9, legR * 3.2, 0x2a1d12, [sx * hip * 0.5, legR * 0.45, legR * 0.5]);
   }
-  // Torso and belt.
-  k.box(shoulderW, torsoH, depth, o.tunic, T(0, torsoH / 2, 0), R());
-  k.box(shoulderW * 1.02, torsoH * 0.1, depth * 1.04, 0x2a1d12, T(0, torsoH * 0.12, 0), R());
+  // Torso (V3.4: tapered to the waist, chamfered at the shoulders, shallower at the belly) and belt.
+  k.add(shapedPrism(shoulderW, torsoH, depth, TORSO_RINGS), o.tunic, T(0, 0, 0), R());
+  {
+    const bw = torsoHalf(torsoH * 0.12, torsoH, shoulderW, depth);
+    const ring: [number, number, number][] = [
+      [0, 1, 1],
+      [1, 1, 1],
+    ];
+    k.add(shapedPrism(bw.hw * 2.08, torsoH * 0.1, bw.hd * 2.1, ring), 0x2a1d12, T(0, torsoH * 0.07, 0), R());
+  }
   // Shoulders: small caps (pauldrons when asked), arms hanging a little forward, hands.
   const armL = torsoH * 0.85;
   const shoulderY = torsoH - armR * 0.6;
@@ -285,7 +295,8 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     k.cyl(h * 0.15, h * 0.15, limbD * 0.5, 6, o.shield, [lx - limbD * 0.4, ly + h * 0.06, lz + h * 0.02], [0, 0, Math.PI / 2], [1, 1, 1.15]);
     k.ball(limbD * 0.5, COLORS.steelDark, [lx - limbD * 0.75, ly + h * 0.06, lz + h * 0.02]);
   }
-  const back = T(0, torsoH * 0.5, -depth / 2);
+  // The back of the shaped torso at mid height (shallower than the chest), for packs and sacks.
+  const back = T(0, torsoH * 0.5, -torsoHalf(torsoH * 0.5, torsoH, shoulderW, depth).hd);
   return {
     top: HEAD_TOP - (1 - cs) * (torsoH + neck + headD) + HELM_TOP[o.helm ?? 'none'],
     hy,
@@ -301,11 +312,87 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     backZ: back[2],
     backY: back[1],
     hunch,
+    torsoH,
+    torsoAt: (y: number) => torsoHalf(y, torsoH, shoulderW, depth),
   };
 }
 
 function limbd(d: number): number {
   return d * 0.5;
+}
+
+/**
+ * V3.4 torso profile (owner: "their chests are just so blocky"): rings from the hip (t = 0) to the
+ * top of the shoulders (t = 1), as fractions of the shoulder width and the chest depth. The torso
+ * narrows to ~78% at the waist, the belly is a little shallower than the chest, and the top ring
+ * pulls in so the shoulder edges read as chamfered rather than a crate's corners.
+ */
+const TORSO_RINGS: readonly (readonly [t: number, w: number, d: number])[] = [
+  [0, 0.78, 0.82],
+  [0.3, 0.8, 0.84],
+  [0.62, 0.96, 1.0],
+  [0.84, 1.0, 0.98],
+  [0.95, 0.9, 0.84],
+  [1, 0.7, 0.6],
+];
+/** How far each octagon's corners are cut (1 = a rectangle, smaller = rounder). */
+const TORSO_CHAMFER = 0.6;
+
+/** Torso half-width and half-depth at torso-local height y (0 at the hip, h at the shoulders). */
+function torsoHalf(y: number, h: number, w: number, d: number): { hw: number; hd: number } {
+  const t = Math.max(0, Math.min(1, y / h));
+  for (let i = 1; i < TORSO_RINGS.length; i++) {
+    const [t0, w0, d0] = TORSO_RINGS[i - 1]!;
+    const [t1, w1, d1] = TORSO_RINGS[i]!;
+    if (t <= t1) {
+      const k = (t - t0) / (t1 - t0 || 1);
+      return { hw: ((w0 + (w1 - w0) * k) * w) / 2, hd: ((d0 + (d1 - d0) * k) * d) / 2 };
+    }
+  }
+  return { hw: w / 2, hd: d / 2 };
+}
+
+/**
+ * A tapered, chamfered octagonal prism through `rings` (t, width, depth fractions), base at y = 0,
+ * capped top and bottom. Low-poly on purpose: with flat shading each band reads as a plane.
+ */
+function shapedPrism(w: number, h: number, d: number, rings: readonly (readonly [number, number, number])[], chamfer = TORSO_CHAMFER): THREE.BufferGeometry {
+  const oct = (hw: number, hd: number): [number, number][] => [
+    [hw, hd * chamfer],
+    [hw * chamfer, hd],
+    [-hw * chamfer, hd],
+    [-hw, hd * chamfer],
+    [-hw, -hd * chamfer],
+    [-hw * chamfer, -hd],
+    [hw * chamfer, -hd],
+    [hw, -hd * chamfer],
+  ];
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (const [t, wf, df] of rings) for (const [x, z] of oct((wf * w) / 2, (df * d) / 2)) pos.push(x, t * h, z);
+  const n = 8;
+  for (let r = 0; r < rings.length - 1; r++)
+    for (let i = 0; i < n; i++) {
+      const a = r * n + i;
+      const b = r * n + ((i + 1) % n);
+      const c = a + n;
+      const e = b + n;
+      idx.push(a, c, b, b, c, e);
+    }
+  // Caps (fans about a centre vertex).
+  const capBottom = pos.length / 3;
+  pos.push(0, 0, 0);
+  for (let i = 0; i < n; i++) idx.push(capBottom, i, (i + 1) % n);
+  const top = (rings.length - 1) * n;
+  const capTop = pos.length / 3;
+  pos.push(0, h, 0);
+  for (let i = 0; i < n; i++) idx.push(capTop, top + ((i + 1) % n), top + i);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  const flat = g.toNonIndexed();
+  flat.computeVertexNormals();
+  return flat;
 }
 
 // ------------------------------------------------------------ models
@@ -436,8 +523,9 @@ function buildModel(key: ModelKey): FigureModel {
       const sn = Math.sin(f.hunch);
       for (let i = 0; i < 3; i++) {
         const y = 0.2 - i * 0.045;
-        const z = f.depth / 2 + 0.005;
-        k.box(f.shoulderW * 0.8, 0.012, 0.012, 0xc8d0bc, [0, f.hipY + y * cs - z * sn, y * sn + z * cs], [f.hunch, 0, 0]);
+        const at = f.torsoAt(y);
+        const z = at.hd + 0.004;
+        k.box(at.hw * 1.5, 0.012, 0.012, 0xc8d0bc, [0, f.hipY + y * cs - z * sn, y * sn + z * cs], [f.hunch, 0, 0]);
       }
       // Claws: three thin spikes hanging off each hand.
       for (const hand of [f.handL, f.handR]) for (let c = -1; c <= 1; c++) k.cone(0.008, 0.09, 3, 0xe8e4d0, [hand[0] + c * 0.02, hand[1] - 0.05, hand[2] + c * 0.012], [Math.PI * 0.95, 0, 0]);

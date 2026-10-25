@@ -276,7 +276,8 @@ export class LevelView {
     // Walls (15.8). A built wall hex with floor beside it is drawn as thin panels along its
     // floor-facing edges (pale cap, dark face) over a low dark core, with posts at the corners.
     // Wall hexes with no open neighbour, and cave walls (any open neighbour in a rock/earth/bone
-    // room), stay solid blocks so the castle keeps its mass. All of it cuts away near the camera.
+    // room), stay solid blocks so the castle keeps its mass. All of it can cut away near the camera
+    // (Diorama.setCutaway; off by default since V3.4).
     const wallColor = (h: Hex) => new THREE.Color(COLORS.wallCap).offsetHSL(0, (hash2(h.q, h.r, 3) - 0.5) * 0.03, (hash2(h.r, h.q, 9) - 0.5) * 0.05);
     const solid: Hex[] = [];
     const thin: Hex[] = [];

@@ -234,6 +234,10 @@ export class Diorama {
     this.gloamEdge.count = 0;
     this.gloamEdge.renderOrder = 1;
     this.gloamEdge.frustumCulled = false;
+    // V3.4: walls stand at full height, so the hover, path-end and selection rings get a faint
+    // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
+    // still shows its ring.
+    for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
     this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon, this.routes, this.darkRings, this.gloamEdge);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
@@ -338,6 +342,8 @@ export class Diorama {
     const m = this.hoverMesh.material as THREE.MeshBasicMaterial;
     m.color.setHex(kind === 'interact' ? COLORS.emberHot : kind === 'danger' ? COLORS.danger : COLORS.parchment);
     m.opacity = kind === 'plain' ? 0.8 : 1;
+    const ghost = this.hoverMesh.children[0] as THREE.Mesh | undefined;
+    if (ghost) ((ghost.material as THREE.MeshBasicMaterial).color.copy(m.color));
     this.hoverMesh.scale.setScalar(kind === 'plain' ? 1 : 1.04);
   }
 
@@ -459,7 +465,18 @@ export class Diorama {
     requestAnimationFrame(this.loop);
   };
 
-  cutaway = true;
+  /**
+   * V3.4 (owner: "see all walls at their full height"): the cutaway that lowered walls between the
+   * camera and the focus is off by default. The shader code stays; `setCutaway(true)` brings it back
+   * (a settings toggle may call it). Hero figures hidden behind walls draw as a faint silhouette.
+   */
+  cutaway = false;
+
+  /** Lower walls between the camera and the focus (true) or keep every wall at full height (false, default). */
+  setCutaway(on: boolean): void {
+    this.cutaway = on;
+    this.updateCutaway();
+  }
 
   private updateCutaway(): void {
     const cam = this.rig.camera.position;
@@ -468,7 +485,7 @@ export class Diorama {
     const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
     if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
     CUTAWAY.dir.value.copy(d.normalize());
-    // Steep top-down views need no cut.
+    // Off: the cut height is above every wall, so nothing is lowered.
     CUTAWAY.height.value = this.cutaway ? 0.3 : 99;
   }
 
@@ -2356,6 +2373,16 @@ export class Diorama {
 }
 
 // ------------------------------------------------------------ helpers
+
+/** A faint copy of a ring overlay drawn only behind nearer geometry (walls), V3.4. */
+function throughWall(src: THREE.Mesh): THREE.Mesh {
+  const base = src.material as THREE.MeshBasicMaterial;
+  const mat = new THREE.MeshBasicMaterial({ color: base.color, transparent: true, opacity: 0.35, depthWrite: false, depthFunc: THREE.GreaterDepth, side: base.side });
+  const m = new THREE.Mesh(src.geometry, mat);
+  m.name = 'through-wall';
+  m.renderOrder = src.renderOrder;
+  return m;
+}
 
 const INTENT_GLYPH: Record<Intent['kind'], string> = {
   attack: '⚔',

@@ -151,6 +151,10 @@ export class App {
     const sp = this.settings.speed;
     this.dio.clock.speed = this.hurry ? Math.max(6, sp * 4) : sp === 0 ? 1000 : sp;
     this.dio.reduceShake = this.settings.reduceShake;
+    // V3.4: "Lower walls near the camera" (the view agent's setCutaway; older dioramas: the field).
+    const dio = this.dio as Diorama & { setCutaway?: (on: boolean) => void };
+    if (typeof dio.setCutaway === 'function') dio.setCutaway(this.settings.cutaway);
+    else dio.cutaway = this.settings.cutaway;
   }
 
   // ------------------------------------------------------------ saving
