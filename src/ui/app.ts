@@ -53,6 +53,8 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   grapple: 'creak',
 };
 const LOADOUT_KEY = 'vc.loadout.v32';
+/** 15.8: default camera distance at delve start; figures are hex-tall now, so a bit further out. */
+const DELVE_DISTANCE = 22;
 
 export class App {
   private state: GameState | null = null;
@@ -245,7 +247,7 @@ export class App {
         if (sel) {
           this.dio.showLevel(sel.at.level, true);
           this.dio.lookAt(sel.at, true);
-          this.dio.rig.distance = 19;
+          this.dio.rig.distance = DELVE_DISTANCE;
         }
       }
       return;

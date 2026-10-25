@@ -182,7 +182,7 @@ export class MapEffects {
       if (!u) continue;
       const m = new THREE.Mesh(this.geo.shield, this.mats.ward);
       m.userData.unit = id;
-      m.scale.set(0.55, u.height * 0.75, 0.55);
+      m.scale.set(0.5 + u.height * 0.12, u.height * 0.7, 0.5 + u.height * 0.12);
       m.renderOrder = 6;
       this.wards.add(m);
     }

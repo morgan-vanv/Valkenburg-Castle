@@ -20,6 +20,8 @@ import { MapEffects, effectsFromState } from './effects';
 import { linkEnds, linkMarker } from './links';
 
 const MAX_LIGHTS = 12;
+/** 15.8: floating text starts above a hex-tall figure's head. */
+const FLOAT_LIFT = 2.8;
 /** How far below the shown level we draw through pits. */
 const BELOW_HALO = 3;
 
@@ -202,7 +204,7 @@ export class Diorama {
     this.hoverMesh = new THREE.Mesh(hexRing(0.86, 0.96), new THREE.MeshBasicMaterial({ color: COLORS.parchment, transparent: true, opacity: 0.8, depthWrite: false }));
     this.hoverMesh.visible = false;
     this.hoverMesh.renderOrder = 4;
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }));
+    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.66, 0.8, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }));
     this.ring.visible = false;
     this.ring.renderOrder = 3;
     this.rippleMesh = new THREE.InstancedMesh(hexRing(0.74, 0.86), new THREE.MeshBasicMaterial({ color: 0x9ec8ff, transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending }), 400);
@@ -450,12 +452,12 @@ export class Diorama {
     const bearer = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
     if (bearer && bearer.shown && bearer.at.level === this.shownLevel && !bearer.dead) {
       const r = radiusOf[this.brightness];
-      if (r > 0) srcs.push({ at: bearer.root.position.clone().add(new THREE.Vector3(0.15, 1.3, 0.1)), radius: r, color: this.brightness === 'bright' ? 0xffb862 : this.brightness === 'dim' ? 0xf09a48 : 0xd0763a, power: 1, seed: 0 });
+      if (r > 0) srcs.push({ at: bearer.root.position.clone().add(new THREE.Vector3(0.3, bearer.height + 0.5, 0.3)), radius: r, color: this.brightness === 'bright' ? 0xffb862 : this.brightness === 'dim' ? 0xf09a48 : 0xd0763a, power: 1, seed: 0 });
     }
     for (const id of this.torches) {
       const v = this.units.get(id);
       if (!v || !v.shown || v.at.level !== this.shownLevel || id === this.lanternBearer) continue;
-      srcs.push({ at: v.root.position.clone().add(new THREE.Vector3(-0.1, 1.2, 0)), radius: 2, color: 0xff9a40, power: 0.9, seed: srcs.length * 1.7 });
+      srcs.push({ at: v.root.position.clone().add(new THREE.Vector3(-0.3, v.height + 0.4, 0.2)), radius: 2, color: 0xff9a40, power: 0.9, seed: srcs.length * 1.7 });
     }
     const lv = this.levels.get(this.shownLevel);
     if (lv) {
@@ -633,9 +635,9 @@ export class Diorama {
         continue;
       }
       // Above a figure standing there, so it doesn't sit on their HP tag.
-      let occupied = false;
-      for (const v of this.units.values()) if (v.shown && samePos(v.at, l.pos)) occupied = true;
-      const p = this.project(occupied ? l.at.clone().setY(l.at.y + 1.4) : l.at);
+      let occupied = 0;
+      for (const v of this.units.values()) if (v.shown && samePos(v.at, l.pos)) occupied = Math.max(occupied, v.height + 0.9);
+      const p = this.project(occupied ? l.at.clone().setY(l.at.y + occupied - 1.5) : l.at);
       l.el.style.display = p.behind ? 'none' : '';
       l.el.classList.toggle('dead', l.lift && !this.liftWorking);
       l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
@@ -652,7 +654,7 @@ export class Diorama {
     el.className = `floater floater-${kind}`;
     el.textContent = text;
     this.fx.appendChild(el);
-    const world = at instanceof THREE.Vector3 ? at.clone() : this.worldOf(at, 1.6);
+    const world = at instanceof THREE.Vector3 ? at.clone() : this.worldOf(at, FLOAT_LIFT);
     this.floaters.push({ el, world, born: this.clock.real, life, rise: kind === 'damage' ? 0.5 : 0.7 });
   }
 
@@ -712,7 +714,8 @@ export class Diorama {
       this.units.set(id, v);
       this.scene.add(v.root);
       v.root.position.copy(this.worldOf(at));
-      v.face(0, side === 'hero' ? -1 : 1);
+      // Everyone starts facing the camera (+z), so faces and shields read at a glance.
+      v.face(0, 1);
       const el = document.createElement('div');
       el.className = `unit-tag tag-${side}`;
       el.dataset.id = id;
@@ -930,10 +933,10 @@ export class Diorama {
     const col = BEACON_COLOR[o.kind];
     const base = this.worldOf(o.at, 0.05);
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.5, 7, 12, 1, true),
+      new THREE.CylinderGeometry(0.28, 0.5, 9, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
     );
-    pillar.position.copy(base).add(new THREE.Vector3(0, 3.5, 0));
+    pillar.position.copy(base).add(new THREE.Vector3(0, 4.5, 0));
     pillar.userData = { pillar: true, phase: 0 };
     const ring = new THREE.Mesh(hexRing(0.55, 0.92), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false }));
     ring.position.copy(base);
@@ -943,7 +946,7 @@ export class Diorama {
     glow.scale.setScalar(2.4);
     glow.userData = { phase: 2 };
     this.beacon.add(pillar, ring, glow);
-    this.beaconAt = this.worldOf(o.at, 2.2);
+    this.beaconAt = this.worldOf(o.at, o.kind === 'slay' ? 4.6 : 2.8);
     this.beaconTag.className = `beacon-tag ${o.kind}`;
     this.beaconTag.textContent = o.label;
     this.beaconTag.classList.remove('hidden');
@@ -1113,11 +1116,11 @@ export class Diorama {
         continue;
       }
       // A line to the target or destination.
-      const from = this.worldOf(m.at, 0.6);
+      const from = this.worldOf(m.at, 1.1);
       let to: THREE.Vector3 | null = null;
       if (it.targetId) {
         const tp = targetPos(state, it.targetId);
-        if (tp && tp.level === m.at.level) to = this.worldOf(tp, 0.6);
+        if (tp && tp.level === m.at.level) to = this.worldOf(tp, 1.1);
       } else if (it.to && it.to.level === m.at.level) to = this.worldOf(it.to, 0.08);
       if (to && m.at.level === this.shownLevel) {
         const col = it.kind === 'attack' || it.kind === 'steal' ? COLORS.danger : it.kind === 'web' ? 0xd8d8d8 : 0xb08a6a;
@@ -1644,7 +1647,7 @@ export class Diorama {
         return;
       }
       case 'thrown': {
-        const a = this.worldOf(e.from, 0.9);
+        const a = this.worldOf(e.from, 1.6);
         const b = this.worldOf(e.to, 0.2);
         const watch = e.from.level === this.shownLevel && (this.canSee(e.from) || this.canSee(e.to));
         if (!watch) return;
@@ -1861,7 +1864,7 @@ export class Diorama {
     const len = dir.length();
     if (len < 0.01) return;
     dir.normalize();
-    const reach = Math.min(0.45, len * 0.35);
+    const reach = Math.min(0.6, len * 0.35);
     a.busy++;
     await this.clock.tween(0.1, (k) => a.rig.position.copy(dir).multiplyScalar(reach * easeOutCubic(k)));
     void this.clock.tween(0.16, (k) => a.rig.position.copy(dir).multiplyScalar(reach * (1 - k))).then(() => a.busy--);
@@ -1869,7 +1872,7 @@ export class Diorama {
 
   private async recoil(t: UnitView, a?: UnitView): Promise<void> {
     const dir = a ? t.root.position.clone().sub(a.root.position).setY(0).normalize() : new THREE.Vector3(0, 0, 1);
-    await this.clock.tween(0.18, (k) => t.rig.position.copy(dir).multiplyScalar(Math.sin(k * Math.PI) * 0.18));
+    await this.clock.tween(0.18, (k) => t.rig.position.copy(dir).multiplyScalar(Math.sin(k * Math.PI) * 0.26));
     t.rig.position.set(0, 0, 0);
   }
 

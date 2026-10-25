@@ -10,7 +10,10 @@ export const LEVEL_GAP = 9;
 /** Height of the walkable top of a plain floor tile. */
 export const FLOOR_TOP = 0.18;
 export const RAISED_TOP = 0.62;
-export const WALL_HEIGHT = 1.25;
+/** 15.8: walls stand about a hero's height (heroes are ~2.6), so thin panels still read as walls. */
+export const WALL_HEIGHT = 2.2;
+/** Thickness of a thin wall panel (15.8). */
+export const WALL_THICK = 0.24;
 
 export function levelY(level: number): number {
   return -(level - 1) * LEVEL_GAP;
