@@ -74,6 +74,10 @@ export function buildLevel1(): LevelBuilder {
   b.props('bench', [[34, 22], [35, 22], [39, 22], [40, 22]]);
   b.prop(37, 18, 'statue', true);
 
+  // V3.7 (spec 20.3): the tower stair's shaft can't be blown into (the outer curtain is marked in finish).
+  b.unbreakableAround('tower');
+  b.protectAround(37, 3); // the floor beside the stairs never collapses or rubbles (spec 20.3a)
+
   // Railing: a few short bits left on the pit mouth's rim.
   b.railing([[25, 11], [26, 11], [22, 14], [22, 15]]);
 

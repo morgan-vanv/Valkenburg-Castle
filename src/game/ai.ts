@@ -2,15 +2,16 @@
 // how they strike, and the Ranger's overwatch that fires at them.
 
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
-import type { HeroInDelve } from './types';
-import { CALTROPS_DMG, CLASSES, OVERWATCH_RANGE } from './data';
+import type { HeroInDelve, Intent } from './types';
+import { CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  armorOf, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
-  roll,
+  armorOf, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
+  rangedLabel, roll, rootFigure,
 } from './common';
-import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, monsterSees, pathTo, seesHex, within } from './world';
+import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, within } from './world';
 import { figure } from './falls';
+import { dirIndex, heroSwings } from './stealth';
 
 // ---------------------------------------------------------------- perception
 
@@ -107,13 +108,25 @@ export function exitsBy(c: Ctx, from: Pos): Pos[] {
   return [...c.w.exits].filter((e) => field.has(posKey(e))).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
 }
 
-/** Walk a figure along `path`. Returns true if caltrops stopped it short (monsters only). */
-export function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): boolean {
+/**
+ * Walk a figure along `path`. Returns true if it was stopped short: caltrops (monsters only), or a
+ * hero's free swing killed it (spec 20.2: leaving a hero's side with their action ready). It faces
+ * the way it last stepped (spec 20.1).
+ */
+export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path: Pos[]): boolean {
   if (!path.length) return false;
+  // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) stays where it is.
+  if (((c.d.rivals?.members.find((r) => r.id === id)?.stuck) ?? 0) > 0) return true;
   const seg: Pos[] = [];
   let from = at.at;
   const isMonster = c.d.monsters.some((m) => m.id === id);
   for (const p of path) {
+    if (p.level === from.level && !samePos(p, from)) at.facing = dirIndex(from, p);
+    if (heroSwings(c, id, from, p)) {
+      if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
+      at.at = { ...from };
+      return true;
+    }
     if (isMonster && c.d.caltrops.includes(posKey(p))) {
       // Caltrops: 2 damage, the walk ends here (spec 15.4).
       c.d.caltrops = c.d.caltrops.filter((k) => k !== posKey(p));
@@ -156,23 +169,69 @@ export function guardFor(c: Ctx, targetId: string): HeroInDelve | undefined {
 
 /** An attack on a hero or the prisoner. Returns the id that was hit (after guard), or null on a miss. */
 export function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): string | null {
+  return strikeDetailed(c, attacker, targetId, slots, p, dmg, what).hit;
+}
+
+/** `strike` with the roll's hits and the damage dealt (free swings report them, spec 20.2). */
+export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): { hit: string | null; hits: number; damage: number } {
   let tid = targetId;
   const g = guardFor(c, tid);
   if (g) {
     tid = g.heroId;
     say(c, `${heroName(c, g.heroId)} steps in front of ${nameOf(c, targetId)}.`);
   }
-  const r = roll(c, attacker, what, slots, p);
+  // V3.7 (spec 20.5): a braced hero is harder to hit; brace and the shield take damage off each hit.
+  const h = hd(c, tid);
+  const gm = h ? guardMods(c, h, rangedLabel(what)) : { dmg: 0, chance: 0 };
+  const r = roll(c, attacker, what, slots, p + gm.chance);
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: tid });
-    return null;
+    return { hit: null, hits: 0, damage: 0 };
   }
-  const h = hd(c, tid);
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
-  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h)) + (r.perfect ? 1 : 0);
+  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h) - gm.dmg) + (r.perfect ? 1 : 0);
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
-  return tid;
+  return { hit: tid, hits: r.hits, damage: total };
+}
+
+// ---------------------------------------------------------------- hamstring (spec 20.5: orc archers, rival Rangers)
+
+/**
+ * Should a bow-armed enemy at `from` hamstring target `t` instead of shooting it? A hero not yet
+ * rooted, within HAMSTRING_RANGE in line of sight, and close enough to be a threat (within 3).
+ * Shown as the intent `hamstring` the round before (world-phase SHOWN_FIRST; crews likewise).
+ */
+export function hamstringIntent(c: Ctx, from: Pos, t: Target): Intent | null {
+  if (!t.hero || t.hero.status !== 'active' || (t.hero.rooted ?? 0) > 0) return null;
+  if (t.at.level !== from.level || distance(from, t.at) > HAMSTRING_RANGE || distance(from, t.at) > 3) return null;
+  if (!los(c.w, c.d, from, t.at)) return null;
+  return { kind: 'hamstring', targetId: t.id, to: { ...from } };
+}
+
+/**
+ * The hamstring shot itself (spec 20.5): HAMSTRING_SLOTS at `chance` − 20; a hit roots the hero for
+ * HAMSTRING_ROUNDS (a rooted hero hit again is refreshed). Brace lowers the chance. Noise 1.
+ * Returns true on a hit.
+ */
+export function hamstringShot(c: Ctx, attacker: string, t: Target, chance: number): boolean {
+  if (!t.hero || t.hero.status !== 'active') return false;
+  const gm = guardMods(c, t.hero, true);
+  say(c, `${nameOf(c, attacker)} aims low at ${heroName(c, t.id)}'s legs.`);
+  const r = roll(c, attacker, 'Hamstring', HAMSTRING_SLOTS, chance + HAMSTRING_PENALTY + gm.chance);
+  const at = figurePosOf(c, attacker);
+  if (at) makeNoise(c, at, HAMSTRING_NOISE);
+  if (!r.hits) {
+    c.ev.push({ type: 'miss', attacker, target: t.id });
+    return false;
+  }
+  c.ev.push({ type: 'hit', attacker, target: t.id, damage: 0, crit: false });
+  rootFigure(c, t.id, HAMSTRING_ROUNDS, attacker);
+  return true;
+}
+
+function figurePosOf(c: Ctx, id: string): Pos | undefined {
+  return c.d.monsters.find((m) => m.id === id)?.at ?? c.d.rivals?.members.find((r) => r.id === id)?.at;
 }
 
 // ---------------------------------------------------------------- overwatch (Ranger, spec 15.3)

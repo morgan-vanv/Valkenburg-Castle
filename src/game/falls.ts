@@ -75,9 +75,9 @@ export function fallInfo(c: Ctx, pit: Pos, self?: string): FallInfo | null {
   return { to, levels: col.levels, damage: fallDamage(col.levels), levelName: c.w.levelName(to.level) };
 }
 
-/** Is this hex railed against shoves? */
+/** Is this hex railed against shoves? A railing on floor that has collapsed into the pit (spec 20.3a) is gone. */
 export function railed(c: Ctx, p: Pos): boolean {
-  return !!c.w.tile(p)?.railing;
+  return !!c.w.tile(p)?.railing && kindAt(c.w, c.d, p) !== 'pit';
 }
 
 /** The worst fall a shove could cause to someone standing at `at` (null if none or railed). */
@@ -149,8 +149,12 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   afterLanding?.(c, f.kind === 'hero' ? f.h : null);
 }
 
-/** Hook set by delve.ts: lair checks after a hero lands somewhere new. */
-export let afterLanding: ((c: Ctx, h: HeroInDelve | null) => void) | undefined;
+/**
+ * Hook set by delve.ts: lair checks after a hero lands somewhere new. A `var`, not a `let`,
+ * so the registration works even when an import cycle evaluates delve.ts before this module.
+ */
+// eslint-disable-next-line no-var
+export var afterLanding: ((c: Ctx, h: HeroInDelve | null) => void) | undefined;
 export function setAfterLanding(fn: (c: Ctx, h: HeroInDelve | null) => void): void {
   afterLanding = fn;
 }

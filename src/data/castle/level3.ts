@@ -49,6 +49,7 @@ export function buildLevel3(): LevelBuilder {
   // Sealed Stair, lift, cave mouth.
   b.set(42, 4, { kind: 'sealed' });
   b.set(24, 27, { kind: 'lift' });
+  b.protectAround(24, 27); // the lift base never rubbles (spec 20.3a)
   b.set(1, 28, { kind: 'exit' });
 
   // Bone Pile: heaps of bones (cover), only in the bridges' shadow so no

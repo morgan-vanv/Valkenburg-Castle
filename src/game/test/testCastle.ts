@@ -12,7 +12,7 @@
 // through Level 2's pit to the Hollow (2 levels, 7 damage).
 
 import { offsetToAxial, posNeighbors, hexKey, type Pos } from '../hex';
-import type { CastleDef, LevelDef, RoomDef, TileDef, TileKind } from '../types';
+import type { CastleDef, LevelDef, RoomDef, SpawnDef, TileDef, TileKind } from '../types';
 
 const LEGEND: Record<string, TileDef | null> = {
   '.': { kind: 'floor' },
@@ -151,10 +151,11 @@ export const testCastle: CastleDef = {
   // V3.3 (spec 16.1): awake by default; sleepers are marked. The east hall has a patrol, the
   // Crossing an archer on the bridge and a captain with Grub, the Hollow a buried ghoul.
   spawns: [
-    { at: at(1, 4, 2), kind: 'rats', asleep: true },
+    // V3.7 (spec 20.1): sleepers face where they lie (`facing` is a DIRS index: 0 east, 3 west). The rats face the pantry door; the spider the forge wall.
+    { at: at(1, 4, 2), kind: 'rats', asleep: true, facing: 0 } as SpawnDef,
     { at: at(1, 16, 4), kind: 'orc' },
     { at: at(1, 15, 6), kind: 'orc', patrol: [at(1, 15, 6), at(1, 17, 6), at(1, 17, 8), at(1, 15, 8)] },
-    { at: at(2, 16, 2), kind: 'spider', asleep: true },
+    { at: at(2, 16, 2), kind: 'spider', asleep: true, facing: 3 } as SpawnDef,
     { at: at(2, 9, 7), kind: 'orc', name: 'Grub the Jailer' },
     { at: at(2, 10, 7), kind: 'captain' },
     { at: at(2, 12, 3), kind: 'archer' },
@@ -179,10 +180,15 @@ export const testCastle: CastleDef = {
     { id: 'res1', kind: 'rescue', at: at(2, 16, 8), where: 'the cells' },
     { id: 'res2', kind: 'rescue', at: at(1, 16, 8), where: 'the east hall' },
     { id: 'slay', kind: 'slay', at: at(3, 16, 4), where: 'the Lair' },
+    // V3.7 (spec 20.4): crew hideouts for "Bring back" contracts (never on the regular board).
+    { id: 'lantern-sisters-hideout', kind: 'rescue', at: at(2, 3, 8), where: 'the winch room', hideout: 'lantern-sisters' },
+    { id: 'ferrymen-hideout', kind: 'rescue', at: at(3, 3, 7), where: 'the Hollow', hideout: 'ferrymen' },
+    { id: 'gallows-choir-hideout', kind: 'rescue', at: at(3, 10, 7), where: 'the Hollow', hideout: 'gallows-choir' },
+    { id: 'the-wake-hideout', kind: 'rescue', at: at(3, 11, 2), where: 'the Hollow', hideout: 'the-wake' },
   ],
   rivalEntrances: [at(1, 18, 7)],
-  // V3.5 (spec 18.5): a cutthroat post on the Crossing, east of the pit.
-  rivalPosts: [at(2, 14, 5)],
+  // V3.5 (spec 18.5): a cutthroat post on the Crossing, east of the pit. V3.7: the Wake's post in the Hollow by the lift base.
+  rivalPosts: [at(2, 14, 5), at(3, 4, 6)],
   lights: [
     { at: at(1, 4, 6), radius: 2, kind: 'sconce' },
     { at: at(1, 2, 8), radius: 3, kind: 'daylight' },

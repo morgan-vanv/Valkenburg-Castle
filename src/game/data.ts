@@ -1,6 +1,6 @@
 // Numbers from docs/v3-spec.md.
 
-import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
+import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
 import type { ClassInfo } from './api';
 
 /** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
@@ -114,8 +114,8 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
 export const RECRUIT_CLASSES: HeroClass[] = ['sellsword', 'burglar', 'ranger', 'sapper', 'pyromancer', 'shadowmancer', 'hedgewitch'];
 
 const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
-  heir: { role: 'The heir: steady, rallies the squad.', abilities: ['Rally: allies within 3 gain 1 Focus. Cooldown 3.'] },
-  sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.'] },
+  heir: { role: 'The heir: steady, rallies the squad.', abilities: ['Rally: allies within 3 gain 1 Focus. Cooldown 3.', 'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.'] },
+  sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.', 'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.'] },
   burglar: {
     role: 'Quiet: picks locks, sneaks fast.',
     abilities: ['Pick locks.', 'Sneak 4.', 'Backstab: +1 slot on monsters not hunting.', 'Opens chests silently and takes loot without using the action.'],
@@ -126,11 +126,18 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Longbow: range 6, noise 1. Adjacent shots lose 1 slot.',
       'Overwatch: shoot the first enemy that moves or acts in sight within 6 next world phase.',
       'Knockback shot: 2 Finesse slots at range 5; 2 hits push the target 1 hex back (pits!).',
+      'Hamstring: 1 Finesse slot at −20% at range 5; a hit roots the target for 2 rounds (no moving, can still act). Noise 1.',
     ],
   },
   sapper: {
     role: 'Breacher: blows walls, digs through.',
-    abilities: ['Starts each delve with 2 free charges.', 'Throw a charge up to 3 hexes.', 'Dig: clear adjacent rubble or a cracked wall. Noise 4.'],
+    abilities: [
+      'Satchel: 3 charges each delve; bought charges add to them.',
+      'Set a charge (fuse 1 or 2) on an adjacent hex, door, chest or wall; throw one up to 3 hexes (fuse 1).',
+      'Blast: 4 dmg within 1 and thrown back, 2 within 2; opens locks and breaks walls on Levels 1 and 2. Noise 8. The Sapper takes 0, friends half.',
+      'Dig: clear adjacent rubble or a cracked wall. Noise 4.',
+      'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.',
+    ],
   },
   pyromancer: {
     role: 'Fire: burns crowds, lights the way.',
@@ -146,6 +153,8 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Veil (1 mana): an ally within 3 is unseen by monsters for 2 rounds, until they attack or make noise 4+.',
       'Sleep (1 mana): 2 Wits slots at range 5; a hit puts a monster to sleep.',
       'Blink (1 mana): teleport up to 4 to a free hex in sight, over pits. Silent.',
+      'Dread (1 mana): 2 Wits slots at range 5; a hit sends a monster or crew member fleeing from you for 2 rounds, taking free swings as it goes.',
+      'Night thorn (1 mana): 2 Wits slots at range 5, 1 dmg per hit ignoring armor. Silent.',
     ],
   },
   hedgewitch: {
@@ -154,6 +163,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Mend (1 mana): heal 4 within 3.',
       'Ward (1 mana): an ally within 3 takes 1 less per hit for 2 rounds.',
       'Gust (1 mana): everyone within 1 of a hex at range 4 is pushed 1 hex away from it. Noise 2.',
+      'Briar (1 mana): 2 Wits slots at range 4, 1 dmg per hit; any hit roots the target 1 round, a perfect roll 2. Noise 1.',
     ],
   },
 };
@@ -226,6 +236,67 @@ export const GLOAM_RISE_MAX = 6;
 export const GLOAM_CALM_FADE = 2;
 export const BRAZIER_LIGHT = 4;
 export const KINDLE_LIGHT = 6;
+// ---------------------------------------------------------------- V3.7 stealth and swings (spec 20.1, 20.2)
+
+/** Walking noise per hex passed (2 on rubble); sneaking is silent. */
+export const STEP_NOISE = 1;
+export const RUBBLE_STEP_NOISE = 2;
+/** A hero passing within this many hexes of a sleeper rolls to wake it. */
+export const WAKE_RANGE = 2;
+export const WAKE_WALK = 50;
+export const WAKE_SNEAK = 10;
+/** Ending the move adjacent to a sleeper: walking wakes it for sure, sneaking this often. */
+export const WAKE_END_SNEAK = 25;
+/** Noticing ranges by light and move mode; in the Hollow light doesn't matter. The blind arc halves the walking range. */
+export const NOTICE = { litWalk: 6, litSneak: 4, unlitWalk: 3, unlitSneak: 1, hollowWalk: 6, hollowSneak: 3 } as const;
+/** Sneak attack: +1 slot on a monster that hasn't noticed the attacker. */
+export const SNEAK_ATTACK_SLOTS = 1;
+/** Free swings: the usual attack with one slot fewer (min 1); a bow swings with 1 slot. */
+export const SWING_SLOT_PENALTY = 1;
+export const SWING_BOW_SLOTS = 1;
+/** Dread (Shadowmancer): 1 mana, 2 Wits slots at range 5; 1+ hits = feared for 2 world phases. */
+export const DREAD_MANA = 1;
+export const DREAD_SLOTS = 2;
+export const DREAD_RANGE = 5;
+export const DREAD_ROUNDS = 2;
+
+// ---------------------------------------------------------------- V3.7 kit and free movement (spec 20.5)
+
+/** Free movement while calm: the castle takes a turn (a full world phase) every this many steps. */
+export const CALM_STEPS = 4;
+/** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
+export const BRACE_DMG = 1;
+export const BRACE_CHANCE = -15;
+/** The forge shield: ranged hits do 1 less, 2 less while braced. 50 gold, needs the smith. */
+export const SHIELD_DMG = 1;
+export const SHIELD_BRACED_DMG = 2;
+export const SHIELD_PRICE = 50;
+/** Hamstring (anyone with a bow): 1 Finesse slot at −20, range 5 in sight; a hit roots 2 rounds. Noise 1. */
+export const HAMSTRING_SLOTS = 1;
+export const HAMSTRING_PENALTY = -20;
+export const HAMSTRING_RANGE = 5;
+export const HAMSTRING_ROUNDS = 2;
+export const HAMSTRING_NOISE = 1;
+/** Night thorn (Shadowmancer, 1 mana): 2 Wits slots, 1 dmg per hit ignoring armor, range 5, silent. */
+export const NIGHTTHORN_MANA = 1;
+export const NIGHTTHORN_SLOTS = 2;
+export const NIGHTTHORN_RANGE = 5;
+export const NIGHTTHORN_DMG = 1;
+/** Briar (Hedgewitch, 1 mana): 2 Wits slots at range 4, 1 dmg per hit; a hit roots 1 round, a perfect roll 2. Noise 1. */
+export const BRIAR_MANA = 1;
+export const BRIAR_SLOTS = 2;
+export const BRIAR_RANGE = 4;
+export const BRIAR_DMG = 1;
+export const BRIAR_ROOT = 1;
+export const BRIAR_ROOT_PERFECT = 2;
+export const BRIAR_NOISE = 1;
+/** Smashing a crate or barrel: noise 4; 60% gold 3–12, 20% a small item, 20% nothing. */
+export const SMASH_NOISE = 4;
+export const SMASH_GOLD_CHANCE = 60;
+export const SMASH_ITEM_CHANCE = 20;
+export const SMASH_GOLD: [number, number] = [3, 12];
+export const SMASH_ITEMS: ItemKind[] = ['torch', 'potion', 'firecracker', 'caltrops'];
+
 /** The Lantern Sisters' kit (16.5). */
 export const SISTER_CLASSES: ('ranger' | 'shadowmancer' | 'burglar')[] = ['ranger', 'shadowmancer', 'burglar'];
 export const SISTER_DARTS = 2;
@@ -265,7 +336,7 @@ export const SHOP: ShopOffer[] = [
   { kind: 'torch', name: 'Torch', price: 10, text: '12 rounds of light around the bearer.' },
   { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
   { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
-  { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Opens locks and cracked walls. Very loud.' },
+  { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Set it with a fuse: opens locks, breaks walls on Levels 1 and 2. Very loud.' },
   { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
   { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
   { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
@@ -292,7 +363,11 @@ export const START_GOLD = 120;
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
 export const TAVERN_SIZE = 4;
-export const SAPPER_CHARGES = 2;
+/** V3.7 (spec 20.3): the satchel. */
+export const SAPPER_CHARGES = 3;
+export const BLAST_INNER_DMG = 4;
+export const BLAST_OUTER_DMG = 2;
+export const BLAST_NOISE = 8;
 export const BOW_RANGE = 6;
 export const OVERWATCH_RANGE = 6;
 export const KNOCKBACK_RANGE = 5;
@@ -418,7 +493,7 @@ export const FIRESIDE_HEAL = 3;
 export const HICCUP_NOISE = 1;
 export const HEAVY_MOVE = 3;
 
-// ---------------------------------------------------------------- V3.5 crews (spec 18.5)
+// ---------------------------------------------------------------- V3.5 crews (spec 18.5), reworked in V3.7 (spec 20.4)
 
 export interface RivalStats {
   hp: number;
@@ -431,7 +506,10 @@ export interface RivalStats {
   range: number;
 }
 
-/** Base numbers per rival class (the Sisters' ranger, shadowmancer and burglar as in 16.5). */
+/**
+ * Legacy numbers per rival class (V3.5 saves without `level`). V3.7 crews are built like heroes
+ * from CLASSES (see rivals.ts `rivalStats`); this table only backs members from older saves.
+ */
 export const RIVAL_CLASSES: Record<RivalClass, RivalStats> = {
   ranger: { ...SISTER, armor: 0, range: BOW_RANGE },
   shadowmancer: { ...SISTER, armor: 0, range: 1 },
@@ -439,12 +517,23 @@ export const RIVAL_CLASSES: Record<RivalClass, RivalStats> = {
   sellsword: { hp: 10, slots: 3, chance: 60, dmg: 2, move: 4, armor: 1, range: 1 },
   sapper: { hp: 9, slots: 3, chance: 55, dmg: 2, move: 4, armor: 0, range: 1 },
   pyromancer: { hp: 6, slots: 2, chance: 50, dmg: 1, move: 4, armor: 0, range: 1 },
+  hedgewitch: { hp: 7, slots: 2, chance: 50, dmg: 1, move: 4, armor: 0, range: 1 },
 };
-/** Level 2 tier for cutthroats (16.3): +2 HP, +5 hit. */
+/** Level 2 tier for cutthroats (16.3): +2 HP, +5 hit (legacy saves only). */
 export const CUTTHROAT_TIER = { hp: 2, chance: 5 };
+/** Spec 20.4: the purse a killed member drops, by crew level (30 at level 2 and 3, 50 at level 4). */
+export const CREW_PURSE: Record<number, number> = { 1: 30, 2: 30, 3: 30, 4: 50 };
 export const CUTTHROAT_PURSE = 30;
 export const CUTTHROAT_CHANCE = 0.6;
 export const PROSPECTOR_CHANCE = 0.5;
+/** Spec 20.4: the Wake on Level 3 contracts. */
+export const WAKE_CHANCE = 0.6;
+/** Crew members walk 4 (like heroes). */
+export const RIVAL_MOVE = 4;
+/** Spec 20.4: members at or below half HP back off a hex and drink a potion (heals 5, like a hero's). */
+export const RIVAL_POTION_HEAL = 5;
+/** Spec 20.4: a dragged hero moves 3 a round toward the crew's exit. */
+export const DRAG_MOVE = 3;
 /** Waiting cutthroats notice a hero this close in line of sight, or noise this loud. */
 export const CUTTHROAT_SIGHT = 6;
 export const CUTTHROAT_HEAR = 4;
@@ -460,35 +549,68 @@ export const PYRO_BOLT_DMG = 2;
 export const PYRO_BOLT_NOISE = 3;
 export const SELLSWORD_SHOVE_CHANCE = 60;
 
+export interface CrewMemberDef {
+  name: string;
+  cls: RivalClass;
+  /** Spec 20.4: the 4-slot pack by class (item kinds; 'charge' ×n = n charges). */
+  pack: ItemKind[];
+}
+
 export interface CrewDef {
   id: CrewId;
   name: string;
   temperament: 'prospector' | 'cutthroat';
-  members: { name: string; cls: RivalClass }[];
+  /** Spec 20.4: members are built as heroes of their class at this level (+2 HP, +5 main stat per level above 1). */
+  level: number;
+  weaponTier: 0 | 1 | 2;
+  armorTier: 0 | 1 | 2;
+  /** Which contract levels draw this crew (makeCrew), and the level its posts are on (cutthroats). */
+  contracts: number[];
+  members: CrewMemberDef[];
+  /** Spec 20.4: the crew's hideout, where captives are held ("Bring back" contracts); a ContractSiteDef with `hideout` = this crew. */
+  hideout: { siteId: string; where: string };
 }
 
 export const CREWS: Record<CrewId, CrewDef> = {
   'lantern-sisters': {
-    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector',
-    members: SISTER_NAMES.map((name, i) => ({ name, cls: SISTER_CLASSES[i]! })),
+    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 2, weaponTier: 1, armorTier: 1, contracts: [1],
+    members: [
+      { name: SISTER_NAMES[0]!, cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
+      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+    ],
+    hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
-    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat',
+    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
     members: [
-      { name: 'Ferryman Joost', cls: 'sellsword' },
-      { name: 'Ferryman Sil', cls: 'ranger' },
-      { name: 'Ferryman Brecht', cls: 'sapper' },
+      { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
+      { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
+      { name: 'Ferryman Brecht', cls: 'sapper', pack: ['charge', 'charge', 'glue'] },
     ],
+    hideout: { siteId: 'ferrymen-hideout', where: 'the Drain' },
   },
   'gallows-choir': {
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat',
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
     members: [
-      { name: 'Deacon Harl', cls: 'sellsword' },
-      { name: 'Little Mags', cls: 'burglar' },
-      { name: 'Cantor Vey', cls: 'pyromancer' },
+      { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
+      { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'oil'] },
     ],
+    hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
+  },
+  'the-wake': {
+    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 4, weaponTier: 2, armorTier: 1, contracts: [3],
+    members: [
+      { name: 'Mother Grave', cls: 'sellsword', pack: ['potion', 'potion'] },
+      { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },
+      { name: 'Candle', cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: 'Spade', cls: 'sapper', pack: ['charge', 'charge', 'charge'] },
+    ],
+    hideout: { siteId: 'the-wake-hideout', where: 'the Bone Pile' },
   },
 };
+/** Spec 18.5: the Level 2 pool. */
 export const CUTTHROAT_POOL: CrewId[] = ['ferrymen', 'gallows-choir'];
 
 // ---------------------------------------------------------------- V3.5 parley (spec 18.6)

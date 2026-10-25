@@ -5,6 +5,8 @@ import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Comm
 import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
+import { blastPreview } from './charges';
+import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
@@ -12,6 +14,7 @@ import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, checkDelveEnd, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
+import { calmReason, updateCalm } from './calm';
 
 function ctx(w: World, s: GameStateX, ev: GameEvent[] = []): Ctx | null {
   if (!s.delve) return null;
@@ -38,6 +41,7 @@ export function createEngine(castle: CastleDef): Engine {
         const c = ctx(w, s, ev)!;
         refreshSight(c);
         computeIntents(c);
+        updateCalm(c);
         c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
         c.ev.push({ type: 'phase', phase: 'player', round: 1 });
         c.ev.push({ type: 'say', text: `${c.d.contract.title}. The lantern is full.` });
@@ -51,7 +55,7 @@ export function createEngine(castle: CastleDef): Engine {
     let err: string | undefined;
     switch (command.type) {
       case 'move':
-        err = doMove(c, command.heroId, command.path, command.sneak);
+        err = doMove(c, command.heroId, command.path, command.sneak, command.follow);
         break;
       case 'act':
         err = doAct(c, command.heroId, command.action, command.target, command.focus);
@@ -77,6 +81,8 @@ export function createEngine(castle: CastleDef): Engine {
     if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
       for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.intent) m.intent = planMonster(c, m, lit).intent;
+      // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
+      updateCalm(c);
     }
     return { state: s, events: ev };
   }
@@ -196,6 +202,23 @@ export function createEngine(castle: CastleDef): Engine {
 
     shop: (state) => shopOffers(state),
     ales: (state) => aleOffers(state),
+    calmReach(state, heroId, sneak) {
+      const c = rctx(state);
+      return c ? calmReach(c, heroId, sneak) : [];
+    },
+
+    blastPreview(state, at) {
+      const c = rctx(state);
+      if (!c) return { broke: [], collapsed: [], rubbled: [], hit: [] as string[] };
+      return blastPreview(c, at);
+    },
+
+    calm(state) {
+      const c = rctx(state);
+      if (!c || state.stage !== 'delve') return { calm: false, why: 'Not in a delve.' };
+      const why = calmReason(c);
+      return why === undefined ? { calm: true } : { calm: false, why };
+    },
     deals(state, heroId) {
       const c = rctx(state);
       if (!c || state.stage !== 'delve') return [];

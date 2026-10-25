@@ -10,19 +10,22 @@ import {
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP,
   START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
   ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
-  HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, type StoryDef,
+  HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
 } from './data';
 import { placeHoard } from './dragon';
-import { HOARD_PIECES } from './data';
+import { HOARD_PIECES, SHIELD_PRICE } from './data';
 import { pick, random, shuffle } from './rng';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
+import { isSatchel, satchelName } from './charges';
 import { canEnter, kindAt, type World } from './world';
 
 export interface ContractX extends Contract {
   /** Prisoner or heirloom name. */
   subject: string;
+  /** V3.7 (spec 20.4): a "Bring back" contract: the captive hero's id. */
+  captiveId?: string;
 }
 
 type Res = { error?: string; events: GameEvent[] };
@@ -64,6 +67,7 @@ export function newGame(w: World, seed: number): GameStateX {
       litBraziers: [],
       lostGear: [],
       village: newVillage(),
+      captives: [], // V3.7 (spec 20.4): filled by the crews rework
     },
     delve: null,
     summary: null,
@@ -134,8 +138,8 @@ function makeBoard(w: World, s: GameStateX): Contract[] {
   const rep = s.campaign.reputation;
   const open = (lv: number) => rep >= (REP_FOR_LEVEL[lv] ?? REP_FOR_LEVEL[REP_FOR_LEVEL.length - 1]!);
   // Spec 19.1: story sites belong to their story contract; the regular board never picks them.
-  const sites = w.castle.contractSites.filter((x) => x.kind !== 'slay' && !x.story && open(x.at.level));
-  const slay = rep >= REP_FOR_SLAY ? w.castle.contractSites.filter((x) => x.kind === 'slay' && !x.story) : [];
+  const sites = w.castle.contractSites.filter((x) => x.kind !== 'slay' && !x.story && !x.hideout && open(x.at.level));
+  const slay = rep >= REP_FOR_SLAY ? w.castle.contractSites.filter((x) => x.kind === 'slay' && !x.story && !x.hideout) : [];
   const l1 = shuffle(s, sites.filter((x) => x.at.level === 1));
   const deep = shuffle(s, sites.filter((x) => x.at.level > 1));
   // The slay contract stays on the board once unlocked; at least one Level 1 contract; deeper ones mixed in.
@@ -175,6 +179,35 @@ function makeBoard(w: World, s: GameStateX): Contract[] {
     out.push(c);
   });
   out.push(...storyBoard(w, s));
+  out.unshift(...captiveBoard(w, s));
+  return out;
+}
+
+/**
+ * V3.7 (spec 20.4): a "Bring back <name>" contract per captive: a rescue at the crew's hideout with the
+ * full rescue bounty for the hideout's level (the level below where they were taken, capped at 3).
+ */
+export function captiveBoard(w: World, s: GameStateX): Contract[] {
+  const out: Contract[] = [];
+  for (const cp of s.campaign.captives ?? []) {
+    const crew = CREWS[cp.crew];
+    const site = w.castle.contractSites.find((x) => x.id === cp.siteId) ?? w.castle.contractSites.find((x) => x.hideout === cp.crew);
+    if (!site) continue;
+    const lvl = Math.min(3, site.at.level);
+    const c: ContractX = {
+      id: `cap-${cp.hero.id}`,
+      kind: 'rescue',
+      title: `Bring back ${cp.hero.name}`,
+      brief: `${cp.hero.name} was dragged off by ${crew.name}. They are held at ${crew.name.replace(/^The /, 'the ')}' hideout in ${site.where}, alive for now.`,
+      siteId: site.id,
+      level: lvl,
+      bounty: BOUNTY.rescue[lvl] ?? 0,
+      warnings: [crew.name, `Level ${lvl}`, 'Held at HP 1'],
+      subject: cp.hero.name,
+      captiveId: cp.hero.id,
+    };
+    out.push(c);
+  }
   return out;
 }
 
@@ -300,6 +333,18 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       C.gold -= o.price;
       h.ale = o.kind;
       events.push({ type: 'say', text: `Wim draws ${h.name} a ${o.name}. Drunk at the start of the next delve.` });
+      return { events };
+    }
+    case 'buyShield': {
+      // V3.7 (spec 20.5): a round shield from the forge: ranged hits do 1 less (2 while braced). Any class.
+      const h = C.roster.find((x) => x.id === cmd.heroId);
+      if (!h) return err('No such hero.');
+      if (!villageOf(s).smith) return err(LOCKED.smith);
+      if (h.shield) return err(`${h.name} already carries a shield.`);
+      if (C.gold < SHIELD_PRICE) return err('Not enough gold.');
+      C.gold -= SHIELD_PRICE;
+      h.shield = true;
+      events.push({ type: 'say', text: `Gerda straps a shield to ${h.name}'s arm (${SHIELD_PRICE} gold).` });
       return { events };
     }
     case 'upgrade': {
@@ -473,7 +518,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   } else if (contract.kind === 'slay') {
     // Nothing to place: the Dragon is a castle spawn.
   } else {
-    d.prisoner = { id: 'p1', name: contract.subject, at: { ...site.at }, hp: 5, freed: false, out: false, dead: false };
+    // Spec 20.4: a captive hero is held at HP 1.
+    d.prisoner = { id: 'p1', name: contract.subject, at: { ...site.at }, hp: contract.captiveId ? 1 : 5, freed: false, out: false, dead: false };
   }
   // The Dragon's hoard: what's been carried out never comes back.
   placeHoard(w, s, d, Math.max(0, HOARD_PIECES - (s.hoardTaken ?? 0)));
@@ -507,10 +553,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       ward: 0,
       ...(ale ? { ale } : {}),
     };
-    // Sappers bring two free charges (spec 15.3), on top of what fits.
-    if (h.cls === 'sapper') {
-      for (let i = 0; i < SAPPER_CHARGES && packUsed(hid.pack) < PACK_SLOTS; i++) hid.pack.push(makeItem({ s }, 'charge', 1, 'Blasting charge'));
-    }
+    // V3.7 (spec 20.3): the Sapper's satchel: 3 charges in one slotless pack item; bought charges add to them.
+    if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -550,6 +594,8 @@ export function spawnMonster(sp: SpawnDef, id: string): MonsterX {
     maxHp: hp,
     awareness,
     spawnedAt: { ...sp.at },
+    // V3.7 (spec 20.1): sleepers face where the map put them; default 0 (east). `facing` on SpawnDef is a contract request.
+    facing: (sp as SpawnDef & { facing?: number }).facing ?? 0,
   };
   if (tier > 1) m.tier = tier;
   if (patrol) {
@@ -611,6 +657,7 @@ export function buildSummary(c: Ctx): void {
   }
   const lootValue = valueOf(out.flatMap((h) => h.pack));
   const notes = [...(d.notes ?? [])];
+  for (const h of d.heroes) if (h.status === 'captured') notes.push(`${C.roster.find((x) => x.id === h.heroId)?.name ?? h.heroId} was dragged out by ${d.rivals?.name ?? 'a crew'}.`);
   if (done) notes.unshift(`Contract done: ${d.contract.title}.`);
   else notes.unshift(`Contract failed: ${d.contract.title}.`);
   c.s.summary = {
@@ -640,6 +687,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
       if (it.story) continue; // spec 18.3: to the village, below
+      if (isSatchel(it)) continue; // spec 20.3: the satchel refills each delve
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
     }
@@ -671,7 +719,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard');
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isSatchel(i));
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;
@@ -686,10 +734,43 @@ export function backToCamp(w: World, s: GameStateX): Res {
     events.push({ type: 'villageUnlocked', story });
     events.push({ type: 'say', text: st.line });
   }
-  // Prisoner joins (story villagers stay in Lowgate instead).
-  if (d.contract.kind === 'rescue' && d.prisoner?.out && !story) {
+  // V3.7 (spec 20.4): a captive brought back rejoins the roster with the HP they came out with; one who
+  // died in the crew's hands is mourned. (The contract comes off the board with the captive.)
+  const captiveId = (d.contract as ContractX).captiveId;
+  if (captiveId && d.prisoner) {
+    const i = (C.captives ?? []).findIndex((cp) => cp.hero.id === captiveId);
+    const cp = i >= 0 ? C.captives[i] : undefined;
+    if (cp && d.prisoner.out) {
+      C.captives.splice(i, 1);
+      cp.hero.hp = Math.max(1, Math.min(cp.hero.maxHp, d.prisoner.hp));
+      C.roster.push(cp.hero);
+      events.push({ type: 'say', text: `${cp.hero.name} is home, and back on the roster.` });
+    } else if (cp && d.prisoner.dead) {
+      C.captives.splice(i, 1);
+      const at = d.prisoner.at;
+      C.fallen.push({ name: cp.hero.name, cls: cp.hero.cls, level: cp.hero.level, where: `Level ${at.level}, ${w.roomName(at).toLowerCase()}`, delve: C.delveCount });
+    }
+  }
+  // Prisoner joins (story villagers stay in Lowgate; a captive hero is handled above).
+  if (d.contract.kind === 'rescue' && d.prisoner?.out && !story && !captiveId) {
     const cls = pick(s, RECRUIT_CLASSES);
     C.roster.push(makeHero(`h${(s.nextHero = (s.nextHero ?? 1) + 1) - 1}`, d.prisoner.name, cls));
+  }
+  // V3.7 (spec 20.4): heroes a crew carried off leave the roster for the captives list (minus gold and
+  // gems, which the crew took); a "Bring back" contract goes up for each. The heir taken ends it.
+  C.captives ??= [];
+  const cr = d.rivals;
+  let heirTaken = false;
+  for (const hid of d.heroes) {
+    if (hid.status !== 'captured') continue;
+    const h = C.roster.find((x) => x.id === hid.heroId);
+    if (!h || !cr) continue;
+    h.hp = 1;
+    C.roster = C.roster.filter((x) => x !== h);
+    const site = w.castle.contractSites.find((x) => x.hideout === cr.crew);
+    C.captives.push({ hero: h, crew: cr.crew, siteId: site?.id ?? CREWS[cr.crew].hideout.siteId, delve: C.delveCount });
+    if (h.id === 'keven') heirTaken = true;
+    events.push({ type: 'say', text: `${h.name} was carried off by ${cr.name}. A "Bring back" job goes up on the post.` });
   }
   const heirDead = sum.dead.includes('keven');
   s.delve = null;
@@ -698,6 +779,11 @@ export function backToCamp(w: World, s: GameStateX): Res {
     s.stage = 'over';
     s.overReason = 'The heir has fallen. Valkenburg stays dark.';
     return { events: [...events, { type: 'say', text: 'The heir has fallen. Valkenburg stays dark.' }] };
+  }
+  if (heirTaken) {
+    s.stage = 'over';
+    s.overReason = 'The heir is taken. Valkenburg stays dark.';
+    return { events: [...events, { type: 'say', text: 'The heir is taken. Valkenburg stays dark.' }] };
   }
   refreshCamp(w, s);
   s.stage = 'camp';

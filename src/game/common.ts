@@ -3,11 +3,13 @@
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
-  BLEED_START, CLASSES, CUTTHROAT_HEAR, FIRESIDE_HEAL, FOCUS_MAX, RESERVE_FOCUS, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS, SLAY_XP, TIERS, TOLL_MIN,
+  BLEED_START, BRACE_CHANCE, BRACE_DMG, CLASSES, CUTTHROAT_HEAR, FIRESIDE_HEAL, FOCUS_MAX, RESERVE_FOCUS, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS,
+  SHIELD_BRACED_DMG, SHIELD_DMG, SLAY_XP, TIERS, TOLL_MIN, WAKE_END_SNEAK,
 } from './data';
 import { chance, int, pick, random } from './rng';
-import { newItemId, say, type Ctx, type MonsterX } from './state';
+import { newItemId, say, type Ctx, type MonsterX, type RivalX } from './state';
 import { brightnessOf, litSet, noiseField, within, type World } from './world';
+import { faceToward, forgetHeroes, noticeHero } from './stealth';
 
 // ---------------------------------------------------------------- lookups
 
@@ -252,6 +254,8 @@ export function killHero(c: Ctx, h: HeroInDelve): void {
   h.pack = [];
   if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
   h.escorting = undefined;
+  // V3.7 (spec 20.4): a member dragging them lets go.
+  for (const r of c.d.rivals?.members ?? []) if (r.dragging === h.heroId) r.dragging = undefined;
   // The lantern drops with them; the nearest active hero picks it up.
   if (c.d.lanternBearer === h.heroId) passLanternIfNeeded(c);
 }
@@ -370,14 +374,22 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       const src = by ? hd(c, by) : undefined;
       goHunting(c, m, src?.at);
     }
+    // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
+    if (by && hd(c, by)) noticeHero(c, m, by);
     if (m.hp <= 0) {
       killMonster(c, m, by);
       if (opts.noise !== false) makeNoise(c, m.at, 2);
     }
     return;
   }
-  const r = c.d.rivals?.members.find((x) => x.id === id);
+  let r = c.d.rivals?.members.find((x) => x.id === id);
   if (r) {
+    // V3.7 (spec 20.4): the Sellsword guarding this member, standing beside it, takes the hit instead.
+    const g = rivalGuard(c, r);
+    if (g) {
+      say(c, `${g.name} steps in front of ${r.name}.`);
+      r = g;
+    }
     r.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: r.id, damage: dmg, crit: !!opts.crit });
     if (by && hd(c, by)) makeHostile(c);
@@ -385,8 +397,11 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       r.hp = 0;
       c.ev.push({ type: 'monsterDied', id: r.id });
       say(c, `${r.name} falls.`);
-      putOnGround(c, r.at, r.loot);
+      // Spec 20.4: spoils: the purse and loot, and the pack. A dragged hero is dropped where they lie.
+      putOnGround(c, r.at, [...r.loot, ...(r.pack ?? [])]);
       r.loot = [];
+      r.pack = r.pack ? [] : r.pack;
+      dropCaptive(c, r, 'falls');
       if (by && hd(c, by)) {
         c.d.kills[by] = (c.d.kills[by] ?? 0) + 1;
         (c.d.xp ??= {})[by] = (c.d.xp[by] ?? 0) + 1;
@@ -413,6 +428,20 @@ export function makeHostile(c: Ctx): void {
   for (const r of cr.members) if (r.intent?.kind === 'toll') r.intent = undefined;
   c.ev.push({ type: 'rivalsStance', stance: 'hostile' });
   say(c, paid ? `${cr.name} keep your coin and draw steel.` : `${cr.name} draw steel.`);
+}
+
+/** V3.7 (spec 20.4): the living Sellsword guarding `r` from an adjacent hex, if any. */
+export function rivalGuard(c: Ctx, r: { id: string; at: Pos }): RivalX | undefined {
+  return rivalsOnMap(c).find((g) => g.id !== r.id && g.guarding === r.id && g.at.level === r.at.level && distance(g.at, r.at) === 1);
+}
+
+/** V3.7 (spec 20.4): the member lets go of the hero it was dragging (killed, downed or feared); the hero stays downed where they lie. */
+export function dropCaptive(c: Ctx, r: RivalX, why: string): void {
+  const id = r.dragging;
+  if (!id) return;
+  r.dragging = undefined;
+  const h = hd(c, id);
+  if (h && h.status === 'downed') say(c, `${r.name} ${why}. ${heroName(c, id)} is dropped where they lie.`);
 }
 
 /** Gold value the party carries (every active or downed hero's pack): gold and valuables. */
@@ -446,10 +475,13 @@ export function crewDemand(c: Ctx): void {
 
 // ---------------------------------------------------------------- noise
 
-/** A ripple of radius R at `at`. Wakes sleepers, draws alert monsters. */
-export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean } = {}): void {
+/**
+ * A ripple of radius R at `at`. Wakes sleepers, draws alert monsters, turns heads (spec 20.1).
+ * `quiet`: no `noise` event for the view (per-hex walking noise sends one event per move).
+ */
+export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean; quiet?: boolean } = {}): void {
   if (radius <= 0) return;
-  c.ev.push({ type: 'noise', at, radius });
+  if (!opts.quiet) c.ev.push({ type: 'noise', at, radius });
   const heard = noiseField(c.w, c.d, at, radius);
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
   if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
@@ -458,6 +490,7 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;
+    faceToward(m, at);
     if (m.kind === 'dragon') {
       if (m.awareness === 'asleep' && radius >= DRAGON_WAKE_NOISE) {
         m.awareness = 'hunting';
@@ -486,7 +519,10 @@ export function goHunting(c: Ctx, m: MonsterX, at?: Pos): void {
   m.awareness = 'hunting';
   m.searchRounds = undefined;
   m.returning = undefined;
-  if (at) m.focusAt = { ...at };
+  if (at) {
+    m.focusAt = { ...at };
+    faceToward(m, at);
+  }
   if (was !== 'hunting') c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
 }
 
@@ -495,14 +531,84 @@ export function goAlert(c: Ctx, m: MonsterX, at: Pos): void {
   m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
   m.focusAt = { ...at };
   m.returning = undefined;
+  faceToward(m, at);
   if (m.awareness === 'alert') m.searchRounds = SEARCH_ROUNDS;
   c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
 }
 
-export function wakeAdjacent(c: Ctx, at: Pos): void {
+/**
+ * A hero arrives at `at` without walking there (a fall, a climb, a blink): sleepers next to them
+ * wake for sure when the hero came loudly, 25% when quietly (spec 20.1's end-adjacent rule).
+ * Walks use the per-hex wake rolls in doMove instead.
+ */
+export function wakeAdjacent(c: Ctx, at: Pos, sneak = false, by?: string): void {
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' && m.kind !== 'dragon' && !m.buried && within(m.at, at, 1)) goAlert(c, m, at);
+    if (m.awareness !== 'asleep' || m.kind === 'dragon' || m.buried || !within(m.at, at, 1)) continue;
+    if (sneak && !chance(c.s, WAKE_END_SNEAK)) continue;
+    goAlert(c, m, at);
+    if (by) c.ev.push({ type: 'woke', id: m.id, by });
   }
+}
+
+/** A monster loses its quarry: back to alert, and it forgets who it had noticed (sneak attacks are on again). */
+export function loseQuarry(c: Ctx, m: MonsterX, at?: Pos): void {
+  m.awareness = 'alert';
+  m.searchRounds = SEARCH_ROUNDS;
+  m.returning = undefined;
+  if (at) m.focusAt = { ...at };
+  forgetHeroes(m);
+  c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
+}
+
+// ---------------------------------------------------------------- V3.7 kit (spec 20.5)
+
+/**
+ * Brace and the forge shield against a hit on this hero: damage taken off each hit (after armor,
+ * min 0 is the caller's) and the attacker's chance modifier. `ranged`: arrows, knockback shots,
+ * firebolts (not the Dragon's breath), the only hits a shield turns.
+ */
+export function guardMods(c: Ctx, h: HeroInDelve, ranged: boolean): { dmg: number; chance: number } {
+  const braced = !!h.braced;
+  const shield = !!heroDef(c, h.heroId)?.shield;
+  let dmg = braced ? BRACE_DMG : 0;
+  if (shield && ranged) dmg += braced ? SHIELD_BRACED_DMG : SHIELD_DMG;
+  return { dmg, chance: braced ? BRACE_CHANCE : 0 };
+}
+
+/** Attack labels that count as ranged for the shield (spec 20.5). */
+export function rangedLabel(what: string): boolean {
+  return /shot|firebolt|overwatch|arrow|bolt|dart/i.test(what);
+}
+
+/**
+ * Root a figure for `rounds` (hamstring, briar): a hero can't move or dash (`rooted`, refreshed by a
+ * new hit); a monster or crew member stands where it is (`stuck`). The Dragon and the Gloam are not rooted.
+ */
+export function rootFigure(c: Ctx, id: string, rounds: number, by: string): boolean {
+  const h = hd(c, id);
+  if (h) {
+    if (h.status !== 'active') return false;
+    h.rooted = Math.max(h.rooted ?? 0, rounds);
+    c.ev.push({ type: 'rooted', id, by, rounds: h.rooted });
+    say(c, `${heroName(c, id)} is rooted to the spot.`);
+    return true;
+  }
+  const m = c.d.monsters.find((x) => x.id === id);
+  if (m) {
+    if (m.kind === 'dragon' || m.kind === 'gloam') return false;
+    m.stuck = Math.max(m.stuck ?? 0, rounds);
+    c.ev.push({ type: 'rooted', id, by, rounds: m.stuck });
+    say(c, `${m.name} ${m.kind === 'rats' ? 'are' : 'is'} rooted to the spot.`);
+    return true;
+  }
+  const r = c.d.rivals?.members.find((x) => x.id === id);
+  if (r) {
+    r.stuck = Math.max(r.stuck ?? 0, rounds);
+    c.ev.push({ type: 'rooted', id, by, rounds: r.stuck });
+    say(c, `${r.name} is rooted to the spot.`);
+    return true;
+  }
+  return false;
 }
 
 export { random };

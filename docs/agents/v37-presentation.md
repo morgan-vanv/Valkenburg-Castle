@@ -1,0 +1,12 @@
+# Brief: V3.7 presentation
+
+Read docs/agents/v37-common.md, then docs/v3-spec.md section 20 in full. Build everything the player sees for 20.1–20.4 against the contract, using and extending src/view/fixtures.ts (the engine agents are building the rules in parallel; read their progress notes and switch to the real engine as pieces land).
+
+1. **Move preview risks** (`Reach.risks`): along the hovered path, mark hexes where a sleeper could wake (yellow pulse on the sleeper with the %), awake enemies that would notice the hero at the destination (red eye), and free swings the move provokes (red sword on the enemy, "Orc: free swing 0–2" in the hint). Walk vs sneak toggles the preview live.
+2. **Facing**: a small arrow/eye cone on awake monsters and crew members showing where they face; when a sneaking hero is selected, dim the blind-arc hexes behind each enemy so the player can see the safe approach; the hex directly behind gets a soft marker ("sneak up here").
+3. **Free swings**: a quick strike animation and a log line for `swing` (both sides); the move confirm asks once when a swing would be provoked (like the two-level jump), with the damage range.
+4. **Dread**: Shadowmancer bar button with help, the `flee` intent, cast effect (a dark ripple), feared tag on the enemy.
+5. **Charges**: set-charge flow (pick the hex, then fuse 1 or 2 in a small picker), fuse marker on the hex with the countdown number and the blast rings (inner red, outer orange), breakable walls hinted on hover ("Wall · a Sapper's charge could break it") and outlined when the set-charge action is pending; the `blast` event: shake, flash, debris, and the broken wall becomes rubble (level rebuild). Rival fuses look the same with the enemy colour.
+6. **Captives and crews**: drag animation and "dragged!" tag when a member hauls a downed hero; `captured` banner; summary line; camp: a Captives panel under the roster and "Bring back <name>" contracts pinned with their own look; crew members show level/tier and their pack on the parley card and hover; crew intents `item`/`potion`/`rob`/`drag` drawn and named; a new crew (the Wake) colours: deep green and bone.
+7. Tooltips and help for all of the above in the V3.4 style (names.ts, live numbers from data.ts).
+8. Check: typecheck, scripts/v37-ui-check.mjs on `?fixture=1` (and the real engine once it lands), stress bot. Screenshots: one of the move preview with risks, one of a fuse and blast.

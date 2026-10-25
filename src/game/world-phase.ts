@@ -6,22 +6,25 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Intent } from './types';
 import {
   ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
-  GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SEARCH_ROUNDS, SHOUT_NOISE,
+  GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SHOUT_NOISE,
 } from './data';
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  activeHeroes, chestLoot, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, makeNoise, monsterStats, nameOf, noteOnce, occupant,
-  onMap, putOnGround, releaseHold, rivalsOnMap, roll,
+  activeHeroes, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
+  onMap, releaseHold, rivalsOnMap, roll,
 } from './common';
 import { canEnter, dijkstra, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within } from './world';
 import { awayFrom, checkDelveEnd, pusherFor, refreshSight, setLight, unlitOnL3, visNow } from './delve';
-import { figure, push, pushOutcome } from './falls';
+import { push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
 import {
-  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
+  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
 } from './ai';
+import { HAMSTRING_RANGE } from './data';
 import { computeRivalIntents, rivalsAct } from './rivals';
+import { tickFuses } from './charges';
+import { faceToward, fleePlan, noticeHero, perceivable } from './stealth';
 
 // ---------------------------------------------------------------- planning
 
@@ -33,7 +36,7 @@ interface Plan {
 const WAIT: Plan = { intent: { kind: 'wait' }, path: [] };
 
 /** Abilities that must be shown as an intent the round before they go off (spec 16.4). */
-const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove'];
+const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove', 'hamstring'];
 
 function canSteal(t: Target): boolean {
   return !!t.hero && t.hero.pack.some((i) => i.kind !== 'heirloom');
@@ -47,7 +50,8 @@ function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): T
     const held = all.find((t) => t.id === m.holding);
     if (held && adjacentTo(held.at, m.at)) return held;
   }
-  const seen = all.filter((t) => sees(c, m.at, t.at, lit));
+  // V3.7 (spec 20.1): heroes it has noticed are seen by plain sight; others by the noticing rule (light, sneaking, facing).
+  const seen = all.filter((t) => perceivable(c, m, t, lit, (a, b, L) => sees(c, a, b, L)));
   if (prefer) {
     const p = all.find((t) => t.id === prefer);
     if (p && (seen.includes(p) || (m.awareness === 'hunting' && p.at.level === m.at.level && distance(p.at, m.at) <= 2))) return p;
@@ -125,6 +129,9 @@ function archerPlan(c: Ctx, m: MonsterX, t: Target, move: number, lit: Set<strin
       m.shoveFrom = { ...to };
       return sh;
     }
+    // V3.7 (spec 20.5): a hero closing in and not yet rooted gets an arrow in the leg first.
+    const ham = noAbility ? null : hamstringIntent(c, to, t);
+    if (ham) return { intent: ham, path };
     return { intent: { kind: 'attack', targetId: t.id, to, damage: hitRange(st.slots, st.dmg, t.armor) }, path };
   };
   const d = m.at.level === t.at.level ? distance(m.at, t.at) : 99;
@@ -165,6 +172,11 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
   const st = monsterStats(m);
   const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
   const noAbility = !!opts.noAbility;
+  // V3.7 (spec 20.2): feared: it runs from the caster with its whole move and does nothing else.
+  if ((m.feared ?? 0) > 0) {
+    const f = fleePlan(c, m, move);
+    return { intent: { kind: 'flee', to: f.to }, path: f.path };
+  }
   // Cutpurse with loot: run for the farthest exit.
   if (m.kind === 'cutpurse' && m.stolen) {
     const ex = exitsBy(c, m.at);
@@ -304,9 +316,11 @@ export function computeIntents(c: Ctx): void {
 
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
   if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || m.buried) return;
-  const seen = targets(c).filter((t) => sees(c, m.at, t.at, lit)).sort(byDist(m.at));
+  const seen = targets(c).filter((t) => perceivable(c, m, t, lit, (a, b, L) => sees(c, a, b, L))).sort(byDist(m.at));
   const t = seen[0];
   if (t) {
+    // V3.7 (spec 20.1): every hero it makes out is noticed (remembered, faced, one event each); it hunts the nearest.
+    for (const x of seen) if (x.hero) noticeHero(c, m, x.id);
     goHunting(c, m, t.at);
     if (m.kind === 'orc' && !m.shouted) {
       m.shouted = true;
@@ -314,11 +328,8 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
       makeNoise(c, m.at, 5);
     }
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
-    // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1).
-    m.awareness = 'alert';
-    m.searchRounds = SEARCH_ROUNDS;
-    m.returning = undefined;
-    c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
+    // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1); it forgets who it saw.
+    loseQuarry(c, m);
   }
 }
 
@@ -397,6 +408,8 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
       if (!within(to, t!.at, ARCHER_RANGE) || !los(c.w, c.d, to, t!.at)) return null;
     } else if (!adjacentTo(to, t!.at)) return null;
   }
+  // V3.7 (spec 20.5): the hamstring shot as shown, while the hero is still in range and not rooted yet.
+  if (it.kind === 'hamstring' && (!t?.hero || (t.hero.rooted ?? 0) > 0 || !within(to, t.at, HAMSTRING_RANGE) || !los(c.w, c.d, to, t.at))) return null;
   return { intent: it, path };
 }
 
@@ -450,6 +463,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         if (x === m || (x.kind !== 'orc' && x.kind !== 'archer' && x.kind !== 'captain')) continue;
         if (x.at.level !== m.at.level || distance(x.at, m.at) > CAPTAIN_SHOUT_RANGE) continue;
         goHunting(c, x, t.at);
+        if (t.hero) noticeHero(c, x, t.id);
         x.intent = { kind: 'wait', targetId: t.id };
       }
       makeNoise(c, m.at, SHOUT_NOISE);
@@ -499,6 +513,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
       if (m.kind === 'archer') {
         if (!within(m.at, t.at, ARCHER_RANGE) || !los(c.w, c.d, m.at, t.at)) break;
       } else if (distance(t.at, m.at) !== 1) break;
+      faceToward(m, t.at);
       const slots = st.slots + (m.kind === 'ghoul' && m.holding === t.id ? 1 : 0);
       const landed = strike(c, m.id, t.id, slots, st.chance, st.dmg, m.kind === 'dragon' ? 'Bite' : m.kind === 'archer' ? 'Shot' : 'Attack');
       // Berserker charge: moved 2+ hexes then hit: knock the target back.
@@ -509,6 +524,14 @@ function monsterAct(c: Ctx, m: MonsterX): void {
           push(c, landed, m.at, m.id);
         }
       }
+      break;
+    }
+    case 'hamstring': {
+      // V3.7 (spec 20.5): the orc archer roots a hero.
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t?.hero || t.at.level !== m.at.level || !within(m.at, t.at, HAMSTRING_RANGE) || !los(c.w, c.d, m.at, t.at)) break;
+      faceToward(m, t.at);
+      hamstringShot(c, m.id, t, st.chance);
       break;
     }
     case 'steal': {
@@ -615,55 +638,7 @@ function gloamPhase(c: Ctx): void {
   monsterAct(c, g);
 }
 
-// ---------------------------------------------------------------- charges
-
-export function blowCharges(c: Ctx): void {
-  const list = c.d.charges ?? [];
-  c.d.charges = [];
-  for (const ch of list) {
-    const at = ch.at;
-    c.ev.push({ type: 'blast', at });
-    const k = kindAt(c.w, c.d, at);
-    if (k === 'cracked') c.d.blown.push(posKey(at));
-    if (k === 'door') {
-      const door = c.d.doors[posKey(at)]!;
-      door.open = true;
-      door.locked = false;
-      door.jammed = false;
-      c.d.blown.push(posKey(at));
-      c.ev.push({ type: 'doorChanged', at, open: true, locked: false });
-    }
-    const chest = c.d.chests.find((x) => samePos(x.at, at) && !x.opened);
-    if (chest) {
-      chest.opened = true;
-      chest.locked = false;
-      const items = chestLoot(c, chest.tier);
-      putOnGround(c, chest.at, items);
-      c.ev.push({ type: 'chestOpened', id: chest.id, items });
-    }
-    say(c, 'BOOM.');
-    // Damage.
-    const hurt: [string, number][] = [];
-    for (const m of onMap(c)) if (m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, distance(m.at, at) <= 1 ? 4 : 2]);
-    for (const r of rivalsOnMap(c)) if (r.at.level === at.level && distance(r.at, at) <= 2) hurt.push([r.id, distance(r.at, at) <= 1 ? 4 : 2]);
-    for (const h of c.d.heroes) {
-      if ((h.status === 'active' || h.status === 'downed') && h.at.level === at.level && distance(h.at, at) <= 2) hurt.push([h.heroId, distance(h.at, at) <= 1 ? 4 : 2]);
-    }
-    const pr = c.d.prisoner;
-    if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= 2) hurt.push([pr.id, distance(pr.at, at) <= 1 ? 4 : 2]);
-    for (const [id, dmg] of hurt) hurtAny(c, id, dmg, c.d.heroes.some((h) => h.heroId === id) ? null : ch.by, { noise: false });
-    // Anything within 1 standing with an unrailed pit straight behind it goes over.
-    for (const [id] of hurt) {
-      const f = figure(c, id);
-      if (!f) continue;
-      const p = f.kind === 'hero' ? f.h.at : f.kind === 'monster' ? f.m.at : f.kind === 'rival' ? f.r.at : c.d.prisoner!.at;
-      if (p.level !== at.level || distance(p, at) !== 1) continue;
-      const o = pushOutcome(c, at, p, id);
-      if (o.kind === 'fall') push(c, id, at, c.d.heroes.some((h) => h.heroId === id) ? null : ch.by);
-    }
-    makeNoise(c, at, 8, { otherLevels: true });
-  }
-}
+// Charges: V3.7 (spec 20.3) fused charges live in charges.ts; tickFuses runs at the end of the world phase.
 
 // ---------------------------------------------------------------- the phase
 
@@ -694,7 +669,6 @@ function burnPhase(c: Ctx): void {
 
 export function worldPhase(c: Ctx): void {
   const d = c.d;
-  blowCharges(c);
   refreshSight(c);
   if (checkDelveEnd(c)) return;
   d.phase = 'world';
@@ -706,8 +680,12 @@ export function worldPhase(c: Ctx): void {
   // Spec 18.4: the Black Cask's hiccups: noise 1 at the drinker every world phase.
   for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
+  // V3.7 (spec 20.5): roots (hamstring, briar) wear off at the start of the phase: a hero rooted by an archer sits out two of their turns.
+  for (const h of d.heroes) if ((h.rooted ?? 0) > 0) h.rooted! -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
+    // V3.7 (spec 20.4): a crew member dragging them keeps them breathing (they're worth more alive).
+    if (d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut)) continue;
     h.bleed -= 1;
     if (h.bleed <= 0) killHero(c, h);
   }
@@ -721,13 +699,18 @@ export function worldPhase(c: Ctx): void {
   // 3. Rivals. 4. The Gloam.
   rivalsAct(c);
   gloamPhase(c);
+  // V3.7 (spec 20.3): fuses count down; charges at 0 go off now, at the end of the world phase.
+  tickFuses(c);
   // 5. New round.
+  // V3.7 (spec 20.5): the castle has turned: free movement counts its steps afresh; braces end at the next player phase.
+  d.calmSteps = 0;
   for (const h of d.heroes) {
     h.moved = false;
     h.acted = false;
     h.dashed = false;
     h.overwatch = false;
     h.guarding = undefined;
+    h.braced = undefined;
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;
@@ -744,6 +727,19 @@ export function worldPhase(c: Ctx): void {
   for (const m of d.monsters) {
     if ((m.stuck ?? 0) > 0) m.stuck! -= 1;
     if ((m.shoutCooldown ?? 0) > 0) m.shoutCooldown! -= 1;
+    // V3.7 (spec 20.2): Dread wears off.
+    if ((m.feared ?? 0) > 0) {
+      m.feared! -= 1;
+      if (m.feared === 0) m.fearOf = undefined;
+    }
+  }
+  for (const r of d.rivals?.members ?? []) {
+    if ((r.feared ?? 0) > 0) {
+      r.feared! -= 1;
+      if (r.feared === 0) r.fearOf = undefined;
+    }
+    // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) comes loose.
+    if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
   }
   tick(d.smoke);
   tick(d.glue);

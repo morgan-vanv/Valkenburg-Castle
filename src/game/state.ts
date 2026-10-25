@@ -20,11 +20,17 @@ export interface MonsterX extends Monster {
   routeAfter?: number;
   /** Lost its quarry and is walking back to its post / route. */
   returning?: boolean;
+  /** V3.7 (spec 20.1): heroes it has noticed (ids); cleared when it loses its quarry or sleeps. A hero not in it is open to a sneak attack. */
+  noticedIds?: string[];
 }
 
 export interface HeroX extends HeroInDelve {
   /** Hit by a sister's sleep dart: loses the next move and action (cleared with webbed). */
   dozing?: boolean;
+  /** V3.7 (spec 20.1): the last move was a sneak (undefined = never moved: counts as walking). Monsters notice by it. */
+  sneaked?: boolean;
+  /** V3.7 (spec 20.4): a hostile crew member has already taken this (downed) hero's gold and gems. */
+  robbed?: boolean;
 }
 
 export interface RivalX extends Rival {
@@ -38,6 +44,12 @@ export interface RivalX extends Rival {
   tier?: number;
   /** Sellsword shove: the hex it shoves from. */
   shoveFrom?: Pos;
+  /** V3.7 (spec 20.4): the Sellsword guards this member (takes hits meant for it while adjacent). */
+  guarding?: string;
+  /** V3.7 (spec 20.4): warded by the Hedgewitch: rounds left of 1 less per hit. */
+  ward?: number;
+  /** V3.7: the kit intent's helper hex (a Sapper's set spot, a potion's step back). */
+  kitFrom?: Pos;
 }
 
 export interface CrewX extends RivalCrew {
@@ -54,14 +66,16 @@ export interface CrewX extends RivalCrew {
   dealRound?: number;
   /** Chests a paid job opened for the party: the crew leaves the loot alone. */
   spare?: string[];
+  /** V3.7 (spec 20.4): the hero the whole crew goes for this round (focus fire). */
+  target?: string;
 }
 
 export interface DelveX extends Delve {
   heroes: HeroX[];
   monsters: MonsterX[];
   rivals: CrewX | null;
-  /** Blasting charges waiting for the end of the player phase. */
-  charges?: { at: Pos; by: string }[];
+  /** V3.7 (spec 20.4): caltrops a crew laid (also in `caltrops`): these catch heroes. */
+  rivalCaltrops?: string[];
   /** XP earned this delve by hero id (kills). */
   xp?: Record<string, number>;
   /** Item ids dropped by heroes who died (become lostGear). */

@@ -46,6 +46,19 @@ export interface Reach {
    * the second colour. Send it as a normal 'move' command.
    */
   dash?: boolean;
+  /**
+   * V3.7 (spec 20.1, 20.2): what stepping along this path risks, for the move preview.
+   * wake: sleepers that could wake (hex where it happens, monster id, chance 0..100).
+   * notice: awake enemies that would notice the hero at the destination.
+   * swings: enemies that get a free swing as the hero leaves their reach (with damage range).
+   */
+  risks?: MoveRisks;
+}
+
+export interface MoveRisks {
+  wake: { at: Pos; id: string; chance: number }[];
+  notice: { id: string }[];
+  swings: { id: string; damage: [number, number] }[];
 }
 
 /** What a risky action will look like before the player commits. */
@@ -158,6 +171,12 @@ export interface Engine {
   shop(state?: GameState): ShopOffer[];
   /** V3.5 (spec 18.4): the Flagon's ales, each `locked` until its brewing gear is home. */
   ales(state: GameState): AleOffer[];
+  /** V3.7 (spec 20.3): what a blast at `at` would do, for the coloured overlay before committing. */
+  blastPreview(state: GameState, at: Pos): { broke: Pos[]; collapsed: Pos[]; rubbled: Pos[]; /** ids of figures the blast would damage */ hit: string[] };
+  /** V3.7 (spec 20.5): while calm, every explored hex the hero could walk to (any length), with path and risks. */
+  calmReach(state: GameState, heroId: string, sneak: boolean): Reach[];
+  /** V3.7 (spec 20.5): is the party calm (free movement on)? With a reason when not ("An orc hunts Pim"). */
+  calm(state: GameState): { calm: boolean; why?: string };
   /** V3.5 (spec 18.6): the parley deals a hero can make with the crew right now (empty if none in reach). */
   deals(state: GameState, heroId: string): DealOption[];
   /** V3.2: one-line role and the ability/spell lines for a class, for recruit cards. */

@@ -426,12 +426,13 @@ export type ModelKey =
   | RivalModelKey;
 
 /** V3.5 (18.5): a cutthroat crew member, by crew and class ("rival-ferrymen-sapper"). */
-export type RivalModelKey = `rival-${'ferrymen' | 'gallows-choir'}-${'sellsword' | 'ranger' | 'burglar' | 'sapper' | 'pyromancer' | 'shadowmancer'}`;
+export type RivalModelKey = `rival-${'ferrymen' | 'gallows-choir' | 'the-wake'}-${'sellsword' | 'ranger' | 'burglar' | 'sapper' | 'pyromancer' | 'shadowmancer' | 'hedgewitch'}`;
 
-/** Crew colours (18.7): Ferrymen river blue-grey; the Gallows Choir black and bone. */
-const CREW_LOOK: Record<'ferrymen' | 'gallows-choir', { tunic: number; legs: number; cape: number; hood: number; trim: number; skin: number; eyes?: number }> = {
+/** Crew colours (18.7, 20.4): Ferrymen river blue-grey; the Gallows Choir black and bone; the Wake deep green and bone. */
+const CREW_LOOK: Record<'ferrymen' | 'gallows-choir' | 'the-wake', { tunic: number; legs: number; cape: number; hood: number; trim: number; skin: number; eyes?: number }> = {
   ferrymen: { tunic: 0x4f6272, legs: 0x2e3a44, cape: 0x6f8798, hood: 0x3e505e, trim: 0xa8bccb, skin: 0xc79a76 },
   'gallows-choir': { tunic: 0x1c1a1a, legs: 0x121111, cape: 0x0c0b0b, hood: 0x161414, trim: 0xe0d6be, skin: 0xd9d0bb, eyes: 0x2a0a0a },
+  'the-wake': { tunic: 0x1f3d2a, legs: 0x15281c, cape: 0x2a5238, hood: 0x1a3324, trim: 0xe6dcc4, skin: 0xcfc6ae, eyes: 0x0a1a10 },
 };
 
 export function getModel(key: ModelKey): FigureModel {
@@ -657,7 +658,7 @@ function buildModel(key: ModelKey): FigureModel {
  * bone-white faces and a noose round the neck; the Ferrymen a boat-cloak and a pole-hook badge.
  */
 function crewMember(k: Kit, key: RivalModelKey): FigureModel {
-  const crew = key.startsWith('rival-ferrymen') ? 'ferrymen' : 'gallows-choir';
+  const crew = key.startsWith('rival-ferrymen') ? 'ferrymen' : key.startsWith('rival-the-wake') ? 'the-wake' : 'gallows-choir';
   const cls = key.slice(`rival-${crew}-`.length);
   const L = CREW_LOOK[crew];
   const base = { skin: L.skin, tunic: L.tunic, legs: L.legs, eyes: L.eyes };
@@ -676,8 +677,11 @@ function crewMember(k: Kit, key: RivalModelKey): FigureModel {
     }
     case 'pyromancer':
     case 'shadowmancer':
-      f = humanoid(k, { ...base, helm: cls === 'pyromancer' ? 'hat' : 'hood', helmColor: L.hood, weapon: 'staff', staffGlow: cls === 'pyromancer' ? 0xff6a1a : 0x9a6aff, cape: L.cape });
+    case 'hedgewitch':
+      f = humanoid(k, { ...base, helm: cls === 'pyromancer' ? 'hat' : 'hood', helmColor: L.hood, weapon: 'staff', staffGlow: cls === 'pyromancer' ? 0xff6a1a : cls === 'hedgewitch' ? 0x8ad0a0 : 0x9a6aff, cape: L.cape });
       robe(k, L.tunic, f);
+      // V3.7 (20.4): the Wake's hedgewitch wears a bone charm necklace.
+      if (cls === 'hedgewitch') for (const x of [-0.05, 0, 0.05]) k.box(0.02, 0.05, 0.015, L.trim, [x, f.shoulderY - 0.09 - Math.abs(x) * 0.6, f.depth * 0.55]);
       if (cls === 'pyromancer') {
         // A flame cupped in the off hand.
         k.ball(0.045, 0xffa040, [f.handL[0], f.handL[1] + 0.03, f.handL[2] + 0.04], undefined, true);
@@ -695,6 +699,12 @@ function crewMember(k: Kit, key: RivalModelKey): FigureModel {
     // A noose of bone-pale rope round the neck, its tail down the chest.
     k.add(new THREE.TorusGeometry(f.headR * 0.62, 0.016, 4, 10), L.trim, [0, f.shoulderY + 0.01, f.depth * 0.1], [Math.PI / 2, 0, 0]);
     k.box(0.02, 0.12, 0.02, L.trim, [0, f.shoulderY - 0.07, f.depth * 0.5]);
+  } else if (crew === 'the-wake') {
+    // V3.7 (20.4): grave-robbers: a bone-white skull mask over the face and a spade strapped to the back.
+    k.ball(f.headR * 0.78, L.trim, [0, f.hy - f.headR * 0.05, f.hz + f.headR * 0.45], [1, 1.05, 0.45]);
+    for (const sx of [-1, 1]) k.ball(f.headR * 0.16, L.eyes ?? 0x000000, [sx * f.headR * 0.3, f.hy, f.hz + f.headR * 0.9]);
+    k.box(0.025, 0.42, 0.025, 0x4a3a28, [f.shoulderW * 0.25, f.backY + 0.05, f.backZ - 0.05], [0, 0, 0.25]);
+    k.box(0.09, 0.11, 0.015, 0x8a8e94, [f.shoulderW * 0.25 - 0.06, f.backY - 0.2, f.backZ - 0.05], [0, 0, 0.25]);
   } else {
     // A river-grey sash across the chest with a brass hook badge.
     k.box(f.shoulderW * 0.9, 0.035, 0.02, L.trim, [0, f.shoulderY - 0.1, f.depth * 0.52], [0, 0, 0.5]);
