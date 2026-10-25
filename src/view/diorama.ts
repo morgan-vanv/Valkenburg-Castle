@@ -17,6 +17,7 @@ import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
+import { linkEnds, linkMarker } from './links';
 
 const MAX_LIGHTS = 12;
 /** How far below the shown level we draw through pits. */
@@ -131,7 +132,7 @@ export class Diorama {
   /** 15.7: pulsing ring on the stairs/lift hex the selected hero stands on. */
   private linkPulse: THREE.Mesh;
   /** 15.7: floating level markers over explored stairs and lift ends ("↓ L2"). */
-  private linkTags: { el: HTMLElement; at: THREE.Vector3; key: string; level: number; lift: boolean }[] = [];
+  private linkTags: { el: HTMLElement; pos: Pos; at: THREE.Vector3; key: string; level: number; lift: boolean }[] = [];
   /** 15.7: the contract objective's beacon (light pillar + DOM diamond) once its hex is explored. */
   private beacon = new THREE.Group();
   private beaconTag: HTMLElement;
@@ -208,9 +209,14 @@ export class Diorama {
     this.rippleMesh.count = 0;
     this.rippleMesh.renderOrder = 2;
     this.rippleMesh.frustumCulled = false;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow);
+    this.linkPulse = new THREE.Mesh(hexRing(0.62, 0.94), new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.linkPulse.visible = false;
+    this.linkPulse.renderOrder = 4;
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon);
     this.landingTag = document.createElement('div');
     this.landingTag.className = 'landing-tag hidden';
+    this.beaconTag = document.createElement('div');
+    this.beaconTag.className = 'beacon-tag hidden';
     this.effects = new MapEffects({
       worldOf: (p, lift) => this.worldOf(p, lift ?? 0),
       get shownLevel() {
@@ -239,6 +245,7 @@ export class Diorama {
     this.scene.add(this.sparks);
 
     this.fx.appendChild(this.landingTag);
+    this.fx.appendChild(this.beaconTag);
     this.bindPointer(canvas);
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -251,7 +258,9 @@ export class Diorama {
     if (this.castle === def) return;
     for (const lv of this.levels.values()) this.scene.remove(lv.group);
     for (const t of this.roomTags) t.el.remove();
+    for (const t of this.linkTags) t.el.remove();
     this.roomTags = [];
+    this.linkTags = [];
     this.levels.clear();
     this.castle = def;
     for (const ld of def.levels) {
@@ -266,7 +275,33 @@ export class Diorama {
         this.roomTags.push({ el, at: l.at, key: l.key, level: ld.level });
       }
     }
+    // 15.7: a level marker over each stairs and lift end, shown once that hex is explored.
+    for (const l of linkEnds(def)) {
+      const el = document.createElement('div');
+      el.className = `link-tag ${l.kind === 'lift' ? 'lift' : 'stairs'} ${l.down ? 'down' : 'up'}`;
+      el.textContent = linkMarker(l);
+      this.fx.appendChild(el);
+      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.5), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
+    }
     this.showLevel(def.levels[0]?.level ?? 1, true);
+  }
+
+  /** 15.7: pulse the hex the selected hero stands on when it's stairs or a working lift. */
+  showLinkPulse(at: Pos | null): void {
+    if (!at || at.level !== this.shownLevel) {
+      this.linkPulse.visible = false;
+      return;
+    }
+    this.linkPulse.visible = true;
+    this.linkPulse.position.copy(this.worldOf(at, 0.06));
+  }
+
+  /** 15.7: the hover ring says whether the hex is something you can use (ember), a hazard (red) or floor. */
+  setHoverStyle(kind: 'plain' | 'interact' | 'danger'): void {
+    const m = this.hoverMesh.material as THREE.MeshBasicMaterial;
+    m.color.setHex(kind === 'interact' ? COLORS.emberHot : kind === 'danger' ? COLORS.danger : COLORS.parchment);
+    m.opacity = kind === 'plain' ? 0.8 : 1;
+    this.hoverMesh.scale.setScalar(kind === 'plain' ? 1 : 1.04);
   }
 
   showLevel(level: number, instant = false): void {
@@ -506,6 +541,19 @@ export class Diorama {
       g.scale.setScalar(1.25 + 0.2 * k);
     }
     for (const l of this.lips.children) ((l as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(t * 5);
+    if (this.linkPulse.visible) {
+      const k = 0.5 + 0.5 * Math.sin(t * 3.2);
+      this.linkPulse.scale.setScalar(1 + k * 0.22);
+      (this.linkPulse.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.55 * (1 - k);
+    }
+    for (const b of this.beacon.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 1.8 + (b.userData.phase as number));
+      if (b.userData.pillar) ((b as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.1 * k;
+      else if (b.userData.ring) {
+        b.scale.setScalar(1 + 0.12 * k);
+        ((b as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.4 * (1 - k);
+      }
+    }
     // Ripple: hex rings fade outward in a wave.
     if (this.rippleData && this.rippleMesh.count) {
       const m = this.rippleMesh.material as THREE.MeshBasicMaterial;
@@ -576,6 +624,26 @@ export class Diorama {
       const p = this.project(r.at);
       r.el.style.display = p.behind ? 'none' : '';
       r.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+    }
+    // 15.7: level markers over explored stairs and lift ends; the lift's is greyed until the winch runs.
+    for (const l of this.linkTags) {
+      const show = l.level === this.shownLevel && this.vis.explored.has(l.key) && !!this.state?.delve;
+      if (!show) {
+        l.el.style.display = 'none';
+        continue;
+      }
+      // Above a figure standing there, so it doesn't sit on their HP tag.
+      let occupied = false;
+      for (const v of this.units.values()) if (v.shown && samePos(v.at, l.pos)) occupied = true;
+      const p = this.project(occupied ? l.at.clone().setY(l.at.y + 1.4) : l.at);
+      l.el.style.display = p.behind ? 'none' : '';
+      l.el.classList.toggle('dead', l.lift && !this.liftWorking);
+      l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
+    if (this.beaconAt) {
+      const p = this.project(this.beaconAt);
+      this.beaconTag.style.display = p.behind ? 'none' : '';
+      this.beaconTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
   }
 
@@ -815,8 +883,75 @@ export class Diorama {
     }
   }
 
+  /**
+   * 15.7: where the contract objective is, if its hex has been explored: the heirloom on the
+   * ground (or carried by a rival, then none), the prisoner until freed, the Dragon while it lives.
+   * Null before it's seen or once it's done.
+   */
+  objectiveAt(): { at: Pos; kind: 'recover' | 'rescue' | 'slay'; label: string } | null {
+    const d = this.state?.delve;
+    if (!d) return null;
+    const k = d.contract;
+    let at: Pos | null = null;
+    let label = '';
+    if (k.kind === 'recover') {
+      const g = d.ground.find((x) => x.items.some((i) => i.contractId === k.id || i.kind === 'heirloom'));
+      if (g) {
+        at = g.at;
+        label = g.items.find((i) => i.contractId === k.id || i.kind === 'heirloom')!.name;
+      }
+    } else if (k.kind === 'rescue') {
+      const p = d.prisoner;
+      if (p && !p.freed && !p.out && !p.dead) {
+        at = p.at;
+        label = p.name;
+      }
+    } else {
+      const m = d.monsters.find((x) => x.kind === 'dragon' && x.hp > 0);
+      if (m) {
+        at = m.at;
+        label = m.name;
+      }
+    }
+    if (!at || !this.vis.explored.has(posKey(at))) return null;
+    return { at, kind: k.kind, label };
+  }
+
+  /** Rebuild the beacon (pillar of light + diamond) for the objective, on the shown level only. */
+  private refreshBeacon(): void {
+    const o = this.objectiveAt();
+    const key = o && o.at.level === this.shownLevel ? `${posKey(o.at)}:${o.kind}` : '';
+    if (key === this.beaconKey) return;
+    this.beaconKey = key;
+    this.beacon.clear();
+    this.beaconAt = null;
+    this.beaconTag.classList.add('hidden');
+    if (!o || !key) return;
+    const col = BEACON_COLOR[o.kind];
+    const base = this.worldOf(o.at, 0.05);
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.5, 7, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+    );
+    pillar.position.copy(base).add(new THREE.Vector3(0, 3.5, 0));
+    pillar.userData = { pillar: true, phase: 0 };
+    const ring = new THREE.Mesh(hexRing(0.55, 0.92), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false }));
+    ring.position.copy(base);
+    ring.userData = { ring: true, phase: 1 };
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+    glow.position.copy(base).add(new THREE.Vector3(0, 0.3, 0));
+    glow.scale.setScalar(2.4);
+    glow.userData = { phase: 2 };
+    this.beacon.add(pillar, ring, glow);
+    this.beaconAt = this.worldOf(o.at, 2.2);
+    this.beaconTag.className = `beacon-tag ${o.kind}`;
+    this.beaconTag.textContent = o.label;
+    this.beaconTag.classList.remove('hidden');
+  }
+
   private refreshProps(): void {
     this.refreshLootGlow();
+    this.refreshBeacon();
     this.effects.set(effectsFromState(this.state));
     for (const p of this.props.values()) {
       const at = p.obj.userData.at as Pos;
@@ -885,6 +1020,7 @@ export class Diorama {
     for (const m of this.highlights.values()) m.count = 0;
     this.showPath(null);
     this.showRipple(null, 0);
+    this.linkPulse.visible = false;
   }
 
   showPath(path: Pos[] | null): void {
@@ -1840,6 +1976,9 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   breath: 'breathes fire on',
   sweep: 'sweeps its tail at',
 };
+
+/** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
+const BEACON_COLOR: Record<'recover' | 'rescue' | 'slay', number> = { recover: 0xffd36a, rescue: 0x8fe07a, slay: 0xff5a4a };
 
 const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
 const SPELL_COLOR: Partial<Record<string, number>> = {

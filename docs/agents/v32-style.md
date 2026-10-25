@@ -1,0 +1,5 @@
+# Brief: V3.2 style and scale pass
+
+Read docs/agents/v3-common.md (own paths only, don't commit, progress note at docs/agents/v32-style-progress.md, `bash scripts/snapshot-wip.sh` every 15 minutes, testing cost rules). Branch `v3.2`. Read docs/agents/v32-clarity-progress.md, v32-presentation-progress.md and v31-presentation-progress.md for how the view is built; you take over src/view/** and src/ui/** from the clarity agent, who has finished.
+
+Implement docs/v3-spec.md section 15.8: OSRS-like figure scale, a big Dragon, and thin walls drawn visually along floor-facing edges (tiles unchanged; caves stay thick). Order: figures and camera/overlay adjustments first (figures.ts, unit.ts, diorama.ts), then the Dragon, then walls (level.ts), checking doors, railings, braziers and sconces on the new walls. Verify cheaply: typecheck, the stress bot for errors, the stairs-walk script still passes; take a small number of screenshots only where the look is the question (one per level at the end, plus one close-up of the party and one of the Dragon), and one before/after pair for the report. Finish with a short report.

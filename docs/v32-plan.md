@@ -17,6 +17,7 @@ Goal: the owner's seven play-test notes (2026-10-24 evening) built and deployed.
 - [x] Engine: contract + 15.1-15.4 rules + take feedback (15.7); 102 tests; sim hires a squad (20 delves: 19 done, 3 deaths)
 - [x] Presentation: 15.2-15.6 UI; screenshots (effects in src/view/effects.ts)
 - [ ] Clarity pass: 15.7 (stairs/lift, objective beacons, take feedback, interactable tooltips, HUD hierarchy); screenshots
+- [ ] Style and scale pass: 15.8 (OSRS-like figure scale, big Dragon, thin walls visually), after the clarity agent finishes
 - [ ] Integration: typecheck, tests, build
 - [ ] Quick balance check (a new squad can finish a Level 1 contract)
 - [ ] Play-test in headless Chromium

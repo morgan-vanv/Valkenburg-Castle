@@ -29,12 +29,12 @@ export function linkAt(castle: CastleDef, at: Pos): LinkInfo | null {
   return null;
 }
 
-/** Every link end on a level (for markers). */
-export function linkEnds(castle: CastleDef, level: number): LinkInfo[] {
+/** Every link end (on one level, or all of them) for markers. */
+export function linkEnds(castle: CastleDef, level?: number): LinkInfo[] {
   const out: LinkInfo[] = [];
   for (const l of castle.links)
     for (const end of [l.a, l.b]) {
-      if (end.level !== level) continue;
+      if (level !== undefined && end.level !== level) continue;
       const to = end === l.a ? l.b : l.a;
       out.push({ kind: l.kind, at: end, to, down: to.level > end.level, winch: l.kind === 'lift' ? l.winch : undefined });
     }

@@ -11,7 +11,7 @@ import { posKey, samePos } from '../src/game/hex';
 import type { ActionKind, Command, GameState } from '../src/game/types';
 import { World, distField } from '../src/game/world';
 import type { DelveX } from '../src/game/state';
-import { linkAt, linkButton, linkReach } from '../src/ui/links';
+import { linkAt, linkButton, linkReach } from '../src/view/links';
 
 const SEED = Number(process.argv[2] ?? 1980);
 const e = createEngine(castle);

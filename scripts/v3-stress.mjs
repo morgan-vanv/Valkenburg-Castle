@@ -31,7 +31,16 @@ const res = await p.evaluate(async (n) => {
     while (vc.busy()) await new Promise((r) => setTimeout(r, 5));
     s = vc.state();
     if (s.stage === 'camp') {
-      const fit = s.campaign.roster.filter((h) => h.wounded === 0).slice(0, 4);
+      // V3.2: Hobart starts alone; hire while the engine says the party is too small and gold allows.
+      let fit = s.campaign.roster.filter((h) => h.wounded === 0).slice(0, 4);
+      if (E.partyProblem(s, fit.map((h) => h.id))) {
+        const r = s.campaign.recruits.find((x) => x.price <= s.campaign.gold);
+        if (r) {
+          await vc.send({ type: 'hire', heroId: r.hero.id });
+          continue;
+        }
+      }
+      fit = s.campaign.roster.filter((h) => h.wounded === 0).slice(0, 4);
       if (!fit.length || !s.campaign.board.length) break;
       const k = pick(s.campaign.board);
       const stash = s.campaign.stash.filter((i) => i.kind !== 'gold').slice(0, 2).map((i) => i.id);
