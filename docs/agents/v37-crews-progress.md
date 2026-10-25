@@ -28,10 +28,37 @@ Spec 20.4. Append-only sections; the presentation and kit agents read this.
 - `Rival.pack` is the kit; `charges` = mana for the Pyromancer, Shadowmancer and Hedgewitch; `ward` on a member is engine-private (RivalX) — ask if you want it in the contract. `Rival.guarding` likewise.
 - `campaign.captives[]` and the board's `Bring back <name>` contracts (`id` `cap-<heroId>`, `siteId` `<crew>-hideout`, `warnings` [crew name, Level n, 'Held at HP 1']).
 
-## Next
+## Done (chunk 2: tests, sim, balance)
 
-- `describe('V3.7 crews')` tests; the sim (fight on 1 in 3 crew delves, report fights/captures/rescues); balance.
+- `describe('V3.7 crews')` in engine.test.ts: 14 tests (builder and stats, the Wake on L3 posts, focus fire, positioning out of the other heroes' sight, potion back-off, caltrops on the way in and on heroes, glue + guard, mend/ward/blink, fireball, robbery + drag trailing, capture → captives → "Bring back" → rescue home, the heir taken, freeing by dread/kill + spoils + bleeding resumes, rob intent + hired potions). Suite: 265 green, `npx tsc --noEmit` clean.
+- `endDelve`: a downed hero in a dragger's hands is captured, not "left behind" (so a wiped party loses its dragged member to the crew, as the spec intends).
+- Tempo tweaks: the Sellsword glues only when nobody is at his blade; the Ranger lays caltrops only when there's nothing to shoot; rival Rangers hamstring (the kit agent's `hamstringIntent`/`hamstringShot`, intent `hamstring`) a hero closing within 3 before caltrops.
+- **scripts/v37-crew-arena.ts** (new): a headless open fight on the test castle's Crossing, party × crew, both sides with simple rules (heroes focus the lowest-HP member, potion below half, ranged keep 3 away, fireball on 2+ clustered members). `CREW=`, `PARTY=`, `LEVEL=`/`WEAPON=`/`ARMOR=` overrides for tuning, N fights per cell.
+- **scripts/v3-engine-sim.ts**: every third crew delve is a fight on purpose (refuses the toll / tells the Sisters to fight), the bot focuses the lowest-HP enemy, drinks a potion below half, takes "Bring back" jobs first once 3 strong; reports crew fights won/lost/fled, members killed, heroes downed/captured, rescues tried/done, captives.
+
+## Balance (arena, 20–30 fights a cell, careful bot; the spec's terms)
+
+| Crew | Settled | 3×L1 (1 potion) | 4×L1 (2 potions) | 4×L2 W1 | 4×L3 W1A1 | 4×L4 W2A1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Lantern Sisters | level 2, weapon 1, **armor 1** (table said armor 0: at A0 three L1 heroes win 100% with nobody hurt below half; A1 costs them 0.3 downed and ends at 2.8 of 3 up) | won 100%, 0.3 downed | 100%, 0 downed | 100% | 100% | 100% |
+| The Ferrymen | level 3, W1 A1 (table) | won 13%, lost 67%, 26 captured/30 | 95–100%, 1–2 downed, ~1 dead a fight | 100% | 100% | 100% |
+| The Gallows Choir | level 3, W1 A1 (table) | won 50%, 18 captured/30 | 100%, 0.5–1.1 downed | 100% | 100% | 100% |
+| The Wake | level 4, W2 A1 (table) | won 0%, lost 100%, 55 captured/90 | 20% won, 30% lost | 95% (fireballs on the posts) | 50%, 2.3 downed | 100% |
+
+Reading: the heroes' alpha strike (move 4 + attack, focus fire) decides open fights, and armor past 1 does nothing against 2-damage weapons (min 1 per hit), so the levers that bite are HP (level) and armor 0→1. The L2 crews are a coin flip for three L1 heroes and a bloody win for four; the Wake eats L1 parties and is beatable from L2–L3 with a plan (and a Pyromancer). That matches "L1 Sisters winnable with one hero below half / L2 ~50% without a plan / L3 avoid or parley below hero level 3" closely enough that I left the table's levels and tiers alone except the Sisters' armor. Raising the Wake to level 5 is the next notch if the owner wants L3 parties to lose more.
+
+## Known issues
+
+- The campaign sim's bot is now running on the kit agent's free-movement changes (in flux: "Keven stops: the way is blocked" loops with the prisoner on the exit were seen in a trace); its crew numbers are indicative only. See the final report for the run.
+- Robbery takes gold, gems and jewelry only; the captive's other pack items are lost with them (the crew keeps the pack; gear = tiers and level come back). Spec says "keeping level and gear".
+- A member's `ward`/`guarding` are engine-private; the UI can't show "warded" on a crew member yet.
+- Crew members never use lockpicks/oil (the Burglar's and Pyromancer's spare pack slots are flavour and spoils).
+- The Sapper's "set on the way in" places the charge on his own neighbour (he takes 0, other members within 1 are avoided), so it sits one hex from him: the party sees it coming.
 
 ## Contract requests
 
 - None yet beyond what the lead added. `Rival.ward` and `Rival.guarding` could join the contract if the UI wants to show them.
+
+## Campaign sim run (`npx tsx scripts/v3-engine-sim.ts 24`, seed 1, with the kit agent's free movement in the tree)
+
+24 delves: 17 done, 10 deaths; 11 delves with a crew (Sisters 7, Choir 2, the Wake 2); crew fights 3: won 1 (Sisters, by a L3/L3/L4/L1 squad, 3/3 members killed), lost 1 (the Wake on the slay contract, 4 dead, 0 captured: downed heroes on L3 die to the Gloam before anyone drags them), fled 1 (Sisters, 1/3 killed); members killed 4; heroes captured 0; rescues tried 0. Two "fight delves" with the Choir never came to blows (the bot's route never passed within 6 of the post). Captures showed up only in the arena (26/30 against three L1 heroes vs the Ferrymen; 55/90 vs the Wake): in the campaign bot's hands a downed hero dies or the party wins before the 3-a-round drag reaches an exit. Refused commands 0.

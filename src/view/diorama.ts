@@ -3478,8 +3478,9 @@ function pipsHtml(hp: number, max: number, cls: string): string {
 }
 
 function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, draggedBy?: string, shield = false): string {
-  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : (h.rooted ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted: can't move or dash for ${h.rooted} more round${h.rooted === 1 ? '' : 's'}">rooted · ${h.rooted}</b>` : h.braced ? '<b class="tag-braced" title="Braced: hits do 1 less, enemies roll −15%">⛨ braced</b>' : '';
-  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${shield ? '<span class="tag-shield" title="Shield: ranged hits do 1 less (2 while braced)">◉</span>' : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
+  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : (h.rooted ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted: can't move or dash for ${h.rooted} more round${h.rooted === 1 ? '' : 's'}">rooted · ${h.rooted}</b>` : '';
+  const braced = h.braced && h.status === 'active' ? '<b class="tag-braced" title="Braced: hits do 1 less, enemies roll −15%">⛨ braced</b>' : '';
+  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${shield ? '<span class="tag-shield" title="Shield: ranged hits do 1 less (2 while braced)">◉</span>' : ''}${pipsHtml(h.hp, max, 'hero')}${status}${braced}`;
 }
 
 function monsterTag(m: Monster): string {

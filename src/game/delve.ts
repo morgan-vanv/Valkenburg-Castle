@@ -24,7 +24,7 @@ import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck
 import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isSatchel, setFuse, spendCharge } from './charges';
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
-import { rivalCaltropsStep, striker } from './crewai';
+import { capture, rivalCaltropsStep, striker } from './crewai';
 import { parleyTargets } from './parley';
 import { fleePlan, forgetHeroes, hasNoticed, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
@@ -1875,6 +1875,12 @@ export function checkDelveEnd(c: Ctx): boolean {
 
 export function endDelve(c: Ctx): void {
   for (const h of c.d.heroes) {
+    // V3.7 (spec 20.4): a downed hero in a crew member's hands is carried off, not left to die.
+    const dragger = h.status === 'downed' ? rivalsOnMap(c).find((r) => r.dragging === h.heroId) : undefined;
+    if (dragger) {
+      capture(c, dragger, h as HeroX);
+      continue;
+    }
     if (h.status === 'active' || h.status === 'downed') {
       killHero(c, h);
       noteOnce(c, `${heroName(c, h.heroId)} was left behind.`);

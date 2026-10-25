@@ -329,6 +329,19 @@ export class Hud {
     const sel = this.selected();
     const canAct = !!sel && sel.status === 'active' && d.phase === 'player';
     this.reach = canAct && !this.busy ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
+    // 20.5: while calm the engine's calmReach (every explored hex, with path and risks) replaces the budget.
+    if (canAct && !this.busy && this.freeMove()) {
+      try {
+        const far = typeof this.engine.calmReach === 'function' ? this.engine.calmReach(s, sel.heroId, this.sneak) : [];
+        if (far.length) {
+          const near = new Map(this.reach.map((r) => [posKey(r.to), r] as const));
+          for (const r of far) if (!near.has(posKey(r.to))) near.set(posKey(r.to), r);
+          this.reach = [...near.values()];
+        }
+      } catch {
+        /* the view paths the rest itself */
+      }
+    }
     this.options = canAct && !this.busy ? this.engine.actions(s, sel.heroId) : [];
     this.renderTop();
     this.renderCards();
@@ -598,8 +611,8 @@ export class Hud {
   }
 
   /** 20.3a: the three things a blast at `at` does to the ground, by colour: break (walls), collapse (floor into the pit), rubble. */
-  private showBlastOutcomes(at: Pos): { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[] } {
-    const pv = blastPreview(this.engine.castle(), this.state?.delve ?? null, at);
+  private showBlastOutcomes(at: Pos): { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[]; hit: string[] } {
+    const pv = this.blastPlan(at);
     this.dio.highlight(pv.breaks, 'breakable');
     this.dio.highlight(pv.collapses, 'collapse');
     this.dio.highlight(pv.rubbles, 'rubble');
@@ -608,12 +621,29 @@ export class Hud {
     return pv;
   }
 
-  /** "breaks 1 wall, drops 2 hexes into the pit, 3 to rubble". */
-  private blastWords(pv: { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[] }): string {
+  /** The engine's blast plan (Engine.blastPreview), else the view's reading of the rule. */
+  private blastPlan(at: Pos): { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[]; hit: string[] } {
+    const s = this.state;
+    if (s) {
+      try {
+        if (typeof this.engine.blastPreview === 'function') {
+          const e = this.engine.blastPreview(s, at);
+          return { breaks: e.broke, collapses: e.collapsed, rubbles: e.rubbled, hit: e.hit ?? [] };
+        }
+      } catch {
+        /* fall back */
+      }
+    }
+    return { ...blastPreview(this.engine.castle(), s?.delve ?? null, at), hit: [] };
+  }
+
+  /** "breaks 1 wall, drops 2 hexes into the pit, 3 to rubble, hits Brann and Rats". */
+  private blastWords(pv: { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[]; hit?: string[] }): string {
     const parts: string[] = [];
     if (pv.breaks.length) parts.push(`breaks ${pv.breaks.length} wall${pv.breaks.length === 1 ? '' : 's'}`);
     if (pv.collapses.length) parts.push(`drops ${pv.collapses.length} floor hex${pv.collapses.length === 1 ? '' : 'es'} into the pit`);
     if (pv.rubbles.length) parts.push(`${pv.rubbles.length} to rubble`);
+    if (pv.hit?.length) parts.push(`hits ${pv.hit.map((id) => this.nameOf(id)).join(', ')}`);
     return parts.join(', ');
   }
 
@@ -738,7 +768,7 @@ export class Hud {
     const fuse = fuseAt(d, at);
     if (fuse) {
       const side = fuseSide(s, fuse.by);
-      const words = this.blastWords(blastPreview(castle, d, at));
+      const words = this.blastWords(this.blastPlan(at));
       parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="tip-how">· set by ${this.nameOf(fuse.by)}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
     }
     if (t.railing) parts.push('Railing');

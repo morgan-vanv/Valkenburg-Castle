@@ -6,6 +6,7 @@ import type { ActionOption, Engine, FallInfo, MoveRisks, Reach, RollPreview, Vis
 import { DIRS, distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, AleOffer, ApplyResult, CastleDef, Command, CrewId, DealOption, GameState, Hero, HeroClass, Intent, Item, Rival, RivalCrew, ShopOffer, StoryId } from '../game/types';
 import { backDirs, blastPreview, blastRings, breakableWall } from './stealth';
+import { longPaths } from './pathing';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
   return { id, name, cls, level: 1, xp: 0, maxHp, hp: maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
@@ -419,6 +420,17 @@ export function fixtureEngine(castle0: CastleDef): Engine {
   const eng: Engine = {
     castle: () => castle,
     calm: (s) => calmOf(s),
+    calmReach: (s, heroId, sneak) => {
+      if (!calmOf(s).calm) return [];
+      const vis = visInner(s);
+      return [...longPaths(castle, s, vis, heroId, 60).entries()].map(([, path]) => ({ to: path[path.length - 1]!, cost: path.length, path, risks: risksFor(s, heroId, path, !!sneak) }));
+    },
+    blastPreview: (s, at) => {
+      const pv = blastPreview(castle, s.delve ?? null, at);
+      const d = s.delve;
+      const hit = d ? [...d.heroes.filter((h) => h.status === 'active' && h.at.level === at.level && distance(h.at, at) <= 2).map((h) => h.heroId), ...d.monsters.filter((m) => m.hp > 0 && m.at.level === at.level && distance(m.at, at) <= 2).map((m) => m.id)] : [];
+      return { broke: pv.breaks, collapsed: pv.collapses, rubbled: pv.rubbles, hit };
+    },
     newGame: (seed) => {
       const c = fixtureCampaign();
       pinStories(c);

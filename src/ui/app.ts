@@ -13,7 +13,7 @@ import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type 
 import { CREW, STANCE, STORY, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v35';
+export const SAVE_KEY = 'vc.save.v37';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',

@@ -45,9 +45,10 @@ import { posKey, samePos, type Pos } from '../src/game/hex';
 import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '../src/game/types';
 import { World, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
 import { posNeighbors } from '../src/game/hex';
-import type { DelveX } from '../src/game/state';
+import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
 import { breakableWall } from '../src/game/charges';
+import { calmReach } from '../src/game/calm';
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -75,9 +76,21 @@ let errors = 0;
 const refusals: Record<string, number> = {};
 const evCount: Record<string, number> = {};
 let gloamStrikes = 0;
+/** V3.7 (spec 20.5): free movement while calm: moves, steps walked, castle turns taken on the way, walks that stopped for combat, braces. */
+const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, hamstrung: 0 };
 function run(s: GameState, cmd: Command): GameState {
   const r = e.apply(s, cmd);
   const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
+  if (cmd.type === 'move' && !r.error && s.delve?.calm) {
+    calm.moves++;
+    if (cmd.follow) calm.follows++;
+    for (const ev of r.events) {
+      if (ev.type === 'moved' && ev.id === cmd.heroId) calm.steps += ev.path.length;
+      if (ev.type === 'phase' && ev.phase === 'world') calm.turns++;
+      if (ev.type === 'calm' && !ev.calm) calm.stopped++;
+    }
+  }
+  for (const ev of r.events) if (ev.type === 'rooted' && s.delve?.heroes.some((h) => h.heroId === ev.id)) calm.hamstrung++;
   for (const ev of r.events) {
     const key = ev.type === 'hit' ? (ev.target.startsWith('m') || ev.target.startsWith('r') ? 'hit:monster' : 'hit:hero') : ev.type === 'awake' ? `awake:${ev.awareness}` : ev.type;
     evCount[key] = (evCount[key] ?? 0) + 1;
@@ -364,6 +377,19 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     if (!alive() || hero()!.acted) return false;
     const me = hero()!;
     const def = e.heroById(s, id)!;
+    // V3.7 (spec 20.5): a front-liner with 2+ enemies adjacent braces instead of swinging.
+    const br = option(s, id, 'brace');
+    if (br) {
+      const adj = (option(s, id, 'attack')?.targets.filter((t) => t.at && Math.max(Math.abs(t.at.q - me.at.q), Math.abs(t.at.r - me.at.r), Math.abs(t.at.q + t.at.r - me.at.q - me.at.r)) === 1).length) ?? 0;
+      if (adj >= 2) {
+        const before = s;
+        s = act(s, id, 'brace', br.targets[0]!);
+        if (s !== before) {
+          calm.braces++;
+          return true;
+        }
+      }
+    }
     // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
     const order: ActionKind[] = ['escape', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
@@ -404,7 +430,46 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   if (alive()) s = sapperCheck(s, id);
   if (!alive()) return s;
   const me = hero()!;
-  if (!me.moved && !me.webbed) {
+  // V3.7 (spec 20.5): free movement while calm. The lantern bearer walks the whole way to the goal with the
+  // squad following; the others only catch up when they've fallen more than 3 behind. A walk ends early when
+  // the castle stirs (the engine stops it); the next hero's turn carries on from there.
+  let calmMoved = false;
+  if (!me.webbed && s.delve!.calm && !option(s, id, 'attack')) {
+    const d = s.delve as DelveX;
+    const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+    const isBearer = !bearer || bearer.heroId === id;
+    const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const behind = !isBearer && bearer && (bearer.at.level !== me.at.level || hexDist(me.at, bearer.at) > COHESION);
+    if (isBearer || behind) {
+      const goals = isBearer ? routeFor(s, me.at).goals : [bearer!.at];
+      const field = distField(w, d, goals, { stairs: true, allowLocked: true });
+      const here = field.get(posKey(me.at)) ?? 999;
+      const sneak = nearSleeper(s, me.at);
+      const c: Ctx = { w, s: s as GameStateX, d, ev: [] };
+      let best: ReturnType<typeof calmReach>[0] | undefined;
+      let bestD = here;
+      for (const r of calmReach(c, id, sneak)) {
+        if (inBlast(d, r.to)) continue;
+        if (!isBearer && hexDist(r.to, bearer!.at) > 1 && r.to.level === bearer!.at.level) continue; // catch up to the bearer's side
+        const dd = field.get(posKey(r.to)) ?? 999;
+        if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
+          bestD = dd;
+          best = r;
+        }
+      }
+      if (best) {
+        if (sneak) sneakMoves++;
+        else walkMoves++;
+        const before = s;
+        s = run(s, { type: 'move', heroId: id, path: best.path, sneak, follow: isBearer });
+        calmMoved = s !== before;
+      }
+    }
+  }
+  if (!alive()) return s;
+  // No free walk (not calm, or the explored frontier is as close as it gets): the budgeted move, which may step into the unknown.
+  if (!hero()!.moved && !hero()!.webbed && !calmMoved) {
+    const me = hero()!;
     // Stay put next to an awake enemy we can hit; close in on a hunter in sight within 4 (archers plink from range).
     const enemyNear = option(s, id, 'attack');
     if (!(enemyNear && !me.acted)) {
@@ -607,6 +672,7 @@ for (let i = 0; i < N; i++) {
     if (pickFight) crewLog.push('fight delve');
   } else pickFight = false;
   const isRescue = k.id.startsWith('cap-');
+  let everHostile = false;
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
@@ -615,6 +681,7 @@ for (let i = 0; i < N; i++) {
       s = heroTurn(s, h);
     }
     if (s.stage !== 'delve') break;
+    if (s.delve!.rivals?.stance === 'hostile') everHostile = true;
     {
       const d = s.delve as DelveX;
       const lit = litSet(w, d);
@@ -639,7 +706,7 @@ for (let i = 0; i < N; i++) {
   if (isRescue && sum.contractDone) crewStats.rescuesDone++;
   if (d.rivals && (d.rivals as { entered?: boolean }).entered) {
     const cr = d.rivals;
-    const fought = cr.stance === 'hostile' || cr.members.some((m) => m.hp <= 0) || d.heroes.some((h) => h.status === 'captured') || crewLog.some((x) => /fight|refused/.test(x));
+    const fought = everHostile || cr.stance === 'hostile' || cr.members.some((m) => m.hp <= 0) || d.heroes.some((h) => h.status === 'captured');
     const taken = d.heroes.filter((h) => h.status === 'captured').length;
     crewStats.captured += taken;
     if (fought) {
@@ -710,6 +777,7 @@ for (const lv of [1, 2, 3]) {
   console.log(`  L${lv}    ${String(rs.length).padStart(3)}  ${String(rs.filter((r) => r.done).length).padStart(4)}  ${String(rs.reduce((a, r) => a + r.deaths, 0)).padStart(6)}  ${String(rs.reduce((a, r) => a + r.darkRounds, 0)).padStart(16)}  ${String(rs.reduce((a, r) => a + r.gloamStrikes, 0)).padStart(13)}`);
 }
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+console.log(`calm (spec 20.5): free moves ${calm.moves} (${calm.follows} with follow), steps walked while calm ${calm.steps}, castle turns on the way ${calm.turns}, walks stopped by combat ${calm.stopped}, braces ${calm.braces}, heroes hamstrung ${calm.hamstrung}`);
 console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, floor collapsed ${sap.collapsed} / rubbled ${sap.rubbled}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
 if (sapLog.length) console.log(`  blasts: ${sapLog.slice(0, 12).join('; ')}${sapLog.length > 12 ? '; ...' : ''}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);

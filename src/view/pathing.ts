@@ -37,24 +37,34 @@ export function longPath(castle: CastleDef, s: GameState, vis: Visibility, heroI
   if (!d || !h || samePos(h.at, to)) return null;
   if (!standable(castle, s, to) || !(vis.explored.has(posKey(to)) || vis.visible.has(posKey(to)))) return null;
   if (d.heroes.some((o) => o.status !== 'out' && o.status !== 'dead' && o.status !== 'captured' && o.heroId !== heroId && samePos(o.at, to))) return null;
+  return longPaths(castle, s, vis, heroId, maxCost, to).get(posKey(to)) ?? null;
+}
+
+/** Every explored hex the hero can walk to while calm, with its path (one Dijkstra); `goal` stops the search early. */
+export function longPaths(castle: CastleDef, s: GameState, vis: Visibility, heroId: string, maxCost = 80, goal?: Pos): Map<string, Pos[]> {
+  const out = new Map<string, Pos[]>();
+  const d = s.delve;
+  const h = d?.heroes.find((x) => x.heroId === heroId);
+  if (!d || !h) return out;
   const blocked = new Set<string>();
   for (const m of d.monsters) if (m.hp > 0 && !m.buried) blocked.add(posKey(m.at));
   for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && d.round >= d.rivals!.entersRound) blocked.add(posKey(r.at));
   if (d.prisoner && !d.prisoner.out && !d.prisoner.dead && !d.prisoner.freed) blocked.add(posKey(d.prisoner.at));
   const cost = (p: Pos) => (castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)]?.kind === 'rubble' || (d.blown.includes(posKey(p)) && castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)]?.kind === 'wall') ? 2 : 1);
   const start = posKey(h.at);
-  const goal = posKey(to);
+  const goalKey = goal ? posKey(goal) : null;
   const dist = new Map<string, number>([[start, 0]]);
   const prev = new Map<string, Pos>();
   const open: { p: Pos; c: number }[] = [{ p: h.at, c: 0 }];
   const seen = new Set<string>();
+  const occupied = new Set(d.heroes.filter((o) => o.status !== 'out' && o.status !== 'dead' && o.status !== 'captured' && o.heroId !== heroId).map((o) => posKey(o.at)));
   while (open.length) {
     open.sort((a, b) => a.c - b.c);
     const cur = open.shift()!;
     const ck = posKey(cur.p);
     if (seen.has(ck)) continue;
     seen.add(ck);
-    if (ck === goal) break;
+    if (ck === goalKey) break;
     if (cur.c > maxCost) break;
     const nexts: Pos[] = posNeighbors(cur.p);
     const link = linkAt(castle, cur.p);
@@ -72,14 +82,23 @@ export function longPath(castle: CastleDef, s: GameState, vis: Visibility, heroI
       }
     }
   }
-  if (!dist.has(goal)) return null;
-  const path: Pos[] = [];
-  let at: Pos | undefined = to;
-  while (at && posKey(at) !== start) {
-    path.unshift(at);
-    at = prev.get(posKey(at));
+  for (const k of seen) {
+    if (k === start || occupied.has(k)) continue;
+    const path: Pos[] = [];
+    let at: Pos | undefined = parse(k);
+    while (at && posKey(at) !== start) {
+      path.unshift(at);
+      at = prev.get(posKey(at));
+    }
+    if (path.length) out.set(k, path);
   }
-  return path.length ? path : null;
+  return out;
+}
+
+function parse(k: string): Pos {
+  const [l, rest] = k.split(':');
+  const [q, r] = (rest ?? '0,0').split(',').map(Number);
+  return { level: Number(l), q: q ?? 0, r: r ?? 0 };
 }
 
 /** "the castle turns in N steps": steps left before the next world phase while calm. */

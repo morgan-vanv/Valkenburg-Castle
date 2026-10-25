@@ -126,7 +126,8 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     const far = [...reach].sort((a, c) => c.cost - a.cost)[0];
     const sleeper = s.delve.monsters.find((m) => m.awareness === 'asleep' && m.kind !== 'dragon');
     const taken = new Set([...s.delve.heroes.map((h) => `${h.at.q},${h.at.r}`), ...s.delve.monsters.map((m) => `${m.at.q},${m.at.r}`), ...reach.map((r) => `${r.to.q},${r.to.r}`)]);
-    const spot = Object.keys(lv1.tiles).map((k) => { const [q, r] = k.split(',').map(Number); return { level: 1, q, r }; }).find((q) => STAND.has(tileAt(q)?.kind) && dist(q, far.to) === 2 && !taken.has(`${q.q},${q.r}`));
+    const visNow = await p.evaluate(() => [...window.vcEngine.visibility(window.vc.state()).visible]);
+    const spot = Object.keys(lv1.tiles).map((k) => { const [q, r] = k.split(',').map(Number); return { level: 1, q, r }; }).find((q) => STAND.has(tileAt(q)?.kind) && dist(q, far.to) === 2 && !taken.has(`${q.q},${q.r}`) && visNow.includes(`1:${q.q},${q.r}`));
     if (sleeper && spot) {
       await edit(`const m = s.delve.monsters.find((x) => x.id === a.id); m.at = a.at; m.spawnedAt = a.at; m.awareness = 'asleep';`, { id: sleeper.id, at: spot });
       await p.evaluate((id) => window.vc.hud.select(id), lead.heroId);
@@ -478,7 +479,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       const h2 = s.delve.heroes.find((x) => x.heroId === lead.heroId);
       const arrived = h2.at.q === far.to.q && h2.at.r === far.to.r;
       const log = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
-      check('clicking it walks there (or stops for combat with a "Combat!" line)', arrived || /Combat!/.test(log), `${JSON.stringify(h2.at)} vs ${JSON.stringify(far.to)}; ${log.split('\n').slice(-1)}`);
+      check('clicking it walks there (or stops with a "Combat!" / "stops" line)', arrived || /Combat!|stops/.test(log), `${JSON.stringify(h2.at)} vs ${JSON.stringify(far.to)}; ${log.split('\n').slice(-1)}`);
       if (far.path.length >= 4 && arrived) check('the castle turned on the way (round advanced)', s.delve.round > 3 || s.delve.calmSteps >= 4, `round ${s.delve.round}, steps ${s.delve.calmSteps}`);
     } else skip('free move walk', 'no far explored hex');
     await unhover();
@@ -518,7 +519,9 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       const b = s.delve.heroes.find((h) => h.heroId === heir.heroId);
       if (b.braced) {
         check('braced badge on the card', !!(await p.$(`.hcard[data-hero="${heir.heroId}"] .chip.braced`)));
-        check('...and on the figure tag', (await visible('.unit-tag .tag-braced')).length > 0);
+        await p.waitForTimeout(300);
+        const tagHtml = await p.evaluate((id) => ({ html: document.querySelector(`.unit-tag[data-id="${id}"]`)?.innerHTML ?? '(no tag)', at: window.vc.dio.units.get(id)?.at, shown: window.vc.dio.shownLevel, h: window.vc.state().delve.heroes.find((x) => x.heroId === id) }), heir.heroId);
+        check('...and on the figure tag', /tag-braced/.test(tagHtml.html), JSON.stringify(tagHtml).slice(0, 300));
       } else skip('braced badge', 'the engine did not set braced');
     }
     const shieldChip = await p.$eval(`.hcard[data-hero="${heir.heroId}"] .chip.shield`, (e) => e.title).catch(() => '');

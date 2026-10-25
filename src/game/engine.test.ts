@@ -308,7 +308,7 @@ describe('movement', () => {
 
 describe('exploring by line of sight', () => {
   it('every step of a walk reveals what that hex can see, lit or not', () => {
-    let s = delve({ heroes: ['keven', 'pim'] });
+    let s = alarm(delve({ heroes: ['keven', 'pim'] })); // not calm: a 4-step walk would turn the castle and burn the last of the light
     s.delve!.light = 1; // dark: the lantern lights almost nothing
     const reach = e.reachable(s, 'pim', false).sort((a, b) => b.path.length - a.path.length)[0]!;
     expect(reach.path.length).toBeGreaterThan(2);
@@ -3477,7 +3477,7 @@ describe('V3.7 crews', () => {
     expect(wake.members.every((r) => r.loot.length === 1 && r.loot[0]!.kind === 'gold' && r.loot[0]!.amount === 50)).toBe(true);
     // The Sisters at level 2, weapon 1: the ranger's bow at Finesse 75 + 5 + 10, range 6, HP 10.
     const sis = buildCrew(s as GameStateX, 'lantern-sisters', [at(1, 3, 6), at(1, 4, 6), at(1, 5, 6)]);
-    expect(rivalStats(sis.members[0]!)).toMatchObject({ hp: 10, slots: 3, chance: 90, range: 6, armor: 0 });
+    expect(rivalStats(sis.members[0]!)).toMatchObject({ hp: 10, slots: 3, chance: 90, range: 6, armor: 1 }); // armor 1: the sim's tuning (progress note)
     expect(sis.members[0]!.hp).toBe(10);
     expect(sis.members.every((r) => r.loot.length === 0)).toBe(true); // prospectors carry no purse
     expect(CREWS['the-wake'].hideout.siteId).toBe('the-wake-hideout');
@@ -3561,17 +3561,20 @@ describe('V3.7 crews', () => {
     expect(r.events.some((x) => x.type === 'cast' && x.by === ss.id && x.spell === 'potion')).toBe(true);
   });
 
-  it('ranger: caltrops on the hex the nearest hero would charge through; a hero stepping there takes 2 and stops', () => {
+  it('ranger: caltrops on the hex the nearest hero would charge through (when there is nothing to shoot); a hero stepping there takes 2 and stops', () => {
     const s = crewDelve('ferrymen', [at(2, 2, 1), at(2, 16, 4), at(2, 18, 4)], 'hostile');
     member(s, 0).hp = 0; // only the ranger (and a far sapper)
     member(s, 2).at = at(2, 17, 8);
     put(s, 'brann', at(2, 12, 2));
     computeIntentsOf(ctx(s));
+    expect(member(s, 1).intent?.kind).toBe('attack'); // Brann in bow sight: she shoots
+    put(s, 'brann', at(2, 16, 7)); // in the cells behind the closed door: no line, but on his way in
+    computeIntentsOf(ctx(s));
     const ran = member(s, 1);
     expect(ran.intent).toMatchObject({ kind: 'caltrops', item: 'caltrops' });
     const spot = ran.intent!.to!;
     expect(distance(spot, ran.at)).toBe(1);
-    expect(distance(spot, at(2, 12, 2))).toBeLessThan(distance(ran.at, at(2, 12, 2)));
+    expect(distance(spot, at(2, 16, 7))).toBeLessThan(distance(ran.at, at(2, 16, 7)));
     let t = ok(s, { type: 'endTurn' }).state;
     expect(t.delve!.caltrops).toContain(posKey(spot));
     expect(member(t, 1).pack!.filter((i) => i.kind === 'caltrops').length).toBe(1);
@@ -3900,14 +3903,15 @@ describe('V3.7 kit and calm', () => {
       expect(r0.state.delve!.calm).toBe(true);
       s = hollow();
       s.delve!.calm = true;
-      const m = monster(s, 'rats', at(3, 2, 4), 'asleep');
-      m.hp = 1;
-      // Attacking it wakes it hunting: calm ends on the spot, with the reason.
-      const miss = until(s, { type: 'act', heroId: 'brann', action: 'attack', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'miss'));
+      const m = monster(s, 'rats', at(3, 2, 4), 'alert');
+      m.hp = 30;
+      // Attacking it (hit or miss) makes it hunt: calm ends on the spot, with the reason.
+      const miss = act(s, 'brann', 'attack', { id: m.id });
       expect(miss.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: false, why: 'Rats hunt Brann.' });
       expect(miss.state.delve!.calm).toBe(false);
       // Killing it brings calm back.
       hero(miss.state, 'brann').acted = false;
+      miss.state.delve!.monsters[0]!.hp = 1;
       const kill = until(miss.state, { type: 'act', heroId: 'brann', action: 'attack', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied'));
       expect(kill.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: true });
     });
@@ -3935,12 +3939,15 @@ describe('V3.7 kit and calm', () => {
       expect(r.state.delve!.calmSteps).toBe(3);
       expect(walked(r.events, 'brann')).toEqual(path);
       expect(r.events.filter((x) => x.type === 'noise')).toHaveLength(3); // one per leg
-      // The action came back with the new rounds; another walk is free, and the fourth step of it turns the castle.
+      // The action came back with the new rounds; another walk is free, and its first step is the fourth: the castle turns at the end of it.
       expect(h.acted).toBe(false);
       const r2 = ok(r.state, { type: 'move', heroId: 'brann', path: [at(3, 11, 4)], sneak: true });
       expect(worlds(r2.events)).toBe(1);
       expect(r2.state.delve!.calmSteps).toBe(0);
       expect(hero(r2.state, 'brann').moved).toBe(false);
+      // An explicit End turn also starts the count afresh.
+      const r3 = ok(r.state, { type: 'endTurn' });
+      expect(r3.state.delve!.calmSteps).toBe(0);
       // Not calm: the old budget rules.
       const n = alarm(hollow());
       expect(e.apply(n, { type: 'move', heroId: 'brann', path, sneak: false }).error).toBe('Too far.');
@@ -3955,8 +3962,10 @@ describe('V3.7 kit and calm', () => {
       expect(reach.length).toBeGreaterThan(20);
       expect(reach.every((r) => explored.has(posKey(r.to)))).toBe(true);
       expect(reach.every((r) => r.path.length === r.cost)).toBe(true);
+      // (3,3) is 3 steps away through (3,4) or round it: with a spotted trap on (3,4) the path goes round (a tie-break, like `reachable`).
       s.delve!.traps[posKey(at(3, 3, 4))] = { spotted: true };
-      const around = calmReach(ctx(s), 'brann', false).find((r) => samePos(r.to, at(3, 5, 4)))!;
+      const around = calmReach(ctx(s), 'brann', false).find((r) => samePos(r.to, at(3, 3, 3)))!;
+      expect(around.cost).toBe(3);
       expect(around.path.some((p) => samePos(p, at(3, 3, 4)))).toBe(false);
     });
 
@@ -4221,6 +4230,7 @@ describe('V3.7 kit and calm', () => {
       else expect(ground).toBeUndefined();
       // Floor now: Brann can step there; the crate is no longer a target; the barrel still is.
       expect(ke.reachable(r.state, 'brann', false).some((x) => samePos(x.to, at(1, 5, 1)))).toBe(true);
+      hero(r.state, 'brann').acted = false;
       expect(ke.actions(r.state, 'brann').find((x) => x.action === 'smashProp')!.targets).toEqual([{ at: at(1, 6, 1) }]);
       // The drop table: gold 3–12, a small item, or nothing; the same seed gives the same drop.
       const seen = new Set<string>();

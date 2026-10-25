@@ -234,11 +234,15 @@ function dartIntent(c: Ctx, r: RivalX): Intent | null {
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
 }
 
-/** Caltrops on the hex the nearest hero would charge through: the member's neighbour on that hero's shortest way in. */
+/**
+ * Caltrops on the hex the nearest hero would charge through: the member's neighbour on that hero's
+ * shortest way in. Only while the bow has nothing to shoot at (a Ranger with a target shoots).
+ */
 function caltropsIntent(c: Ctx, r: RivalX): Intent | null {
   if (!hasKit(r, 'caltrops')) return null;
   const t = nearestHero(c, r);
   if (!t || t.at.level !== r.at.level || distance(t.at, r.at) <= 1 || distance(t.at, r.at) > 6) return null;
+  if (r.cls === 'ranger' && heroesInSight(c, r, BOW_RANGE).length) return null;
   const nodes = dijkstra(c.w, c.d, t.at, { enter: (p) => !blocked(c, p, t.id), stairs: false, budget: 8 });
   let best: Pos | null = null;
   let bestCost = Infinity;
@@ -453,7 +457,8 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
     case 'ranger':
       return knockbackIntent(c, r) ?? rangerHamstring(c, r, t) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
     case 'sellsword':
-      return shoveIntent(c, r) ?? glueIntent(c, r);
+      // Glue is for the charge, not for a brawl already joined: only when nobody is at his blade.
+      return shoveIntent(c, r) ?? (targets(c).some((x) => x.hero && adjacentTo(x.at, r.at)) ? null : glueIntent(c, r));
     case 'sapper':
       return fuseIntent(c, r);
     case 'pyromancer':
