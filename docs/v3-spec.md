@@ -430,3 +430,42 @@ Overrides earlier sections where they disagree. Contract: `git diff v3.4 -- src/
 - The Flagon station: the ale menu (locked ales show what brews them), choose an ale per hero; the hero card in camp and in the delve shows the ale.
 - The parley card: crew name and temperament, stance, members, what they're after (`aim`), and each deal with price, what it pays with, risk, blocked reason; Fight as a button. Cutthroat toll intent reads clearly as a demand with a one-round fuse.
 - Models: rival Sellsword (shield), Sapper, Pyromancer by crew colours; hired crews marked as allies.
+
+## 19. V3.6: play-test fixes (owner and play-testers, 2026-10-25 midday)
+
+Overrides earlier sections where they disagree. The bigger asks from the same notes (stealth and aggro, the Sapper, tougher crews, attacks of opportunity) are proposals awaiting approval, not in this section.
+
+### 19.1 Villagers in places that make sense (`ContractSiteDef.story`)
+
+Story sites are used only by their story contract; the regular board never picks them. Each villager has their own place and reason:
+
+| Story | Site (new) | Room | Why they're there |
+| --- | --- | --- | --- |
+| surgeon | l1-story-chapel, Level 1 Chapel | Chapel | Brother Aldric slipped back into the castle to pick herbs from the physic garden in the courtyard and was taken. The orcs keep him in the chapel to patch up their wounded. |
+| innkeeper | l1-story-kitchens, Level 1 Kitchens | Kitchens | Old Wim never got out. The orcs keep him at the spit in the kitchens, cooking for the warband. |
+| smith | l2-story-forge, Level 2 Forge | Forge | Gerda barred the forge door the night the castle fell and has held it since, trading mended blades for food. The door is locked; she opens it to a knock from the heir (the hex next to her counts as adjacent through the door, or the door is simply unlocked from her side when a hero is adjacent). Simplest: place her inside the forge behind its door, door unlocked. |
+| copper | l2-story-barracks, Level 2 Barracks | Barracks | The orcs dragged Wim's brewing copper to the barracks to brew their own swill. It sits among the sleeping squad. |
+| caskbook | l3-recover-drain (as before) | The Drain | Wim's cask book was lost in the Drain when the cellars flooded. |
+
+Briefs and the camp's "Lowgate" panel use these reasons (one sentence each). Sites are placed on floor hexes away from the room's existing regular site (if any), reachable, not on a spawn.
+
+### 19.2 Locks: the Burglar picks; everyone else smashes, unless they carry lockpicks
+
+- **Pick** is the Burglar's alone by default (as spec 2). Any other hero gets Pick only while carrying **lockpicks**: 2 Finesse slots (same outcomes table: 2 hits opens silently... use the Burglar table on 2 slots: 2 hits opens silently, 1 hit opens with noise 2, 0 jams). Lockpicks are reusable for the delve, 1 slot, 25 gold, `needs: 'smith'` (metalwork).
+- Without Pick, a locked door or chest offers Smash, a blasting charge, or the skeleton key (one use, anyone, needs the smith) as before. Option text on a locked thing for a non-Burglar without picks: "Locked · Smash it, or a Burglar or lockpicks could pick it."
+
+### 19.3 Night-eye draught
+
+- `nightsight`, 30 gold at the peddler (always sold), 1 slot. Drinking it is an action (`nightsight`), silent: `nightEyes = 8` rounds, counting down each world phase.
+- While it lasts: the hero's sight range is the bright-stage range minus depth (8/7/6) whatever light they stand in, and the brightness penalty to their rolls is 0. Nothing else changes: they are still unlit for monsters' noticing rules, the Gloam still hunts them unlit, far-light rules unchanged. The hero card shows a badge with rounds left.
+
+### 19.4 Movement through friends
+
+- Heroes pass through heroes, the prisoner and **hired** crew members; monsters and other rivals block. (Heroes already passed through heroes; hired crews blocked them, which is fixed.) A hero still can't end a move on anyone.
+
+### 19.5 Exits read as the way out (view and HUD)
+
+- Every exit hex, once explored, gets a floating marker like the stairs' ("Way out" with an arrow; the entrance you came in by reads "Way out · you came in here") and a doorway/light model at the hex, and the hover tooltip "Way out · stand here, then Leave the castle".
+- A hero standing on an exit gets a prominent bar button "Leave the castle" (hotkey), and the hex pulses, the same pattern as "Take stairs".
+- Once the contract's prize is in hand (heirloom in a pack, prisoner freed and escorted) the goal box switches to "Get out: nearest way out is the main gate, 14 hexes" with a click-to-pan, and known exits pulse softly on the map.
+- The context hint names a nearby exit ("Way out 3 hexes east").

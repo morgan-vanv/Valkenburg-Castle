@@ -3,7 +3,7 @@
 // input is blocked.
 
 import type { Engine } from '../game/api';
-import { posKey } from '../game/hex';
+import { posKey, type Pos } from '../game/hex';
 import type { Command, GameEvent, GameState } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { Diorama } from '../view/diorama';
@@ -115,6 +115,7 @@ export class App {
         applySettings: () => this.applySettings(),
         abandonDelve: () => void this.send({ type: 'abandon' }),
         toTitle: () => this.showTitle(),
+        entrance: () => this.entrancePos(),
       },
       this.dio,
     );
@@ -148,6 +149,17 @@ export class App {
       this.state = saved;
       this.render(true);
     } else this.showTitle();
+  }
+
+  /**
+   * V3.6 (19.5): the exit the party came in by. The engine doesn't record it (contract request:
+   * `Delve.entrance`), so it comes from the loadout the prepare screen saved; the main gate otherwise.
+   */
+  private entrancePos(): Pos | null {
+    const ents = this.engine.castle().entrances;
+    if (!ents.length) return null;
+    const i = this.loadout?.entrance ?? 0;
+    return ents[i] ?? ents[0] ?? null;
   }
 
   private applySettings(): void {
@@ -253,6 +265,7 @@ export class App {
       this.hud.root.classList.remove('hidden');
       this.dio.setActive(true);
       const vis = this.visibilityOf(s);
+      this.dio.setEntrance(this.entrancePos());
       this.dio.sync(s, vis, this.engine.brightness(s));
       this.hud.setState(s, vis);
       this.hud.setDark(this.engine.brightness(s));
@@ -384,6 +397,8 @@ export class App {
       if (e.type === 'moved' && world && !this.isHero(e.id) && !instant() && this.enemyFocus(e)) this.dio.setFollow(e.id);
       switch (e.type) {
         case 'say':
+          // A deal's own line (the engine says it before the `deal` event) is replaced by dealLine below.
+          if (events[events.indexOf(e) + 1]?.type === 'deal') continue;
           this.hud.log(e.text);
           continue;
         case 'phase': {

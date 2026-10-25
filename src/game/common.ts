@@ -115,6 +115,17 @@ export function brightnessAt(w: World, c: Ctx, at: Pos, lit?: Set<string>): Brig
 
 export const LIGHT_PENALTY: Record<Brightness, number> = { bright: 0, dim: -10, dark: -20, pitch: -30 };
 
+/** V3.6 (spec 19.3): the hero has the night-eye draught in them: no dark penalties to sight or rolls. */
+export function nightEyed(h: HeroInDelve): boolean {
+  return (h.nightEyes ?? 0) > 0 && h.status === 'active';
+}
+
+/** The brightness penalty to this hero's rolls: by the light they stand in, 0 with night-eye. */
+export function lightPenaltyFor(w: World, c: Ctx, h: HeroInDelve, lit?: Set<string>): number {
+  if (nightEyed(h)) return 0;
+  return LIGHT_PENALTY[brightnessAt(w, c, h.at, lit)];
+}
+
 // ---------------------------------------------------------------- rolls
 
 export function clampChance(p: number): number {
@@ -140,6 +151,7 @@ const SINGLE: Record<ItemKind, string> = {
   charge: 'Blasting charge', heirloom: 'Heirloom', hoard: 'Hoard',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', hook: 'Grappling hook',
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
+  lockpicks: 'Lockpicks', nightsight: 'Night-eye draught',
 };
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {

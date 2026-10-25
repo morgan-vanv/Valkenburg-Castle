@@ -136,6 +136,8 @@ export interface ContractSiteDef {
   at: Pos;
   /** e.g. "the cellblock", "the chapel crypt". Used in contract text. */
   where: string;
+  /** V3.6 (spec 19.1): a story site, used only by its story contract, never by the regular board. */
+  story?: StoryId;
 }
 
 /**
@@ -214,7 +216,10 @@ export type ItemKind =
   | 'hook' // grappling hook: reusable, climb up out of a pit landing
   | 'key' // skeleton key: opens one locked door or chest, silently
   | 'oil' // oil flask: +10 light
-  | 'firecracker'; // throw 6: noise 6 at the target hex
+  | 'firecracker' // throw 6: noise 6 at the target hex
+  // V3.6 (spec 19.2, 19.3)
+  | 'lockpicks' // reusable: any hero may Pick with 2 Finesse slots (needs the smith)
+  | 'nightsight'; // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
 
 export interface Item {
   id: string;
@@ -308,7 +313,8 @@ export interface AleOffer {
 
 export type ShopKind =
   | 'torch' | 'potion' | 'rope' | 'charge'
-  | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker';
+  | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker'
+  | 'lockpicks' | 'nightsight';
 
 export interface ShopOffer {
   kind: ShopKind;
@@ -371,6 +377,8 @@ export interface HeroInDelve {
   ale?: AleEffect;
   /** Featherfoot: the free fall has been used. */
   aleSpent?: boolean;
+  /** V3.6 (spec 19.3): rounds of night-eye left: no dark penalties to sight or rolls. */
+  nightEyes?: number;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead'. */
   status: 'active' | 'downed' | 'out' | 'dead';
   /** Downed only: world phases left before death (starts at 2). */
@@ -658,6 +666,7 @@ export type ActionKind =
   | 'shove' // push an adjacent enemy 1 hex (into the pit = it falls)
   | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
+  | 'nightsight' // V3.6: drink the night-eye draught (action)
   | 'parley' // V3.5: open the deal card with a crew in sight within 4 (free; the deal is a 'deal' command)
   | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally

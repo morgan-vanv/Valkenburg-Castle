@@ -406,7 +406,12 @@ for (let i = 0; i < N; i++) {
   crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
+  // Lockpicks (spec 19.2): once the smith is home, one reusable pair for the party, carried by a non-Burglar.
+  if (s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
   const packs: Record<string, string[]> = {};
+  const picks = s.campaign.stash.find((it) => it.kind === 'lockpicks');
+  const picker = fit.find((id) => e.heroById(s, id)?.cls !== 'burglar');
+  if (picks && picker) (packs[picker] ??= []).push(picks.id);
   const carry = [
     ...(k.level >= 3 ? s.campaign.stash.filter((it) => it.kind === 'oil').slice(0, 1) : []),
     ...s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2),

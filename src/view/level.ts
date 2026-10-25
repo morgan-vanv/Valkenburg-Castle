@@ -1134,28 +1134,61 @@ export class LevelView {
   }
 
   private addExit(h: Hex): void {
+    // V3.6 (19.5): the exit reads as a doorway out. Two posts and a lintel stand along the wall
+    // axis; between them a pale sheet of daylight faces the outside (the side with fewer open
+    // hexes), a lit threshold slab and a glowing hex ring mark the floor, and an arrow points out.
     const axis = this.wallAxis(h);
+    const open = (i: number) => (WALKABLE.has(this.tile(add(h, DIRS[(i + 6) % 6]!))?.kind ?? '') ? 1 : 0);
+    // Local +x after the rotation points toward DIRS[axis + 1..2]; -x toward DIRS[axis + 4..5].
+    const plus = open(axis + 1) + open(axis + 2);
+    const minus = open(axis + 4) + open(axis + 5);
+    const out = plus <= minus ? 1 : -1;
     const stone = fogMaterial({ color: COLORS.wallCap, litFloor: 0.3 });
+    const dark = fogMaterial({ color: 0x3a332c, litFloor: 0.12 });
+    const slab = fogMaterial({ color: 0xcfc4ad, litFloor: 0.45 });
     const glow = new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const day = new THREE.MeshBasicMaterial({ color: 0xdceeff, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     const g = new THREE.Group();
     g.rotation.y = this.dirAngle(axis);
     const span = HEX * 1.8;
+    const H = 1.9;
     for (const z of [-span / 2, span / 2]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.26, 1.6, 0.26), stone);
-      post.position.set(0, FLOOR_TOP + 0.8, z);
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.26, 4), stone);
-      cap.position.set(0, FLOOR_TOP + 1.73, z);
-      g.add(post, cap);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, H, 0.3), stone);
+      post.position.set(out * 0.35, FLOOR_TOP + H / 2, z);
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.42), dark);
+      foot.position.set(out * 0.35, FLOOR_TOP + 0.09, z);
+      g.add(post, foot);
     }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.24, span + 0.5), stone);
+    lintel.position.set(out * 0.35, FLOOR_TOP + H + 0.12, 0);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.1, span + 0.7), dark);
+    cap.position.set(out * 0.35, FLOOR_TOP + H + 0.29, 0);
+    g.add(lintel, cap);
+    // The daylight in the opening: a sheet between the posts, just outside the hex's centre.
+    const sheet = new THREE.Mesh(new THREE.PlaneGeometry(span - 0.3, H - 0.05), day);
+    sheet.rotation.y = Math.PI / 2;
+    sheet.position.set(out * 0.42, FLOOR_TOP + (H - 0.05) / 2, 0);
+    g.add(sheet);
+    // A second, fainter sheet a step further out so the light has depth from an angle.
+    const haze = new THREE.Mesh(new THREE.PlaneGeometry(span + 0.3, H + 0.4), glow);
+    haze.rotation.y = Math.PI / 2;
+    haze.position.set(out * 0.7, FLOOR_TOP + (H + 0.4) / 2 - 0.1, 0);
+    g.add(haze);
+    // Threshold: a pale slab across the doorway, and the glowing ring on the hex.
+    const step = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, span - 0.2), slab);
+    step.position.set(out * 0.3, FLOOR_TOP + 0.025, 0);
+    g.add(step);
     const disc = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.82, 6, 1, Math.PI / 6), glow);
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = FLOOR_TOP + 0.02;
     g.add(disc);
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 3), glow);
-    arrow.position.y = FLOOR_TOP + 0.5;
+    // The arrow points out through the doorway.
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 3), glow);
+    arrow.rotation.z = -out * Math.PI / 2;
+    arrow.position.set(-out * 0.15, FLOOR_TOP + 0.55, 0);
     g.add(arrow);
     this.place(h, g);
-    this.extra(h, g, [stone], this.withNeighbours(h));
+    this.extra(h, g, [stone, dark, slab], this.withNeighbours(h));
   }
 
   private addBrazier(h: Hex): void {

@@ -335,10 +335,17 @@ export function sightRangeOf(light: number, level: number): number {
  */
 export function sightRangeAt(w: World, d: DelveX, at: Pos, lit: Set<string> = litSet(w, d)): number {
   const k = posKey(at);
+  // V3.6 (spec 19.3): a night-eyed hero standing here sees the bright-stage range minus depth, whatever the light.
+  if (d.heroes.some((h) => h.status === 'active' && (h.nightEyes ?? 0) > 0 && samePos(h.at, at))) return nightSightRange(at.level);
   if (!lit.has(k)) return DARK_SIGHT[at.level] ?? 1;
   if (partyLights(w, d, at)) return sightRangeOf(d.light, at.level);
   if (fixedLights(w, d).day.has(k)) return SIGHT_BY_STAGE.bright;
   return Math.max(2, FIXED_LIGHT_SIGHT - Math.max(0, at.level - 1));
+}
+
+/** V3.6 (spec 19.3): night-eye sight: the bright-stage range minus depth (8/7/6). */
+export function nightSightRange(level: number): number {
+  return Math.max(2, SIGHT_BY_STAGE.bright - Math.max(0, level - 1));
 }
 
 /** Does the party's own light (open lantern, a lit torch) reach `at`? */

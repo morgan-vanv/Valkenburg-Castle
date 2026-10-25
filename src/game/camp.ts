@@ -133,8 +133,9 @@ export function healQuote(h: Hero, gold: number): { hp: number; cost: number; mi
 function makeBoard(w: World, s: GameStateX): Contract[] {
   const rep = s.campaign.reputation;
   const open = (lv: number) => rep >= (REP_FOR_LEVEL[lv] ?? REP_FOR_LEVEL[REP_FOR_LEVEL.length - 1]!);
-  const sites = w.castle.contractSites.filter((x) => x.kind !== 'slay' && open(x.at.level));
-  const slay = rep >= REP_FOR_SLAY ? w.castle.contractSites.filter((x) => x.kind === 'slay') : [];
+  // Spec 19.1: story sites belong to their story contract; the regular board never picks them.
+  const sites = w.castle.contractSites.filter((x) => x.kind !== 'slay' && !x.story && open(x.at.level));
+  const slay = rep >= REP_FOR_SLAY ? w.castle.contractSites.filter((x) => x.kind === 'slay' && !x.story) : [];
   const l1 = shuffle(s, sites.filter((x) => x.at.level === 1));
   const deep = shuffle(s, sites.filter((x) => x.at.level > 1));
   // The slay contract stays on the board once unlocked; at least one Level 1 contract; deeper ones mixed in.
@@ -324,12 +325,12 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
 
 /** Refusals that name the fix (spec 18.2). */
 export const LOCKED = {
-  surgeon: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the library). Until then, drink a potion.',
-  smith: 'The forge is cold. Rescue Gerda the smith (Level 2, the cellblock).',
-  metal: 'Needs a smith: rescue Gerda (Level 2, the cellblock).',
-  copper: 'Nothing to brew in: recover the brewing copper (Level 2, the forge).',
+  surgeon: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the chapel). Until then, drink a potion.',
+  smith: 'The forge is cold. Rescue Gerda the smith (Level 2, the forge).',
+  metal: 'Needs a smith: rescue Gerda (Level 2, the forge).',
+  copper: 'Nothing to brew in: recover the brewing copper (Level 2, the barracks).',
   caskbook: 'Wim needs his cask book: recover it (Level 3, the Drain).',
-  innkeeper: 'The Flagon is dark. Rescue Old Wim (Level 1, the library).',
+  innkeeper: 'The Flagon is dark. Rescue Old Wim (Level 1, the kitchens).',
 } as const;
 
 /** The peddler's stock; metalwork `locked` until the smith is home (with no state, nothing is locked). */
