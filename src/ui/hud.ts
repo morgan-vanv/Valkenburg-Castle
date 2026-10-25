@@ -13,7 +13,7 @@ import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTool
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, blastPreview, breakableWall, collapsible, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
-import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
+import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
 
@@ -726,11 +726,12 @@ export class Hud {
     const act = (name: string, what: string) => parts.push(`<b>${name}</b> <span class="tip-how">· ${what}</span>`);
     const door = d.doors[k];
     const castle = this.engine.castle();
-    // 19.2: Pick is the Burglar's, or anyone's with lockpicks in the pack.
+    // 21.4: no pick, no Pick: the smith's lockpicks or a Burglar's improvised pick.
     const sel = this.selected();
     const selDef = sel ? this.heroDef(sel.heroId) : undefined;
-    const canPick = !!sel && (selDef?.cls === 'burglar' || sel.pack.some((i) => itemBase(i.kind) === 'lockpicks'));
-    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : `Smash it${more}, or a Burglar or lockpicks could pick it`);
+    const canPick = !!sel && sel.pack.some((i) => itemBase(i.kind) === 'lockpicks' || i.kind === 'improvised');
+    const spent = !canPick && selDef?.cls === 'burglar';
+    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised pick is spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
     if (t.kind === 'door' && door) {
       if (door.open) act('Open door', 'walk through');
       else if (door.jammed) act('Jammed door', 'Smash or Charge');
@@ -1502,8 +1503,8 @@ export class Hud {
       chip(`lantern ${open ? '' : 'shut'}`, open ? '◆ Lantern' : '◇ Lantern', `${name} carries the lantern${open ? '' : ' (shuttered)'}.\nIts light goes where ${name} goes. Shutter or open it with L (free); Pass lantern hands it to a hero next to you.`);
     }
     if (hd.status === 'active' && darkSight !== null) {
-      if (hd.nightEyes && hd.nightEyes > 0) chip('dark', 'In the dark · night-eye', `${name} stands outside all light, but the night-eye draught keeps sight (${darkSight}) and rolls whole.${hd.at.level === 3 ? '\nIn the Hollow the dark itself still hunts anyone standing unlit.' : `\nMonsters still notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}`);
-      else chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}\nStep into the lantern's light, a brazier's or a torch's.`);
+      if (hd.nightEyes && hd.nightEyes > 0) chip('dark', 'In the dark · night-eye', `${name} stands outside all light, but the night-eye draught keeps sight (${darkSight}) and rolls whole.${hd.at.level === 3 ? '\nIn the Hollow the dark itself still hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+      else chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}\nStep into the lantern's light, a brazier's or a torch's.`);
     }
     if (hd.grabbedBy) {
       const by = d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul';
@@ -2474,6 +2475,11 @@ function packRow(pack: Item[]): HTMLElement {
     const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
     // V3.7 (20.3): the Sapper's satchel takes no slot and shows its charge count.
     const satchel = it.kind === 'charge' && it.slots === 0;
+    // V3.7.1 (21.4): the Burglar's improvised pick takes no slot either.
+    if (it.kind === 'improvised') {
+      socks.push(h('span', { class: 'pk-sock pk-improvised pk-satchel', 'data-span': '0', title: `Improvised pick · one Pick at 2 Finesse slots, used up whatever happens. No pack slot; a fresh one each delve.\nUse: next to a locked door or chest, Interact › Pick lock` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind))));
+      continue;
+    }
     if (satchel) {
       socks.push(h('span', { class: 'pk-sock pk-charge pk-satchel', 'data-span': '0', title: `Satchel · ${it.amount} charge${it.amount === 1 ? '' : 's'} left, no pack slot. ${PACK_SLOTS} slots stay free for loot.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge.` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), h('small', { class: 'num' }, `${it.amount}`)));
       continue;

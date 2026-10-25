@@ -29,9 +29,9 @@ export const V37 = {
   wakeSneak: liveNum(10, 'WAKE_SNEAK', 'WAKE_CHANCE_SNEAK'),
   wakeEndSneak: liveNum(25, 'WAKE_END_SNEAK', 'WAKE_ADJACENT_SNEAK'),
   /** Notice ranges: lit walking / lit sneaking / unlit walking / unlit sneaking; the Hollow walking / sneaking. */
-  noticeLitWalk: liveNotice('litWalk', 6),
+  noticeLitWalk: liveNotice('litWalk', 8),
   noticeLitSneak: liveNotice('litSneak', 4),
-  noticeDarkWalk: liveNotice('unlitWalk', 3),
+  noticeDarkWalk: liveNotice('unlitWalk', 5),
   noticeDarkSneak: liveNotice('unlitSneak', 1),
   noticeHollowSneak: liveNotice('hollowSneak', 3),
   sneakSlots: liveNum(1, 'SNEAK_ATTACK_SLOTS'),
@@ -136,7 +136,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
   ],
   burglar: [
-    ['Pick', 'ability', 'Pick locks on doors and chests. Anyone else needs lockpicks.'],
+    ['Pick', 'ability', 'An improvised pick each delve (2 slots, used up). With the smith\'s lockpicks: 3 slots, kept.'],
     ['Sneak 4', 'passive', 'Sneaks further than anyone.'],
     ['Backstab', 'passive', '+1 slot on a monster that has not noticed you, on top of the sneak attack everyone gets (+2 in all).'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
@@ -311,7 +311,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
  */
 export const ACTION_HELP: Record<ActionKind, string> = {
   attack: 'Strike an enemy with your weapon. Each slot that hits deals its damage; all slots hit: +1. Your first strike on a monster that has not noticed you: +1 slot (the Burglar +2).',
-  pick: `Burglar: 3 Finesse slots on a locked door or chest next to you: 3 hits opens it silently, 2 opens it (noise 2), 1 fails, 0 jams it for good. Anyone else needs lockpicks: 2 slots, 2 hits opens silently, 1 opens with noise 2, 0 jams it.`,
+  pick: `Work a locked door or chest next to you. Needs a pick. The smith's lockpicks are kept: a Burglar rolls 3 Finesse slots (3 hits silent, 2 opens with noise 2, 1 fails, 0 jams it for good), anyone else 2. A Burglar's improvised pick (one per delve) rolls 2 slots and is used up whatever happens. On 2 slots: 2 hits silent, 1 opens with noise 2, 0 jams it.`,
   smash: 'Force a locked door or chest next to you: 2 Might slots. A door needs 2 hits, a chest 1. Noise 4 either way.',
   open: 'Open or close a door next to you (free), or open a chest (uses the action; free for the Burglar). Chest loot lands on the floor: Take it.',
   take: `Pick up loot next to you or underfoot. Free. Each item fills a pack slot (${PACK_SLOTS} per hero); heirlooms and hoard pieces fill 2.`,
@@ -444,7 +444,8 @@ export const ITEM_HELP: Record<string, string> = {
   key: 'Opens one locked door or chest, silently.\nUse: next to the lock, Items › Skeleton key',
   oil: `+${OIL_LIGHT} lantern light (${OIL_LIGHT} more rounds).\nUse: Items › Oil flask`,
   firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.\nUse: Items › Firecracker, then click a hex within ${THROW_RANGE.firecracker}`,
-  lockpicks: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots. Burglars don\'t need them.\nUse: next to a locked door or chest, Interact › Pick lock',
+  lockpicks: 'The smith\'s proper lockpicks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.\nUse: next to a locked door or chest, Interact › Pick lock',
+  improvised: 'A bent nail and a hairpin: one Pick at 2 Finesse slots, used up whatever happens. Every Burglar brings one each delve; it takes no pack slot.\nUse: next to a locked door or chest, Interact › Pick lock',
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.\nUse: Items › Night-eye draught',
 };
 
@@ -541,6 +542,7 @@ export const ITEM_GLYPH: Record<string, string> = {
   oil: '♁',
   firecracker: '✺',
   lockpicks: '⚲',
+  improvised: '⌐',
   nightsight: '◉',
 };
 
@@ -557,6 +559,7 @@ export function itemBase(kind: string): string {
   if (k.includes('dart')) return 'dart';
   if (k.includes('caltrop')) return 'caltrops';
   if (k.includes('grappl') || k === 'hook') return 'grapple';
+  if (k === 'improvised') return 'improvised';
   if (k.includes('lockpick') || k.includes('picks')) return 'lockpicks';
   if (k.includes('night')) return 'nightsight';
   if (k.includes('key')) return 'key';
@@ -579,7 +582,8 @@ export const ITEM_EFFECT: Record<string, string> = {
   key: 'Opens one locked door or chest, silently, for anyone. One use.',
   oil: `+${OIL_LIGHT} lantern light. The lantern burns 1 per round while open.`,
   firecracker: 'Throw 6: noise 6 at the target hex. Lure monsters away.',
-  lockpicks: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots. Burglars don\'t need them.',
+  lockpicks: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2. Without a pick, nobody picks.',
+  improvised: 'One Pick at 2 Finesse slots, then it is spent. Every Burglar brings one each delve, outside the pack slots.',
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
 };
 

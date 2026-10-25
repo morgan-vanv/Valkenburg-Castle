@@ -224,7 +224,8 @@ export type ItemKind =
   | 'oil' // oil flask: +10 light
   | 'firecracker' // throw 6: noise 6 at the target hex
   // V3.6 (spec 19.2, 19.3)
-  | 'lockpicks' // reusable: any hero may Pick with 2 Finesse slots (needs the smith)
+  | 'lockpicks' // the smith's proper lockpicks: reusable; Burglar picks at 3 slots, anyone else at 2 (spec 21.4)
+  | 'improvised' // V3.7.1: the Burglar's improvised pick, 1 per delve, used up on any Pick (2 slots)
   | 'nightsight'; // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
 
 export interface Item {
@@ -329,8 +330,8 @@ export interface ShopOffer {
   name: string;
   price: number;
   text: string;
-  /** V3.5 (spec 18.2): metalwork needs the smith home. */
-  needs?: 'smith';
+  /** V3.5 (spec 18.2): metalwork needs the smith home; V3.7.1 (spec 21.3): the night-eye draught needs the innkeeper. */
+  needs?: 'smith' | 'innkeeper';
   /** Why it can't be bought now, if so ("Needs a smith: rescue Gerda"). */
   locked?: string;
 }

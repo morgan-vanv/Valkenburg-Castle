@@ -2383,6 +2383,11 @@ input.seed {
 }
 .hire-first b { color: var(--ember-hot); font-family: var(--display); font-size: 1.15rem; }
 .hire-first .btn { margin-left: auto; }
+/* V3.7.1 (21.1): Keven may go alone: a hint, not a gate */
+.hire-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; margin-bottom: 14px; border: 1px dashed rgba(232, 163, 61, 0.5); background: rgba(232, 163, 61, 0.05); }
+.hire-hint b { color: var(--ember); font-family: var(--display); }
+.hire-hint .btn { margin-left: auto; }
+.warn-alone { font-weight: 600; }
 .station.call { border-color: var(--ember); animation: station-call 1.4s ease-in-out infinite; }
 @keyframes station-call {
   0%, 100% { box-shadow: 0 0 0 rgba(232, 163, 61, 0); }
@@ -3430,6 +3435,7 @@ input.seed {
 /* 20.3: the satchel socket takes no slot */
 .pk-sock.pk-satchel { border-style: dashed; border-color: var(--fuse); color: var(--fuse); }
 .pk-sock.pk-satchel small { color: #fff3d0; }
+.pk-sock.pk-improvised { border-color: #b9a77a; color: #e8dcb8; }
 
 /* 20.4: crews that fight back */
 .tag-lvl {

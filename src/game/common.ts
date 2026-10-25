@@ -153,7 +153,7 @@ const SINGLE: Record<ItemKind, string> = {
   charge: 'Blasting charge', heirloom: 'Heirloom', hoard: 'Hoard',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', hook: 'Grappling hook',
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
-  lockpicks: 'Lockpicks', nightsight: 'Night-eye draught',
+  lockpicks: 'Lockpicks', improvised: 'Improvised pick', nightsight: 'Night-eye draught',
 };
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {

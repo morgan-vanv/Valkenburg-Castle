@@ -217,8 +217,8 @@ export const TIERS: Record<number, { hp: number; chance: number; dmg: number }> 
 /** Rounds a monster that lost its quarry searches before going back to its route or post (16.1). */
 export const SEARCH_ROUNDS = 3;
 /** Monsters see heroes this far (line of sight), lit or within MONSTER_DARK_SIGHT. */
-export const MONSTER_SIGHT = 6;
-export const MONSTER_DARK_SIGHT = 3;
+export const MONSTER_SIGHT = 8;
+export const MONSTER_DARK_SIGHT = 5;
 /** Sight range of a hero standing in an unlit hex, by level (16.2). */
 export const DARK_SIGHT: Record<number, number> = { 1: 4, 2: 2, 3: 1 };
 /** Spec 17.4: standing in a castle light that isn't daylight (fire, brazier, sconce, fungus, glow), you see this far minus depth (min 2). */
@@ -248,7 +248,8 @@ export const WAKE_SNEAK = 10;
 /** Ending the move adjacent to a sleeper: walking wakes it for sure, sneaking this often. */
 export const WAKE_END_SNEAK = 25;
 /** Noticing ranges by light and move mode; in the Hollow light doesn't matter. The blind arc halves the walking range. */
-export const NOTICE = { litWalk: 6, litSneak: 4, unlitWalk: 3, unlitSneak: 1, hollowWalk: 6, hollowSneak: 3 } as const;
+/** V3.7.1 (spec 21.5): walking ranges +2 (lit 8, unlit 5, Hollow 8); sneaking unchanged. */
+export const NOTICE = { litWalk: 8, litSneak: 4, unlitWalk: 5, unlitSneak: 1, hollowWalk: 8, hollowSneak: 3 } as const;
 /** Sneak attack: +1 slot on a monster that hasn't noticed the attacker. */
 export const SNEAK_ATTACK_SLOTS = 1;
 /** Free swings: the usual attack with one slot fewer (min 1); a bow swings with 1 slot. */
@@ -346,19 +347,22 @@ export const SHOP: ShopOffer[] = [
   { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
   // V3.6 (spec 19.2, 19.3).
-  { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Anyone picks locks: 2 Finesse slots. Reusable.', needs: 'smith' },
-  { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink (an action): 8 rounds of full sight and no dark penalty to rolls. The dark still hunts.' },
+  { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.', needs: 'smith' },
+  // V3.7.1 (spec 21.3): Wim brews it; sold once he is home.
+  { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink (an action): 8 rounds of full sight and no dark penalty to rolls. The dark still hunts.', needs: 'innkeeper' },
 ];
 
 // V3.6 (spec 19.2, 19.3).
-/** Lockpicks: a non-Burglar picks with this many Finesse slots (the Burglar's table on 2 slots). */
+/** Lockpicks (or the improvised pick): Finesse slots for a non-Burglar, or any hero on the improvised pick (spec 21.4). */
 export const LOCKPICK_SLOTS = 2;
+/** V3.7.1 (spec 21.4): a Burglar with the smith's proper lockpicks picks at this many slots. */
+export const BURGLAR_PICK_SLOTS = 3;
 /** Night-eye draught: rounds without dark penalties to sight and rolls. */
 export const NIGHTSIGHT_ROUNDS = 8;
 
 // Section 15 numbers.
-/** Spec 17.1: enough for two level-1 hires and nothing else, or one hire and a few cheap items. */
-export const START_GOLD = 120;
+/** V3.7.1 (spec 21.2): one level-1 hire (60) and an item or two. */
+export const START_GOLD = 90;
 /** Spec 17.1: a recruit costs RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL × (level − 1). */
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;

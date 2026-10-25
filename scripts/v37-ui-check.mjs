@@ -80,7 +80,9 @@ if (fixture) {
 } else {
   await p.evaluate(async () => {
     const E = window.vcEngine;
-    window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state);
+    const s0 = E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state;
+    s0.campaign.gold = 150; // V3.7.1: the starting 90 buys one hire; this check wants two
+    window.vc.load(s0);
     const want = ['sapper', 'shadowmancer'];
     for (let i = 0; i < 4; i++) {
       const s = window.vc.state();
@@ -169,7 +171,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     const reachS = await p.evaluate((id) => window.vcEngine.reachable(window.vc.state(), id, true), lead.heroId);
     const same = reachS.find((r) => r.to.q === risky.to.q && r.to.r === risky.to.r);
     const tipS = same ? await hoverTip(same.to) : '';
-    check('sneak toggles the preview live (hover tip now says Sneak)', !same || /Sneak/.test(tipS), tipS.slice(0, 80));
+    check('sneak toggles the preview live (hover tip now says Sneak)', !same || /sneak/i.test(tipS), tipS.slice(0, 80));
     const wakeS = same?.risks?.wake[0];
     if (wake && wakeS) check('...with the lower sneaking wake chance', wakeS.chance < wake.chance, `${wake.chance}% → ${wakeS.chance}%`);
     // Blind arcs and facing.

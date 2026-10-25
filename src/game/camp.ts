@@ -18,7 +18,7 @@ import { pick, random, shuffle } from './rng';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
-import { isSatchel, satchelName } from './charges';
+import { isKit, satchelName } from './charges';
 import { canEnter, kindAt, type World } from './world';
 
 export interface ContractX extends Contract {
@@ -376,12 +376,19 @@ export const LOCKED = {
   copper: 'Nothing to brew in: recover the brewing copper (Level 2, the barracks).',
   caskbook: 'Wim needs his cask book: recover it (Level 3, the Drain).',
   innkeeper: 'The Flagon is dark. Rescue Old Wim (Level 1, the kitchens).',
+  brewed: 'Brewed at the Gilded Flagon: rescue Old Wim (Level 1, the kitchens).',
 } as const;
 
-/** The peddler's stock; metalwork `locked` until the smith is home (with no state, nothing is locked). */
+/**
+ * The peddler's stock; metalwork `locked` until the smith is home, the night-eye draught until
+ * Old Wim is (spec 21.3: brewed at the Flagon). With no state, nothing is locked.
+ */
 export function shopOffers(s?: GameState): ShopOffer[] {
   const v = s ? villageOf(s) : null;
-  return SHOP.map((o) => ({ ...o, ...(v && o.needs === 'smith' && !v.smith ? { locked: LOCKED.metal } : {}) }));
+  return SHOP.map((o) => {
+    const locked = !v ? undefined : o.needs === 'smith' && !v.smith ? LOCKED.metal : o.needs === 'innkeeper' && !v.innkeeper ? LOCKED.brewed : undefined;
+    return { ...o, ...(locked ? { locked } : {}) };
+  });
 }
 
 /** The Flagon's ales, `locked` until the copper (and the cask book) is home, and while Wim is away. */
@@ -555,6 +562,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     };
     // V3.7 (spec 20.3): the Sapper's satchel: 3 charges in one slotless pack item; bought charges add to them.
     if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
+    // V3.7.1 (spec 21.4): every Burglar brings one improvised pick, outside the 4 slots like the satchel.
+    if (h.cls === 'burglar') hid.pack.push({ ...makeItem({ s }, 'improvised'), slots: 0 });
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -687,7 +696,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
       if (it.story) continue; // spec 18.3: to the village, below
-      if (isSatchel(it)) continue; // spec 20.3: the satchel refills each delve
+      if (isKit(it)) continue; // spec 20.3, 21.4: the satchel and the improvised pick refill each delve
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
     }
@@ -719,7 +728,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isSatchel(i));
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i));
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;
