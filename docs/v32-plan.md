@@ -15,7 +15,7 @@ Goal: the owner's seven play-test notes (2026-10-24 evening) built and deployed.
 
 - [x] Spec section 15, plan, briefs, safeguards
 - [ ] Engine: contract + 15.1-15.4 rules; tests; sim
-- [ ] Presentation: 15.2-15.6 UI; screenshots
+- [x] Presentation: 15.2-15.6 UI; screenshots (effects in src/view/effects.ts)
 - [ ] Clarity pass: 15.7 (stairs/lift, objective beacons, take feedback, interactable tooltips, HUD hierarchy); screenshots
 - [ ] Integration: typecheck, tests, build
 - [ ] Quick balance check (a new squad can finish a Level 1 contract)
