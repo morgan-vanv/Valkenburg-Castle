@@ -128,6 +128,15 @@ export class Diorama {
   private lootTags = new Map<string, { el: HTMLElement; at: THREE.Vector3 }>();
   /** V3.2 effects: smoke, glue, caltrops, fire, veil, ward, overwatch, sleep. */
   readonly effects: MapEffects;
+  /** 15.7: pulsing ring on the stairs/lift hex the selected hero stands on. */
+  private linkPulse: THREE.Mesh;
+  /** 15.7: floating level markers over explored stairs and lift ends ("↓ L2"). */
+  private linkTags: { el: HTMLElement; at: THREE.Vector3; key: string; level: number; lift: boolean }[] = [];
+  /** 15.7: the contract objective's beacon (light pillar + DOM diamond) once its hex is explored. */
+  private beacon = new THREE.Group();
+  private beaconTag: HTMLElement;
+  private beaconAt: THREE.Vector3 | null = null;
+  private beaconKey = '';
 
   constructor(
     private readonly container: HTMLElement,

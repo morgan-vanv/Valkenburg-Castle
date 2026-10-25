@@ -3,7 +3,7 @@
 // diorama's highlights from hover and click. Commands go through host.send.
 
 import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
-import { add, hexKey, posKey, samePos, type Pos } from '../game/hex';
+import { add, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, Brightness, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, Monster, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
@@ -1430,6 +1430,17 @@ export function intentText(s: GameState, it: Intent): string {
     default:
       return 'waits';
   }
+}
+
+/** Compass word from one hex to another, in world space (north = away from the default camera). */
+function compass(from: Pos, to: Pos): string {
+  const a = hexToWorld(from, 1);
+  const b = hexToWorld(to, 1);
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const ang = Math.atan2(dx, -dz); // 0 = north, clockwise
+  const names = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  return names[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8]!;
 }
 
 function hpBar(hp: number, max: number): HTMLElement {
