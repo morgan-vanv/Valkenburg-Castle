@@ -16,8 +16,20 @@ Status: started 2026-10-24. Reading code; engine contract not yet published.
 - 15.2 dash: diorama highlight style 'dash' (teal) and 'area' (orange); hud draws reach in 'dash' when any Reach.dash; tooltip says "Dash · uses the action"; bar shows "Dashed" / "Dash ready".
 - Targeting: hud startAction uses ActionOption.pick: hex/enemy/ally → aim hint (+short list for units), hex targets drawn teal, area (ActionOption.area) previewed in orange under the hovered hex; preview opens for rolls, area actions and blink; RollPreview.hexes drawn orange and .affects drawn red. names.ts: ACTION_GLYPH/ACTION_KEY/ACTION_HELP for all new actions (smoke key M since C is camera). Action buttons get act-item/act-spell classes and a mana chip.
 
-## In progress
-- Events (thrown/cast/blinked/dug/caltrops) in diorama + app sfx/log; tavern via classInfo; partyProblem in prepare; CSS for fx tags/act chips; screenshots.
+- Events: diorama playEvent handles `thrown` (arc of a coloured ball from→to, puff/flash on landing), `cast` (caster flash + float label, bolt to the target for ranged spells/shots, ring pulse over `hexes`, shake on fireball), `blinked` (fade/squash out, reappear at `to`, follow if selected), `dug` (hides the rubble/cracked wall at once + dust), `caltrops` (float "−2" + red flash). app.ts: sfx + log lines for them; ACTION_SFX for all new actions; enemy camera also follows `cast` (overwatch shots) and `caltrops`.
+- Tavern recruit cards use `engine.classInfo(cls)` (role/weapon/armor/mana/abilities parsed as "Name (cost): text") with names.ts tables as the fallback (try/catch, so it runs against an engine without it). Prepare: `engine.partyProblem(state, heroIds)` shown in red in the footer and disables Delve.
+- CSS (V3.2 block at the end of style.css): .loot-marker, class badges, hire banner + pulsing tavern station, recruit cards, .dash-note, .act-spell/.act-item/.act-mana, .fx-tag (ow/zz/gl/vl).
+- Fixture engine: dash support (second move spends the action, `dash: true` entries) for the scene script.
+- scripts/v32-shot-fx.mjs: `node scripts/v32-shot-fx.mjs <base> <outDir>` on ?fixture=1 → fx-01-effects.png (smoke, glue, caltrops, burning, veil, ward, overwatch, stuck) and fx-02-dash.png (dash range teal, spell buttons with mana chips).
+
+## Verified (2026-10-24 evening, static build served from the scratchpad)
+- tsc: 0 errors in src/view, src/ui, src/audio, src/main.ts (the remaining errors are in src/game, the engine's mid-work).
+- scripts/v3-shot.mjs fixture tour: 0 errors. scripts/v32-shot-fx.mjs: 0 errors, both scenes look right. Real-engine camp (seed 1980): opens on the tavern, Hobart alone with 160 gold, 4 recruit cards, board shows "Hire at least one hero" with contracts disabled, quartermaster lists all 12 items with one-line effects.
+- Not yet seen in play against the real engine (its rules were still in progress): dash, the new actions' targeting flow, thrown/cast events, enemy camera pans in a real world phase. All are wired to the published contract.
+
+## Next (for the clarity agent, if wanted)
+- The overwatch cone uses the figure's last facing (120°); if the engine means "all around within 6", drop the facing test in effects.ts rebuild().
+- `cast` for mend/kindle/veil/ward on self shows only the flash + label; fine but plain.
 
 ## Next
 - 15.2 dash, 15.3 squad building, abilities/spells/items bar + map effects, quartermaster, save key vc.save.v32.

@@ -310,15 +310,29 @@ function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 function recruitCard(hr: Hero, price: number, s: GameState, host: ScreenHost): HTMLElement {
   const st = hr.stats;
   const bar = (label: string, v: number) => h('div', { class: 'rc-stat' }, h('span', { class: 'dim' }, label), h('span', { class: 'rc-bar' }, h('i', { style: `width:${Math.min(100, v)}%` })), h('b', { class: 'num' }, `${v}`));
-  const kit = CLASS_KIT[hr.cls as keyof typeof CLASS_KIT] ?? [];
+  // The engine's class text first; the UI's own tables as fallback.
+  let info: ReturnType<Engine['classInfo']> | null = null;
+  try {
+    info = host.engine.classInfo(hr.cls);
+  } catch {
+    info = null;
+  }
+  const role = info?.role || CLASS_ROLE[hr.cls as keyof typeof CLASS_ROLE] || '';
+  const gear = info ? `${info.weapon} · Armor ${info.armor}${info.mana ? ` · Mana ${info.mana}` : ''}` : (CLASS_GEAR[hr.cls as keyof typeof CLASS_GEAR] ?? '');
+  const kit: HTMLElement[] = info?.abilities.length
+    ? info.abilities.map((line) => {
+        const m = /^([^:(]+)(\([^)]*\))?:?\s*(.*)$/.exec(line);
+        return m ? h('li', null, h('b', null, m[1]!.trim()), m[2] ? h('span', { class: 'rc-cost' }, m[2].slice(1, -1)) : '', h('span', null, m[3] ?? '')) : h('li', null, h('span', null, line));
+      })
+    : (CLASS_KIT[hr.cls as keyof typeof CLASS_KIT] ?? []).map(([name, cost, text]) => h('li', null, h('b', null, name), h('span', { class: 'rc-cost' }, cost), h('span', null, text)));
   return h(
     'div',
     { class: `recruit cls-${hr.cls}` },
     h('div', { class: 'rc-head' }, classBadge(hr.cls), h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `Level ${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP`))),
-    h('p', { class: 'rc-role' }, CLASS_ROLE[hr.cls as keyof typeof CLASS_ROLE] ?? ''),
+    h('p', { class: 'rc-role' }, role),
     h('div', { class: 'rc-stats small' }, bar('Might', st.might), bar('Finesse', st.finesse), bar('Wits', st.wits), bar('Nerve', st.nerve)),
-    h('div', { class: 'rc-gear small dim' }, CLASS_GEAR[hr.cls as keyof typeof CLASS_GEAR] ?? ''),
-    kit.length ? h('ul', { class: 'rc-kit small' }, ...kit.map(([name, cost, text]) => h('li', null, h('b', null, name), h('span', { class: 'rc-cost' }, cost), h('span', null, text)))) : '',
+    h('div', { class: 'rc-gear small dim' }, gear),
+    kit.length ? h('ul', { class: 'rc-kit small' }, ...kit) : '',
     h(
       'button',
       {
@@ -554,17 +568,24 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   });
   el.append(h('h3', { class: 'prep-h' }, 'Entrance'), h('div', { class: 'prep-contracts' }, ...ents));
 
+  let problem: string | null = null;
+  try {
+    problem = host.engine.partyProblem(s, l.heroIds);
+  } catch {
+    problem = null;
+  }
   el.append(
     h(
       'div',
       { class: 'screen-actions sticky-actions' },
-      h('span', { class: 'dim prep-sum' }, `${l.heroIds.length} hero${l.heroIds.length === 1 ? '' : 'es'} · ${contract.bounty} gold bounty`),
+      problem ? h('span', { class: 'neg prep-sum' }, problem) : h('span', { class: 'dim prep-sum' }, `${l.heroIds.length} hero${l.heroIds.length === 1 ? '' : 'es'} · ${contract.bounty} gold bounty`),
       h('button', { class: 'btn btn-ghost', onclick: () => host.setStation('board') }, 'Back to the board'),
       h(
         'button',
         {
           class: 'btn btn-primary btn-big btn-delve',
-          disabled: !l.heroIds.length,
+          disabled: !l.heroIds.length || !!problem,
+          title: problem ?? '',
           onclick: async () => {
             host.saveLoadout(l);
             const packsOut: Record<string, string[]> = {};

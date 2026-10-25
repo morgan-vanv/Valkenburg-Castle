@@ -3,11 +3,11 @@
 import { posKey, type Pos } from './hex';
 import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Command, GameEvent, GameState, Intent } from './types';
 import type { Engine, Reach, RollPreview, Visibility } from './api';
-import { SHOP } from './data';
+import { classInfo, SHOP } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { brightnessOf, litSet, sightRangeOf, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
-import { backToCamp, campCommand, newGame } from './camp';
+import { backToCamp, campCommand, newGame, partyProblem } from './camp';
 import { hd, valueOf } from './common';
 import { abandon, actions, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
@@ -113,6 +113,8 @@ export function createEngine(castle: CastleDef): Engine {
         light: sp.light,
         ...(sp.warning ? { warning: sp.warning } : {}),
         ...(sp.confirm ? { confirm: true } : {}),
+        ...(sp.hexes ? { hexes: sp.hexes } : {}),
+        ...(sp.affects ? { affects: sp.affects } : {}),
       };
     },
 
@@ -171,6 +173,8 @@ export function createEngine(castle: CastleDef): Engine {
     },
 
     shop: () => SHOP.map((o) => ({ ...o })),
+    classInfo: (cls) => classInfo(cls),
+    partyProblem: (state, heroIds) => partyProblem(state as GameStateX, heroIds),
     heroById: (state, id) => state.campaign.roster.find((h) => h.id === id),
     value: (items) => valueOf(items),
 

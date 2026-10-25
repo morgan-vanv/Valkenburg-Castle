@@ -166,6 +166,10 @@ export function fixtureEngine(castle: CastleDef): Engine {
       if (cmd.type === 'move' && s.delve) {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
         h.at = cmd.path[cmd.path.length - 1]!;
+        if (h.moved) {
+          h.dashed = true;
+          h.acted = true;
+        }
         h.moved = true;
         for (const k of lit(s)) if (!s.delve.explored.includes(k)) s.delve.explored.push(k);
         return { state: s, events: [{ type: 'moved', id: cmd.heroId, path: cmd.path }, { type: 'noise', at: h.at, radius: cmd.sneak ? 0 : 1 }] };
@@ -205,7 +209,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
     reachable(state, heroId, sneak): Reach[] {
       const d = state.delve!;
       const h = d.heroes.find((x) => x.heroId === heroId)!;
-      if (h.moved) return [];
+      if (h.moved && (h.acted || h.dashed)) return [];
+      const dash = h.moved;
       const max = sneak ? 2 : 4;
       const seen = new Map<string, Reach>();
       const q: Reach[] = [{ to: h.at, cost: 0, path: [] }];
@@ -221,7 +226,7 @@ export function fixtureEngine(castle: CastleDef): Engine {
           q.push(r);
         }
       }
-      return [...seen.values()].filter((r) => r.cost > 0 && !d.heroes.some((o) => o.status === 'active' && samePos(o.at, r.to)));
+      return [...seen.values()].filter((r) => r.cost > 0 && !d.heroes.some((o) => o.status === 'active' && samePos(o.at, r.to))).map((r) => (dash ? { ...r, dash: true } : r));
     },
     actions(state, heroId): ActionOption[] {
       const d = state.delve!;
