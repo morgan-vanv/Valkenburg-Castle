@@ -3,7 +3,7 @@
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
-  BLEED_START, CLASSES, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS, SLAY_XP, TIERS,
+  BLEED_START, CLASSES, CUTTHROAT_HEAR, FIRESIDE_HEAL, FOCUS_MAX, RESERVE_FOCUS, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS, SLAY_XP, TIERS, TOLL_MIN,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX } from './state';
@@ -34,6 +34,21 @@ export function nameOf(c: Ctx, id: string): string {
 
 export function armorOf(h: Hero): number {
   return CLASSES[h.cls].armor + h.armorTier;
+}
+
+/** Spec 18.4: Hobart's Reserve raises the Focus max to 4. */
+export function focusMax(h: HeroInDelve): number {
+  return h.ale === 'reserve' ? RESERVE_FOCUS : FOCUS_MAX;
+}
+
+/** Spec 18.4: Fireside Porter heals 3 each time the drinker changes level (call after any fall damage). */
+export function levelHeal(c: Ctx, h: HeroInDelve): void {
+  if (h.ale !== 'fireside' || h.status !== 'active') return;
+  const max = heroDef(c, h.heroId)?.maxHp ?? h.hp;
+  if (h.hp >= max) return;
+  const before = h.hp;
+  h.hp = Math.min(max, h.hp + FIRESIDE_HEAL);
+  say(c, `${heroName(c, h.heroId)} feels the Fireside Porter: +${h.hp - before} HP.`);
 }
 
 export function activeHeroes(c: Ctx): HeroInDelve[] {
@@ -373,12 +388,48 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
   if (h) hurtHero(c, h, dmg, by ?? 'blast', !!opts.crit);
 }
 
+/** Attacked (or told to fight): the crew turns hostile; a paid crew keeps what it was paid (spec 18.6). */
 export function makeHostile(c: Ctx): void {
   const cr = c.d.rivals;
   if (!cr || cr.stance === 'hostile') return;
+  const paid = cr.stance === 'bribed' || cr.stance === 'truce' || cr.stance === 'hired';
   cr.stance = 'hostile';
+  cr.toll = undefined;
+  cr.hiredRounds = undefined;
+  cr.hiredBy = undefined;
+  cr.job = undefined;
+  for (const r of cr.members) if (r.intent?.kind === 'toll') r.intent = undefined;
   c.ev.push({ type: 'rivalsStance', stance: 'hostile' });
-  say(c, 'The Lantern Sisters draw steel.');
+  say(c, paid ? `${cr.name} keep your coin and draw steel.` : `${cr.name} draw steel.`);
+}
+
+/** Gold value the party carries (every active or downed hero's pack): gold and valuables. */
+export function partyValue(c: Ctx): number {
+  return valueOf(c.d.heroes.filter((h) => h.status === 'active' || h.status === 'downed').flatMap((h) => h.pack.filter((i) => !i.story)));
+}
+
+/** Round to the nearest 5. */
+export function round5(n: number): number {
+  return Math.round(n / 5) * 5;
+}
+
+/**
+ * Spec 18.5: a waiting cutthroat crew has noticed the party: they demand the toll (the larger of
+ * 50 and half the gold value carried, rounded to 5) and won't attack this world phase; at the
+ * next one, unpaid, they turn hostile.
+ */
+export function crewDemand(c: Ctx): void {
+  const cr = c.d.rivals;
+  if (!cr || cr.temperament !== 'cutthroat' || cr.stance !== 'waiting') return;
+  cr.stance = 'demanding';
+  cr.spotted = true;
+  cr.toll = Math.max(TOLL_MIN, round5(partyValue(c) / 2));
+  cr.demandRound = c.d.round;
+  c.ev.push({ type: 'rivalsStance', stance: 'demanding' });
+  const lead = rivalsOnMap(c)[0];
+  if (lead) lead.intent = { kind: 'toll', to: { ...lead.at } };
+  for (const r of rivalsOnMap(c)) if (r !== lead) r.intent = { kind: 'wait' };
+  say(c, `${lead?.name ?? cr.name}: "Your gold or your blood." ${cr.name} want ${cr.toll} gold, or they attack.`);
 }
 
 // ---------------------------------------------------------------- noise
@@ -388,6 +439,8 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
   if (radius <= 0) return;
   c.ev.push({ type: 'noise', at, radius });
   const heard = noiseField(c.w, c.d, at, radius);
+  // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
+  if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
   for (const m of c.d.monsters) {
     if (m.kind === 'gloam' || m.buried) continue;
     let hears = heard.has(posKey(m.at));

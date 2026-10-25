@@ -32,6 +32,12 @@ export interface RivalX extends Rival {
   veiled?: boolean;
   /** Rounds of the last kit use, to keep intents honest. */
   armedRound?: number;
+  /** Cutthroats: the hex they hold (spec 18.5). */
+  post?: Pos;
+  /** Level tier (cutthroats 2: +2 HP, +5 hit). Absent = 1. */
+  tier?: number;
+  /** Sellsword shove: the hex it shoves from. */
+  shoveFrom?: Pos;
 }
 
 export interface CrewX extends RivalCrew {
@@ -40,6 +46,14 @@ export interface CrewX extends RivalCrew {
   entered?: boolean;
   /** Rounds in a row a sister couldn't get closer to her goal. */
   blocked?: number;
+  /** V3.5: the hero who hired them (spec 18.6). */
+  hiredBy?: string;
+  /** Round the toll was demanded: they turn hostile at the next world phase. */
+  demandRound?: number;
+  /** Round of the last deal (one deal per crew per round). */
+  dealRound?: number;
+  /** Chests a paid job opened for the party: the crew leaves the loot alone. */
+  spare?: string[];
 }
 
 export interface DelveX extends Delve {

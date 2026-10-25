@@ -6,7 +6,7 @@ import type { FallInfo } from './api';
 import type { HeroInDelve } from './types';
 import { VENT_DMG } from './data';
 import { say, type Ctx, type MonsterX } from './state';
-import { hd, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, killMonster, nameOf, occupant, rivalsOnMap, wakeAdjacent } from './common';
+import { hd, heroName, levelHeal, hurtAny, hurtHero, hurtPrisoner, killHero, killMonster, nameOf, occupant, rivalsOnMap, wakeAdjacent } from './common';
 import { canEnter, doorAt, fallColumn, fallDamage, freeNear, kindAt, pitsNextTo, standable } from './world';
 
 // ---------------------------------------------------------------- figures
@@ -112,7 +112,13 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   }
   const from = posOf(c, f);
   setPos(c, f, info.to);
-  c.ev.push({ type: 'fell', id, from: pit, to: info.to, levels: info.levels, damage: info.damage });
+  // Spec 18.4: Featherfoot: the drinker's first fall deals no damage.
+  let damage = info.damage;
+  if (f.kind === 'hero' && f.h.ale === 'featherfoot' && !f.h.aleSpent) {
+    damage = 0;
+    f.h.aleSpent = true;
+  }
+  c.ev.push({ type: 'fell', id, from: pit, to: info.to, levels: info.levels, damage });
   if (from.level !== info.to.level) c.ev.push({ type: 'levelChanged', id, from: from.level, to: info.to.level });
   say(c, `${name} falls ${info.levels === 1 ? 'a level' : `${info.levels} levels`} into ${info.levelName}.`);
   if (f.kind === 'hero') {
@@ -136,7 +142,9 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
     if (e) e.escorting = undefined;
     pr.escortedBy = undefined;
   }
-  hurtRaw(c, f, info.damage, by);
+  if (damage === 0 && f.kind === 'hero') say(c, `${name} lands light as a feather.`);
+  hurtRaw(c, f, damage, by);
+  if (f.kind === 'hero' && from.level !== info.to.level) levelHeal(c, f.h);
   if (f.kind === 'hero' && f.h.status === 'active') wakeAdjacent(c, f.h.at);
   afterLanding?.(c, f.kind === 'hero' ? f.h : null);
 }

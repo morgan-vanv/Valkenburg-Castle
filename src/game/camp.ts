@@ -3,17 +3,20 @@
 
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type {
-  Campaign, Command, Contract, GameEvent, Hero, HeroClass, HeroInDelve, Item, Recruit, SpawnDef,
+  AleOffer, Campaign, Command, Contract, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Item, Recruit, ShopOffer, SpawnDef, Village,
 } from './types';
 import {
-  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEAL_PRICE, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
-  MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP, SISTER,
-  SISTER_CLASSES, SISTER_DARTS, SISTER_NAMES, SISTER_SMOKE, START_GOLD, TAVERN_SIZE, TIERS, WEAPON_PRICE,
+  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
+  MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP,
+  START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
+  ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
+  HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, type StoryDef,
 } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES } from './data';
-import { int, pick, random, shuffle } from './rng';
-import type { Ctx, CrewX, DelveX, GameStateX, MonsterX } from './state';
+import { pick, random, shuffle } from './rng';
+import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
+import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
 import { canEnter, kindAt, type World } from './world';
 
@@ -27,7 +30,7 @@ type Res = { error?: string; events: GameEvent[] };
 export function makeHero(id: string, name: string, cls: HeroClass, level = 1): Hero {
   const c = CLASSES[cls];
   const h: Hero = {
-    id, name, cls, level: 1, xp: 0, maxHp: c.hp, stats: { ...c.stats },
+    id, name, cls, level: 1, xp: 0, maxHp: c.hp, hp: c.hp, stats: { ...c.stats },
     weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0,
   };
   while (h.level < level) levelUp(h);
@@ -38,6 +41,7 @@ export function makeHero(id: string, name: string, cls: HeroClass, level = 1): H
 function levelUp(h: Hero): void {
   h.level += 1;
   h.maxHp += 2;
+  h.hp += 2;
   const main = CLASSES[h.cls].main;
   h.stats[main] += 5;
 }
@@ -51,7 +55,7 @@ export function newGame(w: World, seed: number): GameStateX {
     campaign: {
       gold: START_GOLD,
       stash: [],
-      roster: [makeHero('hobart', 'Lord Hobart', 'hobart')],
+      roster: [makeHero('keven', 'Keven', 'heir')],
       recruits: [],
       board: [],
       reputation: 0,
@@ -59,6 +63,7 @@ export function newGame(w: World, seed: number): GameStateX {
       fallen: [],
       litBraziers: [],
       lostGear: [],
+      village: newVillage(),
     },
     delve: null,
     summary: null,
@@ -67,6 +72,15 @@ export function newGame(w: World, seed: number): GameStateX {
   };
   refreshCamp(w, s);
   return s;
+}
+
+export function newVillage(): Village {
+  return { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false };
+}
+
+/** The village as saved (older saves have none). */
+export function villageOf(s: GameState): Village {
+  return s.campaign.village ?? newVillage();
 }
 
 function newHeroId(s: GameStateX): string {
@@ -79,21 +93,41 @@ function usedNames(s: GameStateX): Set<string> {
 }
 
 export function refreshCamp(w: World, s: GameStateX): void {
+  s.campaign.village ??= newVillage();
   s.campaign.board = makeBoard(w, s);
+  const v = s.campaign.village;
   const names = usedNames(s);
   const recruits: Recruit[] = [];
-  // Four recruits, at least three different classes (spec 15.3): three distinct, one free pick.
+  // Spec 18.2: the campfire has 3 level-1 drifters of 3 classes; the Gilded Flagon 4 (at least 3
+  // classes), 35% level 2, or with the cask book 25% level 2 and 10% level 3.
+  const size = v.innkeeper ? FLAGON_SIZE : CAMPFIRE_SIZE;
   const classes = shuffle(s, [...RECRUIT_CLASSES]).slice(0, 3);
-  classes.push(pick(s, RECRUIT_CLASSES));
-  for (let i = 0; i < TAVERN_SIZE; i++) {
+  while (classes.length < size) classes.push(pick(s, RECRUIT_CLASSES));
+  for (let i = 0; i < size; i++) {
     const pool = RECRUIT_NAMES.filter((n) => !names.has(n));
     const name = pick(s, pool.length ? pool : RECRUIT_NAMES);
     names.add(name);
     const cls = classes[i]!;
-    const level = random(s) < 0.35 ? 2 : 1;
-    recruits.push({ hero: makeHero(newHeroId(s), name, cls, level), price: 40 + 20 * (level - 1) });
+    let level = 1;
+    if (v.innkeeper) {
+      const r = random(s);
+      if (v.caskbook) level = r < CASKBOOK_L3 ? 3 : r < CASKBOOK_L3 + CASKBOOK_L2 ? 2 : 1;
+      else level = r < FLAGON_L2 ? 2 : 1;
+    }
+    recruits.push({ hero: makeHero(newHeroId(s), name, cls, level), price: recruitPrice(level) });
   }
   s.campaign.recruits = recruits;
+}
+
+export function recruitPrice(level: number): number {
+  return RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL * (level - 1);
+}
+
+/** Spec 17.2: what healing this hero costs now: HP that gold buys, up to full. */
+export function healQuote(h: Hero, gold: number): { hp: number; cost: number; missing: number } {
+  const missing = Math.max(0, h.maxHp - h.hp);
+  const hp = Math.min(missing, Math.floor(gold / HEAL_PER_HP));
+  return { hp, cost: hp * HEAL_PER_HP, missing };
 }
 
 function makeBoard(w: World, s: GameStateX): Contract[] {
@@ -139,6 +173,53 @@ function makeBoard(w: World, s: GameStateX): Contract[] {
     };
     out.push(c);
   });
+  out.push(...storyBoard(w, s));
+  return out;
+}
+
+/** Spec 18.3: is this story's contract on the board (prerequisites met, not done)? */
+export function storyAvailable(s: GameState, st: StoryDef): boolean {
+  const v = villageOf(s);
+  const rep = s.campaign.reputation;
+  if (v[st.id]) return false;
+  switch (st.id) {
+    case 'surgeon': return true;
+    case 'innkeeper': return rep >= 1;
+    case 'smith': return rep >= (REP_FOR_LEVEL[2] ?? 1);
+    case 'copper': return v.innkeeper;
+    case 'caskbook': return v.copper && rep >= (REP_FOR_LEVEL[3] ?? 2);
+  }
+}
+
+/** Half the regular bounty for the kind and level, rounded down to 5. */
+export function storyBounty(kind: 'rescue' | 'recover', level: number): number {
+  return Math.floor((BOUNTY[kind][Math.min(3, level)] ?? 0) / 2 / 5) * 5;
+}
+
+function storyBoard(w: World, s: GameStateX): Contract[] {
+  const out: Contract[] = [];
+  for (const st of STORIES) {
+    if (!storyAvailable(s, st)) continue;
+    const site = w.castle.contractSites.find((x) => x.id === st.siteId);
+    if (!site) continue;
+    const lvl = Math.min(3, site.at.level);
+    const warnings = ['Story', st.unlocks];
+    if (lvl > 1) warnings.push(`Level ${lvl}`);
+    if (st.heavy) warnings.push('Heavy: its carrier moves 3');
+    const c: ContractX = {
+      id: `story-${st.id}`,
+      kind: st.kind,
+      title: st.kind === 'rescue' ? `Rescue ${st.subject}` : `Recover ${st.subject}`,
+      brief: st.brief,
+      siteId: site.id,
+      level: lvl,
+      bounty: storyBounty(st.kind, lvl),
+      warnings,
+      subject: st.subject,
+      story: st.id,
+    };
+    out.push(c);
+  }
   return out;
 }
 
@@ -155,8 +236,9 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
   if (s.stage !== 'camp') return err('Not in camp.');
   switch (cmd.type) {
     case 'buy': {
-      const o = SHOP.find((x) => x.kind === cmd.kind);
+      const o = shopOffers(s).find((x) => x.kind === cmd.kind);
       if (!o) return err('Not for sale.');
+      if (o.locked) return err(o.locked);
       if (C.gold < o.price) return err('Not enough gold.');
       C.gold -= o.price;
       C.stash.push(makeItem({ s }, o.kind, 1, o.name));
@@ -164,7 +246,7 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       return { events };
     }
     case 'sellAll': {
-      const sell = C.stash.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard');
+      const sell = C.stash.filter((i) => !i.story && (i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard'));
       if (!sell.length) return err('Nothing to sell.');
       const v = valueOf(sell);
       C.gold += v;
@@ -185,16 +267,44 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
     case 'heal': {
       const h = C.roster.find((x) => x.id === cmd.heroId);
       if (!h) return err('No such hero.');
-      if (!h.wounded) return err(`${h.name} is fit.`);
-      if (C.gold < HEAL_PRICE) return err('Not enough gold.');
-      C.gold -= HEAL_PRICE;
-      h.wounded = 0;
-      events.push({ type: 'say', text: `${h.name} is patched up.` });
+      if (!villageOf(s).surgeon) return err(LOCKED.surgeon);
+      const q = healQuote(h, C.gold);
+      if (!q.missing) return err(`${h.name} is unhurt.`);
+      if (!q.hp) return err('Not enough gold.');
+      C.gold -= q.cost;
+      h.hp += q.hp;
+      events.push({ type: 'say', text: h.hp >= h.maxHp ? `${h.name} is patched up (${q.cost} gold).` : `${h.name} gets ${q.hp} HP back (${q.cost} gold, all you could pay).` });
+      return { events };
+    }
+    case 'drink': {
+      const h = C.roster.find((x) => x.id === cmd.heroId);
+      if (!h) return err('No such hero.');
+      if (h.hp >= h.maxHp) return err(`${h.name} is unhurt.`);
+      const pot = C.stash.find((i) => i.kind === 'potion');
+      if (!pot) return err('No potion in the cart. The peddler sells them.');
+      C.stash = C.stash.filter((i) => i !== pot);
+      const before = h.hp;
+      h.hp = Math.min(h.maxHp, h.hp + DRINK_HEAL);
+      events.push({ type: 'say', text: `${h.name} drinks a potion (+${h.hp - before} HP).` });
+      return { events };
+    }
+    case 'buyAle': {
+      const h = C.roster.find((x) => x.id === cmd.heroId);
+      if (!h) return err('No such hero.');
+      const o = aleOffers(s).find((x) => x.kind === cmd.ale);
+      if (!o) return err('Wim doesn\'t brew that.');
+      if (o.locked) return err(o.locked);
+      if (h.ale) return err(`${h.name} already has an ale waiting. One at a time.`);
+      if (C.gold < o.price) return err('Not enough gold.');
+      C.gold -= o.price;
+      h.ale = o.kind;
+      events.push({ type: 'say', text: `Wim draws ${h.name} a ${o.name}. Drunk at the start of the next delve.` });
       return { events };
     }
     case 'upgrade': {
       const h = C.roster.find((x) => x.id === cmd.heroId);
       if (!h) return err('No such hero.');
+      if (!villageOf(s).smith) return err(LOCKED.smith);
       const tier = cmd.part === 'weapon' ? h.weaponTier : h.armorTier;
       if (tier >= 2) return err('Already the best the smithy makes.');
       const price = (cmd.part === 'weapon' ? WEAPON_PRICE : ARMOR_PRICE)[tier + 1]!;
@@ -212,6 +322,34 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
   }
 }
 
+/** Refusals that name the fix (spec 18.2). */
+export const LOCKED = {
+  surgeon: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the library). Until then, drink a potion.',
+  smith: 'The forge is cold. Rescue Gerda the smith (Level 2, the cellblock).',
+  metal: 'Needs a smith: rescue Gerda (Level 2, the cellblock).',
+  copper: 'Nothing to brew in: recover the brewing copper (Level 2, the forge).',
+  caskbook: 'Wim needs his cask book: recover it (Level 3, the Drain).',
+  innkeeper: 'The Flagon is dark. Rescue Old Wim (Level 1, the library).',
+} as const;
+
+/** The peddler's stock; metalwork `locked` until the smith is home (with no state, nothing is locked). */
+export function shopOffers(s?: GameState): ShopOffer[] {
+  const v = s ? villageOf(s) : null;
+  return SHOP.map((o) => ({ ...o, ...(v && o.needs === 'smith' && !v.smith ? { locked: LOCKED.metal } : {}) }));
+}
+
+/** The Flagon's ales, `locked` until the copper (and the cask book) is home, and while Wim is away. */
+export function aleOffers(s: GameState): AleOffer[] {
+  const v = villageOf(s);
+  return ALES.map((o) => {
+    let locked: string | undefined;
+    if (!v.innkeeper) locked = LOCKED.innkeeper;
+    else if (!v.copper) locked = LOCKED.copper;
+    else if (o.needs === 'caskbook' && !v.caskbook) locked = LOCKED.caskbook;
+    return { ...o, ...(locked ? { locked } : {}) };
+  });
+}
+
 /** Why a delve can't start with this party (spec 15.3), or null. */
 export function partyProblem(s: GameStateX, heroIds: string[]): string | null {
   const C = s.campaign;
@@ -222,7 +360,6 @@ export function partyProblem(s: GameStateX, heroIds: string[]): string | null {
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
     if (!h) return 'No such hero.';
-    if (h.wounded > 0) return `${h.name} is still wounded.`;
   }
   return null;
 }
@@ -247,7 +384,6 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
     if (!h) return err('No such hero.');
-    if (h.wounded > 0) return err(`${h.name} is still wounded.`);
     heroes.push(h);
   }
   const entrance = w.castle.entrances[cmd.entrance];
@@ -289,7 +425,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     monsters,
     rivals: null,
     light: LIGHT_MAX,
-    lanternBearer: ids.includes('hobart') ? 'hobart' : ids[0]!,
+    lanternBearer: ids.includes('keven') ? 'keven' : ids[0]!,
     doors,
     chests: w.castle.chests.map((c) => ({ id: c.id, at: { ...c.at }, tier: c.tier, locked: !!c.locked, jammed: false, opened: false })),
     ground: [],
@@ -322,9 +458,16 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     d.lostIds!.push(...lg.items.map((i) => i.id));
   }
   // Objective.
+  const story = contract.story ? STORIES.find((x) => x.id === contract.story) : undefined;
   if (contract.kind === 'recover') {
-    const it = makeItem({ s }, 'heirloom', HEIRLOOM_VALUE[contract.level] ?? 60, cap(contract.subject));
+    const it = makeItem({ s }, 'heirloom', story ? 0 : (HEIRLOOM_VALUE[contract.level] ?? 60), cap(contract.subject));
     it.contractId = contract.id;
+    if (story) {
+      // Spec 18.3: story things go to the village, not the stash; the copper is heavy.
+      it.story = story.id;
+      it.slots = story.slots ?? 1;
+      if (story.heavy) it.heavy = true;
+    }
     d.ground.push({ at: { ...site.at }, items: [it] });
   } else if (contract.kind === 'slay') {
     // Nothing to place: the Dragon is a castle spawn.
@@ -333,40 +476,20 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   }
   // The Dragon's hoard: what's been carried out never comes back.
   placeHoard(w, s, d, Math.max(0, HOARD_PIECES - (s.hoardTaken ?? 0)));
-  // Rivals.
-  if (w.castle.rivalEntrances.length && random(s) < 0.5) {
-    const at = pick(s, w.castle.rivalEntrances);
-    const crew: CrewX = {
-      crew: 'lantern-sisters',
-      name: 'The Lantern Sisters',
-      stance: 'neutral',
-      goal: 'loot',
-      spotted: false,
-      entersRound: int(s, 3, 6),
-      members: SISTER_NAMES.map((n, i) => {
-        const cls = SISTER_CLASSES[i % SISTER_CLASSES.length]!;
-        return {
-          id: `r${i + 1}`, crew: 'lantern-sisters' as const, name: n, at: { ...at }, hp: SISTER.hp, maxHp: SISTER.hp, loot: [], goneOut: false,
-          cls,
-          ...(cls === 'burglar' ? { darts: SISTER_DARTS } : {}),
-          ...(cls === 'shadowmancer' ? { smoke: SISTER_SMOKE, veil: 0 } : {}),
-          ...(cls === 'ranger' ? { overwatch: false } : {}),
-        };
-      }),
-      pickups: 0,
-      entered: false,
-    };
-    d.rivals = crew;
-  }
+  // Rivals (spec 18.5): the Sisters on a Level 1 contract, a cutthroat crew from the pool on Level 2 or 3.
+  d.rivals = makeCrew(w, s, d, contract.level);
   // Place heroes at the entrance and around it.
   const spots = freeSpotsNear(w, d, entrance, ids.length, monsters.map((m) => m.at));
   ids.forEach((id, i) => {
     const h = C.roster.find((x) => x.id === id)!;
+    // Spec 18.4: the ale is drunk now (the Black Cask resolves on the seeded RNG) and cleared.
+    const ale = h.ale ? drinkAle(s, h.ale) : undefined;
+    h.ale = undefined;
     const hid: HeroInDelve = {
       heroId: id,
       at: spots[i] ?? { ...entrance },
-      hp: h.maxHp,
-      focus: FOCUS_MAX,
+      hp: Math.max(1, Math.min(h.maxHp, h.hp ?? h.maxHp)),
+      focus: ale === 'reserve' ? RESERVE_FOCUS : ale === 'heavyhead' ? HEAVYHEAD_FOCUS : FOCUS_MAX,
       pack: packs[id] ?? [],
       status: 'active',
       bleed: 0,
@@ -381,6 +504,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       overwatch: false,
       veil: 0,
       ward: 0,
+      ...(ale ? { ale } : {}),
     };
     // Sappers bring two free charges (spec 15.3), on top of what fits.
     if (h.cls === 'sapper') {
@@ -392,6 +516,12 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   s.summary = null;
   s.stage = 'delve';
   return { events: [] };
+}
+
+/** What an ale does once drunk: the Black Cask is 70% one of the six others, 30% a drawback. */
+export function drinkAle(s: GameStateX, kind: NonNullable<Hero['ale']>): HeroInDelve['ale'] {
+  if (kind !== 'blackcask') return kind;
+  return random(s) < CASK_GOOD_CHANCE ? pick(s, CASK_GOOD) : pick(s, CASK_BAD);
 }
 
 /**
@@ -487,7 +617,8 @@ export function buildSummary(c: Ctx): void {
     bounty: done ? d.contract.bounty : 0,
     lootValue,
     survivors: out.map((h) => h.heroId),
-    wounded: out.filter((h) => h.revived).map((h) => h.heroId),
+    // Spec 17.2: everyone who comes out hurt (they keep that HP until the infirmary heals them).
+    wounded: out.filter((h) => h.hp < (c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? 0)).map((h) => h.heroId),
     dead: d.heroes.filter((h) => h.status === 'dead').map((h) => h.heroId),
     xp,
     levelUps,
@@ -507,6 +638,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   for (const h of out) {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
+      if (it.story) continue; // spec 18.3: to the village, below
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
     }
@@ -516,17 +648,15 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Heroes.
   const going = new Set(d.heroes.map((h) => h.heroId));
   for (const h of C.roster) {
-    if (!going.has(h.id)) {
-      if (h.wounded > 0) h.wounded -= 1;
-      continue;
-    }
+    if (!going.has(h.id)) continue;
     const hid = d.heroes.find((x) => x.heroId === h.id)!;
     h.kills += d.kills[h.id] ?? 0;
     h.xp += sum.xp[h.id] ?? 0;
     if (hid.status === 'out') {
       h.delves += 1;
+      // HP carries over (spec 17.2); level-ups still add their +2.
+      h.hp = Math.max(1, Math.min(h.maxHp, hid.hp));
       while (h.level < MAX_LEVEL && xpLevel(h.xp) > h.level) levelUp(h);
-      if (hid.revived) h.wounded = 2;
     }
   }
   const lost: { at: Pos; items: Item[] }[] = [];
@@ -545,20 +675,30 @@ export function backToCamp(w: World, s: GameStateX): Res {
   }
   C.lostGear = lost;
   C.litBraziers = [...d.lit];
-  // Prisoner joins.
-  if (d.contract.kind === 'rescue' && d.prisoner?.out) {
+  // Spec 18.3: a story contract done brings its villager or thing home.
+  const events: GameEvent[] = [];
+  const story = d.contract.story;
+  C.village ??= newVillage();
+  if (story && sum.contractDone && !C.village[story]) {
+    C.village[story] = true;
+    const st = STORIES.find((x) => x.id === story)!;
+    events.push({ type: 'villageUnlocked', story });
+    events.push({ type: 'say', text: st.line });
+  }
+  // Prisoner joins (story villagers stay in Lowgate instead).
+  if (d.contract.kind === 'rescue' && d.prisoner?.out && !story) {
     const cls = pick(s, RECRUIT_CLASSES);
     C.roster.push(makeHero(`h${(s.nextHero = (s.nextHero ?? 1) + 1) - 1}`, d.prisoner.name, cls));
   }
-  const hobartDead = sum.dead.includes('hobart');
+  const heirDead = sum.dead.includes('keven');
   s.delve = null;
   s.summary = null;
-  if (hobartDead) {
+  if (heirDead) {
     s.stage = 'over';
-    s.overReason = 'The heir has fallen.';
-    return { events: [{ type: 'say', text: 'The heir has fallen.' }] };
+    s.overReason = 'The heir has fallen. Valkenburg stays dark.';
+    return { events: [...events, { type: 'say', text: 'The heir has fallen. Valkenburg stays dark.' }] };
   }
   refreshCamp(w, s);
   s.stage = 'camp';
-  return { events: [] };
+  return { events };
 }

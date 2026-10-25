@@ -36,6 +36,9 @@ export const castle: CastleDef = {
   // Index order matters to `startDelve.entrance`: main gate, sally port, east breach.
   entrances: [L1(24, 31), L1(1, 14), L1(44, 21)],
   rivalEntrances: [L1(44, 21), L1(1, 14)],
+  // V3.5 (spec 18.5): where a cutthroat crew waits on Level 2, at choke points: the west and east
+  // ends of the main bridge, the arcade end of the north bridge, and the winch room by the lift.
+  rivalPosts: [L2(14, 16), L2(35, 16), L2(22, 7), L2(22, 26)],
   // V3.3 (spec 16.1): spawns are awake unless `asleep: true`. Sleepers: Level 1 the rats and
   // the spider; Level 2 only the barracks squad; Level 3 only the Dragon.
   spawns: [

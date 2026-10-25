@@ -15,6 +15,8 @@ import type {
   HeroClass,
   Intent,
   ShopOffer,
+  AleOffer,
+  DealOption,
   Stat,
 } from './types';
 
@@ -152,7 +154,12 @@ export interface Engine {
   edgeRisk(state: GameState, heroId: string): FallInfo | null;
 
   // camp queries
-  shop(): ShopOffer[];
+  /** The peddler's stock; with a state, metalwork is marked `locked` until the smith is home (spec 18.2). */
+  shop(state?: GameState): ShopOffer[];
+  /** V3.5 (spec 18.4): the Flagon's ales, each `locked` until its brewing gear is home. */
+  ales(state: GameState): AleOffer[];
+  /** V3.5 (spec 18.6): the parley deals a hero can make with the crew right now (empty if none in reach). */
+  deals(state: GameState, heroId: string): DealOption[];
   /** V3.2: one-line role and the ability/spell lines for a class, for recruit cards. */
   classInfo(cls: HeroClass): ClassInfo;
   /** V3.2: why startDelve would refuse this party now (e.g. "Hire at least one hero at the tavern."), or null. */

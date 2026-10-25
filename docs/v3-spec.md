@@ -314,3 +314,119 @@ Each sister has a class (`Rival.cls`) and uses the heroes' own rules, intents sh
 ### 15.8a Scale decision (owner, 2026-10-24 22:07)
 
 From the three-panel study (mockup/shots/scale-options.png, mockup/scale-options.ts): **option C, "RuneScape"**: hero 2.0 units tall, natural blocky proportions (head 1/5, limb thickness 0.07, shoulders 0.34, legs 0.44 of height), rat 0.35x, spider 0.8x, orc 1.05x, walls 2.6 (thin), Dragon as is. "Good enough for now"; the owner wants to revisit scale and proportion later.
+
+## 17. V3.4: tighter purse, wounds that stay, darker falls (owner's play-test, 2026-10-24 late night)
+
+Overrides earlier sections where they disagree. Rival crews and the pub are proposals only (https://claude.ai/artifact/PttJ4kNWutJvUAegNgAxeA), not built.
+
+### 17.1 Starting economy
+
+- A campaign starts with **120 gold** (`START_GOLD`). Recruits cost **60 + 40 × (level − 1)** (`RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`): level 1 60, level 2 100. The opening tavern offers only level 1 recruits; after the first delve 35% are level 2 as before.
+- So a new player can afford two level 1 hires and nothing else, or one hire and about 60 gold of gear (torch 10, rope 15, potion 20, firecracker 10). Shop prices are unchanged.
+
+### 17.2 Wounds carry over; the infirmary charges per HP
+
+- `Hero.hp` (campaign) carries between delves. A delve starts each hero at their campaign HP (at least 1); a survivor's HP when they leave is written back, and level-ups add +2 to both HP and max HP. Nothing heals for free between delves.
+- Infirmary: `heal` restores HP at **3 gold per HP** (`HEAL_PER_HP`) up to full, or as much as the gold covers. The UI also offers "Heal everyone".
+- The old wounded rule (revived heroes sit out 2 contracts; heal 30) is gone: a revived hero just comes out with the HP they have. `Hero.wounded` stays in the type, always 0, until it's removed. `DelveSummary.wounded` lists survivors below full HP.
+
+### 17.3 View and HUD (no rule change)
+
+- Hero torsos taper and lose their box corners. Walls stand at full height at every camera angle (the cutaway is off; a setting brings it back).
+- Hero cards: the pack is a row of 4 sockets with names and uses on hover; no overlap with the light panel; every action, item, status, stage and pip explains itself on hover with the real numbers (Kindle: +6 lantern light for 1 mana, silent).
+
+### 17.4 Sight in the dark: far lights and fixed-light sight
+
+Owner's screenshot (docs/agents/v34-fall-reveal.png): a hero who jumps unlit into the Hollow saw the whole Lair and the Bone Pile, because any lit hex in line of sight showed from up to 14 hexes.
+
+- **Far lights.** Beyond a hero's own sight range, only light sources show (up to `LIT_SIGHT` 14, in line of sight): the hex of a fixed light other than daylight (fire, fungus, glow, sconce), a lit brazier, a burning hex, the open lantern's bearer, a hero with a lit torch. The floor they light is not revealed until a hero is within sight range. Daylight still shows its whole lit patch (Level 1 stays navigable shuttered). Walls next to seen floor are revealed as before, but not around far lights. `farLit(w, d)` in src/game/world.ts.
+- **Sight in a castle light.** A hero's sight range when their hex is lit depends on what lights it: the party's own light (the open lantern, a lit torch) gives the stage range minus depth as before; daylight gives 8; any other light (fire, brazier, sconce, fungus, glow, burning) gives 4 minus depth (`FIXED_LIGHT_SIGHT`), never below 2. Unlit is unchanged (4/2/1). So landing in the pit glow in the Hollow gives sight 2, not 6.
+- Check: scripts/v34-fall-reveal.ts (shuttered two-level jump: Level 3 explored on landing went from 118 hexes to 28).
+
+## 18. V3.5: The Heir's Return (owner, 2026-10-25; decisions in https://claude.ai/artifact/PttJ4kNWutJvUAegNgAxeA)
+
+Overrides earlier sections where they disagree. Contract: `git diff v3.4 -- src/game/types.ts src/game/api.ts`.
+
+### 18.1 Story
+
+- The game is *Valkenburg Castle: The Heir's Return*. **Keven** (hero id `keven`, class `heir`; was Hobart) is the long-lost heir, son of the late Lord Hobart, the castle's last ruler. Same stats and Rally as before. If Keven dies the campaign ends: "The heir has fallen. Valkenburg stays dark."
+- Keven camps in **Lowgate**, the derelict village under the castle walls. Save key `vc.save.v35` (fresh saves).
+- New campaign intro (title screen / first camp): a few lines that set this up. Hobart appears only as lore (the father; "the Hobart Warhorn" heirloom stays).
+
+### 18.2 The village (`Campaign.village`, all false at the start)
+
+| Station | At the start | Won back by | Then |
+| --- | --- | --- | --- |
+| Notice post (board) | 3 contracts + pinned story contracts | | |
+| Campfire (hiring) | 3 drifters, all level 1 | Old Wim (`innkeeper`) | Becomes the **Gilded Flagon**: 4 recruits, 35% level 2. With `caskbook`: 25% level 2, 10% level 3 |
+| Peddler (quartermaster) | Everything except metalwork | Gerda (`smith`) | Caltrops, grappling hook, skeleton key (`ShopOffer.needs: 'smith'`) |
+| Forge (smithy) | Cold: no upgrades | Gerda (`smith`) | Weapon and armor tiers as before |
+| Infirmary | No surgeon: only `drink` | Brother Aldric (`surgeon`) | `heal` at 3 gold per HP (17.2) |
+| Keven's cart (stash), the graves (memorial) | As before | | |
+
+- `drink` (camp, always): a hero drinks a potion from the stash: +5 HP, up to max.
+- Recruit price: 60 + 40 × (level − 1) (level 3: 140).
+- Refusals name the fix: "The forge is cold. Rescue Gerda the smith (Level 2, the cellblock)."
+
+### 18.3 Story contracts (`Contract.story`)
+
+| Story | Kind | Site | On the board when | Subject |
+| --- | --- | --- | --- | --- |
+| surgeon | rescue | l1-rescue-library | from the start | Brother Aldric |
+| innkeeper | rescue | l1-rescue-library | reputation ≥ 1 | Old Wim |
+| smith | rescue | l2-rescue-cell-west | reputation ≥ 1 (Level 2 open) | Gerda the smith |
+| copper | recover | l2-recover-forge | `innkeeper` home | the brewing copper |
+| caskbook | recover | l3-recover-drain | `copper` home and Level 3 open | Wim's cask book |
+
+- Every available story contract (prerequisites met, not done) is pinned on the board in addition to the 3 regular ones. Bounty: half the regular bounty for its kind and level (rounded down to 5). Reputation +1 as usual.
+- A rescued story villager does not join the roster; on `backToCamp` the village flag is set and a `villageUnlocked` event fires with a line ("Brother Aldric sets up in the old chapel. The infirmary is open.").
+- Story recover items: the brewing copper (2 slots, `heavy`: its carrier's move and dash allowance is 3, value 0); Wim's cask book (1 slot, value 0). Both have `story` set: carried out, they go to the village, not the stash; they can't be sold.
+
+### 18.4 Ales (the Flagon, once `copper` is home)
+
+`buyAle` puts the ale on `Hero.ale`; it is drunk when that hero starts their next delve (`HeroInDelve.ale`), then cleared. One per hero; buying a second is refused until the first is drunk.
+
+| Ale | Price | Needs | Effect for one delve |
+| --- | --- | --- | --- |
+| Glowworm Pale | 15 | copper | The drinker sheds party light radius 1 (counts as their own light: never unlit, so the Gloam never targets them) |
+| Featherfoot | 15 | copper | The drinker's first fall deals no damage (`aleSpent`) |
+| Mole's Brown | 20 | copper | The drinker can Dig like a Sapper (rubble or a cracked wall next to them, action, noise 4) |
+| Hobart's Reserve | 20 | copper | The drinker's Focus starts at 4 and its max is 4 |
+| Smuggler's Mead | 20 | caskbook | Sneak moves 4 and sneaking makes no noise |
+| Fireside Porter | 25 | caskbook | Heal 3 each time the drinker changes level (stairs, lift, fall, rope, hook), after any fall damage |
+| Black Cask | 10 | caskbook | At delve start (seeded): 70% one of the six above at random; 30% a drawback: hiccups (noise 1 at the drinker every world phase) or heavy head (Focus starts at 1) |
+
+### 18.5 Rival crews
+
+- **Which crew:** a Level 1 contract may draw the **Lantern Sisters** (prospectors, 50%, as now). A Level 2 or 3 contract may draw a **cutthroat** crew (60%), picked from the pool by the seeded RNG, waiting from round 1 at a post on Level 2 (`CastleDef.rivalPosts`, choke points). Never both in one delve.
+- **The pool** (L2 tier applies: +2 HP, +5 hit):
+  - **The Ferrymen:** a Sellsword (HP 10, 3 slots 60%, 2 dmg, armor 1; shoves a hero standing at an unrailed edge, intent `shove`, like the orc), a Ranger (as the Sisters' ranger), a Sapper (HP 9, hammer 3 slots 55% 2 dmg; 1 charge: intent `charge` on a hex in range 3 the round before, then 3 damage to everyone within 1 of it, noise 8).
+  - **The Gallows Choir:** a Sellsword, a Burglar (as the Sisters' burglar: sleep darts), a Pyromancer (HP 6; 3 firebolts: intent `firebolt` on a hero in range 5 and sight, then 3 Wits slots at 60%, 2 dmg per hit, noise 3).
+  - Each cutthroat starts with 30 gold in its loot (dropped when killed, with whatever else it took).
+- **Prospectors** behave as now (loot, leave; hostile when attacked or blocked).
+- **Cutthroats** wait at their post (`waiting`, don't move). When any hero comes within 6 in line of sight of a member, or makes noise ≥ 4 they hear: stance `demanding`, `toll` = the larger of 50 and half the gold value the party carries (rounded to 5), the leader's intent is `toll` ("Your gold or your blood"). They don't attack that world phase. At the next world phase, still `demanding` → `hostile`, hunting.
+- **Aim:** while a crew is spotted, `RivalCrew.aim` names what they're after (the chest or pile, rounds to reach it, its estimated value) for the parley card.
+
+### 18.6 Parley (`deals`, the `deal` command)
+
+- Any active hero within 4 hexes of a visible crew member, in line of sight, may make a deal. Deals are free (no move or action); one deal per crew per round.
+- Prices (× 1.5 on Level 2 and deeper, rounded to 5):
+
+| Deal | Price | Available | Effect |
+| --- | --- | --- | --- |
+| leave | 40 | not hired | Stance `bribed`, goal leave now; they drop the heirloom or prisoner |
+| truce | 25; the toll while demanding; 50 if hostile | not hired, not truce | Stance `truce`: they never attack unless attacked; prospectors keep looting, cutthroats stay at their post |
+| job | 30 | neutral, truce, waiting | `winch`: they walk to the winch on their level and work it (lift runs); `open`: the nearest seen locked door or chest on their level, opened silently; `scout`: every hex within 8 of each member becomes explored now. Then back to what they were doing |
+| hire | 60 | not hostile | Stance `hired` for 5 rounds: they keep within 2 of the hero who hired them and attack monsters in reach (intents shown). When the rounds end, if the party carries loot worth ≥ 150, 25% they turn `hostile` (`betrayed`); otherwise prospectors go back to looting, cutthroats to `truce`. `risk` shows the odds before you hire |
+| fight | free | not hostile | Stance `hostile` now |
+
+- **Payment** from the party's packs (every active hero): gold coins first, then gems and jewelry, smallest value first, until the price is covered; no change given. Heirlooms, hoard pieces and story items are never handed over. Not enough → `blocked`: "You carry 25; they want 40." `pays` says what would go ("35 gold and a ruby (60)").
+- Attacking a crew that is `bribed`, `truce` or `hired` turns it `hostile`; they keep what they were paid.
+- The old `bribe` action is replaced by the deal card; the `parley` action exists so the action bar can offer it.
+
+### 18.7 Presentation
+
+- Title, intro and camp text for Keven and Lowgate; stations named as in 18.2, locked ones showing who to rescue and where. Story contracts pinned with their own look. The village unlock gets a moment on return to camp.
+- The Flagon station: the ale menu (locked ales show what brews them), choose an ale per hero; the hero card in camp and in the delve shows the ale.
+- The parley card: crew name and temperament, stance, members, what they're after (`aim`), and each deal with price, what it pays with, risk, blocked reason; Fight as a button. Cutthroat toll intent reads clearly as a demand with a one-round fuse.
+- Models: rival Sellsword (shield), Sapper, Pyromancer by crew colours; hired crews marked as allies.

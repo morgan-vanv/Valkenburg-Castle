@@ -3,13 +3,14 @@
 import { posKey, type Pos } from './hex';
 import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Command, GameEvent, GameState, Intent } from './types';
 import type { Engine, Reach, RollPreview, Visibility } from './api';
-import { classInfo, SHOP } from './data';
+import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
-import { backToCamp, campCommand, newGame, partyProblem } from './camp';
+import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
+import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
-import { abandon, actions, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
+import { abandon, actions, checkDelveEnd, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
 
 function ctx(w: World, s: GameStateX, ev: GameEvent[] = []): Ctx | null {
@@ -57,6 +58,13 @@ export function createEngine(castle: CastleDef): Engine {
         break;
       case 'endTurn':
         worldPhase(c);
+        break;
+      case 'deal':
+        err = doDeal(c, command.heroId, command.deal, command.job);
+        if (!err) {
+          refreshSight(c);
+          checkDelveEnd(c);
+        }
         break;
       case 'abandon':
         abandon(c);
@@ -186,7 +194,13 @@ export function createEngine(castle: CastleDef): Engine {
       return edgeRiskAt(c, h.at, heroId);
     },
 
-    shop: () => SHOP.map((o) => ({ ...o })),
+    shop: (state) => shopOffers(state),
+    ales: (state) => aleOffers(state),
+    deals(state, heroId) {
+      const c = rctx(state);
+      if (!c || state.stage !== 'delve') return [];
+      return deals(c, heroId);
+    },
     classInfo: (cls) => classInfo(cls),
     partyProblem: (state, heroIds) => partyProblem(state as GameStateX, heroIds),
     heroById: (state, id) => state.campaign.roster.find((h) => h.id === id),
@@ -197,6 +211,10 @@ export function createEngine(castle: CastleDef): Engine {
       try {
         const s = JSON.parse(text) as GameState;
         if (!s || s.version !== 3 || !s.campaign || typeof s.rng !== 'number') return null;
+        // V3.4 (spec 17.2): saves from before HP carried over start everyone at full HP.
+        for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
+        // V3.5: saves without the village start with nothing won back.
+        s.campaign.village ??= newVillage();
         return s;
       } catch {
         return null;

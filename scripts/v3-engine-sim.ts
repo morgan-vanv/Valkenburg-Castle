@@ -8,7 +8,7 @@
 // out of walking reach it goes to the winch and works it, or failing that jumps
 // down a pit column that lands closer.
 //
-// V3.2: a campaign starts with Hobart alone and 160 gold; the bot hires 2 to 3 recruits at the
+// V3.2: a campaign starts with Keven alone (V3.4: 120 gold, hires 60 + 40 a level); the bot hires 2 to 3 recruits at the
 // tavern (a front-liner first, then a quiet one, then a mage), re-hiring when the roster thins.
 // Heroes dash (second move) toward the goal when nothing is in reach to hit.
 //
@@ -17,6 +17,12 @@
 // buys an oil flask for Level 3 contracts and drinks it when the lantern runs low, and breaks
 // free when a ghoul holds a hero. Per level it prints contracts done, deaths, world phases with a
 // hero in the dark on Level 3, and Gloam strikes.
+//
+// V3.5 (spec 18): Keven camps in Lowgate. The bot takes the surgeon story contract first and other
+// story contracts when they come up (every other delve), drinks stash potions when hurt while there
+// is no surgeon, heals at the infirmary once Brother Aldric is home, buys an ale for Keven once the
+// copper is home, pays a cutthroat toll when it can afford it and otherwise fights. Per delve it
+// prints the crew and how it ended, and the village at the end.
 //
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
@@ -51,6 +57,7 @@ for (const l of castle.levels) for (const k of Object.keys(l.tiles)) {
 }
 
 let errors = 0;
+const refusals: Record<string, number> = {};
 const evCount: Record<string, number> = {};
 let gloamStrikes = 0;
 function run(s: GameState, cmd: Command): GameState {
@@ -63,6 +70,7 @@ function run(s: GameState, cmd: Command): GameState {
   }
   if (r.error) {
     errors++;
+    refusals[`${cmd.type}: ${r.error}`] = (refusals[`${cmd.type}: ${r.error}`] ?? 0) + 1;
     if (VERBOSE) console.log('  refused:', cmd.type, r.error);
     return s;
   }
@@ -169,8 +177,44 @@ function lanternCheck(s: GameState, id: string): GameState {
   return s;
 }
 
+/** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. */
+let crewLog: string[] = [];
+function parleyCheck(s: GameState, id: string): GameState {
+  const cr = s.delve?.rivals;
+  if (!cr || cr.stance !== 'demanding') return s;
+  let ds = e.deals(s, id);
+  if (!ds.length) {
+    // Out of parley range (4) of the crew that demanded from 6: step closer if the purse covers the toll.
+    const me = s.delve!.heroes.find((h) => h.heroId === id)!;
+    const carried = s.delve!.heroes.filter((h) => h.status === 'active').flatMap((h) => h.pack)
+      .filter((i) => !i.story && (i.kind === 'gold' || i.kind === 'gem' || i.kind === 'jewelry')).reduce((n, i) => n + i.amount, 0);
+    const lead = cr.members.find((r) => !r.goneOut && r.hp > 0);
+    if (!lead || lead.at.level !== me.at.level || carried < (cr.toll ?? 0) || me.moved) return s;
+    const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const best = e.reachable(s, id, false).filter((r) => r.to.level === lead.at.level).sort((a, b) => hexDist(a.to, lead.at) - hexDist(b.to, lead.at))[0];
+    if (!best || hexDist(best.to, lead.at) >= hexDist(me.at, lead.at)) return s;
+    s = run(s, { type: 'move', heroId: id, path: best.path, sneak: false });
+    if (s.stage !== 'delve') return s;
+    ds = e.deals(s, id);
+    if (!ds.length) return s;
+  }
+  const toll = ds.find((d) => d.deal === 'truce');
+  if (toll?.ok) {
+    crewLog.push(`paid toll ${toll.price}`);
+    return run(s, { type: 'deal', heroId: id, deal: 'truce' });
+  }
+  const fight = ds.find((d) => d.deal === 'fight');
+  if (fight?.ok) {
+    crewLog.push(`refused toll ${toll?.price ?? '?'}`);
+    return run(s, { type: 'deal', heroId: id, deal: 'fight' });
+  }
+  return s;
+}
+
 function heroTurn(s: GameState, h: HeroInDelve): GameState {
   const id = h.heroId;
+  s = parleyCheck(s, id);
+  if (s.stage !== 'delve') return s;
   const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
   const alive = () => s.stage === 'delve' && hero()?.status === 'active';
   const tryAct = (): boolean => {
@@ -300,11 +344,14 @@ interface Row {
   bounty: number;
   deaths: number;
   rivals: boolean;
+  crew: string;
+  story: string;
   dragonDead: boolean;
   reachedL3: boolean;
 }
 
 const rows: Row[] = [];
+const unlocked: string[] = [];
 let s = e.newGame(SEED);
 for (let i = 0; i < N; i++) {
   if (s.stage === 'over') s = e.newGame(SEED + i * 7919);
@@ -318,14 +365,45 @@ for (let i = 0; i < N; i++) {
       if (site) s.campaign.board[0] = { id: `slay-${i}`, kind: 'slay', title: 'Slay the Dragon', brief: '', siteId: site.id, level: site.at.level, bounty: 500, warnings: [] };
     }
   }
-  // Squad building (spec 15.3): 3 heroes to start (Hobart + 2), 4 once the gold is there.
+  // Squad building (spec 15.3): 3 heroes to start (Keven + 2), 4 once the gold is there.
   s = recruit(s, i === 0 ? 3 : 4);
-  for (const h of s.campaign.roster) if (h.wounded) s = run(s, { type: 'heal', heroId: h.id });
+  // V3.4 (spec 17.2): HP carries over. V3.5: heal at the infirmary once Brother Aldric is home;
+  // before that, drink stash potions (buying one when a hero is badly hurt and the gold is there).
+  const v = s.campaign.village;
+  for (const h of s.campaign.roster) {
+    if (h.hp >= h.maxHp) continue;
+    if (v.surgeon) {
+      if (s.campaign.gold >= 3) s = run(s, { type: 'heal', heroId: h.id });
+      continue;
+    }
+    while (true) {
+      const me = s.campaign.roster.find((x) => x.id === h.id)!;
+      if (me.hp >= me.maxHp) break;
+      if (!s.campaign.stash.some((it) => it.kind === 'potion')) {
+        if (me.maxHp - me.hp < 4 || s.campaign.gold < 20) break;
+        s = run(s, { type: 'buy', kind: 'potion' });
+      }
+      const before = s;
+      s = run(s, { type: 'drink', heroId: h.id });
+      if (s === before) break;
+    }
+  }
   if (s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
+  // An ale for Keven once Wim can brew (spec 18.4).
+  const keven = s.campaign.roster.find((h) => h.id === 'keven');
+  if (keven && !keven.ale && s.campaign.gold > 120) {
+    const ale = e.ales(s).filter((a) => !a.locked).find((a) => a.kind === 'fireside' || a.kind === 'featherfoot');
+    if (ale) s = run(s, { type: 'buyAle', heroId: 'keven', ale: ale.kind });
+  }
   if (DRAGON && s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
-  const fit = s.campaign.roster.filter((h) => !h.wounded).slice(0, 4).map((h) => h.id);
+  const fit = s.campaign.roster.slice(0, 4).map((h) => h.id);
   if (!fit.length) break;
-  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? s.campaign.board[i % s.campaign.board.length]!;
+  // Spec 18.3: the surgeon first; other story contracts every other delve; else the regular ones in turn.
+  const stories = s.campaign.board.filter((x) => x.story);
+  const regular = s.campaign.board.filter((x) => !x.story);
+  const story = stories.find((x) => x.story === 'surgeon') ?? (i % 2 === 1 ? stories[0] : undefined);
+  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
+  crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
   const packs: Record<string, string[]> = {};
@@ -342,6 +420,7 @@ for (let i = 0; i < N; i++) {
     break;
   }
   const rivals = !!s.delve!.rivals;
+  const crewName = s.delve!.rivals?.crew ?? '';
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
@@ -384,19 +463,39 @@ for (let i = 0; i < N; i++) {
     bounty: sum.bounty,
     deaths: sum.dead.length,
     rivals,
+    crew: crewName ? `${crewName.replace('lantern-sisters', 'sisters').replace('gallows-choir', 'choir')}:${d.rivals!.stance}${d.rivals!.members.every((r) => r.hp <= 0) ? '/dead' : ''}${crewLog.length ? ` (${crewLog.join(', ')})` : ''}` : '',
+    story: k.story ?? '',
     dragonDead: !d.monsters.some((m) => m.kind === 'dragon') && castle.spawns.some((sp) => sp.kind === 'dragon'),
     reachedL3: d.explored.some((k) => k.startsWith('3:')),
   });
   if (VERBOSE) for (const n of sum.notes) console.log('   ', n);
-  s = run(s, { type: 'backToCamp' });
+  const back = e.apply(s, { type: 'backToCamp' });
+  if (back.error) {
+    errors++;
+    refusals[`backToCamp: ${back.error}`] = (refusals[`backToCamp: ${back.error}`] ?? 0) + 1;
+  } else {
+    for (const ev of back.events) if (ev.type === 'villageUnlocked') unlocked.push(`delve ${i + 1}: ${ev.story}`);
+    s = back.state;
+  }
 }
 
-console.log('delve  contract     done  rounds light  loot bounty deaths rivals  dark gloam  squad');
+console.log('delve  contract     story      done  rounds light  loot bounty deaths  dark gloam  squad                 crew');
 rows.forEach((r, i) => {
   console.log(
-    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${(r.rivals ? 'yes' : '').padEnd(6)} ${String(r.darkRounds).padStart(5)} ${String(r.gloamStrikes).padStart(5)}  ${r.squad}`,
+    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${r.story.padEnd(10)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${String(r.darkRounds).padStart(5)} ${String(r.gloamStrikes).padStart(5)}  ${r.squad.padEnd(20)}  ${r.crew}`,
   );
 });
+console.log(`\nstory (spec 18.3): ${rows.filter((r) => r.story).length} story delves, ${rows.filter((r) => r.story && r.done).length} done; unlocked: ${unlocked.join(', ') || 'nothing'}`);
+console.log(`village now: ${Object.entries(s.campaign.village).filter(([, v]) => v).map(([k]) => k).join(', ') || 'nothing'}`);
+const crews = rows.filter((r) => r.crew);
+const tally: Record<string, number> = {};
+for (const r of crews) {
+  const [name, rest] = r.crew.split(':');
+  const stance = (rest ?? '').split(' ')[0]!;
+  tally[`${name} ${stance}`] = (tally[`${name} ${stance}`] ?? 0) + 1;
+}
+console.log(`crews (spec 18.5): ${crews.length} delves with a crew; ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).length}, refused ${crews.filter((r) => r.crew.includes('refused toll')).length}; deaths in crew delves ${crews.reduce((a, r) => a + r.deaths, 0)}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
 console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
 for (const lv of [1, 2, 3]) {
@@ -418,5 +517,6 @@ for (const kd of kinds) {
 }
 if (DRAGON) console.log(`dragon: slain ${rows.filter((r) => r.dragonDead).length}/${rows.length}, reached L3 ${rows.filter((r) => r.reachedL3).length}/${rows.length}`);
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
+if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);
 void samePos;

@@ -169,6 +169,8 @@ export interface CastleDef {
   contractSites: ContractSiteDef[];
   /** Where rival crews enter (exit tiles). */
   rivalEntrances: Pos[];
+  /** V3.5 (spec 18.5): where a cutthroat crew waits on Level 2 (choke points: bridge ends, the winch room). */
+  rivalPosts?: Pos[];
   /** Fixed lights: sconces, daylight, the forge, fungus, the Lair's fires. */
   lights: LightDef[];
 }
@@ -177,7 +179,7 @@ export interface CastleDef {
 
 /** V3.2 (spec 15.3): the mage split into three schools; ranger and sapper added. */
 export type HeroClass =
-  | 'hobart'
+  | 'heir'
   | 'sellsword'
   | 'burglar'
   | 'ranger'
@@ -224,6 +226,10 @@ export interface Item {
   slots: number;
   /** Contract id, for contract items. */
   contractId?: string;
+  /** V3.5 (spec 18.3): a heavy item (the brewing copper): its carrier moves 3 at most. */
+  heavy?: boolean;
+  /** V3.5: a story item goes to the village when carried out (not to the stash, never sold). */
+  story?: StoryId;
 }
 
 export interface Hero {
@@ -233,15 +239,19 @@ export interface Hero {
   level: number;
   xp: number;
   maxHp: number;
+  /** Spec 17.2: HP carries over between delves; only the infirmary restores it (for gold). */
+  hp: number;
   stats: Stats;
   /** Smithy upgrades: weapon +10% per slot per tier, armor +1 per tier. */
   weaponTier: 0 | 1 | 2;
   armorTier: 0 | 1 | 2;
-  /** Contracts left to sit out in the infirmary (0 = fit). */
+  /** Unused since V3.4 (always 0): hurt heroes now keep their HP instead of sitting out (spec 17.2). */
   wounded: number;
   /** Delves survived, for the memorial and bragging. */
   delves: number;
   kills: number;
+  /** V3.5 (spec 18.4): an ale bought at the Flagon, drunk at the start of this hero's next delve. */
+  ale?: AleKind;
 }
 
 // ---------------------------------------------------------------- camp
@@ -258,6 +268,42 @@ export interface Contract {
   bounty: number;
   /** Short warnings shown on the card. */
   warnings: string[];
+  /** V3.5 (spec 18.2): a story contract; done, it unlocks that part of the village. */
+  story?: StoryId;
+}
+
+// ---------------------------------------------------------------- V3.5: the village (spec 18)
+
+/** Story contracts and the villagers or things they bring home to Lowgate. */
+export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook';
+
+/** What Lowgate has won back. All false at the start. */
+export interface Village {
+  /** Brother Aldric is home: the infirmary heals for gold. */
+  surgeon: boolean;
+  /** Old Wim is home: the Gilded Flagon replaces the campfire (4 recruits, some level 2). */
+  innkeeper: boolean;
+  /** Gerda is home: the forge (smithy tiers) and metalwork (caltrops, hook, key). */
+  smith: boolean;
+  /** The brewing copper is home: the first four ales. */
+  copper: boolean;
+  /** Wim's cask book is home: the rest of the ales and level 3 recruits. */
+  caskbook: boolean;
+}
+
+export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask';
+/** What an ale does once drunk: the Black Cask turns into another ale or a drawback. */
+export type AleEffect = Exclude<AleKind, 'blackcask'> | 'hiccups' | 'heavyhead';
+
+export interface AleOffer {
+  kind: AleKind;
+  name: string;
+  price: number;
+  text: string;
+  /** What has to be home before it's poured. */
+  needs: 'copper' | 'caskbook';
+  /** Why it can't be bought now (not brewed yet), if so. */
+  locked?: string;
 }
 
 export type ShopKind =
@@ -269,6 +315,10 @@ export interface ShopOffer {
   name: string;
   price: number;
   text: string;
+  /** V3.5 (spec 18.2): metalwork needs the smith home. */
+  needs?: 'smith';
+  /** Why it can't be bought now, if so ("Needs a smith: rescue Gerda"). */
+  locked?: string;
 }
 
 export interface Recruit {
@@ -301,6 +351,8 @@ export interface Campaign {
   litBraziers: string[];
   /** Gear left where heroes died, by posKey, recoverable on later delves. */
   lostGear: { at: Pos; items: Item[] }[];
+  /** V3.5 (spec 18): what Lowgate has won back. */
+  village: Village;
 }
 
 // ---------------------------------------------------------------- delve
@@ -315,6 +367,10 @@ export interface HeroInDelve {
   focus: number;
   /** Pack, 4 slots. */
   pack: Item[];
+  /** V3.5 (spec 18.4): the ale this hero drank for this delve (the Black Cask already resolved). */
+  ale?: AleEffect;
+  /** Featherfoot: the free fall has been used. */
+  aleSpent?: boolean;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead'. */
   status: 'active' | 'downed' | 'out' | 'dead';
   /** Downed only: world phases left before death (starts at 2). */
@@ -327,7 +383,7 @@ export interface HeroInDelve {
   webbed: boolean;
   /** Pyromancer, Shadowmancer, Hedgewitch: mana left. */
   mana: number;
-  /** Hobart only: rounds until Rally is ready (0 = ready). */
+  /** The heir (Keven) only: rounds until Rally is ready (0 = ready). */
   rallyCooldown: number;
   /** Sellsword only: id of the ally guarded until the next player phase. */
   guarding?: string;
@@ -358,7 +414,7 @@ export interface Intent {
    * targetId one hex toward it (`to`). grab: the ghoul holds targetId. Rivals also use
    * overwatch / smoke / veil / dart (spec 16.5): `to` = the hex a bomb lands on.
    */
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart';
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge';
   /** breath: the marked hexes. */
   hexes?: Pos[];
   targetId?: string;
@@ -397,9 +453,33 @@ export interface Monster {
   buried?: boolean;
 }
 
+/** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
+export type CrewId = 'lantern-sisters' | 'ferrymen' | 'gallows-choir';
+export type RivalClass = 'ranger' | 'shadowmancer' | 'burglar' | 'sellsword' | 'sapper' | 'pyromancer';
+/** Parley deals (spec 18.6). 'truce' is the toll when a cutthroat crew demands one. */
+export type DealKind = 'leave' | 'truce' | 'job' | 'hire' | 'fight';
+export type JobKind = 'winch' | 'open' | 'scout';
+
+export interface DealOption {
+  deal: DealKind;
+  job?: JobKind;
+  label: string;
+  /** Gold value asked; 0 for fight. */
+  price: number;
+  /** What it buys, in a sentence. */
+  text: string;
+  /** What would be handed over, in words: "35 gold and a ruby (60)". */
+  pays?: string;
+  /** Shown before you commit, e.g. backstab odds for hire. */
+  risk?: string;
+  ok: boolean;
+  /** Why it can't be done now. */
+  blocked?: string;
+}
+
 export interface Rival {
   id: string;
-  crew: 'lantern-sisters';
+  crew: CrewId;
   name: string;
   at: Pos;
   hp: number;
@@ -407,22 +487,40 @@ export interface Rival {
   /** Gold and items they've picked up. */
   loot: Item[];
   goneOut: boolean;
-  /** Her class and kit (spec 16.5). */
-  cls: 'ranger' | 'shadowmancer' | 'burglar';
+  /** Class and kit (spec 16.5, 18.5). */
+  cls: RivalClass;
   intent?: Intent;
   /** Kit uses left: darts, smoke; veil rounds left; overwatch armed. */
   darts?: number;
   smoke?: number;
   veil?: number;
   overwatch?: boolean;
+  /** Sapper: charges left; Pyromancer: firebolts left (spec 18.5). */
+  charges?: number;
 }
 
 export interface RivalCrew {
-  crew: 'lantern-sisters';
+  crew: CrewId;
   name: string;
-  stance: 'neutral' | 'hostile' | 'bribed';
+  /** Spec 18.5: prospectors race you for loot; cutthroats wait on Level 2 and demand a toll. */
+  temperament: 'prospector' | 'cutthroat';
+  /**
+   * neutral: looting, not fighting. waiting: a cutthroat crew at its post. demanding: the toll
+   * is asked (`toll`), they attack next world phase unless paid. hostile: fighting. bribed: paid
+   * to leave. truce: paid not to attack (they may still loot). hired: fighting beside you
+   * (`hiredRounds` left).
+   */
+  stance: 'neutral' | 'waiting' | 'demanding' | 'hostile' | 'bribed' | 'truce' | 'hired';
   /** What they're doing now, shown once spotted. */
   goal: 'loot' | 'objective' | 'leave';
+  /** Spec 18.6: what they're after, for the parley card ("the chapel chest", 3 rounds, ~60 gold). */
+  aim?: { at: Pos; what: string; rounds: number; value: number };
+  /** Gold value of the toll asked while demanding. */
+  toll?: number;
+  /** Rounds of sell-sword service left. */
+  hiredRounds?: number;
+  /** A job paid for and not yet done. */
+  job?: { kind: JobKind; at?: Pos };
   spotted: boolean;
   /** Round they enter; they're off the map before it. */
   entersRound: number;
@@ -515,6 +613,7 @@ export interface DelveSummary {
   /** Value of loot carried out (gold + valuables + heirloom bonus). */
   lootValue: number;
   survivors: string[];
+  /** Survivors who came out below full HP (spec 17.2). */
   wounded: string[];
   dead: string[];
   xp: Record<string, number>;
@@ -559,7 +658,8 @@ export type ActionKind =
   | 'shove' // push an adjacent enemy 1 hex (into the pit = it falls)
   | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
-  | 'rally' // Hobart: +1 Focus to allies within 3, cooldown 3
+  | 'parley' // V3.5: open the deal card with a crew in sight within 4 (free; the deal is a 'deal' command)
+  | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally
   | 'firebolt' // Mage spell
   | 'kindle' // Mage spell: +12 light
@@ -604,12 +704,15 @@ export type Command =
   | { type: 'sellAll' } // sell every valuable in the stash
   | { type: 'hire'; heroId: string }
   | { type: 'heal'; heroId: string }
+  | { type: 'drink'; heroId: string } // V3.5 camp: drink a stash potion, +5 HP
+  | { type: 'buyAle'; heroId: string; ale: AleKind } // V3.5: at the Flagon, for the hero's next delve
   | { type: 'upgrade'; heroId: string; part: 'weapon' | 'armor' }
   | { type: 'startDelve'; contractId: string; heroIds: string[]; entrance: number; /** stash item ids per hero */ packs: Record<string, string[]> }
   // delve
   | { type: 'move'; heroId: string; path: Pos[]; sneak: boolean }
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
+  | { type: 'deal'; heroId: string; deal: DealKind; job?: JobKind } // V3.5 parley (spec 18.6), free
   | { type: 'abandon' } // everyone still active flees: only heroes on exits get out
   // after the delve
   | { type: 'backToCamp' };
@@ -653,6 +756,9 @@ export type GameEvent =
   | { type: 'stolen'; by: string; from: string; item: Item }
   | { type: 'rivalsEnter'; at: Pos }
   | { type: 'rivalsStance'; stance: RivalCrew['stance'] }
+  | { type: 'deal'; deal: DealKind; job?: JobKind; price: number; paid: string[] } // V3.5
+  | { type: 'betrayed' } // V3.5: sell-swords turn on the party when their deal ends
+  | { type: 'villageUnlocked'; story: StoryId } // V3.5, on backToCamp
   | { type: 'freed'; prisonerId: string }
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }

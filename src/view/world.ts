@@ -64,9 +64,9 @@ export const COLORS = {
   moss: 0x3f4a2c,
 };
 
-/** Banner colour per hero class (heroes share class colours; Hobart is gold). */
+/** Banner colour per hero class (heroes share class colours; the heir is gold). */
 export const CLASS_COLORS: Record<string, number> = {
-  hobart: 0xd9a93a,
+  heir: 0xd9a93a,
   sellsword: 0xb03a2e,
   burglar: 0x3b9a4a,
   mage: 0x8a4cc9,

@@ -6,7 +6,7 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Intent } from './types';
 import {
   ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
-  GLOAM_RISE_MIN, ORC_SHOVE_CHANCE, SEARCH_ROUNDS, SHOUT_NOISE,
+  GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SEARCH_ROUNDS, SHOUT_NOISE,
 } from './data';
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
@@ -703,6 +703,8 @@ export function worldPhase(c: Ctx): void {
   // 1. Light (an open lantern burns), torches, bleeding, fire.
   if (d.lanternOpen !== false) setLight(c, d.light - 1);
   burnPhase(c);
+  // Spec 18.4: the Black Cask's hiccups: noise 1 at the drinker every world phase.
+  for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;

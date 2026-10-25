@@ -6,12 +6,12 @@
 import * as THREE from 'three';
 import type { Visibility } from '../game/api';
 import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
-import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, Monster } from '../game/types';
+import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, Monster, Rival, RivalCrew } from '../game/types';
 import { AnimClock } from './anim';
 import { CameraRig } from './camera';
 import type { ModelKey } from './figures';
 import { LevelView } from './level';
-import { makeChest, makeCoins, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
+import { makeBook, makeChest, makeCoins, makeCopper, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
 import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
@@ -149,6 +149,9 @@ export class Diorama {
   /** 16.2: heroes standing in the dark get a dark ring on the floor. */
   private darkHeroes = new Set<string>();
   private darkRings = new THREE.Group();
+  /** V3.5 (18.7): a ring under each rival: green hired (allies), red hostile, amber demanding, pale otherwise. */
+  private crewRings = new THREE.Group();
+  private crewRingKey = '';
   /** 16.1: known patrol routes, dotted, with arrows. */
   private routes = new THREE.Group();
   private routesKey = '';
@@ -234,7 +237,11 @@ export class Diorama {
     this.gloamEdge.count = 0;
     this.gloamEdge.renderOrder = 1;
     this.gloamEdge.frustumCulled = false;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon, this.routes, this.darkRings, this.gloamEdge);
+    // V3.4: walls stand at full height, so the hover, path-end and selection rings get a faint
+    // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
+    // still shows its ring.
+    for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -338,6 +345,8 @@ export class Diorama {
     const m = this.hoverMesh.material as THREE.MeshBasicMaterial;
     m.color.setHex(kind === 'interact' ? COLORS.emberHot : kind === 'danger' ? COLORS.danger : COLORS.parchment);
     m.opacity = kind === 'plain' ? 0.8 : 1;
+    const ghost = this.hoverMesh.children[0] as THREE.Mesh | undefined;
+    if (ghost) ((ghost.material as THREE.MeshBasicMaterial).color.copy(m.color));
     this.hoverMesh.scale.setScalar(kind === 'plain' ? 1 : 1.04);
   }
 
@@ -459,7 +468,18 @@ export class Diorama {
     requestAnimationFrame(this.loop);
   };
 
-  cutaway = true;
+  /**
+   * V3.4 (owner: "see all walls at their full height"): the cutaway that lowered walls between the
+   * camera and the focus is off by default. The shader code stays; `setCutaway(true)` brings it back
+   * (a settings toggle may call it). Hero figures hidden behind walls draw as a faint silhouette.
+   */
+  cutaway = false;
+
+  /** Lower walls between the camera and the focus (true) or keep every wall at full height (false, default). */
+  setCutaway(on: boolean): void {
+    this.cutaway = on;
+    this.updateCutaway();
+  }
 
   private updateCutaway(): void {
     const cam = this.rig.camera.position;
@@ -468,7 +488,7 @@ export class Diorama {
     const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
     if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
     CUTAWAY.dir.value.copy(d.normalize());
-    // Steep top-down views need no cut.
+    // Off: the cut height is above every wall, so nothing is lowered.
     CUTAWAY.height.value = this.cutaway ? 0.3 : 99;
   }
 
@@ -627,6 +647,15 @@ export class Diorama {
         const k = 0.5 + 0.5 * Math.sin(t * 1.6 + (r.userData.phase as number));
         r.scale.setScalar(1 + k * 0.08);
         ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.45 + 0.2 * k;
+      }
+    }
+    // 18.7: crew rings follow their rival.
+    for (const r of this.crewRings.children) {
+      const u = this.units.get(r.userData.unit as string);
+      r.visible = !!u && u.shown && u.root.visible;
+      if (u) {
+        r.position.set(u.root.position.x, u.root.position.y + 0.04, u.root.position.z);
+        if (r.userData.pulse) ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.35 * Math.abs(Math.sin(t * 3));
       }
     }
     // 16.2: the Gloam's darkness creeps: tiles pulse out of phase, deeper when the Gloam is near.
@@ -894,9 +923,28 @@ export class Diorama {
     return kind as ModelKey;
   }
 
-  /** 16.5: a sister's model by her class. */
-  private sisterModel(cls?: string): ModelKey {
+  /** 16.5: a sister's model by her class; 18.5: cutthroats by crew and class. */
+  private rivalModel(r: Rival): ModelKey {
+    if (r.crew === 'ferrymen' || r.crew === 'gallows-choir') return `rival-${r.crew}-${r.cls}` as ModelKey;
+    const cls = r.cls;
     return cls === 'ranger' ? 'sisterRanger' : cls === 'shadowmancer' ? 'sisterShadow' : cls === 'burglar' ? 'sisterBurglar' : 'sister';
+  }
+
+  /** 18.7: rebuild the crew rings when the members or the stance change. */
+  private syncCrewRings(crew: RivalCrew | null, round: number): void {
+    const live = crew && round >= crew.entersRound ? crew.members.filter((m) => !m.goneOut && m.hp > 0) : [];
+    const key = crew ? `${crew.stance}|${live.map((m) => m.id).join(',')}` : '';
+    if (key === this.crewRingKey) return;
+    this.crewRingKey = key;
+    this.crewRings.clear();
+    if (!crew) return;
+    const col = crew.stance === 'hired' ? 0x7fe07a : crew.stance === 'hostile' ? COLORS.danger : crew.stance === 'demanding' ? 0xffb35c : 0xb8ad98;
+    for (const m of live) {
+      const ring = new THREE.Mesh(hexRing(0.62, crew.stance === 'hired' ? 0.86 : 0.78), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: crew.stance === 'hired' ? 0.85 : 0.6, depthWrite: false }));
+      ring.userData = { unit: m.id, pulse: crew.stance === 'demanding' };
+      ring.renderOrder = 2;
+      this.crewRings.add(ring);
+    }
   }
 
   private ensureUnit(id: string, key: ModelKey, side: UnitSide, at: Pos, name: string): UnitView {
@@ -962,17 +1010,23 @@ export class Diorama {
       v.fig.rotation.z = 0;
       this.setTag(m.id, m.kind === 'gloam' ? '' : monsterTag(m));
     }
+    this.syncCrewRings(d.rivals, d.round);
     if (d.rivals) {
+      const st = d.rivals.stance;
+      const pip = st === 'hostile' ? 'enemy' : st === 'hired' ? 'ally' : 'rival';
+      const flag = st === 'hired' ? `<b class="tag-hired" title="Hired: fighting beside you">hired${d.rivals.hiredRounds ? ` · ${d.rivals.hiredRounds}` : ''}</b>` : st === 'demanding' ? '<b class="tag-toll">toll!</b>' : st === 'truce' ? '<b class="tag-truce">truce</b>' : '';
       for (const r of d.rivals.members) {
         if (r.goneOut || r.hp <= 0 || d.round < d.rivals.entersRound) continue;
-        const want = this.sisterModel(r.cls);
+        const want = this.rivalModel(r);
         const have = this.units.get(r.id);
         if (have && have.key !== want && !have.busy) this.removeUnit(r.id);
         const v = this.ensureUnit(r.id, want, 'rival', r.at, r.name);
         keep.add(r.id);
         place(v, r.at);
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
-        this.setTag(r.id, pipsHtml(r.hp, r.maxHp, d.rivals.stance === 'hostile' ? 'enemy' : 'rival') + ((r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : ''));
+        const tagEl = this.tags.get(r.id)?.el;
+        if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st}`;
+        this.setTag(r.id, pipsHtml(r.hp, r.maxHp, pip) + flag + ((r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : ''));
       }
     }
     if (d.prisoner && !d.prisoner.out && !d.prisoner.dead) {
@@ -1049,7 +1103,7 @@ export class Diorama {
       const kind = groundKind(g.items);
       const p = this.props.get(key);
       if (p && p.state !== kind) this.removeProp(key);
-      const np = this.ensureProp(key, () => (kind === 'hoard' ? makeHoard() : kind === 'heirloom' ? makeHeirloom() : kind === 'gold' ? makeCoins(g.items.reduce((a, i) => a + i.amount, 0)) : makeSack()), g.at, (hashStr(key) % 6) * (Math.PI / 3));
+      const np = this.ensureProp(key, () => (kind === 'copper' ? makeCopper() : kind === 'book' ? makeBook() : kind === 'hoard' ? makeHoard() : kind === 'heirloom' ? makeHeirloom() : kind === 'gold' ? makeCoins(g.items.reduce((a, i) => a + i.amount, 0)) : makeSack()), g.at, (hashStr(key) % 6) * (Math.PI / 3));
       np.state = kind;
     }
     // Traps (only when spotted).
@@ -1094,10 +1148,10 @@ export class Diorama {
     let at: Pos | null = null;
     let label = '';
     if (k.kind === 'recover') {
-      const g = d.ground.find((x) => x.items.some((i) => i.contractId === k.id || i.kind === 'heirloom'));
+      const g = d.ground.find((x) => x.items.some((i) => i.contractId === k.id || i.kind === 'heirloom' || (!!k.story && i.story === k.story)));
       if (g) {
         at = g.at;
-        label = g.items.find((i) => i.contractId === k.id || i.kind === 'heirloom')!.name;
+        label = g.items.find((i) => i.contractId === k.id || i.kind === 'heirloom' || (!!k.story && i.story === k.story))!.name;
       }
     } else if (k.kind === 'rescue') {
       const p = d.prisoner;
@@ -1345,6 +1399,27 @@ export class Diorama {
         el.title = `${name}: veils herself. Hard to see next turn.`;
         continue;
       }
+      // 18.5: the toll: a demand with a one-round fuse, not an attack yet.
+      if (it.kind === 'toll') {
+        const crew = d.rivals;
+        const toll = crew?.toll ?? 50;
+        el.innerHTML = `<span class="intent-icon">¤</span><span class="intent-dmg">${toll}</span><span class="intent-fuse">1</span>`;
+        el.title = `${name}: "Your gold or your blood." Pay ${toll} or they attack next turn. Parley to pay or deal.`;
+        this.markRadius(at, 1, id, 0xffb35c, 'ring');
+        continue;
+      }
+      // 18.5: the Sapper's charge: the blast hexes, 3 damage to everyone within 1 of the mark.
+      if (it.kind === 'charge') {
+        const centre = it.to ?? (it.targetId ? targetPos(state, it.targetId) : null);
+        const hexes = it.hexes?.length ? it.hexes : centre ? [centre, ...range(centre, 1).filter((h) => h.q !== centre.q || h.r !== centre.r).map((h) => ({ level: centre.level, ...h }))] : [];
+        if (hexes.length) this.markBreath(hexes, id);
+        el.innerHTML = `<span class="intent-icon">✹</span><span class="intent-dmg">3</span>`;
+        el.title = `${name}: lights a charge. Next turn it blows: 3 damage to everyone on the marked hexes, no roll. Noise 8. Get off them.`;
+        continue;
+      }
+      if (it.kind === 'firebolt') {
+        el.title = `${name}: hurls a firebolt at ${target || 'a hero'} next turn: 3 Wits slots at 60%, 2 damage per hit. Break the line of sight or get out of range 5.`;
+      }
       // Smoke: the bomb lands on `to`; mark the hex and its neighbours.
       if (it.kind === 'smoke' && it.to) {
         const hexes = [it.to, ...range(it.to, 1).map((h) => ({ level: it.to!.level, ...h }))];
@@ -1364,7 +1439,7 @@ export class Diorama {
         if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
       } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
       if (to && at.level === this.shownLevel) {
-        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' ? COLORS.danger : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
+        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
         const g = new THREE.BufferGeometry().setFromPoints([from, to]);
         const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: col, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.85, depthTest: false }));
         line.computeLineDistances();
@@ -1558,7 +1633,7 @@ export class Diorama {
       if (d.rivals)
         for (const r of d.rivals.members) {
           if (r.goneOut || r.hp <= 0 || d.round < d.rivals.entersRound || this.units.has(r.id)) continue;
-          const v = this.ensureUnit(r.id, this.sisterModel(r.cls), 'rival', r.at, r.name);
+          const v = this.ensureUnit(r.id, this.rivalModel(r), 'rival', r.at, r.name);
           v.at = { ...r.at };
         }
     }
@@ -2357,6 +2432,16 @@ export class Diorama {
 
 // ------------------------------------------------------------ helpers
 
+/** A faint copy of a ring overlay drawn only behind nearer geometry (walls), V3.4. */
+function throughWall(src: THREE.Mesh): THREE.Mesh {
+  const base = src.material as THREE.MeshBasicMaterial;
+  const mat = new THREE.MeshBasicMaterial({ color: base.color, transparent: true, opacity: 0.35, depthWrite: false, depthFunc: THREE.GreaterDepth, side: base.side });
+  const m = new THREE.Mesh(src.geometry, mat);
+  m.name = 'through-wall';
+  m.renderOrder = src.renderOrder;
+  return m;
+}
+
 const INTENT_GLYPH: Record<Intent['kind'], string> = {
   attack: '⚔',
   move: '➜',
@@ -2374,6 +2459,9 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   smoke: '☁',
   veil: '◐',
   dart: '➶',
+  toll: '¤',
+  firebolt: '☄',
+  charge: '✹',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -2392,6 +2480,9 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   smoke: 'throws a smoke bomb at',
   veil: 'veils herself',
   dart: 'throws a sleep dart at',
+  toll: 'demands a toll from',
+  firebolt: 'hurls a firebolt at',
+  charge: 'lights a charge near',
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
@@ -2435,6 +2526,8 @@ function parsePos(k: string): Pos {
 }
 
 function groundKind(items: Item[]): string {
+  if (items.some((i) => i.story === 'copper' || i.heavy)) return 'copper';
+  if (items.some((i) => i.story === 'caskbook')) return 'book';
   if (items.some((i) => i.kind === 'hoard')) return 'hoard';
   if (items.some((i) => i.kind === 'heirloom')) return 'heirloom';
   if (items.every((i) => i.kind === 'gold')) return 'gold';

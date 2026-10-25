@@ -8,9 +8,11 @@ export interface Settings {
   reduceFlashes: boolean;
   /** Skip the "still waiting" question on End turn (15.7 asks once by default). */
   noEndTurnAsk: boolean;
+  /** V3.4: lower walls between the camera and the focus (the diorama's cutaway). Off by default. */
+  cutaway: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false };
 
 export function loadSettings(): Settings {
   try {

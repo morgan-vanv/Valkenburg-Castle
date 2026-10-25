@@ -92,6 +92,44 @@ export function makeHeirloom(): PropView {
   return { obj: g, mats: [gold] };
 }
 
+/** V3.5 (18.3): the brewing copper: a squat copper pot with a domed lid and a swan-neck pipe. Heavy. */
+export function makeCopper(): PropView {
+  const copper = fogMaterial({ color: 0xb8683a, litFloor: 0.4, emissive: 0x2a1006 });
+  const dark = fogMaterial({ color: 0x5a3018, litFloor: 0.2 });
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.26, 0.36, 10), copper);
+  pot.position.y = FLOOR_TOP + 0.18;
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), copper);
+  dome.position.y = FLOOR_TOP + 0.36;
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.025, 4, 12), dark);
+  band.rotation.x = Math.PI / 2;
+  band.position.y = FLOOR_TOP + 0.3;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.32, 6), copper);
+  neck.position.set(0.12, FLOOR_TOP + 0.66, 0);
+  neck.rotation.z = -0.5;
+  const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), copper);
+  spout.position.set(0.34, FLOOR_TOP + 0.72, 0);
+  spout.rotation.z = -1.4;
+  g.add(pot, dome, band, neck, spout);
+  g.name = 'copper';
+  return { obj: g, mats: [copper, dark] };
+}
+
+/** V3.5 (18.3): Wim's cask book: a fat leather book with brass corners. */
+export function makeBook(): PropView {
+  const leather = fogMaterial({ color: 0x5a2a1a, litFloor: 0.25 });
+  const page = fogMaterial({ color: 0xe8dcc0, litFloor: 0.35 });
+  const g = new THREE.Group();
+  const cover = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.26), leather);
+  cover.position.y = FLOOR_TOP + 0.05;
+  const pages = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.07, 0.235), page);
+  pages.position.set(0.012, FLOOR_TOP + 0.05, 0);
+  g.add(cover, pages);
+  g.rotation.y = 0.4;
+  g.name = 'book';
+  return { obj: g, mats: [leather, page] };
+}
+
 export function makeTrap(): PropView {
   const iron = fogMaterial({ color: 0x5a5250, litFloor: 0.2 });
   const red = new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.55, depthWrite: false });

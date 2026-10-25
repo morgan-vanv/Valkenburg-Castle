@@ -1,10 +1,11 @@
 // Full-screen pages: title, camp (stations), prepare delve, summary, game over.
 
 import type { Engine } from '../game/api';
-import type { Command, Contract, GameState, Hero, Item } from '../game/types';
+import type { AleKind, Command, Contract, GameState, Hero, Item, StoryId, Village } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
-import { ITEM_EFFECT, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel } from './names';
+import { HEAL_PER_HP } from '../game/data';
+import { ALE, ITEM_EFFECT, STORY, aleNeeds, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel, storyFix } from './names';
 
 export interface ScreenHost {
   engine: Engine;
@@ -18,6 +19,9 @@ export interface ScreenHost {
   /** Camp station shown. */
   station: Station;
   setStation(s: Station): void;
+  /** V3.5 (18.7): what was won back on this return to camp, for the moment; cleared on dismiss. */
+  wonBack: StoryId[];
+  dismissWonBack(): void;
 }
 
 export type Station = 'board' | 'quartermaster' | 'smithy' | 'tavern' | 'infirmary' | 'stash' | 'memorial' | 'prepare';
@@ -32,14 +36,21 @@ export interface Loadout {
 }
 
 const TITLE = 'Valkenburg Castle';
-const SUBTITLE = "Hobart's Revenge";
+const SUBTITLE = "The Heir's Return";
 
 const WEAPON_PRICE = [0, 60, 150];
 const ARMOR_PRICE = [0, 80, 200];
-const HEAL_PRICE = 30;
 const LEVEL_XP = [0, 0, 5, 12, 20, 30, 45];
 
 // ------------------------------------------------------------ title
+
+/** 18.1: the story, in the game's plain voice (title screen and the first camp). */
+export const INTRO = [
+  'Lord Hobart was the last to rule Valkenburg. He died, and the castle went dark.',
+  'His son Keven grew up far from here. Now the heir is back, in Lowgate, the village under the walls.',
+  "Lowgate's people were dragged into the castle. Bring them home and the village comes back to life.",
+  'Take contracts. Come back alive. If Keven falls, Valkenburg stays dark.',
+];
 
 export function titleScreen(el: HTMLElement, host: ScreenHost): void {
   clear(el);
@@ -50,7 +61,7 @@ export function titleScreen(el: HTMLElement, host: ScreenHost): void {
       { class: 'screen-panel title-panel' },
       h('div', { class: 'kicker' }, 'A delve into the ruined seat of the Van Valkenburgs'),
       h('h1', { class: 'game-title' }, TITLE, h('span', { class: 'game-sub' }, SUBTITLE)),
-      h('p', { class: 'lede' }, 'The keep fell three generations ago. Lord Hobart, last of the line, wants it back, one contract at a time. Mind the lantern. Something waits for the dark.'),
+      h('div', { class: 'lede intro-lines' }, ...INTRO.map((l) => h('p', null, l))),
       h(
         'div',
         { class: 'title-actions' },
@@ -76,39 +87,73 @@ export function titleScreen(el: HTMLElement, host: ScreenHost): void {
 
 // ------------------------------------------------------------ camp
 
-const STATIONS: { id: Station; name: string; glyph: string; blurb: string }[] = [
-  { id: 'board', name: 'Bounty board', glyph: '✠', blurb: 'Pick a contract' },
-  { id: 'quartermaster', name: 'Quartermaster', glyph: '⚱', blurb: 'Torches, potions, rope' },
-  { id: 'smithy', name: 'Smithy', glyph: '⚒', blurb: 'Better blades and mail' },
-  { id: 'tavern', name: 'Tavern', glyph: '☕', blurb: 'Hire hands' },
-  { id: 'infirmary', name: 'Infirmary', glyph: '✚', blurb: 'Patch the wounded' },
-  { id: 'stash', name: 'Stash', glyph: '▣', blurb: 'Gold and goods' },
-  { id: 'memorial', name: 'Memorial', glyph: '✝', blurb: 'The fallen' },
-];
+interface StationDef {
+  id: Station;
+  name: string;
+  glyph: string;
+  blurb: string;
+  /** 18.2: what is missing, with the fix ("The forge is cold. Rescue Gerda the smith (Level 2, the cellblock)."). */
+  locked?: string;
+  /** Which story lights it up (for the won-back moment). */
+  story?: StoryId[];
+}
+
+/** 18.2: Lowgate's stations, named by what has been won back. */
+export function stationsFor(v: Village): StationDef[] {
+  return [
+    { id: 'board', name: 'Notice post', glyph: '✠', blurb: 'Contracts, and pleas from the village' },
+    v.innkeeper
+      ? { id: 'tavern', name: 'The Gilded Flagon', glyph: '⚜', blurb: v.copper ? 'Hire hands · ales on tap' : 'Hire hands · the taps are dry', story: ['innkeeper', 'copper', 'caskbook'] }
+      : { id: 'tavern', name: 'Campfire', glyph: '♨', blurb: 'Drifters for hire', locked: `The Flagon is shut. ${storyFix('innkeeper')}.`, story: ['innkeeper'] },
+    { id: 'quartermaster', name: 'Peddler', glyph: '⚱', blurb: v.smith ? 'Torches, potions, rope, metalwork' : 'Torches, potions, rope', locked: v.smith ? undefined : `No metalwork without a smith. ${storyFix('smith')}.`, story: ['smith'] },
+    { id: 'smithy', name: 'Forge', glyph: '⚒', blurb: v.smith ? 'Better blades and mail' : 'Cold', locked: v.smith ? undefined : `The forge is cold. ${storyFix('smith')}.`, story: ['smith'] },
+    { id: 'infirmary', name: 'Infirmary', glyph: '✚', blurb: v.surgeon ? `Heal for ${HEAL_PER_HP} gold per HP` : 'No surgeon: potions only', locked: v.surgeon ? undefined : `No surgeon. ${storyFix('surgeon')}.`, story: ['surgeon'] },
+    { id: 'stash', name: "Keven's cart", glyph: '▣', blurb: 'Gold and goods' },
+    { id: 'memorial', name: 'The graves', glyph: '✝', blurb: 'The fallen' },
+  ];
+}
+
+const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false };
+/** Tolerant of a state from an engine that hasn't set the village yet. */
+export function villageOf(s: GameState): Village {
+  return s.campaign.village ?? NO_VILLAGE;
+}
 
 export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): void {
   clear(el);
   const c = s.campaign;
+  const v = villageOf(s);
+  const won = new Set(host.wonBack);
   const nav = h('nav', { class: 'camp-nav' });
-  for (const st of STATIONS) {
-    const badge = st.id === 'infirmary' ? c.roster.filter((x) => x.wounded > 0).length : st.id === 'memorial' ? c.fallen.length : st.id === 'tavern' ? c.recruits.length : 0;
+  for (const st of stationsFor(v)) {
+    const badge = st.id === 'infirmary' ? c.roster.filter(hurt).length : st.id === 'memorial' ? c.fallen.length : st.id === 'tavern' ? c.recruits.length : st.id === 'board' ? c.board.filter((k) => k.story).length : 0;
+    const lit = !!st.story?.some((x) => won.has(x));
+    // A station is fully locked when it can't do its job at all (the forge); partly when only some of it waits (peddler, infirmary, campfire).
+    const cold = st.id === 'smithy' && !!st.locked;
     nav.append(
       h(
         'button',
-        { class: `station ${host.station === st.id ? 'on' : ''} ${st.id === 'tavern' && needsHire(s) ? 'call' : ''}`, onclick: () => host.setStation(st.id) },
+        {
+          class: `station st-${st.id} ${host.station === st.id ? 'on' : ''} ${st.id === 'tavern' && needsHire(s) ? 'call' : ''} ${cold ? 'locked' : st.locked ? 'partial' : ''} ${lit ? 'won' : ''}`,
+          'data-station': st.id,
+          title: st.locked ? `${st.name} · ${st.locked}` : `${st.name} · ${st.blurb}`,
+          onclick: () => host.setStation(st.id),
+        },
         h('span', { class: 'st-glyph' }, st.glyph),
         h('span', { class: 'st-text' }, h('b', null, st.name), h('span', { class: 'dim small' }, st.blurb)),
-        badge ? h('span', { class: 'st-badge num' }, `${badge}`) : '',
+        cold ? h('span', { class: 'st-lock', 'aria-label': 'locked' }, '⚿') : badge ? h('span', { class: `st-badge num ${st.id === 'board' ? 'st-badge-story' : ''}` }, `${badge}`) : '',
       ),
     );
   }
   const head = h(
     'header',
     { class: 'camp-head' },
-    h('div', null, h('div', { class: 'kicker' }, `Camp below the keep · delve ${c.delveCount + 1}`), h('h1', { class: 'screen-title' }, "Hobart's camp")),
-    h('div', { class: 'ledger' }, stat('Gold', gold(c.gold), 'stat-gold'), stat('Reputation', `${c.reputation}`), stat('Roster', `${c.roster.length}`), stat('Fallen', `${c.fallen.length}`)),
+    h('div', null, h('div', { class: 'kicker' }, `Under the walls of Valkenburg · delve ${c.delveCount + 1}`), h('h1', { class: 'screen-title' }, 'Lowgate')),
+    h('div', { class: 'ledger' }, stat('Gold', gold(c.gold), 'stat-gold'), stat('Reputation', `${c.reputation}`), stat('Roster', `${c.roster.length}`), stat('Won back', `${Object.values(v).filter(Boolean).length}/5`)),
   );
   const body = h('section', { class: 'camp-body' });
+  if (host.wonBack.length) body.append(wonBackBanner(host));
+  else if (c.delveCount === 0 && host.station === 'board') body.append(introCard());
   switch (host.station) {
     case 'board':
       boardStation(body, s, host);
@@ -135,8 +180,90 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       prepareStation(body, s, host);
       break;
   }
-  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)));
+  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)), villagePanel(v));
   el.append(h('div', { class: 'camp' }, head, h('div', { class: 'camp-grid' }, nav, body, rosterStrip)));
+}
+
+/** 18.7: the moment something is won back: a banner with the village's line, the station lit in the nav. */
+function wonBackBanner(host: ScreenHost): HTMLElement {
+  return h(
+    'div',
+    { class: 'won-back' },
+    h('div', { class: 'kicker' }, 'Won back for Lowgate'),
+    ...host.wonBack.map((id) => h('p', { class: 'wb-line' }, h('span', { class: 'wb-glyph' }, '✦'), STORY[id].line, h('span', { class: 'wb-what dim small' }, ` ${STORY[id].unlocks}.`))),
+    h(
+      'div',
+      { class: 'wb-actions' },
+      ...[...new Set(host.wonBack.map((id) => STORY[id].station))].map((st) =>
+        h(
+          'button',
+          {
+            class: 'btn btn-small btn-primary',
+            onclick: () => {
+              host.dismissWonBack();
+              host.setStation(st);
+            },
+          },
+          `Visit the ${st === 'tavern' ? 'Flagon' : st === 'smithy' ? 'forge' : st === 'quartermaster' ? 'peddler' : 'infirmary'}`,
+        ),
+      ),
+      h('button', { class: 'btn btn-small btn-ghost', onclick: () => host.dismissWonBack() }, 'Back to the post'),
+    ),
+  );
+}
+
+function introCard(): HTMLElement {
+  return h('div', { class: 'intro-card' }, h('div', { class: 'kicker' }, "The Heir's Return"), ...INTRO.map((l) => h('p', null, l)));
+}
+
+/** What Lowgate has won back, under the roster: each villager or thing, home or still in the castle. */
+function villagePanel(v: Village): HTMLElement {
+  const order: StoryId[] = ['surgeon', 'innkeeper', 'smith', 'copper', 'caskbook'];
+  return h(
+    'div',
+    { class: 'village-panel' },
+    h('div', { class: 'kicker', title: 'Lowgate · Story contracts on the notice post bring these home. Each one wins back part of the village.' }, 'Lowgate'),
+    ...order.map((id) =>
+      h(
+        'div',
+        { class: `vp-row ${v[id] ? 'home' : ''}`, title: v[id] ? `${cap(STORY[id].who)} · home. ${STORY[id].unlocks}.` : `${cap(STORY[id].who)} · still in the castle (${STORY[id].where}). On the post ${STORY[id].when}. Wins back: ${STORY[id].unlocks.toLowerCase()}.` },
+        h('span', { class: 'vp-mark' }, v[id] ? '✦' : '·'),
+        h('span', null, cap(STORY[id].who)),
+        h('span', { class: 'vp-state small' }, v[id] ? 'home' : STORY[id].where.replace(/^Level (\d), (the )?/, 'L$1 ')),
+      ),
+    ),
+  );
+}
+
+function cap(t: string): string {
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** A station's locked note with the fix and a link to the pinned story contract, if it's up. */
+function lockNote(el: HTMLElement, s: GameState, host: ScreenHost, text: string, story: StoryId): void {
+  const pinned = s.campaign.board.find((k) => k.story === story);
+  el.append(
+    h(
+      'div',
+      { class: 'lock-note' },
+      h('span', { class: 'ln-glyph' }, '⚿'),
+      h('div', null, h('b', null, text), h('div', { class: 'dim small' }, pinned ? `${STORY[story].unlocks}. The job is pinned on the notice post.` : `${STORY[story].unlocks}. The job goes up on the notice post ${STORY[story].when}.`)),
+      pinned
+        ? h(
+            'button',
+            {
+              class: 'btn btn-small',
+              onclick: () => {
+                const l = host.lastLoadout ?? { heroIds: [], packs: {}, entrance: 0 };
+                host.saveLoadout({ ...l, contractId: pinned.id });
+                host.setStation('prepare');
+              },
+            },
+            'Take the job',
+          )
+        : '',
+    ),
+  );
 }
 
 function stat(label: string, value: string, cls = ''): HTMLElement {
@@ -147,19 +274,40 @@ function classBadge(cls: string): HTMLElement {
   return h('span', { class: `cbadge cls-${cls}`, title: className(cls) }, classGlyph(cls));
 }
 
-/** Hobart alone: the squad needs hiring before the first delve. */
+/** Keven alone: the squad needs hiring before the first delve. */
 function needsHire(s: GameState): boolean {
-  return !s.campaign.roster.some((x) => x.cls !== 'hobart' && x.wounded === 0);
+  return !s.campaign.roster.some((x) => x.cls !== 'heir');
+}
+
+/** Spec 17.2: HP carries over between delves. */
+function hpOf(hr: Hero): number {
+  return Math.min(hr.maxHp, hr.hp ?? hr.maxHp);
+}
+function hurt(hr: Hero): boolean {
+  return hpOf(hr) < hr.maxHp;
+}
+/** "7/10 HP", marked when hurt (badly when at a third or less). */
+function hpText(hr: Hero): HTMLElement {
+  const hp = hpOf(hr);
+  const cls = hp >= hr.maxHp ? '' : hp * 3 <= hr.maxHp ? 'neg' : 'warn';
+  return h('span', { class: `hp-text ${cls}`, title: hp < hr.maxHp ? `${hr.name} goes in with ${hp} of ${hr.maxHp} HP. Wounds don't mend between delves; the infirmary heals for ${HEAL_PER_HP} gold per HP.` : 'Unhurt.' }, `${hp}/${hr.maxHp} HP`);
 }
 
 function heroChip(hr: Hero): HTMLElement {
   const next = LEVEL_XP[hr.level + 1];
   return h(
     'div',
-    { class: `hchip ${hr.wounded ? 'wounded' : ''}` },
+    { class: `hchip ${hurt(hr) ? 'wounded' : ''}`, 'data-hero': hr.id },
     classBadge(hr.cls),
-    h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP${next ? ` · XP ${hr.xp}/${next}` : ''}`), hr.wounded ? h('div', { class: 'neg small' }, `Wounded: sits out ${hr.wounded}`) : ''),
+    h('div', { class: 'hchip-body' }, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr), next ? ` · XP ${hr.xp}/${next}` : '')),
+    hr.ale ? aleBadge(hr.ale, hr.name) : '',
   );
+}
+
+/** 18.4: a hero's waiting ale, as a small badge with its effect. */
+export function aleBadge(kind: AleKind, name: string): HTMLElement {
+  const a = ALE[kind];
+  return h('span', { class: `ale-badge ale-${kind}`, title: `${a.name} · drunk when ${name} starts the next delve\n${a.text}` }, h('span', { class: 'ale-g' }, a.glyph), h('span', { class: 'ale-n' }, a.name));
 }
 
 function stationHead(title: string, text: string): HTMLElement {
@@ -169,7 +317,7 @@ function stationHead(title: string, text: string): HTMLElement {
 // ---- board
 
 function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Bounty board', 'Three jobs nailed to the post. Bounties pay only if the prize comes out with you.'));
+  el.append(stationHead('Notice post', 'Jobs nailed to the post. Bounties pay only if the prize comes out with you.'));
   const hire = needsHire(s);
   if (hire)
     el.append(
@@ -177,12 +325,20 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         'div',
         { class: 'hire-first' },
         h('b', null, 'Hire at least one hero'),
-        h('span', null, ' Lord Hobart will not go in alone. Visit the tavern first.'),
-        h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, 'Go to the tavern'),
+        h('span', null, ` Keven will not go in alone. Find hands at the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'} first.`),
+        h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, `Go to the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'}`),
       ),
     );
+  const story = s.campaign.board.filter((k) => k.story);
+  if (story.length) {
+    el.append(h('h3', { class: 'board-h story-h', title: 'For Lowgate · Pinned by the village. Half the usual bounty, but each one wins back part of Lowgate for good.' }, h('span', { class: 'seal-mini' }, '✦'), ' Pinned by the village'));
+    const sg = h('div', { class: 'contracts story-contracts' });
+    for (const k of story) sg.append(contractCard(k, host, hire));
+    el.append(sg);
+    el.append(h('h3', { class: 'board-h' }, 'Bounties'));
+  }
   const grid = h('div', { class: 'contracts' });
-  for (const k of s.campaign.board) grid.append(contractCard(k, host, hire));
+  for (const k of s.campaign.board.filter((x) => !x.story)) grid.append(contractCard(k, host, hire));
   el.append(grid);
   if (host.lastLoadout && s.campaign.board.length) {
     el.append(
@@ -207,12 +363,16 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
 
 function contractCard(k: Contract, host: ScreenHost, locked = false): HTMLElement {
+  const st = k.story ? STORY[k.story] : null;
   return h(
     'article',
-    { class: `contract kind-${k.kind}` },
-    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
+    { class: `contract kind-${k.kind} ${st ? 'story' : ''}`, 'data-story': k.story ?? '' },
+    st ? h('span', { class: 'ct-seal', title: 'For Lowgate · A story contract. Done, it wins back part of the village for good.' }, '✦') : '',
+    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${st ? 'For Lowgate · ' : ''}${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
     k.kind === 'slay' ? h('h3', null, h('span', { class: 'ct-dragon', 'aria-hidden': 'true' }, '🐉 '), k.title) : h('h3', null, k.title),
     h('p', null, k.brief),
+    st ? h('div', { class: 'ct-unlock', title: `Wins back · ${st.unlocks}.\n${k.kind === 'rescue' ? `${cap(st.who)} goes home to Lowgate, not into your roster.` : `${cap(st.who)} goes home to Lowgate, not to the cart. It can't be sold.`}` }, h('span', { class: 'kicker' }, 'Wins back'), h('b', null, st.unlocks)) : '',
+    st && k.story === 'copper' ? h('p', { class: 'ct-heavy small' }, 'Heavy: whoever carries it moves 3 at most.') : '',
     k.warnings.length ? h('ul', { class: 'ct-warn' }, ...k.warnings.map((w) => h('li', null, w))) : h('p', { class: 'dim small' }, 'No warnings posted.'),
     h(
       'button',
@@ -234,22 +394,25 @@ function contractCard(k: Contract, host: ScreenHost, locked = false): HTMLElemen
 // ---- quartermaster
 
 function shopStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Quartermaster', 'Bought goods go to the stash. Give them out when you prepare a delve.'));
+  el.append(stationHead('Peddler', "A pedlar's cart by the gate. Bought goods go on Keven's cart; give them out when you prepare a delve."));
+  const offers = host.engine.shop(s);
+  if (!villageOf(s).smith) lockNote(el, s, host, 'No metalwork without a smith. Caltrops, hooks and keys wait for Gerda.', 'smith');
   const list = h('div', { class: 'shop' });
-  for (const o of host.engine.shop()) {
+  for (const o of [...offers.filter((x) => !x.locked), ...offers.filter((x) => x.locked)]) {
     const have = s.campaign.stash.filter((i) => i.kind === o.kind).length;
     list.append(
       h(
         'div',
-        { class: 'shop-row' },
+        { class: `shop-row ${o.locked ? 'locked' : ''}`, 'data-kind': o.kind },
         h('span', { class: 'shop-glyph' }, itemGlyph(o.kind)),
-        h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, ITEM_EFFECT[itemBase(o.kind)] ?? o.text)),
-        h('span', { class: 'dim small' }, `In stash: ${have}`),
+        h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, ITEM_EFFECT[itemBase(o.kind)] ?? o.text), o.locked ? h('div', { class: 'lock-why small' }, `⚿ ${o.locked}`) : ''),
+        h('span', { class: 'dim small' }, `On the cart: ${have}`),
         h(
           'button',
           {
             class: 'btn btn-small',
-            disabled: s.campaign.gold < o.price,
+            disabled: !!o.locked || s.campaign.gold < o.price,
+            title: o.locked ?? (s.campaign.gold < o.price ? `You have ${s.campaign.gold} gold.` : ''),
             onclick: async () => {
               if (await host.send({ type: 'buy', kind: o.kind })) sfx.play('coin');
             },
@@ -265,7 +428,13 @@ function shopStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 // ---- smithy
 
 function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Smithy', 'Weapon tiers add +10% per slot per tier. Armor tiers soak 1 more damage per hit.'));
+  if (!villageOf(s).smith) {
+    el.append(stationHead('Forge', 'Cold ash and a split anvil. Nobody in Lowgate can work steel.'));
+    lockNote(el, s, host, 'The forge is cold. Rescue Gerda the smith (Level 2, the cellblock).', 'smith');
+    el.append(h('p', { class: 'dim small' }, 'With Gerda home: weapon tiers add +10% per slot per tier, armor tiers soak 1 more damage per hit.'));
+    return;
+  }
+  el.append(stationHead('Forge', "Gerda's forge. Weapon tiers add +10% per slot per tier. Armor tiers soak 1 more damage per hit."));
   const t = h('table', { class: 'tbl' });
   t.append(h('tr', null, h('th', null, 'Hero'), h('th', null, 'Weapon'), h('th', null, 'Armor')));
   for (const hr of s.campaign.roster) {
@@ -300,13 +469,86 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
 function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   const hire = needsHire(s);
-  el.append(stationHead('Tavern', hire ? `Lord Hobart can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.` : 'Blades, bows, sneaks and spellcasters, for a price. Offers change after every delve.'));
+  const v = villageOf(s);
+  const flagon = v.innkeeper;
+  const sub = hire
+    ? `Keven can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.`
+    : flagon
+      ? `Old Wim's regulars. Some have been inside before.${v.caskbook ? ' The old hands are back too.' : ''} Offers change after every delve.`
+      : 'Three drifters warm their hands at the fire. All green, all cheap. Offers change after every delve.';
+  el.append(stationHead(flagon ? 'The Gilded Flagon' : 'Campfire', sub));
+  if (!flagon) lockNote(el, s, host, 'The Flagon is shut. Rescue Old Wim (Level 1, the library).', 'innkeeper');
   const grid = h('div', { class: 'recruits' });
   if (!s.campaign.recruits.length) grid.append(h('p', { class: 'dim' }, 'Nobody looking for work. Come back after the next delve.'));
   for (const r of s.campaign.recruits) grid.append(recruitCard(r.hero, r.price, s, host));
+  if (flagon) aleMenu(el, s, host);
   el.append(grid);
   if (!hire)
-    el.append(h('div', { class: 'screen-actions' }, h('button', { class: 'btn', onclick: () => host.setStation('board') }, 'To the bounty board')));
+    el.append(h('div', { class: 'screen-actions' }, h('button', { class: 'btn', onclick: () => host.setStation('board') }, 'To the notice post')));
+}
+
+/** Whose ale the Flagon pours next (kept between renders). */
+let alePick: string | null = null;
+
+/** 18.4: the ale menu: pick a hero, pour an ale; locked ales say what brews them. */
+function aleMenu(el: HTMLElement, s: GameState, host: ScreenHost): void {
+  const c = s.campaign;
+  let offers: ReturnType<Engine['ales']> = [];
+  try {
+    offers = host.engine.ales(s);
+  } catch {
+    offers = [];
+  }
+  if (!c.roster.some((x) => x.id === alePick)) alePick = c.roster.find((x) => !x.ale)?.id ?? c.roster[0]?.id ?? null;
+  const who = c.roster.find((x) => x.id === alePick);
+  const box = h('div', { class: 'ale-menu' });
+  box.append(
+    h('div', { class: 'am-head' }, h('h3', null, 'On tap'), h('span', { class: 'dim small' }, 'One ale per hero, drunk as they start the next delve. It lasts that delve.')),
+  );
+  if (!villageOf(s).copper) {
+    box.append(h('div', { class: 'lock-note slim' }, h('span', { class: 'ln-glyph' }, '⚿'), h('div', null, h('b', null, 'The taps are dry.'), h('div', { class: 'dim small' }, "Wim's brewing copper is still in the forge on Level 2. Bring it home and he brews again."))));
+  }
+  const picks = h('div', { class: 'am-who' }, h('span', { class: 'kicker' }, 'Pour for'));
+  for (const hr of c.roster)
+    picks.append(
+      h(
+        'button',
+        { class: `btn btn-small am-hero ${hr.id === alePick ? 'on' : ''}`, 'data-hero': hr.id, title: hr.ale ? `${hr.name} · has ${ALE[hr.ale].name} waiting.` : `${hr.name} · no ale yet.`, onclick: () => ((alePick = hr.id), host.setStation('tavern')) },
+        classBadge(hr.cls),
+        ` ${hr.name}`,
+        hr.ale ? h('span', { class: 'am-has' }, ` ${ALE[hr.ale].glyph}`) : '',
+      ),
+    );
+  box.append(picks);
+  const list = h('div', { class: 'shop ales' });
+  for (const o of offers) {
+    const a = ALE[o.kind];
+    const busy = !!who?.ale;
+    const why = o.locked ?? (busy ? `${who!.name} already has ${ALE[who!.ale!].name} waiting. It is drunk at the start of the next delve.` : c.gold < o.price ? `You have ${c.gold} gold.` : '');
+    list.append(
+      h(
+        'div',
+        { class: `shop-row ale-row ${o.locked ? 'locked' : ''}`, 'data-ale': o.kind },
+        h('span', { class: 'shop-glyph ale-glyph' }, a.glyph),
+        h('div', null, h('b', null, o.name || a.name), h('div', { class: 'dim small' }, a.text), o.locked ? h('div', { class: 'lock-why small' }, `⚿ ${o.locked || aleNeeds(o.needs)}`) : ''),
+        h('span', { class: 'dim small' }, o.needs === 'caskbook' ? 'From the cask book' : 'From the copper'),
+        h(
+          'button',
+          {
+            class: 'btn btn-small',
+            disabled: !who || !!o.locked || busy || c.gold < o.price,
+            title: why,
+            onclick: async () => {
+              if (who && (await host.send({ type: 'buyAle', heroId: who.id, ale: o.kind }))) sfx.play('coin', { pitch: 0.8 });
+            },
+          },
+          who ? `Pour for ${who.name} · ${o.price}` : `${o.price}`,
+        ),
+      ),
+    );
+  }
+  box.append(list);
+  el.append(box);
 }
 
 function recruitCard(hr: Hero, price: number, s: GameState, host: ScreenHost): HTMLElement {
@@ -352,35 +594,112 @@ function recruitCard(hr: Hero, price: number, s: GameState, host: ScreenHost): H
 // ---- infirmary
 
 function infirmaryStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Infirmary', `Wounded heroes sit out contracts. The surgeon can patch one up at once for ${HEAL_PRICE} gold.`));
-  const hurt = s.campaign.roster.filter((x) => x.wounded > 0);
-  if (!hurt.length) {
-    el.append(h('p', { class: 'dim' }, 'Every cot is empty.'));
+  const c = s.campaign;
+  const surgeon = villageOf(s).surgeon;
+  el.append(
+    stationHead(
+      'Infirmary',
+      surgeon
+        ? `Brother Aldric's cots in the old chapel. Wounds don't mend on their own; he charges ${HEAL_PER_HP} gold per HP. A potion from the cart heals 5 for free.`
+        : "Empty cots and no one to tend them. Wounds don't mend on their own: a hero goes back in with the HP they came out with.",
+    ),
+  );
+  if (!surgeon) lockNote(el, s, host, 'No surgeon. Rescue Brother Aldric (Level 1, the library).', 'surgeon');
+  const list = c.roster.filter(hurt);
+  if (!list.length) {
+    el.append(h('p', { class: 'dim' }, 'Every cot is empty. Nobody needs patching.'));
     return;
   }
-  const list = h('div', { class: 'shop' });
-  for (const hr of hurt)
-    list.append(
+  // 18.2: drink a potion from the cart: +5 HP, always available.
+  const pots = c.stash.filter((i) => i.kind === 'potion').length;
+  const drinkBtn = (hr: Hero) =>
+    h(
+      'button',
+      {
+        class: 'btn btn-small btn-drink',
+        disabled: !pots,
+        title: pots ? `Drink a potion · ${hr.name} heals ${Math.min(5, hr.maxHp - hpOf(hr))} HP (5, up to full). ${pots} on the cart.` : 'No potions on the cart. The peddler sells them for 20.',
+        onclick: async () => {
+          if (await host.send({ type: 'drink', heroId: hr.id })) sfx.play('spell', { pitch: 0.9 });
+        },
+      },
+      `⚱ Drink a potion${pots ? ` (${pots})` : ''}`,
+    );
+  if (!surgeon) {
+    const rows = h('div', { class: 'shop' });
+    for (const hr of list)
+      rows.append(
+        h(
+          'div',
+          { class: 'shop-row' },
+          classBadge(hr.cls),
+          h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr))),
+          h('span', { class: 'dim small' }, `${hr.maxHp - hpOf(hr)} HP short`),
+          drinkBtn(hr),
+        ),
+      );
+    el.append(rows);
+    if (!pots) el.append(h('p', { class: 'dim small' }, 'No potions on the cart. The peddler sells them for 20 gold.'));
+    return;
+  }
+  const quote = (hr: Hero, purse: number) => {
+    const missing = hr.maxHp - hpOf(hr);
+    const hp = Math.min(missing, Math.floor(purse / HEAL_PER_HP));
+    return { missing, hp, cost: hp * HEAL_PER_HP };
+  };
+  const rows = h('div', { class: 'shop' });
+  for (const hr of list) {
+    const q = quote(hr, c.gold);
+    const label = !q.hp ? `Heal · ${q.missing * HEAL_PER_HP}` : q.hp < q.missing ? `Heal ${q.hp} of ${q.missing} HP · ${q.cost}` : `Heal ${q.hp} HP · ${q.cost}`;
+    rows.append(
       h(
         'div',
         { class: 'shop-row' },
         classBadge(hr.cls),
-        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `Sits out ${hr.wounded} more contract${hr.wounded > 1 ? 's' : ''}`)),
-        h('span', null),
-        h(
+        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr))),
+        h('span', { class: 'dim small' }, `Full: ${q.missing * HEAL_PER_HP} gold`),
+        h('span', { class: 'heal-btns' }, pots ? drinkBtn(hr) : '', h(
           'button',
           {
             class: 'btn btn-small',
-            disabled: s.campaign.gold < HEAL_PRICE,
+            disabled: !q.hp,
+            title: q.hp < q.missing ? 'You can only pay for part of it. Heals as much as your gold covers.' : '',
             onclick: async () => {
               if (await host.send({ type: 'heal', heroId: hr.id })) sfx.play('spell');
             },
           },
-          `Heal now · ${HEAL_PRICE}`,
+          label,
+        )),
+      ),
+    );
+  }
+  el.append(rows);
+  if (list.length > 1) {
+    const total = list.reduce((n, hr) => n + (hr.maxHp - hpOf(hr)) * HEAL_PER_HP, 0);
+    el.append(
+      h(
+        'div',
+        { class: 'screen-actions' },
+        h(
+          'button',
+          {
+            class: 'btn',
+            disabled: c.gold < HEAL_PER_HP,
+            title: 'Heals everyone in roster order, as far as your gold goes.',
+            onclick: async () => {
+              let ok = false;
+              for (const hr of list) {
+                if (!(await host.send({ type: 'heal', heroId: hr.id }))) break;
+                ok = true;
+              }
+              if (ok) sfx.play('spell');
+            },
+          },
+          `Heal everyone · ${total}`,
         ),
       ),
     );
-  el.append(list);
+  }
 }
 
 // ---- stash
@@ -389,7 +708,7 @@ function stashStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   const c = s.campaign;
   const valuables = c.stash.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom');
   const worth = host.engine.value(valuables);
-  el.append(stationHead('Stash', `${gold(c.gold)} gold in the chest.`));
+  el.append(stationHead("Keven's cart", `${gold(c.gold)} gold in the strongbox. Gear waits here until you hand it out.`));
   if (!c.stash.length) el.append(h('p', { class: 'dim' }, 'Nothing but dust.'));
   else el.append(h('ul', { class: 'stash-list' }, ...groupItems(c.stash).map(([it, n]) => h('li', null, h('span', { class: 'shop-glyph' }, itemGlyph(it.kind)), itemLabel(it), n > 1 ? h('span', { class: 'dim' }, ` ×${n}`) : ''))));
   el.append(
@@ -425,7 +744,7 @@ function groupItems(items: Item[]): [Item, number][] {
 // ---- memorial
 
 function memorialStation(el: HTMLElement, s: GameState): void {
-  el.append(stationHead('Memorial', 'Names cut in the old gatepost.'));
+  el.append(stationHead('The graves', 'Names cut in the old gatepost, and a row of fresh mounds below it.'));
   if (!s.campaign.fallen.length) {
     el.append(h('p', { class: 'dim' }, 'No names yet. Keep it that way.'));
     return;
@@ -444,7 +763,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     return;
   }
   // Clean the remembered loadout against the current state.
-  const fit = (id: string) => c.roster.some((x) => x.id === id && x.wounded === 0);
+  const fit = (id: string) => c.roster.some((x) => x.id === id);
   const l: Loadout = {
     contractId: contract.id,
     heroIds: prev.heroIds.filter(fit).slice(0, 4),
@@ -466,7 +785,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     }
     l.packs[id] = pack;
   }
-  if (!l.heroIds.length) l.heroIds = c.roster.filter((x) => x.wounded === 0).slice(0, 4).map((x) => x.id);
+  if (!l.heroIds.length) l.heroIds = c.roster.slice(0, 4).map((x) => x.id);
   const save = () => {
     host.saveLoadout(l);
     host.setStation('prepare');
@@ -474,18 +793,19 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
   el.append(stationHead(`Prepare: ${contract.title}`, contract.brief));
   // Contract switcher.
-  el.append(h('div', { class: 'prep-contracts' }, ...c.board.map((k) => h('button', { class: `btn btn-small ${k.id === contract.id ? 'on' : ''}`, onclick: () => ((l.contractId = k.id), save()) }, `${KIND_WORD[k.kind]} L${k.level} · ${k.bounty}`))));
+  el.append(h('div', { class: 'prep-contracts' }, ...c.board.map((k) => h('button', { class: `btn btn-small ${k.id === contract.id ? 'on' : ''} ${k.story ? 'story' : ''}`, title: k.story ? `${k.title} · For Lowgate. Wins back: ${STORY[k.story].unlocks.toLowerCase()}.` : k.title, onclick: () => ((l.contractId = k.id), save()) }, k.story ? '✦ ' : '', `${KIND_WORD[k.kind]} L${k.level} · ${k.bounty}`))));
+  if (contract.story) el.append(h('p', { class: 'prep-story small' }, h('span', { class: 'seal-mini' }, '✦'), ` For Lowgate. Wins back: ${STORY[contract.story].unlocks.toLowerCase()}.${contract.story === 'copper' ? ' The copper is heavy: whoever carries it moves 3 at most.' : ''}`));
 
   // Party.
   const party = h('div', { class: 'prep-party' });
   for (const hr of c.roster) {
     const on = l.heroIds.includes(hr.id);
-    const disabled = hr.wounded > 0 || (!on && l.heroIds.length >= 4);
+    const disabled = !on && l.heroIds.length >= 4;
     party.append(
       h(
         'button',
         {
-          class: `pick-hero ${on ? 'on' : ''} ${hr.wounded ? 'wounded' : ''}`,
+          class: `pick-hero ${on ? 'on' : ''} ${hurt(hr) ? 'wounded' : ''}`,
           disabled,
           onclick: () => {
             if (on) {
@@ -498,13 +818,14 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         },
         h('span', { class: 'tick' }, on ? '✔' : ''),
         classBadge(hr.cls),
-        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, hr.wounded ? `Wounded (${hr.wounded})` : `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP`)),
+        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr))),
+        hr.ale ? aleBadge(hr.ale, hr.name) : '',
       ),
     );
   }
   el.append(h('h3', { class: 'prep-h' }, `Party `, h('span', { class: 'dim small' }, `${l.heroIds.length}/4`)), party);
-  if (l.heroIds.includes('hobart') || l.heroIds.some((id) => c.roster.find((x) => x.id === id)?.cls === 'hobart')) {
-    el.append(h('p', { class: 'warn-hobart' }, '⚠ If Hobart dies, it is over. The campaign ends with him.'));
+  if (l.heroIds.includes('keven') || l.heroIds.some((id) => c.roster.find((x) => x.id === id)?.cls === 'heir')) {
+    el.append(h('p', { class: 'warn-heir' }, '⚠ If Keven dies, it is over. The campaign ends with him.'));
   }
 
   // Packs.
@@ -630,12 +951,18 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
     return;
   }
   const name = (id: string) => s.campaign.roster.find((x) => x.id === id)?.name ?? id;
-  const hobartDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'hobart');
+  /** 17.2: what each survivor carries home (HP stays until the infirmary heals it). */
+  const outHp = (id: string) => {
+    const hd = s.delve?.heroes.find((x) => x.heroId === id);
+    const max = s.campaign.roster.find((x) => x.id === id)?.maxHp ?? 0;
+    return hd ? `${hd.hp}/${max} HP` : 'out';
+  };
+  const heirDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
   el.append(
     h(
       'div',
       { class: `screen-panel summary ${sm.contractDone ? 'won' : 'lost'}` },
-      h('div', { class: 'kicker' }, s.delve?.contract.title ?? 'Delve over'),
+      h('div', { class: 'kicker' }, s.delve?.contract.story ? `For Lowgate · ${s.delve.contract.title}` : (s.delve?.contract.title ?? 'Delve over')),
       h('h1', { class: 'screen-title' }, sm.contractDone ? 'Contract done' : 'Contract failed'),
       h('div', { class: 'ledger' }, stat('Bounty', `${sm.bounty}`, 'stat-gold'), stat('Loot', `${sm.lootValue}`, 'stat-gold'), stat('Out alive', `${sm.survivors.length}`), stat('Dead', `${sm.dead.length}`)),
       h(
@@ -653,7 +980,7 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
                 'li',
                 { class: sm.dead.includes(id) ? 'dead' : '' },
                 h('b', null, name(id)),
-                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : sm.wounded.includes(id) ? ' wounded' : ' out'),
+                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : ` out · ${outHp(id)}`),
                 sm.xp[id] ? h('span', { class: 'small pos' }, ` +${sm.xp[id]} XP`) : '',
                 sm.levelUps.includes(id) ? h('span', { class: 'chip good' }, 'Level up!') : '',
               ),
@@ -662,8 +989,9 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
         ),
         h('div', null, h('h2', null, 'Notes'), sm.notes.length ? h('ul', { class: 'loot-list' }, ...sm.notes.map((n) => h('li', null, n))) : h('p', { class: 'dim' }, 'Nothing worth a song.')),
       ),
-      hobartDead ? h('p', { class: 'warn-hobart' }, 'Lord Hobart did not come back.') : '',
-      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, hobartDead ? 'Continue' : 'Back to camp')),
+      s.delve?.contract.story && sm.contractDone ? h('p', { class: 'prep-story' }, h('span', { class: 'seal-mini' }, '✦'), ` ${cap(STORY[s.delve.contract.story].who)} ${s.delve.contract.kind === 'rescue' ? 'is' : 'goes'} on the way home to Lowgate. Wins back: ${STORY[s.delve.contract.story].unlocks.toLowerCase()}.`) : '',
+      heirDead ? h('p', { class: 'warn-heir' }, 'Keven did not come back.') : '',
+      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, heirDead ? 'Continue' : 'Back to camp')),
     ),
   );
   if (sm.levelUps.length) sfx.play('levelup');
@@ -678,7 +1006,8 @@ export function overScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       { class: 'screen-panel end-panel lost' },
       h('div', { class: 'kicker' }, `After ${c.delveCount} delve${c.delveCount === 1 ? '' : 's'}`),
       h('h1', { class: 'game-title' }, 'The line ends'),
-      h('p', { class: 'lede' }, s.overReason ?? 'The heir has fallen.'),
+      h('p', { class: 'lede over-line' }, 'The heir has fallen. Valkenburg stays dark.'),
+      s.overReason && !/stays dark/.test(s.overReason) ? h('p', { class: 'dim' }, s.overReason) : '',
       h('div', { class: 'ledger' }, stat('Gold', gold(c.gold), 'stat-gold'), stat('Reputation', `${c.reputation}`), stat('Fallen', `${c.fallen.length}`), stat('Delves', `${c.delveCount}`)),
       c.fallen.length ? h('ul', { class: 'memorial' }, ...c.fallen.map((f) => h('li', null, classBadge(f.cls), h('b', null, f.name), h('span', { class: 'dim small' }, ` ${f.where}`)))) : '',
       h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.newCampaign(Math.floor(Math.random() * 1e9)) }, 'New campaign')),

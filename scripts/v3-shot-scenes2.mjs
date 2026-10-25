@@ -28,7 +28,7 @@ const ok = await p.evaluate(async () => {
     s.campaign.reputation = 3;
     const k = s.campaign.board.find((c) => c.kind === 'rescue');
     if (!k) continue;
-    const r = E.apply(s, { type: 'startDelve', contractId: k.id, heroIds: ['hobart', 'brann', 'pim', 'aldous'], entrance: 0, packs: {} });
+    const r = E.apply(s, { type: 'startDelve', contractId: k.id, heroIds: ['keven', 'brann', 'pim', 'aldous'], entrance: 0, packs: {} });
     if (r.error || !r.state.delve?.prisoner) continue;
     s = structuredClone(r.state);
     const d = s.delve;
@@ -48,7 +48,7 @@ const ok = await p.evaluate(async () => {
     }
     d.heroes.forEach((h, i) => spots[i] && (h.at = spots[i]));
     d.monsters = d.monsters.filter((m) => m.at.level !== pr.at.level || Math.abs(m.at.q - pr.at.q) + Math.abs(m.at.r - pr.at.r) > 4);
-    d.lanternBearer = 'hobart';
+    d.lanternBearer = 'keven';
     window.vc.load(s);
     window.vc.dio.lookAt(pr.at, true);
     return seed;
@@ -126,7 +126,7 @@ await snap('33-gloam-close');
 await p.evaluate(() => {
   const s = structuredClone(window.vc.state());
   s.stage = 'summary';
-  s.summary = { contractDone: true, bounty: 150, lootValue: 212, survivors: ['hobart', 'brann', 'pim'], wounded: ['pim'], dead: ['aldous'], xp: { hobart: 6, brann: 5, pim: 4 }, levelUps: ['hobart', 'brann'], notes: ['Brother Edric is free.', 'The Lantern Sisters took the chapel chest.', 'Aldous fell in the cellblock.'] };
+  s.summary = { contractDone: true, bounty: 150, lootValue: 212, survivors: ['keven', 'brann', 'pim'], wounded: ['pim'], dead: ['aldous'], xp: { hobart: 6, brann: 5, pim: 4 }, levelUps: ['keven', 'brann'], notes: ['Brother Edric is free.', 'The Lantern Sisters took the chapel chest.', 'Aldous fell in the cellblock.'] };
   window.vc.load(s);
 });
 await snap('34-summary-won');

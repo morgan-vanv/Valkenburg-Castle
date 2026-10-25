@@ -4,10 +4,10 @@
 
 import type { ActionOption, Engine, FallInfo, Reach, RollPreview, Visibility } from '../game/api';
 import { distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
-import type { ActionKind, ActionTarget, ApplyResult, CastleDef, Command, GameState, Hero, HeroClass, Item, ShopOffer } from '../game/types';
+import type { ActionKind, ActionTarget, AleOffer, ApplyResult, CastleDef, Command, DealOption, GameState, Hero, HeroClass, Item, RivalCrew, ShopOffer, StoryId } from '../game/types';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
-  return { id, name, cls, level: 1, xp: 0, maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
+  return { id, name, cls, level: 1, xp: 0, maxHp, hp: maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
 }
 
 function item(id: string, kind: Item['kind'], name: string, amount = 1, slots = 1): Item {
@@ -19,7 +19,7 @@ export function fixtureCampaign(): GameState['campaign'] {
     gold: 100,
     stash: [item('i1', 'torch', 'Torch'), item('i2', 'potion', 'Potion'), item('i3', 'rope', 'Rope')],
     roster: [
-      hero('hobart', 'Lord Hobart', 'hobart', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
+      hero('keven', 'Keven', 'heir', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
       hero('brann', 'Brann', 'sellsword', 10, { might: 70, finesse: 45, wits: 40, nerve: 60 }),
       hero('pim', 'Pim', 'burglar', 7, { might: 40, finesse: 75, wits: 60, nerve: 50 }),
       { ...hero('aldous', 'Aldous', 'pyromancer', 6, { might: 30, finesse: 50, wits: 75, nerve: 55 }), wounded: 1 },
@@ -38,7 +38,52 @@ export function fixtureCampaign(): GameState['campaign'] {
     fallen: [{ name: 'Sten', cls: 'sellsword', level: 2, where: 'Level 1, the pit hall', delve: 1 }],
     litBraziers: [],
     lostGear: [],
+    village: { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false },
   };
+}
+
+/** V3.5 (18.3): the story contracts the fixture pins, by what is home. */
+const STORY_CONTRACTS: { story: StoryId; kind: 'rescue' | 'recover'; title: string; brief: string; siteId: string; level: number; bounty: number; needs: (v: GameState['campaign']['village'], rep: number) => boolean }[] = [
+  { story: 'surgeon', kind: 'rescue', title: 'Rescue Brother Aldric', brief: 'The old surgeon is held in the library.', siteId: 'l1-rescue-library', level: 1, bounty: 50, needs: () => true },
+  { story: 'innkeeper', kind: 'rescue', title: 'Rescue Old Wim', brief: 'The innkeeper of the Gilded Flagon was taken to the library.', siteId: 'l1-rescue-library', level: 1, bounty: 50, needs: (_v, rep) => rep >= 1 },
+  { story: 'smith', kind: 'rescue', title: 'Rescue Gerda the smith', brief: 'Gerda is chained in the cellblock on Level 2.', siteId: 'l2-rescue-cell-west', level: 2, bounty: 75, needs: (_v, rep) => rep >= 1 },
+  { story: 'copper', kind: 'recover', title: 'Recover the brewing copper', brief: "Wim's copper sits in the forge on Level 2. It is heavy.", siteId: 'l2-recover-forge', level: 2, bounty: 75, needs: (v) => v.innkeeper },
+  { story: 'caskbook', kind: 'recover', title: "Recover Wim's cask book", brief: 'The cask book was lost in the Drain on Level 3.', siteId: 'l3-recover-drain', level: 3, bounty: 100, needs: (v) => v.copper },
+];
+
+/** Pin the story contracts whose prerequisites are met and that aren't done. */
+export function pinStories(c: GameState['campaign']): void {
+  c.board = c.board.filter((k) => !k.story);
+  for (const sc of STORY_CONTRACTS) {
+    if (c.village[sc.story] || !sc.needs(c.village, c.reputation)) continue;
+    c.board.push({ id: `story-${sc.story}`, kind: sc.kind, title: sc.title, brief: sc.brief, siteId: sc.siteId, level: sc.level, bounty: sc.bounty, warnings: [], story: sc.story });
+  }
+}
+
+/** A cutthroat crew demanding a toll next to the party (fixture, for the parley card). */
+export function fixtureCrew(s: GameState, stance: RivalCrew['stance'] = 'demanding'): GameState {
+  const d = s.delve!;
+  const a = d.heroes[0]!.at;
+  const near = (i: number, j: number): Pos => posNeighbors(posNeighbors(posNeighbors(a)[i] ?? a)[i] ?? a)[j] ?? a;
+  const gold = (n: number): Item => item(`cg${n}`, 'gold', 'Gold', 30);
+  d.rivals = {
+    crew: 'ferrymen',
+    name: 'The Ferrymen',
+    temperament: 'cutthroat',
+    stance,
+    goal: 'loot',
+    aim: { at: near(3, 3), what: 'the chest by the bridge', rounds: 3, value: 60 },
+    toll: 75,
+    hiredRounds: stance === 'hired' ? 4 : undefined,
+    spotted: true,
+    entersRound: 1,
+    members: [
+      { id: 'r1', crew: 'ferrymen', name: 'Brune', cls: 'sellsword', at: near(0, 0), hp: 12, maxHp: 12, loot: [gold(1)], goneOut: false, intent: stance === 'demanding' ? { kind: 'toll' } : undefined },
+      { id: 'r2', crew: 'ferrymen', name: 'Osk', cls: 'ranger', at: near(0, 1), hp: 9, maxHp: 9, loot: [gold(2)], goneOut: false },
+      { id: 'r3', crew: 'ferrymen', name: 'Hackett', cls: 'sapper', at: near(0, 5), hp: 11, maxHp: 11, loot: [gold(3)], goneOut: false, charges: 1, intent: stance === 'hostile' ? { kind: 'charge', to: a, hexes: [a, ...posNeighbors(a)] } : undefined },
+    ],
+  };
+  return s;
 }
 
 /** A delve in progress on the test castle. */
@@ -47,14 +92,15 @@ export function fixtureDelve(castle: CastleDef): GameState {
   const near = (p: Pos, i: number): Pos => posNeighbors(p)[i] ?? p;
   const at0: Pos = near(e, 1);
   const c = fixtureCampaign();
-  const heroIds = ['hobart', 'brann', 'pim', 'aldous'];
+  const heroIds = ['keven', 'brann', 'pim', 'aldous'];
   const spots = [at0, near(at0, 0), near(at0, 2), near(at0, 1)];
   const heroes = heroIds.map((id, i) => ({
     heroId: id,
     at: spots[i]!,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
-    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch')] : id === 'hobart' ? [item('i11', 'potion', 'Potion')] : [],
+    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }] : id === 'keven' ? [item('i11', 'potion', 'Potion')] : [],
+    ale: id === 'keven' ? ('reserve' as const) : id === 'pim' ? ('smuggler' as const) : undefined,
     status: 'active' as const,
     bleed: 0,
     torch: id === 'brann' ? 8 : 0,
@@ -93,7 +139,7 @@ export function fixtureDelve(castle: CastleDef): GameState {
       })),
       rivals: null,
       light: 44,
-      lanternBearer: 'hobart',
+      lanternBearer: 'keven',
       doors: Object.fromEntries(
         castle.levels.flatMap((lv) =>
           Object.entries(lv.tiles)
@@ -137,7 +183,69 @@ export function fixtureEngine(castle: CastleDef): Engine {
     { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
     { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
     { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Opens locks and cracked walls. Very loud.' },
+    { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
+    { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
+    { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
   ];
+  const shopFor = (s?: GameState): ShopOffer[] => shop.map((o) => (o.needs === 'smith' && !s?.campaign.village?.smith ? { ...o, locked: 'Needs a smith: rescue Gerda (Level 2, the cellblock).' } : o));
+  const ALES: Omit<AleOffer, 'locked'>[] = [
+    { kind: 'glowworm', name: 'Glowworm Pale', price: 15, text: 'Shed light radius 1 for the delve.', needs: 'copper' },
+    { kind: 'featherfoot', name: 'Featherfoot', price: 15, text: 'Your first fall deals no damage.', needs: 'copper' },
+    { kind: 'mole', name: "Mole's Brown", price: 20, text: 'Dig like a Sapper.', needs: 'copper' },
+    { kind: 'reserve', name: "Hobart's Reserve", price: 20, text: 'Focus starts at 4, max 4.', needs: 'copper' },
+    { kind: 'smuggler', name: "Smuggler's Mead", price: 20, text: 'Sneak 4, silently.', needs: 'caskbook' },
+    { kind: 'fireside', name: 'Fireside Porter', price: 25, text: 'Heal 3 on every level change.', needs: 'caskbook' },
+    { kind: 'blackcask', name: 'Black Cask', price: 10, text: '70% a random ale, 30% a drawback.', needs: 'caskbook' },
+  ];
+  const alesFor = (s: GameState): AleOffer[] =>
+    ALES.map((a) => (s.campaign.village?.[a.needs] ? a : { ...a, locked: a.needs === 'copper' ? 'Not brewed yet: recover the brewing copper (Level 2, the forge).' : "Not brewed yet: recover Wim's cask book (Level 3, the Drain)." }));
+  const PAYABLE = ['gold', 'gem', 'jewelry'];
+  const dealsFor = (s: GameState, heroId: string): DealOption[] => {
+    const d = s.delve;
+    const r = d?.rivals;
+    const h = d?.heroes.find((x) => x.heroId === heroId);
+    if (!d || !r || !h || h.status !== 'active') return [];
+    if (!r.members.some((m) => m.hp > 0 && !m.goneOut && m.at.level === h.at.level && distance(m.at, h.at) <= 4)) return [];
+    const purse = d.heroes.filter((x) => x.status === 'active').flatMap((x) => x.pack).filter((i) => PAYABLE.includes(i.kind));
+    const total = purse.reduce((a, i) => a + i.amount, 0);
+    const pay = (price: number): { pays?: string; blocked?: string } => {
+      if (price <= 0) return {};
+      if (total < price) return { blocked: `You carry ${total}; they want ${price}.` };
+      const sorted = [...purse].sort((a, b) => (a.kind === 'gold' ? -1 : b.kind === 'gold' ? 1 : a.amount - b.amount));
+      let got = 0;
+      let coins = 0;
+      const rest: string[] = [];
+      for (const i of sorted) {
+        if (got >= price) break;
+        if (i.kind === 'gold') {
+          const take = Math.min(i.amount, price - got);
+          coins += take;
+          got += take;
+        } else {
+          rest.push(`${/^[AEIOU]/.test(i.name) ? 'an' : 'a'} ${i.name.toLowerCase()} (${i.amount})`);
+          got += i.amount;
+        }
+      }
+      return { pays: [coins ? `${coins} gold` : '', ...rest].filter(Boolean).join(' and ') };
+    };
+    const lv = h.at.level >= 2 ? 1.5 : 1;
+    const p = (n: number) => Math.round((n * lv) / 5) * 5;
+    const out: DealOption[] = [];
+    const st = r.stance;
+    const add = (o: Omit<DealOption, 'ok'> & { cond: boolean; why?: string }) => {
+      const { cond, why, ...rest } = o;
+      const pay2 = pay(rest.price);
+      const blocked = !cond ? why : pay2.blocked;
+      out.push({ ...rest, pays: pay2.pays, ok: !blocked, blocked });
+    };
+    add({ deal: 'leave', label: 'Pay them to leave', price: p(40), text: 'They take the money and head for the way out now. They drop any heirloom or prisoner they hold.', cond: st !== 'hired', why: 'They work for you now.' });
+    add({ deal: 'truce', label: st === 'demanding' ? 'Pay the toll' : 'Buy a truce', price: st === 'demanding' ? (r.toll ?? 50) : st === 'hostile' ? p(50) : p(25), text: r.temperament === 'cutthroat' ? 'They never attack unless attacked, and stay at their post.' : 'They never attack unless attacked. They keep looting.', cond: st !== 'hired' && st !== 'truce', why: st === 'truce' ? 'You already have a truce.' : 'They work for you now.' });
+    for (const job of ['winch', 'open', 'scout'] as const)
+      add({ deal: 'job', job, label: job === 'winch' ? 'Job: work the winch' : job === 'open' ? 'Job: open a lock' : 'Job: scout ahead', price: p(30), text: job === 'winch' ? 'They walk to the winch on this level and work it: the lift runs.' : job === 'open' ? 'They open the nearest seen locked door or chest on this level, silently.' : 'Every hex within 8 of each of them is explored now.', cond: ['neutral', 'truce', 'waiting'].includes(st), why: st === 'demanding' ? 'Pay the toll first.' : st === 'hostile' ? 'They are fighting you.' : 'Not now.' });
+    add({ deal: 'hire', label: 'Hire them', price: p(60), text: 'They fight beside you for 5 rounds, keeping within 2 of the hero who hired them.', risk: total >= 150 ? 'You carry 150+ in loot: 1 in 4 they turn on you when the 5 rounds end.' : 'You carry under 150 in loot: they will not turn on you.', cond: st !== 'hostile' && st !== 'hired', why: st === 'hired' ? 'Already hired.' : 'They are fighting you. Buy a truce first.' });
+    add({ deal: 'fight', label: 'Fight', price: 0, text: 'They turn hostile now.', cond: st !== 'hostile', why: 'Already fighting.' });
+    return out;
+  };
   const lit = (s: GameState): Set<string> => {
     const d = s.delve!;
     const out = new Set<string>();
@@ -154,11 +262,101 @@ export function fixtureEngine(castle: CastleDef): Engine {
   };
   const eng: Engine = {
     castle: () => castle,
-    newGame: (seed) => ({ version: 3, seed, rng: seed, stage: 'camp', campaign: fixtureCampaign(), delve: null, summary: null }),
+    newGame: (seed) => {
+      const c = fixtureCampaign();
+      pinStories(c);
+      return { version: 3, seed, rng: seed, stage: 'camp', campaign: c, delve: null, summary: null };
+    },
     apply(state: GameState, cmd: Command): ApplyResult {
       const s = structuredClone(state);
       if (cmd.type === 'newCampaign') return { state: eng.newGame(cmd.seed), events: [] };
-      if (cmd.type === 'startDelve') return { state: fixtureDelve(castle), events: [{ type: 'say', text: 'The party enters.' }] };
+      if (cmd.type === 'drink') {
+        const hr = s.campaign.roster.find((x) => x.id === cmd.heroId);
+        const pot = s.campaign.stash.findIndex((i) => i.kind === 'potion');
+        if (!hr || pot < 0) return { state, events: [], error: 'No potion in the stash.' };
+        if (hr.hp >= hr.maxHp) return { state, events: [], error: `${hr.name} is unhurt.` };
+        s.campaign.stash.splice(pot, 1);
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId)!;
+        r.hp = Math.min(r.maxHp, r.hp + 5);
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'heal') {
+        if (!s.campaign.village.surgeon) return { state, events: [], error: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the library).' };
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId)!;
+        const hp = Math.min(r.maxHp - r.hp, Math.floor(s.campaign.gold / 3));
+        r.hp += hp;
+        s.campaign.gold -= hp * 3;
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'upgrade') {
+        if (!s.campaign.village.smith) return { state, events: [], error: 'The forge is cold. Rescue Gerda the smith (Level 2, the cellblock).' };
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId)!;
+        if (cmd.part === 'weapon') r.weaponTier++;
+        else r.armorTier++;
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'buyAle') {
+        const a = alesFor(s).find((x) => x.kind === cmd.ale);
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId);
+        if (!a || !r) return { state, events: [], error: 'No such ale.' };
+        if (a.locked) return { state, events: [], error: a.locked };
+        if (r.ale) return { state, events: [], error: `${r.name} already has an ale waiting.` };
+        if (s.campaign.gold < a.price) return { state, events: [], error: 'Not enough gold.' };
+        s.campaign.gold -= a.price;
+        r.ale = a.kind;
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'hire') {
+        const i = s.campaign.recruits.findIndex((r) => r.hero.id === cmd.heroId);
+        if (i < 0) return { state, events: [], error: 'Gone.' };
+        const r = s.campaign.recruits[i]!;
+        if (s.campaign.gold < r.price) return { state, events: [], error: 'Not enough gold.' };
+        s.campaign.gold -= r.price;
+        s.campaign.roster.push(r.hero);
+        s.campaign.recruits.splice(i, 1);
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'deal' && s.delve?.rivals) {
+        const o = dealsFor(state, cmd.heroId).find((x) => x.deal === cmd.deal && x.job === cmd.job);
+        if (!o) return { state, events: [], error: 'Nobody to deal with.' };
+        if (!o.ok) return { state, events: [], error: o.blocked ?? 'Not now.' };
+        const r = s.delve.rivals;
+        const was = r.stance;
+        r.stance = cmd.deal === 'leave' ? 'bribed' : cmd.deal === 'truce' ? 'truce' : cmd.deal === 'hire' ? 'hired' : cmd.deal === 'fight' ? 'hostile' : r.stance;
+        if (cmd.deal === 'hire') r.hiredRounds = 5;
+        if (cmd.deal === 'leave') r.goal = 'leave';
+        for (const m of r.members) m.intent = cmd.deal === 'fight' ? { kind: 'attack', targetId: cmd.heroId, damage: [0, 4] } : undefined;
+        const paid = o.pays ? [o.pays] : [];
+        // Take the coins (fixture: gold only, then valuables) from the packs.
+        let left = o.price;
+        for (const hd of s.delve.heroes) {
+          for (const it of [...hd.pack]) {
+            if (left <= 0 || !PAYABLE.includes(it.kind)) continue;
+            if (it.kind === 'gold' && it.amount > left) {
+              it.amount -= left;
+              left = 0;
+            } else {
+              left -= it.amount;
+              hd.pack = hd.pack.filter((x) => x !== it);
+            }
+          }
+        }
+        const ev: ApplyResult['events'] = [{ type: 'deal', deal: cmd.deal, job: cmd.job, price: o.price, paid }];
+        if (r.stance !== was) ev.push({ type: 'rivalsStance', stance: r.stance });
+        return { state: s, events: ev };
+      }
+      if (cmd.type === 'startDelve') {
+        const st = fixtureDelve(castle);
+        st.campaign = structuredClone(state.campaign);
+        const k = st.campaign.board.find((x) => x.id === cmd.contractId);
+        if (k) st.delve!.contract = k;
+        for (const hd of st.delve!.heroes) {
+          const r = st.campaign.roster.find((x) => x.id === hd.heroId);
+          hd.ale = r?.ale === 'blackcask' ? 'hiccups' : r?.ale;
+          if (r) delete r.ale;
+        }
+        return { state: st, events: [{ type: 'say', text: 'The party enters.' }] };
+      }
       if (cmd.type === 'buy') {
         const o = shop.find((x) => x.kind === cmd.kind)!;
         if (s.campaign.gold < o.price) return { state, events: [], error: 'Not enough gold.' };
@@ -208,8 +406,16 @@ export function fixtureEngine(castle: CastleDef): Engine {
         return { state: s, events: [{ type: 'say', text: `${cmd.action}: not in the fixture engine.` }] };
       }
       if (cmd.type === 'abandon' || cmd.type === 'backToCamp') {
+        const story = s.delve?.contract.story;
         s.stage = 'camp';
         s.delve = null;
+        // Fixture: a story contract counts as done on the way home (`?fixture=1` only).
+        if (cmd.type === 'backToCamp' && story && !s.campaign.village[story]) {
+          s.campaign.village[story] = true;
+          s.campaign.reputation++;
+          pinStories(s.campaign);
+          return { state: s, events: [{ type: 'villageUnlocked', story }] };
+        }
         return { state: s, events: [] };
       }
       return { state, events: [], error: 'The fixture engine does not do that.' };
@@ -239,8 +445,12 @@ export function fixtureEngine(castle: CastleDef): Engine {
     actions(state, heroId): ActionOption[] {
       const d = state.delve!;
       const h = d.heroes.find((x) => x.heroId === heroId)!;
-      if (h.acted) return [];
       const out: ActionOption[] = [];
+      if (h.acted) {
+        const crew = d.rivals?.members.filter((m) => m.hp > 0 && !m.goneOut && m.at.level === h.at.level && distance(m.at, h.at) <= 4) ?? [];
+        if (crew.length) out.push({ action: 'parley', label: 'Parley', targets: crew.map((m) => ({ id: m.id, at: m.at })), rolls: false, pick: 'enemy' });
+        return out;
+      }
       const adj = d.monsters.filter((m) => distance(m.at, h.at) === 1 && m.at.level === h.at.level);
       if (adj.length) out.push({ action: 'attack', label: 'Attack', targets: adj.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy' });
       if (heroId === 'aldous') {
@@ -249,6 +459,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
         out.push({ action: 'kindle', label: 'Kindle', targets: [{}], rolls: false, pick: 'self', mana: 1 });
       }
       if (h.pack.some((i) => i.kind === 'torch')) out.push({ action: 'torch', label: 'Light torch', targets: [{}], rolls: false, pick: 'self' });
+      const crew = d.rivals?.members.filter((m) => m.hp > 0 && !m.goneOut && m.at.level === h.at.level && distance(m.at, h.at) <= 4) ?? [];
+      if (crew.length) out.push({ action: 'parley', label: 'Parley', targets: crew.map((m) => ({ id: m.id, at: m.at })), rolls: false, pick: 'enemy' });
       return out;
     },
     preview(_s, heroId, action: ActionKind, _t: ActionTarget): RollPreview {
@@ -318,7 +530,9 @@ export function fixtureEngine(castle: CastleDef): Engine {
       return worst;
     },
     inLight: (s, at) => lit(s).has(posKey(at)),
-    shop: () => shop,
+    shop: (s) => shopFor(s),
+    ales: (s) => alesFor(s),
+    deals: (s, heroId) => dealsFor(s, heroId),
     heroById: (s, id) => s.campaign.roster.find((h) => h.id === id),
     classInfo: (cls) => ({ name: cls, role: '', weapon: '', armor: 0, mana: 0, abilities: [] }),
     partyProblem: () => null,

@@ -140,6 +140,9 @@ export interface Frame {
   backZ: number;
   backY: number;
   hunch: number;
+  /** Torso height (hip to shoulder top) and its half-width/half-depth at a torso-local height. */
+  torsoH: number;
+  torsoAt: (y: number) => { hw: number; hd: number };
 }
 
 function humanoid(k: Kit, o: HumanOpts): Frame {
@@ -167,9 +170,16 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     k.cyl(legR, legR * 0.9, legL, 6, o.legs, [sx * hip * 0.5, legL / 2, 0]);
     k.box(legR * 2.2, legR * 0.9, legR * 3.2, 0x2a1d12, [sx * hip * 0.5, legR * 0.45, legR * 0.5]);
   }
-  // Torso and belt.
-  k.box(shoulderW, torsoH, depth, o.tunic, T(0, torsoH / 2, 0), R());
-  k.box(shoulderW * 1.02, torsoH * 0.1, depth * 1.04, 0x2a1d12, T(0, torsoH * 0.12, 0), R());
+  // Torso (V3.4: tapered to the waist, chamfered at the shoulders, shallower at the belly) and belt.
+  k.add(shapedPrism(shoulderW, torsoH, depth, TORSO_RINGS), o.tunic, T(0, 0, 0), R());
+  {
+    const bw = torsoHalf(torsoH * 0.12, torsoH, shoulderW, depth);
+    const ring: [number, number, number][] = [
+      [0, 1, 1],
+      [1, 1, 1],
+    ];
+    k.add(shapedPrism(bw.hw * 2.08, torsoH * 0.1, bw.hd * 2.1, ring), 0x2a1d12, T(0, torsoH * 0.07, 0), R());
+  }
   // Shoulders: small caps (pauldrons when asked), arms hanging a little forward, hands.
   const armL = torsoH * 0.85;
   const shoulderY = torsoH - armR * 0.6;
@@ -285,7 +295,8 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     k.cyl(h * 0.15, h * 0.15, limbD * 0.5, 6, o.shield, [lx - limbD * 0.4, ly + h * 0.06, lz + h * 0.02], [0, 0, Math.PI / 2], [1, 1, 1.15]);
     k.ball(limbD * 0.5, COLORS.steelDark, [lx - limbD * 0.75, ly + h * 0.06, lz + h * 0.02]);
   }
-  const back = T(0, torsoH * 0.5, -depth / 2);
+  // The back of the shaped torso at mid height (shallower than the chest), for packs and sacks.
+  const back = T(0, torsoH * 0.5, -torsoHalf(torsoH * 0.5, torsoH, shoulderW, depth).hd);
   return {
     top: HEAD_TOP - (1 - cs) * (torsoH + neck + headD) + HELM_TOP[o.helm ?? 'none'],
     hy,
@@ -301,6 +312,8 @@ function humanoid(k: Kit, o: HumanOpts): Frame {
     backZ: back[2],
     backY: back[1],
     hunch,
+    torsoH,
+    torsoAt: (y: number) => torsoHalf(y, torsoH, shoulderW, depth),
   };
 }
 
@@ -308,10 +321,84 @@ function limbd(d: number): number {
   return d * 0.5;
 }
 
+/**
+ * V3.4 torso profile (owner: "their chests are just so blocky"): rings from the hip (t = 0) to the
+ * top of the shoulders (t = 1), as fractions of the shoulder width and the chest depth. The torso
+ * narrows to ~78% at the waist, the belly is a little shallower than the chest, and the top ring
+ * pulls in so the shoulder edges read as chamfered rather than a crate's corners.
+ */
+const TORSO_RINGS: readonly (readonly [t: number, w: number, d: number])[] = [
+  [0, 0.78, 0.82],
+  [0.3, 0.8, 0.84],
+  [0.62, 0.96, 1.0],
+  [0.84, 1.0, 0.98],
+  [0.95, 0.9, 0.84],
+  [1, 0.7, 0.6],
+];
+/** How far each octagon's corners are cut (1 = a rectangle, smaller = rounder). */
+const TORSO_CHAMFER = 0.6;
+
+/** Torso half-width and half-depth at torso-local height y (0 at the hip, h at the shoulders). */
+function torsoHalf(y: number, h: number, w: number, d: number): { hw: number; hd: number } {
+  const t = Math.max(0, Math.min(1, y / h));
+  for (let i = 1; i < TORSO_RINGS.length; i++) {
+    const [t0, w0, d0] = TORSO_RINGS[i - 1]!;
+    const [t1, w1, d1] = TORSO_RINGS[i]!;
+    if (t <= t1) {
+      const k = (t - t0) / (t1 - t0 || 1);
+      return { hw: ((w0 + (w1 - w0) * k) * w) / 2, hd: ((d0 + (d1 - d0) * k) * d) / 2 };
+    }
+  }
+  return { hw: w / 2, hd: d / 2 };
+}
+
+/**
+ * A tapered, chamfered octagonal prism through `rings` (t, width, depth fractions), base at y = 0,
+ * capped top and bottom. Low-poly on purpose: with flat shading each band reads as a plane.
+ */
+function shapedPrism(w: number, h: number, d: number, rings: readonly (readonly [number, number, number])[], chamfer = TORSO_CHAMFER): THREE.BufferGeometry {
+  const oct = (hw: number, hd: number): [number, number][] => [
+    [hw, hd * chamfer],
+    [hw * chamfer, hd],
+    [-hw * chamfer, hd],
+    [-hw, hd * chamfer],
+    [-hw, -hd * chamfer],
+    [-hw * chamfer, -hd],
+    [hw * chamfer, -hd],
+    [hw, -hd * chamfer],
+  ];
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (const [t, wf, df] of rings) for (const [x, z] of oct((wf * w) / 2, (df * d) / 2)) pos.push(x, t * h, z);
+  const n = 8;
+  for (let r = 0; r < rings.length - 1; r++)
+    for (let i = 0; i < n; i++) {
+      const a = r * n + i;
+      const b = r * n + ((i + 1) % n);
+      const c = a + n;
+      const e = b + n;
+      idx.push(a, c, b, b, c, e);
+    }
+  // Caps (fans about a centre vertex).
+  const capBottom = pos.length / 3;
+  pos.push(0, 0, 0);
+  for (let i = 0; i < n; i++) idx.push(capBottom, i, (i + 1) % n);
+  const top = (rings.length - 1) * n;
+  const capTop = pos.length / 3;
+  pos.push(0, h, 0);
+  for (let i = 0; i < n; i++) idx.push(capTop, top + ((i + 1) % n), top + i);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  const flat = g.toNonIndexed();
+  flat.computeVertexNormals();
+  return flat;
+}
+
 // ------------------------------------------------------------ models
 
 export type ModelKey =
-  | 'hobart'
+  | 'heir'
   | 'sellsword'
   | 'burglar'
   | 'mage'
@@ -335,7 +422,17 @@ export type ModelKey =
   | 'sisterBurglar'
   | 'prisoner'
   | 'dragon'
-  | 'dragonSleep';
+  | 'dragonSleep'
+  | RivalModelKey;
+
+/** V3.5 (18.5): a cutthroat crew member, by crew and class ("rival-ferrymen-sapper"). */
+export type RivalModelKey = `rival-${'ferrymen' | 'gallows-choir'}-${'sellsword' | 'ranger' | 'burglar' | 'sapper' | 'pyromancer' | 'shadowmancer'}`;
+
+/** Crew colours (18.7): Ferrymen river blue-grey; the Gallows Choir black and bone. */
+const CREW_LOOK: Record<'ferrymen' | 'gallows-choir', { tunic: number; legs: number; cape: number; hood: number; trim: number; skin: number; eyes?: number }> = {
+  ferrymen: { tunic: 0x4f6272, legs: 0x2e3a44, cape: 0x6f8798, hood: 0x3e505e, trim: 0xa8bccb, skin: 0xc79a76 },
+  'gallows-choir': { tunic: 0x1c1a1a, legs: 0x121111, cape: 0x0c0b0b, hood: 0x161414, trim: 0xe0d6be, skin: 0xd9d0bb, eyes: 0x2a0a0a },
+};
 
 export function getModel(key: ModelKey): FigureModel {
   const hit = cache.get(key);
@@ -360,8 +457,9 @@ function tusks(k: Kit, f: Frame): void {
 function buildModel(key: ModelKey): FigureModel {
   const k = new Kit();
   let f: Frame;
-  switch (key) {
-    case 'hobart':
+  if (key.startsWith('rival-')) return crewMember(k, key as RivalModelKey);
+  switch (key as Exclude<ModelKey, RivalModelKey>) {
+    case 'heir':
       f = humanoid(k, { skin: SKIN, tunic: 0x6f7378, legs: 0x3d3f44, helm: 'crown', helmColor: COLORS.gold, weapon: 'sword', shield: COLORS.gold, pauldrons: COLORS.steel, cape: 0x7a1414 });
       banner(k, 0xd9a93a, f);
       return k.build(f.top + 0.05, 0.22);
@@ -436,8 +534,9 @@ function buildModel(key: ModelKey): FigureModel {
       const sn = Math.sin(f.hunch);
       for (let i = 0; i < 3; i++) {
         const y = 0.2 - i * 0.045;
-        const z = f.depth / 2 + 0.005;
-        k.box(f.shoulderW * 0.8, 0.012, 0.012, 0xc8d0bc, [0, f.hipY + y * cs - z * sn, y * sn + z * cs], [f.hunch, 0, 0]);
+        const at = f.torsoAt(y);
+        const z = at.hd + 0.004;
+        k.box(at.hw * 1.5, 0.012, 0.012, 0xc8d0bc, [0, f.hipY + y * cs - z * sn, y * sn + z * cs], [f.hunch, 0, 0]);
       }
       // Claws: three thin spikes hanging off each hand.
       for (const hand of [f.handL, f.handR]) for (let c = -1; c <= 1; c++) k.cone(0.008, 0.09, 3, 0xe8e4d0, [hand[0] + c * 0.02, hand[1] - 0.05, hand[2] + c * 0.012], [Math.PI * 0.95, 0, 0]);
@@ -549,6 +648,59 @@ function buildModel(key: ModelKey): FigureModel {
       return k.build(1.65, 0.45, { floats: true, ghost: true });
     }
   }
+}
+
+/**
+ * V3.5 (18.5, 18.7): a cutthroat by class in the crew's colours. Sellsword: shield and sword,
+ * kettle helm. Sapper: hammer and a pack of charges with a lit fuse. Pyromancer: robe, staff
+ * with a flame. Ranger: hood and bow. Burglar: hood, dagger, sack. The Gallows Choir wear
+ * bone-white faces and a noose round the neck; the Ferrymen a boat-cloak and a pole-hook badge.
+ */
+function crewMember(k: Kit, key: RivalModelKey): FigureModel {
+  const crew = key.startsWith('rival-ferrymen') ? 'ferrymen' : 'gallows-choir';
+  const cls = key.slice(`rival-${crew}-`.length);
+  const L = CREW_LOOK[crew];
+  const base = { skin: L.skin, tunic: L.tunic, legs: L.legs, eyes: L.eyes };
+  let f: Frame;
+  switch (cls) {
+    case 'sellsword':
+      f = humanoid(k, { ...base, helm: 'kettle', helmColor: crew === 'ferrymen' ? 0x5a6a78 : 0x2a2626, weapon: 'sword', shield: crew === 'ferrymen' ? 0x6f8798 : 0xd8cfb8, pauldrons: COLORS.steelDark, wide: 1.15, cape: L.cape });
+      break;
+    case 'sapper': {
+      f = humanoid(k, { ...base, helm: 'kettle', helmColor: L.hood, weapon: 'hammer', wide: 1.2, beard: crew === 'ferrymen' ? 0x5a4a3a : undefined });
+      const bz = f.backZ - 0.07;
+      k.box(0.26, 0.24, 0.13, L.cape, [0, f.backY + 0.02, bz], [f.hunch, 0, 0]);
+      for (const x of [-0.07, 0.07]) k.cyl(0.045, 0.045, 0.14, 6, 0xb03a2e, [x, f.backY + 0.18, bz]);
+      k.box(0.01, 0.07, 0.01, 0xffc860, [0.07, f.backY + 0.28, bz], undefined, true);
+      break;
+    }
+    case 'pyromancer':
+    case 'shadowmancer':
+      f = humanoid(k, { ...base, helm: cls === 'pyromancer' ? 'hat' : 'hood', helmColor: L.hood, weapon: 'staff', staffGlow: cls === 'pyromancer' ? 0xff6a1a : 0x9a6aff, cape: L.cape });
+      robe(k, L.tunic, f);
+      if (cls === 'pyromancer') {
+        // A flame cupped in the off hand.
+        k.ball(0.045, 0xffa040, [f.handL[0], f.handL[1] + 0.03, f.handL[2] + 0.04], undefined, true);
+        k.add(new THREE.ConeGeometry(0.03, 0.09, 4), 0xffd27a, [f.handL[0], f.handL[1] + 0.1, f.handL[2] + 0.04], undefined, undefined, true);
+      }
+      break;
+    case 'ranger':
+      f = humanoid(k, { ...base, helm: 'hood', helmColor: L.hood, weapon: 'bow', cape: L.cape });
+      break;
+    default:
+      f = humanoid(k, { ...base, helm: 'hood', helmColor: L.hood, weapon: 'dagger', hunch: 0.2, cape: L.cape });
+      k.ball(0.08, 0x4a4030, [-f.shoulderW * 0.3, f.backY + 0.02, f.backZ - 0.05]);
+  }
+  if (crew === 'gallows-choir') {
+    // A noose of bone-pale rope round the neck, its tail down the chest.
+    k.add(new THREE.TorusGeometry(f.headR * 0.62, 0.016, 4, 10), L.trim, [0, f.shoulderY + 0.01, f.depth * 0.1], [Math.PI / 2, 0, 0]);
+    k.box(0.02, 0.12, 0.02, L.trim, [0, f.shoulderY - 0.07, f.depth * 0.5]);
+  } else {
+    // A river-grey sash across the chest with a brass hook badge.
+    k.box(f.shoulderW * 0.9, 0.035, 0.02, L.trim, [0, f.shoulderY - 0.1, f.depth * 0.52], [0, 0, 0.5]);
+    k.ball(0.022, COLORS.gold, [f.shoulderW * 0.18, f.shoulderY - 0.04, f.depth * 0.56], undefined, true);
+  }
+  return k.build(f.top + 0.03, cls === 'sapper' || cls === 'sellsword' ? 0.24 : 0.2);
 }
 
 /**
