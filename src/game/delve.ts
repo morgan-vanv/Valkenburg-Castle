@@ -1073,13 +1073,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const o = hd(c, t.id!)!;
       o.veil = VEIL_ROUNDS;
       c.ev.push({ type: 'cast', by: heroId, spell: 'veil', targetId: o.heroId });
-      // Monsters hunting the veiled hero lose them.
+      // Hunting monsters with no unveiled hero left in sight lose the trail.
+      const lit = litSet(c.w, c.d);
       for (const m of c.d.monsters) {
-        if (m.awareness === 'hunting' && m.kind !== 'gloam' && m.kind !== 'dragon' && m.intent?.targetId === o.heroId) {
-          m.awareness = 'alert';
-          m.intent = undefined;
-          c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
-        }
+        if (m.awareness !== 'hunting' || m.kind === 'gloam' || m.kind === 'dragon') continue;
+        const seesSomeone = c.d.heroes.some((x) => x.status === 'active' && x.veil <= 0 && within(x.at, m.at, 6)
+          && (distance(x.at, m.at) <= 2 || lit.has(posKey(x.at))) && los(c.w, c.d, m.at, x.at));
+        if (seesSomeone) continue;
+        m.awareness = 'alert';
+        m.focusAt = { ...o.at };
+        m.intent = undefined;
+        c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
       }
       break;
     }

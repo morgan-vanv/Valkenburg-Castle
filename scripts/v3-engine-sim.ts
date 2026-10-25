@@ -8,6 +8,10 @@
 // out of walking reach it goes to the winch and works it, or failing that jumps
 // down a pit column that lands closer.
 //
+// V3.2: a campaign starts with Hobart alone and 160 gold; the bot hires 2 to 3 recruits at the
+// tavern (a front-liner first, then a quiet one, then a mage), re-hiring when the roster thins.
+// Heroes dash (second move) toward the goal when nothing is in reach to hit.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -57,7 +61,31 @@ function act(s: GameState, heroId: string, action: ActionKind, target: ActionTar
 }
 
 function option(s: GameState, heroId: string, a: ActionKind) {
-  return e.actions(s, heroId).find((o) => o.action === a);
+  const o = e.actions(s, heroId).find((o) => o.action === a);
+  return o && !o.blocked ? o : undefined;
+}
+
+const FRONT = ['sellsword', 'sapper'];
+const QUIET = ['burglar', 'ranger'];
+const MAGES = ['pyromancer', 'hedgewitch', 'shadowmancer'];
+const hired: Record<string, number> = {};
+
+/** Hire up to `want` recruits the stash can pay for, one of each role first. */
+function recruit(s: GameState, want: number): GameState {
+  const roles = [FRONT, QUIET, MAGES, FRONT, QUIET, MAGES];
+  while (s.campaign.roster.length < want) {
+    const have = s.campaign.roster.map((h) => h.cls as string);
+    const role = roles.find((r) => !have.some((c) => r.includes(c))) ?? [...FRONT, ...QUIET, ...MAGES];
+    const pool = s.campaign.recruits.filter((r) => r.price <= s.campaign.gold);
+    const pick = pool.find((r) => role.includes(r.hero.cls)) ?? pool.sort((a, b) => a.price - b.price)[0];
+    if (!pick) break;
+    const before = s;
+    s = run(s, { type: 'hire', heroId: pick.hero.id });
+    if (s === before) break;
+    hired[pick.hero.cls] = (hired[pick.hero.cls] ?? 0) + 1;
+    if (VERBOSE) console.log(`  hired ${pick.hero.name} the ${pick.hero.cls} for ${pick.price}`);
+  }
+  return s;
 }
 
 function objectiveDone(s: GameState): boolean {
@@ -163,6 +191,21 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     }
   }
   tryAct();
+  // Dash (spec 15.2): nothing to do with the action, so move again toward the goal.
+  if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
+    const me2 = hero()!;
+    const goals = routeFor(s, me2.at).goals;
+    const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
+    const here = field.get(posKey(me2.at)) ?? 999;
+    let best: ReturnType<typeof e.reachable>[0] | undefined;
+    let bestD = here;
+    for (const r of e.reachable(s, id, false)) {
+      if (!r.dash) continue;
+      const dd = field.get(posKey(r.to)) ?? 999;
+      if (dd < bestD) { bestD = dd; best = r; }
+    }
+    if (best && bestD < here - 1) s = run(s, { type: 'move', heroId: id, path: best.path, sneak: false });
+  }
   // Getting down: work the winch, or jump.
   if (alive() && !hero()!.acted) {
     const rt = routeFor(s, hero()!.at);
@@ -186,6 +229,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
 }
 
 interface Row {
+  squad: string;
   contract: string;
   done: boolean;
   rounds: number;
@@ -212,6 +256,8 @@ for (let i = 0; i < N; i++) {
       if (site) s.campaign.board[0] = { id: `slay-${i}`, kind: 'slay', title: 'Slay the Dragon', brief: '', siteId: site.id, level: site.at.level, bounty: 500, warnings: [] };
     }
   }
+  // Squad building (spec 15.3): 3 heroes to start (Hobart + 2), 4 once the gold is there.
+  s = recruit(s, i === 0 ? 3 : 4);
   for (const h of s.campaign.roster) if (h.wounded) s = run(s, { type: 'heal', heroId: h.id });
   if (s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
   if (DRAGON && s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
@@ -247,6 +293,7 @@ for (let i = 0; i < N; i++) {
   const sum = s.summary!;
   const d = s.delve!;
   rows.push({
+    squad: d.heroes.map((h) => e.heroById(s, h.heroId)?.cls.slice(0, 4) ?? '?').join('/'),
     contract: `${k.kind} L${k.level}`,
     done: sum.contractDone,
     rounds: d.round,
@@ -262,12 +309,15 @@ for (let i = 0; i < N; i++) {
   s = run(s, { type: 'backToCamp' });
 }
 
-console.log('delve  contract     done  rounds light  loot bounty deaths rivals');
+console.log('delve  contract     done  rounds light  loot bounty deaths rivals  squad');
 rows.forEach((r, i) => {
   console.log(
-    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${r.rivals ? 'yes' : ''}`,
+    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${(r.rivals ? 'yes' : '').padEnd(6)}  ${r.squad}`,
   );
 });
+console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);
+console.log(`first five L1 delves: done ${first.filter((r) => r.done).length}/${first.length}, deaths ${first.reduce((a, r) => a + r.deaths, 0)}`);
 const avg = (f: (r: Row) => number) => (rows.reduce((a, r) => a + f(r), 0) / Math.max(1, rows.length)).toFixed(1);
 console.log(`\n${rows.length} delves: done ${rows.filter((r) => r.done).length}, avg rounds ${avg((r) => r.rounds)}, avg light ${avg((r) => r.light)}, avg loot ${avg((r) => r.loot)}, avg bounty ${avg((r) => r.bounty)}, deaths ${rows.reduce((a, r) => a + r.deaths, 0)}`);
 console.log('\nper contract type:  n  done%  rounds  light  deaths');

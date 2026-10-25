@@ -9,6 +9,7 @@ import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
+import { linkAt, linkButton, linkReach, linkTooltip, type LinkInfo } from './links';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, BRIGHTNESS_NAME, classGlyph, className, itemGlyph, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
 
@@ -175,6 +176,28 @@ export class Hud {
     return this.state?.campaign.roster.find((x) => x.id === id);
   }
 
+  /**
+   * Spec 15.7: the stairs or working lift the selected hero stands on, with the
+   * `reachable` entry that takes them (destination on another level, one step).
+   */
+  private linkHere(): { info: LinkInfo; reach: Reach } | null {
+    const sel = this.selected();
+    if (!sel) return null;
+    const reach = linkReach(this.reach, sel.at);
+    if (!reach) return null;
+    const info = linkAt(this.engine.castle(), sel.at);
+    return info ? { info, reach } : null;
+  }
+
+  private takeLink(): void {
+    const l = this.linkHere();
+    const sel = this.selected();
+    if (!l || !sel || this.busy) return;
+    this.cancel();
+    sfx.play('click');
+    void this.host.send({ type: 'move', heroId: sel.heroId, path: l.reach.path, sneak: this.sneak });
+  }
+
   /** Recompute reach and options and redraw panels and highlights. */
   refresh(): void {
     const s = this.state;
@@ -224,6 +247,9 @@ export class Hud {
       this.reach.map((r) => r.to),
       dash ? 'dash' : this.sneak ? 'sneak' : 'walk',
     );
+    // Standing on stairs or a working lift: the hex pulses (15.7).
+    const link = this.linkHere();
+    this.dio.showLinkPulse(link ? this.selected()!.at : null);
     // Attackable enemies get a red ring.
     const atk = this.options.filter((o) => o.action === 'attack' || o.action === 'firebolt');
     const ats = atk.flatMap((o) => o.targets.map((t) => this.targetPos(t))).filter((p): p is Pos => !!p);
@@ -381,28 +407,69 @@ export class Hud {
     if (!t) return '';
     const k = posKey(at);
     const room = lv?.rooms.find((r) => r.id === t.room)?.name;
+    const explored = !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
+    if (!explored) return '';
     const parts: string[] = [];
+    // 15.7: every interactable names itself and its interactions ("Thing · what you can do").
+    const act = (name: string, what: string) => parts.push(`<b>${name}</b> <span class="tip-how">· ${what}</span>`);
     const door = d.doors[k];
-    if (t.kind === 'door' && door) parts.push(door.open ? 'Open door' : door.jammed ? 'Jammed door' : door.locked ? 'Locked door' : 'Closed door');
-    else if (t.kind === 'brazier') parts.push(d.lit.includes(k) ? 'Brazier, lit' : 'Brazier, cold');
-    else if (t.kind === 'prop' || t.kind === 'tallprop') parts.push(`${propName(t.prop)}${t.kind === 'tallprop' ? ' (blocks sight)' : ' (cover)'}${t.prop === 'winch' ? (d.liftWorking ? ': the lift runs' : ': work it to run the lift (loud)') : ''}`);
-    else if (t.kind === 'lift') parts.push(d.liftWorking ? 'Lift: runs between levels' : 'Lift: dead until the winch is worked');
+    const castle = this.engine.castle();
+    if (t.kind === 'door' && door) {
+      if (door.open) act('Open door', 'walk through');
+      else if (door.jammed) act('Jammed door', 'Smash or Charge');
+      else if (door.locked) act('Locked door', 'Pick, Smash or Charge');
+      else act('Door', 'Open, then walk through');
+    } else if (t.kind === 'brazier') {
+      if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
+      else act('Brazier', 'Light: +6 lantern, lit for good');
+    } else if (t.kind === 'prop' || t.kind === 'tallprop') {
+      if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
+      else parts.push(`${propName(t.prop)} <span class="dim">${t.kind === 'tallprop' ? 'blocks sight' : 'cover'}</span>`);
+    } else if (t.kind === 'lift' || t.kind === 'stairs') {
+      const l = linkAt(castle, at);
+      if (l) parts.push(`<b>${l.kind === 'lift' ? 'Lift' : 'Stairs'}</b> <span class="tip-how">· ${linkTooltip(castle, l, !!d.liftWorking).replace(/^(Lift|Stairs) /, '')}</span>`);
+      else parts.push(TILE_NAME[t.kind] ?? t.kind);
+    } else if (t.kind === 'exit') act('Way out', 'Leave the castle');
     else if (t.kind === 'pit') {
       const f = this.fallWords(at);
-      parts.push(`<span class="neg">Pit${f ? `. ${f.text}` : ''}</span>`);
-    } else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
+      parts.push(`<b class="neg">Pit</b> <span class="tip-how">· Jump or Rope</span>${f ? `<br><span class="neg">${f.text}</span>` : ''}`);
+    } else if (t.kind === 'cracked') act('Cracked wall', "Charge or Sapper's Dig");
+    else if (t.kind === 'rubble') act('Rubble', "costs 2 to cross, or Sapper's Dig");
+    else if (t.kind === 'sealed') parts.push('<b>Sealed.</b> Nothing opens it yet.');
+    else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
     if (t.railing) parts.push('Railing');
-    const vent = this.engine.castle().lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
+    const vent = castle.lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
     if (vent) parts.push('<span class="neg">Fire vent: 3 damage</span>');
     if (t.raised) parts.push('Raised');
     const chest = d.chests.find((c) => samePos(c.at, at));
-    if (chest) parts.push(chest.opened ? 'Chest, empty' : chest.jammed ? 'Chest, jammed' : chest.locked ? 'Chest, locked' : 'Chest');
+    if (chest) {
+      if (chest.opened) parts.push('<b>Chest</b>, empty');
+      else if (chest.jammed) act('Jammed chest', 'Smash');
+      else if (chest.locked) act('Locked chest', 'Pick, Smash or Skeleton key');
+      else act('Chest', 'Open');
+    }
     const g = d.ground.find((x) => samePos(x.at, at));
-    if (g?.items.length) parts.push(g.items.map(itemLabel).join(', '));
-    if (d.traps[k]?.spotted) parts.push('<span class="neg">Trap</span>');
+    if (g?.items.length) parts.push(`<b>Loot</b> <span class="tip-how">· Take</span> <span class="dim">${g.items.map(itemLabel).join(', ')}</span>`);
+    if (d.traps[k]?.spotted) act('<span class="neg">Trap</span>', 'Disarm, or step around');
     const vis = this.vis;
-    const light = vis?.lit.has(k) ? 'lit' : vis?.visible.has(k) ? 'unlit' : vis?.explored.has(k) ? 'remembered' : '';
-    return `${parts.join(' · ')}${room ? ` <span class="dim">${room}</span>` : ''}${light ? ` <span class="dim">(${light})</span>` : ''}`;
+    const light = vis?.lit.has(k) ? 'lit' : vis?.visible.has(k) ? 'unlit' : 'remembered';
+    return `${parts.join(' · ')}${room ? ` <span class="dim">${room}</span>` : ''} <span class="dim">(${light})</span>`;
+  }
+
+  /** Does hovering this hex deserve the interactable outline (15.7)? */
+  private hoverKind(at: Pos): 'plain' | 'interact' | 'danger' {
+    const d = this.state?.delve;
+    const lv = this.engine.castle().levels.find((l) => l.level === at.level);
+    const t = lv?.tiles[hexKey(at)];
+    if (!d || !t) return 'plain';
+    const k = posKey(at);
+    if (!this.vis || !(this.vis.explored.has(k) || this.vis.visible.has(k))) return 'plain';
+    if (t.kind === 'pit' || d.traps[k]?.spotted) return 'danger';
+    if (['door', 'brazier', 'lift', 'stairs', 'exit', 'cracked', 'rubble'].includes(t.kind)) return 'interact';
+    if (t.prop === 'winch') return 'interact';
+    if (d.chests.some((c) => samePos(c.at, at) && !c.opened)) return 'interact';
+    if (d.ground.some((g) => samePos(g.at, at) && g.items.length)) return 'interact';
+    return 'plain';
   }
 
   /** The action a click on this unit or hex would pick. */
