@@ -234,7 +234,13 @@ export type ModelKey =
   | 'cutpurse'
   | 'berserker'
   | 'gloam'
+  | 'archer'
+  | 'captain'
+  | 'ghoul'
   | 'sister'
+  | 'sisterRanger'
+  | 'sisterShadow'
+  | 'sisterBurglar'
   | 'prisoner'
   | 'dragon'
   | 'dragonSleep';
@@ -308,14 +314,62 @@ function buildModel(key: ModelKey): FigureModel {
       k.cone(0.04, 0.16, 4, 0x7fd06a, [0.1, 1.3, 0.04], [0.3, 0, -0.4]);
       banner(k, 0x5ad08a, top + 0.15);
       return k.build(top + 0.05, 0.3);
+    case 'archer':
+      // 16.4: an orc with a longbow, leaner than the cleaver orc, no shield.
+      top = humanoid(k, { skin: COLORS.orc, tunic: 0x2e2a1e, legs: 0x1e1a12, helm: 'none', weapon: 'bow', hunch: 0.3, eyes: COLORS.danger, wide: 1.1 });
+      k.cone(0.03, 0.09, 4, 0xe8dcc0, [-0.07, 0.86, 0.2]);
+      k.cone(0.03, 0.09, 4, 0xe8dcc0, [0.07, 0.86, 0.2]);
+      return k.build(top, 0.34);
+    case 'captain': {
+      // 16.4: broad orc in a kettle helm with a red plume, big shield, pauldrons.
+      top = humanoid(k, { skin: COLORS.orc, tunic: 0x4a3a2a, legs: 0x241c14, helm: 'kettle', helmColor: COLORS.steelDark, weapon: 'blade', shield: 0x6a1a12, hunch: 0.35, eyes: COLORS.danger, wide: 1.4, pauldrons: COLORS.steelDark });
+      k.cone(0.03, 0.09, 4, 0xe8dcc0, [-0.07, 0.85, 0.24]);
+      k.cone(0.03, 0.09, 4, 0xe8dcc0, [0.07, 0.85, 0.24]);
+      // Plume: a tall red crest on the helm.
+      const ph = 0.9 - 0.035 + 0.16;
+      for (let i = 0; i < 4; i++) k.box(0.05, 0.12 + i * 0.03, 0.09, 0xb02a1e, [0, ph + 0.08 + i * 0.07, 0.07 - i * 0.07], [-0.25 - i * 0.1, 0, 0]);
+      return k.build(top + 0.32, 0.4);
+    }
+    case 'ghoul': {
+      // 16.4: gaunt, grey-green and bony, hunched, long clawed arms, pale eyes.
+      const bone = 0x8f9a86;
+      top = humanoid(k, { skin: bone, tunic: 0x5c6a58, legs: 0x3e4a3c, helm: 'none', weapon: 'none', hunch: 0.6, eyes: 0xe8ffb0, wide: 0.85 });
+      // Ribs showing through.
+      for (let i = 0; i < 3; i++) k.box(0.3, 0.02, 0.02, 0xc8d0bc, [0, 0.66 - i * 0.07, 0.16 + i * 0.02], [0.3, 0, 0]);
+      // Claws: three thin spikes off each hand.
+      for (const sx of [-1, 1]) for (let c = -1; c <= 1; c++) k.cone(0.012, 0.14, 3, 0xe8e4d0, [sx * 0.24 + c * 0.03, 0.34, 0.12 + c * 0.02], [Math.PI * 0.95, 0, 0]);
+      return k.build(top, 0.3);
+    }
     case 'sister':
-      // Lantern Sisters: pale hooded robes, a lantern held out front.
-      top = humanoid(k, { skin: SKIN, tunic: 0x8a8070, legs: 0x5a5246, helm: 'hood', helmColor: 0xb8ad98, weapon: 'none' });
+    case 'sisterRanger':
+    case 'sisterShadow':
+    case 'sisterBurglar': {
+      // Lantern Sisters: pale hooded robes, a lantern held out front. 16.5: kit by class.
+      const cls = key === 'sisterRanger' ? 'ranger' : key === 'sisterShadow' ? 'shadow' : key === 'sisterBurglar' ? 'burglar' : 'plain';
+      const hood = cls === 'ranger' ? 0x5a6a3a : cls === 'shadow' ? 0x2a1e3e : cls === 'burglar' ? 0x2c2a26 : 0xb8ad98;
+      top = humanoid(k, {
+        skin: cls === 'shadow' ? 0xb0a4b4 : SKIN,
+        tunic: 0x8a8070,
+        legs: 0x5a5246,
+        helm: 'hood',
+        helmColor: hood,
+        weapon: cls === 'ranger' ? 'bow' : cls === 'burglar' ? 'dagger' : 'none',
+        eyes: cls === 'shadow' ? 0xb08aff : undefined,
+        cape: cls === 'shadow' ? 0x1a1230 : undefined,
+      });
       robe(k, 0x8a8070, 0.28);
-      k.cyl(0.008, 0.008, 0.2, 3, 0x222222, [0.32, 0.62, 0.26]);
-      k.box(0.12, 0.16, 0.12, 0x3a3020, [0.32, 0.46, 0.26]);
-      k.box(0.08, 0.1, 0.08, 0xffd27a, [0.32, 0.46, 0.26], undefined, true);
+      if (cls !== 'ranger') {
+        k.cyl(0.008, 0.008, 0.2, 3, 0x222222, [0.32, 0.62, 0.26]);
+        k.box(0.12, 0.16, 0.12, 0x3a3020, [0.32, 0.46, 0.26]);
+        k.box(0.08, 0.1, 0.08, 0xffd27a, [0.32, 0.46, 0.26], undefined, true);
+      } else {
+        // The ranger sister hangs her lantern from the belt.
+        k.box(0.1, 0.13, 0.1, 0x3a3020, [0.22, 0.34, 0.14]);
+        k.box(0.06, 0.08, 0.06, 0xffd27a, [0.22, 0.34, 0.14], undefined, true);
+      }
+      if (cls === 'burglar') k.ball(0.12, 0x4a4030, [-0.16, 0.6, -0.22]);
       return k.build(top, 0.28);
+    }
     case 'prisoner':
       top = humanoid(k, { skin: SKIN, tunic: 0x9a8a6a, legs: 0x5a4a3a, helm: 'none', weapon: 'none', hunch: 0.3, beard: 0x6a5a4a });
       // Shackles.

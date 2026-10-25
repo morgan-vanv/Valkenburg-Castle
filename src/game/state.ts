@@ -2,7 +2,7 @@
 // the same JSON (they survive structuredClone and serialize); the view ignores them.
 
 import type { Pos } from './hex';
-import type { Delve, GameEvent, GameState, Monster, RivalCrew } from './types';
+import type { Delve, GameEvent, GameState, HeroInDelve, Monster, Rival, RivalCrew } from './types';
 import type { World } from './world';
 
 export interface MonsterX extends Monster {
@@ -14,9 +14,28 @@ export interface MonsterX extends Monster {
   shoveFrom?: Pos;
   /** Dragon: its next intent (once awake) is breath. */
   breathNext?: boolean;
+  /** Spawn level tier (16.3): 1, 2 or 3. Absent = 1. */
+  tier?: number;
+  /** Patrol: the waypoint index to head for once the planned walk is done. */
+  routeAfter?: number;
+  /** Lost its quarry and is walking back to its post / route. */
+  returning?: boolean;
+}
+
+export interface HeroX extends HeroInDelve {
+  /** Hit by a sister's sleep dart: loses the next move and action (cleared with webbed). */
+  dozing?: boolean;
+}
+
+export interface RivalX extends Rival {
+  /** Has veiled herself already (the Shadowmancer sister veils once, when first spotted). */
+  veiled?: boolean;
+  /** Rounds of the last kit use, to keep intents honest. */
+  armedRound?: number;
 }
 
 export interface CrewX extends RivalCrew {
+  members: RivalX[];
   pickups?: number;
   entered?: boolean;
   /** Rounds in a row a sister couldn't get closer to her goal. */
@@ -24,6 +43,7 @@ export interface CrewX extends RivalCrew {
 }
 
 export interface DelveX extends Delve {
+  heroes: HeroX[];
   monsters: MonsterX[];
   rivals: CrewX | null;
   /** Blasting charges waiting for the end of the player phase. */
