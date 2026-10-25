@@ -27,3 +27,7 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-24** V3.2 a Veil breaks on any attack or push the hero makes (including fireball and gust) or any action of noise 4+; Sleep and the sleep dart are silent and don't break it. Ward reduces monster and Gloam hits only, never falls, fire or breath.
 - **2026-10-24** V3.2 `take` is never silent: an option that can't be done now is returned with a plain-words reason (`ActionOption.blocked`), the contract item is taken first, and the preview names exactly what will be taken.
 - **2026-10-24** V3.2 the Burglar opens chests without spending the action. The spec's "takes and opens chests silently" added nothing to a take that was already free and silent, so the class got a real perk instead.
+- **2026-10-24** Take stairs/lift is hotkey T and wins over Torch's T on that hex (no free letter left; torch is rare while standing on stairs).
+- **2026-10-24** End turn asks once when any hero still has a move or action; a settings checkbox turns it off. Scripts turn it off through `vc.settings.noEndTurnAsk`.
+- **2026-10-24** Interactable hover = ember ring; hazard (pit, trap) = red ring; floor = parchment. Tooltip form is "Thing · what you can do".
+- **2026-10-24** Beacon colours by contract: recover gold, rescue green, slay red (diorama BEACON_COLOR and .beacon-tag CSS).
