@@ -646,6 +646,8 @@ export interface Delve {
   calmSteps?: number;
   /** Crates and barrels smashed, by posKey (the hex is floor now). */
   smashed?: string[];
+  /** V3.7 (spec 20.3): floor blown open next to a pit, by posKey: the hex is a pit now (the column widens). */
+  collapsed?: string[];
   /** Ropes anchored at the pit, by posKey of the edge hex. */
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
@@ -847,7 +849,7 @@ export type GameEvent =
   | { type: 'swing'; by: string; target: string; hits: number; damage: number } // attack of opportunity (spec 20.2)
   | { type: 'feared'; id: string; by: string }
   | { type: 'fuseSet'; at: Pos; rounds: number; by: string }
-  | { type: 'blast'; at: Pos; by: string; broke: Pos[] } // a charge went off; walls it broke
+  | { type: 'blast'; at: Pos; by: string; broke: Pos[]; collapsed?: Pos[]; rubbled?: Pos[] } // a charge went off; walls broken, floor dropped into the pit, floor turned to rubble
   | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
   | { type: 'robbed'; hero: string; by: string; items: Item[] }
   | { type: 'calm'; calm: boolean; why?: string } // spec 20.5: free movement starts or ends ("An orc has seen Pim")

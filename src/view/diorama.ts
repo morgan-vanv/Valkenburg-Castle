@@ -1145,7 +1145,8 @@ export class Diorama {
       v.lieDown(h.status === 'downed');
       v.dead = false;
       v.setOpacity(1);
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId)));
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId), !!hero?.shield));
+      this.setShield(v, !!hero?.shield);
     }
     // V3.7 (20.1): figures turn to their engine facing when it is known (and they aren't mid-animation).
     const turn = (v: UnitView, u: { facing?: number }) => {
@@ -1239,6 +1240,8 @@ export class Diorama {
     }
     // V3.7 (20.3): built walls a blast broke are rubble now: rebuild those levels.
     this.applyBrokenWalls(d.blown);
+    // V3.7 (20.5): smashed crates and barrels are gone.
+    for (const lv of this.levels.values()) lv.setSmashed(new Set(d.smashed ?? []));
     // Braziers.
     this.litBraziers = new Set(d.lit);
     for (const lv of this.levels.values()) {
@@ -1641,6 +1644,7 @@ export class Diorama {
         el.title = `${name}: ${INTENT_WORDS[it.kind]} the marked hexes next turn${it.kind === 'fireball' ? ' (3 Wits slots, 2 per hit, allies too)' : it.kind === 'gust' ? ' (everything pushed a hex outward: pits!)' : ' (monsters and heroes there stuck 2 rounds)'}.`;
         continue;
       }
+      if (it.kind === 'hamstring') el.title = `${name}: shoots ${target || 'a hero'} in the legs next turn: 1 Finesse slot at −20%; a hit roots them 2 rounds (no move, no dash). Break the line of sight or get out of range 5.`;
       if (it.kind === 'mend' || it.kind === 'ward') el.title = `${name}: ${INTENT_WORDS[it.kind]} ${target || 'a friend'} next turn${it.kind === 'mend' ? ' (heals 4)' : ' (1 less damage per hit)'}.`;
       if (it.kind === 'caltrops' || it.kind === 'firecracker' || it.kind === 'blink') el.title = `${name}: ${INTENT_WORDS[it.kind]} the marked hex next turn${it.kind === 'firecracker' ? ' (noise 6: monsters come running)' : it.kind === 'caltrops' ? ' (the first across takes 2 and stops)' : ''}.`;
       if (it.kind === 'flee') {
@@ -1677,7 +1681,7 @@ export class Diorama {
         if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
       } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
       if (to && at.level === this.shownLevel) {
-        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' || it.kind === 'rob' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : it.kind === 'mend' || it.kind === 'ward' ? 0x7fe08a : it.kind === 'blink' ? 0x9a6aff : 0xb08a6a;
+        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' || it.kind === 'rob' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : it.kind === 'mend' || it.kind === 'ward' ? 0x7fe08a : it.kind === 'blink' ? 0x9a6aff : it.kind === 'hamstring' ? 0xd8c080 : 0xb08a6a;
         const g = new THREE.BufferGeometry().setFromPoints([from, to]);
         const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: col, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.85, depthTest: false }));
         line.computeLineDistances();
@@ -2476,6 +2480,46 @@ export class Diorama {
         v.fig.position.y = 0;
         return;
       }
+      case 'propSmashed':
+        await this.playSmash(e);
+        return;
+      case 'rooted': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        const by = this.units.get(e.by);
+        if (by) by.face(v.root.position.x - by.root.position.x, v.root.position.z - by.root.position.z);
+        // Thorny tendrils: a ring of small green spikes rising round the feet.
+        const g = new THREE.Group();
+        const mat = new THREE.MeshBasicMaterial({ color: 0x6aa84a, transparent: true, opacity: 0.9, depthWrite: false });
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          const spike = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.4, 4), mat);
+          spike.position.set(Math.cos(a) * 0.5, 0.2, Math.sin(a) * 0.5);
+          spike.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
+          g.add(spike);
+        }
+        g.position.copy(v.root.position);
+        this.overlay.add(g);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), `Rooted · ${e.rounds}`, 'warn', 1.4);
+        await clock.tween(0.5, (t) => {
+          g.scale.y = Math.min(1, t * 3);
+          mat.opacity = 0.9 * (1 - Math.max(0, t - 0.6) / 0.4);
+        });
+        this.overlay.remove(g);
+        mat.dispose();
+        return;
+      }
+      case 'braced': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), '⛨ Braced', 'info', 1.2);
+        await clock.tween(0.25, (t) => {
+          const k = Math.sin(t * Math.PI);
+          v.fig.scale.set(v.scale * (1 + k * 0.08), v.scale * (1 - k * 0.08), v.scale * (1 + k * 0.08));
+        });
+        v.fig.scale.setScalar(v.scale);
+        return;
+      }
       case 'robbed': {
         const v = this.units.get(e.hero);
         if (!v) return;
@@ -3074,6 +3118,82 @@ export class Diorama {
     this.overlay.remove(ring);
   }
 
+  /** 20.5: a round shield on a hero's back (the forge's), added once and toggled. */
+  private setShield(v: UnitView, on: boolean): void {
+    let sh = v.fig.getObjectByName('shield') as THREE.Mesh | undefined;
+    if (!sh && on) {
+      const g = new THREE.Group();
+      g.name = 'shield';
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.03, 12), new THREE.MeshLambertMaterial({ color: 0x8a5a2a, flatShading: true }));
+      const boss = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshLambertMaterial({ color: 0xb8bcc4, flatShading: true }));
+      rim.rotation.x = Math.PI / 2;
+      boss.position.z = -0.02;
+      g.add(rim, boss);
+      // On the back, below the shoulders (model space: 1.0 tall, +z forward).
+      g.position.set(-0.08, 0.62, -0.17);
+      g.rotation.y = 0.2;
+      v.fig.add(g);
+      sh = g as unknown as THREE.Mesh;
+    }
+    if (sh) sh.visible = on;
+  }
+
+  /** 20.5: a crate or barrel breaks: splinters and dust, the prop gone, the loot (if any) on the floor. */
+  private async playSmash(e: Extract<GameEvent, { type: 'propSmashed' }>): Promise<void> {
+    const lv = this.levels.get(e.at.level);
+    if (lv && this.state?.delve) {
+      const next = new Set(this.state.delve.smashed ?? []);
+      next.add(posKey(e.at));
+      this.state.delve.smashed = [...next];
+      lv.setSmashed(next);
+    }
+    if (e.at.level !== this.shownLevel) return;
+    const by = this.units.get(e.by);
+    const at = this.worldOf(e.at, 0.3);
+    if (by) {
+      by.face(at.x - by.root.position.x, at.z - by.root.position.z);
+      await this.lunge(by, { root: { position: at } } as UnitView);
+    }
+    this.dustPuff(this.worldOf(e.at, 0.1));
+    if (!this.reduceShake) this.rig.addShake(0.08);
+    const wood = new THREE.MeshLambertMaterial({ color: 0x8a5a2a, flatShading: true });
+    const group = new THREE.Group();
+    const bits: { m: THREE.Mesh; v: THREE.Vector3; spin: number }[] = [];
+    for (let i = 0; i < 10; i++) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.05 + Math.random() * 0.08, 0.03, 0.12 + Math.random() * 0.14), wood);
+      m.position.copy(at);
+      const a = Math.random() * Math.PI * 2;
+      bits.push({ m, v: new THREE.Vector3(Math.cos(a) * (1 + Math.random() * 1.5), 2 + Math.random() * 2, Math.sin(a) * (1 + Math.random() * 1.5)), spin: 4 + Math.random() * 6 });
+      group.add(m);
+    }
+    this.overlay.add(group);
+    const floorY = this.worldOf(e.at, 0.04).y;
+    let last = 0;
+    await this.clock.tween(0.55, (t) => {
+      const time = t * 0.55;
+      const dt = time - last;
+      last = time;
+      for (const b of bits) {
+        b.v.y -= 12 * dt;
+        b.m.position.addScaledVector(b.v, dt);
+        if (b.m.position.y < floorY) {
+          b.m.position.y = floorY;
+          b.v.multiplyScalar(0.3);
+        }
+        b.m.rotation.x += b.spin * dt;
+        b.m.rotation.z += b.spin * 0.7 * dt;
+      }
+    });
+    this.overlay.remove(group);
+    wood.dispose();
+    if (e.items.length) {
+      this.floatText(this.worldOf(e.at, 0.9), `+ ${itemsText(e.items)}`, 'gold', 1.6);
+      this.flash(this.worldOf(e.at, 0.5), 0xffd27a, 2);
+      if (this.state?.delve && !this.state.delve.ground.some((g) => samePos(g.at, e.at))) this.state.delve.ground = [...this.state.delve.ground, { at: e.at, items: e.items }];
+      this.refreshLootGlow();
+    } else this.floatText(this.worldOf(e.at, 0.9), 'Nothing inside', 'info', 1.2);
+  }
+
   /** 20.2: Dread's cast: a near-black ring swells from the caster, and a second one closes on the target. */
   private async darkRipple(from: THREE.Vector3 | null, to: THREE.Vector3 | null): Promise<void> {
     if (!from) return;
@@ -3210,6 +3330,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   caltrops: '⁂',
   firecracker: '✺',
   blink: '⟿',
+  hamstring: '➴',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -3243,6 +3364,7 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   caltrops: 'scatters caltrops on',
   firecracker: 'throws a firecracker to',
   blink: 'blinks away to',
+  hamstring: 'shoots the legs of',
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
@@ -3310,16 +3432,17 @@ function pipsHtml(hp: number, max: number, cls: string): string {
   return s + '</span>';
 }
 
-function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, draggedBy?: string): string {
-  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : '';
-  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
+function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, draggedBy?: string, shield = false): string {
+  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : (h.rooted ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted: can't move or dash for ${h.rooted} more round${h.rooted === 1 ? '' : 's'}">rooted · ${h.rooted}</b>` : h.braced ? '<b class="tag-braced" title="Braced: hits do 1 less, enemies roll −15%">⛨ braced</b>' : '';
+  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${shield ? '<span class="tag-shield" title="Shield: ranged hits do 1 less (2 while braced)">◉</span>' : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
 }
 
 function monsterTag(m: Monster): string {
   const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
   const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
   const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
-  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}`;
+  const stuck = (m.stuck ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted or glued: can't move for ${m.stuck} more round${m.stuck === 1 ? '' : 's'}; it can still act">rooted · ${m.stuck}</b>` : '';
+  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}${stuck}`;
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

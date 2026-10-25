@@ -9,11 +9,11 @@ import {
   GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
 } from './data';
-import { say, type Ctx, type HeroX, type MonsterX } from './state';
+import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
   LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
-  releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent,
+  releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent, dropCaptive,
 } from './common';
 import {
   adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
@@ -24,6 +24,7 @@ import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck
 import { blastableWall, chargeCount, fuseAt, isSatchel, setFuse, spendCharge, wallsBrokenBy } from './charges';
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
+import { rivalCaltropsStep, striker } from './crewai';
 import { parleyTargets } from './parley';
 import { fleePlan, forgetHeroes, hasNoticed, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
@@ -62,7 +63,12 @@ export function refreshSight(c: Ctx): void {
     if (cr.temperament === 'cutthroat') say(c, `${cr.name} hold the way ahead. Cutthroats.`);
     else say(c, `${cr.name}. They want ${cr.goal === 'leave' ? 'out' : 'the loot'}.`);
     // The Shadowmancer sister slips into shadow the moment she's seen (spec 16.5): shown as an intent first.
-    for (const r of rivalsOnMap(c)) if (r.cls === 'shadowmancer' && !r.veiled && cr.stance !== 'hired') r.intent = { kind: 'veil', targetId: r.id };
+    // V3.7 (spec 20.4): she veils the crew's striker (the melee member within 3), or herself.
+    for (const r of rivalsOnMap(c)) {
+      if (r.cls !== 'shadowmancer' || r.veiled || cr.stance === 'hired') continue;
+      const s = striker(c);
+      r.intent = { kind: 'veil', targetId: s && s !== r && within(s.at, r.at, SPELL_RANGE) ? s.id : r.id };
+    }
     crewAim(c);
   }
   // Spec 18.5: a waiting cutthroat crew sees a hero within 6 and demands the toll.
@@ -218,6 +224,12 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     lastNoise = stepNoise(c, p, sneak);
     if (lastNoise) makeNoise(c, p, lastNoise, { quiet: true });
     wakeRolls(c, h, p, i === path.length - 1, sneak, lit);
+    // V3.7 (spec 20.4): a crew's caltrops catch heroes too: 2 damage and the walk ends here.
+    if (rivalCaltropsStep(c, h, p)) {
+      c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
+      walked.length = 0;
+      break;
+    }
     const trap = c.d.traps[posKey(p)];
     if (trap) {
       c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
@@ -841,6 +853,15 @@ function sign(n: number): string {
 }
 
 /** A monster's armor against this hit, with the plain-words modifiers (armor, the captain's shield wall). */
+/** V3.7 (spec 20.4): a crew member's armor (class plus tier) and the Hedgewitch's ward, as modifiers. */
+function rivalArmorMods(r: RivalX, mods: string[]): { armor: number; ward: number } {
+  const armor = rivalStats(r).armor;
+  if (armor) mods.push(`Armor −${armor}`);
+  const ward = (r.ward ?? 0) > 0 ? 1 : 0;
+  if (ward) mods.push('Warded −1');
+  return { armor, ward };
+}
+
 function armorMods(c: Ctx, m: MonsterX, mods: string[]): number {
   const base = monsterArmor(c, m) - (shieldWalled(c, m) ? 1 : 0);
   if (base) mods.push(`Armor −${base} dmg per hit`);
@@ -904,8 +925,9 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
       if (adjacent(h.at, f.at) && c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
-      const armor = f.monster ? armorMods(c, f.monster, mods) : 0;
-      const dmg = Math.max(1, cls.weapon.dmg - armor);
+      const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
+      const dmg = Math.max(0, Math.max(1, cls.weapon.dmg - armor) - (rd?.ward ?? 0));
       const outcomes = [];
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? 'Miss' : `${i * dmg + (i === slots ? 1 : 0)} dmg`);
       return base(cls.weapon.stat, slots, p, outcomes, cls.weapon.noise ?? 2, dmg);
@@ -1000,8 +1022,9 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       let p = withLight(def.stats.wits);
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
-      const armor = f.monster ? armorMods(c, f.monster, mods) : 0;
-      const bd = Math.max(1, 2 - armor);
+      const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
+      const bd = Math.max(0, Math.max(1, 2 - armor) - (rd?.ward ?? 0));
       const outcomes = [];
       for (let i = 0; i <= 3; i++) outcomes.push(i === 0 ? 'Miss' : `${i * bd + (i === 3 ? 1 : 0)} dmg`);
       const s = base('wits', 3, p, outcomes, 3, bd);
@@ -1298,6 +1321,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         m.intent = { kind: 'flee', to: f.to };
       } else if (rv) {
         if (c.d.rivals) makeHostile(c);
+        dropCaptive(c, rv, 'is seized by dread'); // spec 20.4: fear frees the dragged hero
         rv.intent = { kind: 'flee', to: fleePlan(c, rv, rivalStats(rv).move).to };
       }
       c.ev.push({ type: 'feared', id: tid, by: heroId });

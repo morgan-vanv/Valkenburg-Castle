@@ -17,3 +17,4 @@ Castle redesign pitch: https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd
 - **Rival crews fleshed out:** parley card with deals (leave, truce, job, sell-swords, fight), neutral prospectors on Level 1 and toll-demanding cutthroats on Level 2. Same proposals doc; waiting on the owner's pick.
 - **Arrows as ammunition (2026-10-25):** bows use purchasable arrows (a quiver item), with specialty arrows as forge upgrades (fire, barbed/hamstring, grapple line, whistling/lure). Owner's second play-test batch.
 - **Tripwire charges (2026-10-25):** the Sapper lays a charge as a trap that enemies set off; a forge upgrade from Gerda.
+- **Collapse ceilings and seal hallways with charges (2026-10-25):** a charge against a hallway's roof or a doorway brings it down, filling hexes with rock that blocks movement and sight (and Dig clears it slowly). Revisit after the owner play-tests the V3.7 Sapper rework.

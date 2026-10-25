@@ -20,7 +20,7 @@ export function fixtureCampaign(): GameState['campaign'] {
     gold: 100,
     stash: [item('i1', 'torch', 'Torch'), item('i2', 'potion', 'Potion'), item('i3', 'rope', 'Rope')],
     roster: [
-      hero('keven', 'Keven', 'heir', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
+      { ...hero('keven', 'Keven', 'heir', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }), shield: true },
       // V3.7: Brann is a Sapper (set-charge flow) and Aldous a Shadowmancer (Dread) in the fixture.
       hero('brann', 'Brann', 'sapper', 11, { might: 70, finesse: 45, wits: 40, nerve: 60 }),
       hero('pim', 'Pim', 'burglar', 7, { might: 40, finesse: 75, wits: 60, nerve: 50 }),
@@ -211,6 +211,8 @@ export function fixtureDelve(castle: CastleDef): GameState {
       lit: [posKey(castle.braziers[0]!)],
       blown: [],
       fuses: [],
+      smashed: [],
+      calmSteps: 0,
       ropes: [],
       liftWorking: false,
       lanternOpen: true,
@@ -229,11 +231,27 @@ export function fixtureDelve(castle: CastleDef): GameState {
 }
 
 /** A stand-in engine with just enough behaviour to click around. */
-export function fixtureEngine(castle: CastleDef): Engine {
+/** V3.7 (20.5): the test castle with a crate and a barrel near the first entrance (it has none of its own). */
+export function withBreakables(castle: CastleDef): CastleDef {
+  const e = castle.entrances[0];
+  const lv = castle.levels.find((l) => l.level === e?.level);
+  if (!e || !lv || Object.values(lv.tiles).some((t) => t.prop === 'crate')) return castle;
+  const at0 = posNeighbors(e)[1] ?? e;
+  const ring = [...posNeighbors(at0).slice(3), ...posNeighbors(posNeighbors(at0)[3] ?? at0)];
+  const spots = ring.filter((p, i) => lv.tiles[hexKey(p)]?.kind === 'floor' && !samePos(p, e) && distance(p, e) > 1 && ring.findIndex((q) => samePos(q, p)) === i).slice(0, 2);
+  if (!spots.length) return castle;
+  const tiles = { ...lv.tiles };
+  spots.forEach((p, i) => (tiles[hexKey(p)] = { ...tiles[hexKey(p)]!, kind: 'prop', prop: i ? 'barrel' : 'crate' }));
+  return { ...castle, levels: castle.levels.map((l) => (l === lv ? { ...l, tiles } : l)) };
+}
+
+export function fixtureEngine(castle0: CastleDef): Engine {
+  const castle = withBreakables(castle0);
   const tile = (p: Pos) => castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)];
   const walk = (s: GameState, p: Pos) => {
     const t = tile(p);
-    if (!t || ['wall', 'cracked', 'pillar', 'pit', 'brazier'].includes(t.kind)) return false;
+    if (!t || ['wall', 'cracked', 'pillar', 'pit', 'brazier', 'tallprop', 'sealed'].includes(t.kind)) return false;
+    if (t.kind === 'prop' && !(s.delve?.smashed ?? []).includes(posKey(p))) return false;
     if (t.kind === 'door' && s.delve?.doors[posKey(p)]?.locked) return false;
     return !s.delve?.monsters.some((m) => samePos(m.at, p));
   };
@@ -384,8 +402,23 @@ export function fixtureEngine(castle: CastleDef): Engine {
     }
     return out;
   };
+  /** V3.7 (20.5): calm when nothing hunts a hero's level, no crew is hostile or demanding, no fuse burns, nobody is downed/held/webbed/rooted. */
+  const calmOf = (s: GameState): { calm: boolean; why?: string } => {
+    const d = s.delve;
+    if (!d) return { calm: false };
+    const levels = new Set(d.heroes.filter((h) => h.status === 'active').map((h) => h.at.level));
+    const hunter = d.monsters.find((m) => m.hp > 0 && m.awareness === 'hunting' && levels.has(m.at.level));
+    if (hunter) return { calm: false, why: `${hunter.name} hunts the party.` };
+    if (d.rivals && (d.rivals.stance === 'hostile' || d.rivals.stance === 'demanding')) return { calm: false, why: `${d.rivals.name} ${d.rivals.stance === 'hostile' ? 'are fighting you' : 'demand a toll'}.` };
+    if (d.monsters.some((m) => m.kind === 'gloam')) return { calm: false, why: 'The dark is awake.' };
+    if (d.fuses?.length) return { calm: false, why: 'A fuse is burning.' };
+    const bad = d.heroes.find((h) => h.status === 'downed' || h.grabbedBy || h.webbed || (h.rooted ?? 0) > 0);
+    if (bad) return { calm: false, why: `${s.campaign.roster.find((x) => x.id === bad.heroId)?.name ?? bad.heroId} is ${bad.status === 'downed' ? 'down' : bad.grabbedBy ? 'held' : bad.webbed ? 'webbed' : 'rooted'}.` };
+    return { calm: true };
+  };
   const eng: Engine = {
     castle: () => castle,
+    calm: (s) => calmOf(s),
     newGame: (seed) => {
       const c = fixtureCampaign();
       pinStories(c);
@@ -493,6 +526,16 @@ export function fixtureEngine(castle: CastleDef): Engine {
         else r.armorTier++;
         return { state: s, events: [] };
       }
+      if (cmd.type === 'buyShield') {
+        if (!s.campaign.village.smith) return { state, events: [], error: 'The forge is cold. Rescue Gerda the smith (Level 2, the forge).' };
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId);
+        if (!r) return { state, events: [], error: 'No such hero.' };
+        if (r.shield) return { state, events: [], error: `${r.name} already carries a shield.` };
+        if (s.campaign.gold < 50) return { state, events: [], error: 'Not enough gold.' };
+        s.campaign.gold -= 50;
+        r.shield = true;
+        return { state: s, events: [] };
+      }
       if (cmd.type === 'buyAle') {
         const a = alesFor(s).find((x) => x.kind === cmd.ale);
         const r = s.campaign.roster.find((x) => x.id === cmd.heroId);
@@ -561,6 +604,59 @@ export function fixtureEngine(castle: CastleDef): Engine {
         s.campaign.gold -= o.price;
         s.campaign.stash.push(item(`b${Date.now()}`, o.kind, o.name));
         return { state: s, events: [] };
+      }
+      if (cmd.type === 'move' && s.delve && calmOf(state).calm && cmd.path.length > 0) {
+        // V3.7 (20.5): free move: the whole path, the castle turning every 4 steps, followers in file.
+        const d = s.delve;
+        const h = d.heroes.find((x) => x.heroId === cmd.heroId)!;
+        const ev: ApplyResult['events'] = [];
+        const followers = cmd.follow ? d.heroes.filter((o) => o !== h && o.status === 'active' && o.at.level === h.at.level && distance(o.at, h.at) <= 3) : [];
+        const trail: Pos[] = [h.at];
+        let walked: Pos[] = [];
+        let stopped: string | undefined;
+        const risks = risksFor(state, cmd.heroId, cmd.path, !!cmd.sneak);
+        for (const step of cmd.path) {
+          h.at = step;
+          trail.push(step);
+          walked.push(step);
+          d.calmSteps = (d.calmSteps ?? 0) + 1;
+          const woke = risks.wake.find((w) => samePos(w.at, step) && w.chance >= 50);
+          if (woke) {
+            const m = d.monsters.find((x) => x.id === woke.id);
+            if (m) {
+              m.awareness = 'hunting';
+              m.facing = facingToward(m.at, h.at);
+              stopped = `${m.name} wakes and has seen ${s.campaign.roster.find((x) => x.id === h.heroId)?.name ?? h.heroId}.`;
+              ev.push({ type: 'moved', id: cmd.heroId, path: walked }, { type: 'woke', id: m.id, by: cmd.heroId }, { type: 'noticed', by: m.id, hero: cmd.heroId });
+              walked = [];
+              break;
+            }
+          }
+          if (d.calmSteps % 4 === 0) {
+            ev.push({ type: 'moved', id: cmd.heroId, path: walked });
+            walked = [];
+            followers.forEach((f, i) => {
+              const spot = trail[Math.max(0, trail.length - 2 - i)]!;
+              if (!samePos(f.at, spot)) ev.push({ type: 'moved', id: f.heroId, path: [spot] });
+              f.at = spot;
+            });
+            d.round++;
+            d.light = Math.max(0, d.light - 1);
+            ev.push({ type: 'phase', phase: 'world', round: d.round - 1 }, { type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
+          }
+        }
+        if (walked.length) ev.push({ type: 'moved', id: cmd.heroId, path: walked });
+        followers.forEach((f, i) => {
+          const spot = trail[Math.max(0, trail.length - 2 - i)]!;
+          if (!samePos(f.at, spot)) ev.push({ type: 'moved', id: f.heroId, path: [spot] });
+          f.at = spot;
+        });
+        for (const k of lit(s)) if (!d.explored.includes(k)) d.explored.push(k);
+        if (stopped) {
+          for (const o of d.heroes) o.moved = o.acted = o.dashed = false;
+          ev.push({ type: 'calm', calm: false, why: stopped });
+        }
+        return { state: s, events: ev };
       }
       if (cmd.type === 'move' && s.delve) {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
@@ -670,11 +766,17 @@ export function fixtureEngine(castle: CastleDef): Engine {
         d.fuses = left;
         d.round++;
         d.light = Math.max(0, d.light - 1);
+        const wasCalm = calmOf(state).calm;
         for (const h of d.heroes) {
-          h.moved = h.acted = false;
+          h.moved = h.acted = h.dashed = false;
           if (h.nightEyes) h.nightEyes--;
+          if (h.rooted) h.rooted--;
+          delete h.braced;
         }
+        for (const m of d.monsters) if (m.stuck) m.stuck--;
         ev.push({ type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
+        const nowCalm = calmOf(s);
+        if (nowCalm.calm !== wasCalm) ev.push({ type: 'calm', calm: nowCalm.calm, why: nowCalm.why });
         return { state: s, events: ev };
       }
       if (cmd.type === 'act' && s.delve) {
@@ -710,6 +812,42 @@ export function fixtureEngine(castle: CastleDef): Engine {
           if (cmd.action === 'throwCharge') ev.push({ type: 'thrown', by: h.heroId, kind: 'charge', from: h.at, to: cmd.target.at });
           ev.push({ type: 'fuseSet', at: cmd.target.at, rounds, by: h.heroId }, { type: 'say', text: `${s.campaign.roster.find((x) => x.id === h.heroId)?.name ?? h.heroId} sets a charge: fuse ${rounds}.` });
           return { state: s, events: ev };
+        }
+        // V3.7 (20.5): Brace, Hamstring, Night thorn, Briar, Smash a crate.
+        if (cmd.action === 'brace') {
+          h.braced = true;
+          return { state: s, events: [{ type: 'braced', id: h.heroId }] };
+        }
+        if ((cmd.action === 'hamstring' || cmd.action === 'briar' || cmd.action === 'nightthorn') && cmd.target.id) {
+          const m = s.delve.monsters.find((x) => x.id === cmd.target.id) ?? s.delve.rivals?.members.find((x) => x.id === cmd.target.id);
+          if (!m) return { state, events: [], error: 'Nothing there.' };
+          if (cmd.action !== 'hamstring') h.mana = Math.max(0, h.mana - 1);
+          const ev: ApplyResult['events'] = [
+            { type: 'cast', by: h.heroId, spell: cmd.action, targetId: m.id },
+            { type: 'roll', who: h.heroId, what: cmd.action === 'hamstring' ? 'Hamstring' : cmd.action === 'briar' ? 'Briar' : 'Night thorn', roll: { slots: cmd.action === 'hamstring' ? 1 : 2, chance: cmd.action === 'hamstring' ? 55 : 70, focus: cmd.focus, results: cmd.action === 'hamstring' ? [true] : [true, false], hits: 1, perfect: cmd.action === 'hamstring' } },
+          ];
+          if (cmd.action !== 'hamstring') {
+            m.hp -= 1;
+            ev.push({ type: 'hit', attacker: h.heroId, target: m.id, damage: 1, crit: false });
+          }
+          if (cmd.action !== 'nightthorn') {
+            const rounds = cmd.action === 'hamstring' ? 2 : 1;
+            if ('awareness' in m) m.stuck = rounds;
+            ev.push({ type: 'rooted', id: m.id, by: h.heroId, rounds });
+          }
+          if (m.hp <= 0) {
+            s.delve.monsters = s.delve.monsters.filter((x) => x !== m);
+            ev.push({ type: 'monsterDied', id: m.id });
+          }
+          return { state: s, events: ev };
+        }
+        if (cmd.action === 'smashProp' && cmd.target.at) {
+          const k = posKey(cmd.target.at);
+          s.delve.smashed = [...(s.delve.smashed ?? []), k];
+          const roll = (cmd.target.at.q * 7 + cmd.target.at.r * 13 + s.delve.round) % 10;
+          const items: Item[] = roll < 6 ? [item(`sm${k}`, 'gold', 'Gold', 3 + (roll * 3) % 10)] : roll < 8 ? [item(`sm${k}`, roll === 6 ? 'torch' : 'potion', roll === 6 ? 'Torch' : 'Potion')] : [];
+          if (items.length) s.delve.ground.push({ at: cmd.target.at, items });
+          return { state: s, events: [{ type: 'propSmashed', at: cmd.target.at, by: h.heroId, items }, { type: 'noise', at: cmd.target.at, radius: 4 }, { type: 'say', text: `${s.campaign.roster.find((x) => x.id === h.heroId)?.name ?? h.heroId} smashes the ${tile(cmd.target.at)?.prop ?? 'crate'}.` }] };
         }
         // 20.2: Dread: 2 Wits slots; the fixture always lands one.
         if (cmd.action === 'dread' && cmd.target.id) {
@@ -806,6 +944,14 @@ export function fixtureEngine(castle: CastleDef): Engine {
       const adj = d.monsters.filter((m) => distance(m.at, h.at) === 1 && m.at.level === h.at.level);
       if (adj.length) out.push({ action: 'attack', label: 'Attack', targets: adj.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy' });
       const cls = state.campaign.roster.find((x) => x.id === heroId)?.cls;
+      // V3.7 (20.5)
+      if ((cls === 'heir' || cls === 'sellsword' || cls === 'sapper') && !h.braced) out.push({ action: 'brace', label: 'Brace', targets: [{ id: h.heroId }], rolls: false, pick: 'self' });
+      const inRange = (n: number) => [...d.monsters.filter((m) => m.kind !== 'dragon' && m.kind !== 'gloam'), ...(d.rivals?.members ?? [])].filter((m) => m.hp > 0 && distance(m.at, h.at) <= n && m.at.level === h.at.level);
+      if (cls === 'ranger' && inRange(5).length) out.push({ action: 'hamstring', label: 'Hamstring', targets: inRange(5).map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy' });
+      if (cls === 'shadowmancer' && inRange(5).length) out.push({ action: 'nightthorn', label: 'Night thorn', targets: inRange(5).map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy', mana: 1, blocked: h.mana < 1 ? 'No mana left.' : undefined });
+      if (cls === 'hedgewitch' && inRange(4).length) out.push({ action: 'briar', label: 'Briar', targets: inRange(4).map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy', mana: 1, blocked: h.mana < 1 ? 'No mana left.' : undefined });
+      const crates = posNeighbors(h.at).filter((p) => { const t = tile(p); return t?.kind === 'prop' && (t.prop === 'crate' || t.prop === 'barrel') && !(d.smashed ?? []).includes(posKey(p)); });
+      if (crates.length) out.push({ action: 'smashProp', label: 'Smash', targets: crates.map((at) => ({ at })), rolls: false, pick: 'hex' });
       if (cls === 'shadowmancer') {
         const far = [...d.monsters.filter((m) => m.kind !== 'dragon' && m.kind !== 'gloam'), ...(d.rivals?.members ?? [])].filter((m) => m.hp > 0 && distance(m.at, h.at) <= 5 && m.at.level === h.at.level);
         if (far.length) out.push({ action: 'dread', label: 'Dread', targets: far.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy', mana: 1, blocked: h.mana < 1 ? 'No mana left.' : undefined });
@@ -842,6 +988,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
       void _s;
       void _t;
       const fb = action === 'firebolt';
+      if (action === 'hamstring') return { ok: true, stat: 'finesse', slots: 1, chance: 55, modifiers: ['Legs −20%'], maxFocus: 3, outcomes: ['Miss', 'Rooted 2 rounds'], noise: 1, light: 0 };
+      if (action === 'nightthorn' || action === 'briar') return { ok: true, stat: 'wits', slots: 2, chance: 70, modifiers: ['Dim −10%'], maxFocus: 3, outcomes: ['Miss', action === 'briar' ? '1 dmg, rooted 1 round' : '1 dmg (ignores armor)', action === 'briar' ? '2 dmg, rooted 2 rounds' : '2 dmg (ignores armor)'], noise: action === 'briar' ? 1 : 0, light: 0 };
       if (action === 'dread' || action === 'sleep')
         return { ok: true, stat: 'wits', slots: 2, chance: 70, modifiers: ['Dim −10%'], maxFocus: 3, outcomes: ['Miss', action === 'dread' ? 'Feared 2 turns' : 'Asleep', action === 'dread' ? 'Feared 2 turns' : 'Asleep'], noise: 0, light: 0 };
       return {

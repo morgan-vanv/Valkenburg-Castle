@@ -38,7 +38,9 @@ export const castle: CastleDef = {
   rivalEntrances: [L1(44, 21), L1(1, 14)],
   // V3.5 (spec 18.5): where a cutthroat crew waits on Level 2, at choke points: the west and east
   // ends of the main bridge, the arcade end of the north bridge, and the winch room by the lift.
-  rivalPosts: [L2(14, 16), L2(35, 16), L2(22, 7), L2(22, 26)],
+  // V3.7 (spec 20.4): the Wake waits on Level 3, at the lift base or where the Bone Pile narrows
+  // toward the Lair.
+  rivalPosts: [L2(14, 16), L2(35, 16), L2(22, 7), L2(22, 26), L3(20, 26), L3(31, 17)],
   // V3.3 (spec 16.1): spawns are awake unless `asleep: true`. Sleepers: Level 1 the rats and
   // the spider; Level 2 only the barracks squad; Level 3 only the Dragon.
   spawns: [
@@ -147,6 +149,13 @@ export const castle: CastleDef = {
     { id: 'l1-story-kitchens', kind: 'rescue', at: L1(9, 14), where: 'the kitchens', story: 'innkeeper' },
     { id: 'l2-story-forge', kind: 'rescue', at: L2(38, 26), where: 'the forge', story: 'smith' },
     { id: 'l2-story-barracks', kind: 'recover', at: L2(28, 3), where: 'the barracks', story: 'copper' },
+    // V3.7 (spec 20.4): crew hideouts, used only by "Bring back <name>" contracts for that crew's
+    // captives: the Sisters camp in the officers' quarters (behind the locked door), the Ferrymen
+    // by the Drain's water, the Choir in the east tunnels, the Wake in the Bone Pile's north-east corner.
+    { id: 'lantern-sisters-hideout', kind: 'rescue', at: L2(10, 5), where: "the officers' quarters", hideout: 'lantern-sisters' },
+    { id: 'ferrymen-hideout', kind: 'rescue', at: L3(9, 18), where: 'the Drain', hideout: 'ferrymen' },
+    { id: 'gallows-choir-hideout', kind: 'rescue', at: L3(33, 21), where: 'the Tunnels', hideout: 'gallows-choir' },
+    { id: 'the-wake-hideout', kind: 'rescue', at: L3(30, 9), where: 'the Bone Pile', hideout: 'the-wake' },
   ],
   lights: [...b1.lights, ...b2.lights, ...b3.lights],
 };

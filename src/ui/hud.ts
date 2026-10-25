@@ -12,6 +12,7 @@ import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, breakableWall, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords, wallsBlastWouldBreak } from '../view/stealth';
+import { longPath, stepsToTurn } from '../view/pathing';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
@@ -37,9 +38,9 @@ interface PreviewState {
 }
 
 const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'nightsight']);
-const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust', 'dread']);
-/** Class abilities that aren't spells (the Abilities group of the bar). V3.7: the Sapper's charges live here. */
-const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'throwCharge']);
+const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust', 'dread', 'nightthorn', 'briar']);
+/** Class abilities that aren't spells (the Abilities group of the bar). V3.7: the Sapper's charges, Brace and Hamstring live here. */
+const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'throwCharge', 'brace', 'hamstring']);
 
 const SPEEDS: { label: string; value: number }[] = [
   { label: '½×', value: 0.5 },
@@ -66,6 +67,10 @@ export class Hud {
   readonly root: HTMLElement;
   selectedId: string | null = null;
   sneak = false;
+  /** V3.7 (20.5): free move brings the party along (default on). */
+  follow = true;
+  /** The long path under the mouse while calm. */
+  private hoverLong: Pos[] | null = null;
   private state: GameState | null = null;
   private vis: Visibility | null = null;
   private busy = false;
@@ -297,6 +302,25 @@ export class Hud {
     return !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
   }
 
+  /** V3.7 (20.5): engine.calm, tolerant of an engine without it (then Delve.calm, else not calm). */
+  private calmState(): { calm: boolean; why?: string } {
+    const s = this.state;
+    if (!s?.delve) return { calm: false };
+    try {
+      if (typeof this.engine.calm === 'function') return this.engine.calm(s);
+    } catch {
+      /* fall through */
+    }
+    return { calm: !!s.delve.calm };
+  }
+
+  /** Free move is on: calm, player phase, a selected active hero who can still walk. */
+  private freeMove(): boolean {
+    const d = this.state?.delve;
+    const sel = this.selected();
+    return !!d && d.phase === 'player' && !!sel && sel.status === 'active' && !sel.grabbedBy && !sel.webbed && !(sel.rooted ?? 0) && this.calmState().calm;
+  }
+
   /** Recompute reach and options and redraw panels and highlights. */
   refresh(): void {
     const s = this.state;
@@ -351,10 +375,12 @@ export class Hud {
       return;
     }
     const dash = this.reach.some((r) => r.dash);
-    this.dio.highlight(
-      this.reach.map((r) => r.to),
-      dash ? 'dash' : this.sneak ? 'sneak' : 'walk',
-    );
+    // 20.5: while calm the move is free: no budget rings, the hovered path shows the route and its risks.
+    if (!this.freeMove())
+      this.dio.highlight(
+        this.reach.map((r) => r.to),
+        dash ? 'dash' : this.sneak ? 'sneak' : 'walk',
+      );
     // Standing on stairs or a working lift: the hex pulses (15.7).
     const link = this.linkHere();
     this.dio.showLinkPulse(link ? this.selected()!.at : null);
@@ -459,12 +485,20 @@ export class Hud {
     // Path preview.
     const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
     const sel = this.selected();
+    this.hoverLong = null;
+    const free = this.freeMove();
     if (r && sel) {
       this.dio.showPath(r.path);
       const noise = this.engine.moveNoise(this.state, sel.heroId, this.sneak);
       this.dio.showRipple(r.to, noise);
       // V3.7 (20.1, 20.2): what the move risks, on the monsters.
       this.dio.showRisks(r.risks ?? null);
+    } else if (free && at && !unitId && !this.pending && sel && this.vis) {
+      // 20.5: free move: a long path to any explored hex.
+      this.hoverLong = longPath(this.engine.castle(), this.state, this.vis, sel.heroId, at);
+      this.dio.showPath(this.hoverLong);
+      this.dio.showRipple(null, 0);
+      this.dio.showRisks(null);
     } else if (!this.pending) {
       this.dio.showPath(null);
       this.dio.showRipple(null, 0);
@@ -513,9 +547,20 @@ export class Hud {
       else if (act) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
       this.dio.setHoverStyle('plain');
     } else if (at) {
-      if (r) {
+      if (r && free) {
+        const n = r.path.length;
+        lines.push(`<b>Free move</b> · ${this.sneak ? 'sneak' : 'walk'} ${n} hex${n === 1 ? '' : 'es'} · ${this.calmWords(n)}`);
+        lines.push(...this.riskLines(r.risks));
+      } else if (r) {
         lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${this.sneak ? '' : ' per hex'}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
         lines.push(...this.riskLines(r.risks));
+      } else if (this.hoverLong) {
+        const n = this.hoverLong.length;
+        lines.push(`<b>Free move</b> · ${this.sneak ? 'sneak' : 'walk'} ${n} hexes · ${this.calmWords(n)}${this.follow ? ' · the party follows' : ''}`);
+        lines.push('<span class="dim">Stops if anything notices you, a sleeper wakes or a trap goes off.</span>');
+      } else if (free && !this.pending && !sel?.moved) {
+        const why = this.longPathWhy(at);
+        if (why) lines.push(`<span class="dim">${why}</span>`);
       }
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
@@ -546,7 +591,7 @@ export class Hud {
   private monsterLines(m: Monster): string[] {
     const it = this.intents[m.id];
     const out = [`<b>${m.name}</b> <span class="dim">${m.awareness === 'patrol' ? 'on patrol' : m.awareness}</span>`];
-    if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}${m.stuck ? ` · <span class="neg">glued ${m.stuck}</span>` : ''}`);
+    if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}${m.stuck ? ` · <span class="neg">rooted ${m.stuck}: can't move, can act</span>` : ''}`);
     const note = MONSTER_NOTE[m.kind];
     if (note) out.push(`<span class="dim">${note}</span>`);
     const aw = AWARENESS_TEXT[m.awareness];
@@ -562,6 +607,26 @@ export class Hud {
     if ((m.feared ?? 0) > 0) out.push(`<span class="fear-word">Feared · ${m.feared} turn${m.feared === 1 ? '' : 's'}: flees from ${this.nameOf(m.fearOf ?? '')}, attacks nobody, and your heroes swing free as it leaves them.</span>`);
     if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
     return out;
+  }
+
+  /** 20.5: "the castle turns in 2 steps (3 turns on the way)". */
+  private calmWords(steps: number): string {
+    const d = this.state?.delve;
+    const per = V37.calmSteps;
+    const left = stepsToTurn(d?.calmSteps, per);
+    const turns = Math.floor(((d?.calmSteps ?? 0) % per + steps) / per);
+    return `the castle turns in ${left} step${left === 1 ? '' : 's'}${turns ? ` (${turns} turn${turns === 1 ? '' : 's'} on the way)` : ''}`;
+  }
+
+  /** Why a free move can't end on this hex, in a few words (or nothing worth saying). */
+  private longPathWhy(at: Pos): string {
+    const d = this.state?.delve;
+    const k = posKey(at);
+    if (!d || !this.vis || !(this.vis.explored.has(k) || this.vis.visible.has(k))) return '';
+    if (d.monsters.some((m) => samePos(m.at, at))) return '';
+    const t = this.engine.castle().levels.find((l) => l.level === at.level)?.tiles[hexKey(at)];
+    if (t?.kind === 'door' && !d.doors[k]?.open) return 'Closed door: open it first.';
+    return '';
   }
 
   /** V3.7 (20.1, 20.2): the risks of a move, one line each, for the hover tip and the swing confirm. */
@@ -617,6 +682,8 @@ export class Hud {
       else act('Brazier', `Light: +${BRAZIER_LIGHT} lantern light, lit for good`);
     } else if (t.kind === 'prop' || t.kind === 'tallprop') {
       if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
+      else if ((t.prop === 'crate' || t.prop === 'barrel' || (!t.prop && t.kind === 'prop')) && (d.smashed ?? []).includes(k)) parts.push(`Splinters <span class="dim">a smashed ${t.prop ?? 'crate'}</span>`);
+      else if (t.prop === 'crate' || t.prop === 'barrel' || (!t.prop && t.kind === 'prop')) act(t.prop === 'barrel' ? 'Barrel' : 'Crate', 'Smash: loud, may hold something');
       else parts.push(`${propName(t.prop)} <span class="dim">${t.kind === 'tallprop' ? 'blocks sight' : 'cover'}</span>`);
     } else if (t.kind === 'lift' || t.kind === 'stairs') {
       const l = linkAt(castle, at);
@@ -673,6 +740,7 @@ export class Hud {
     if (['door', 'brazier', 'lift', 'stairs', 'exit', 'cracked', 'rubble'].includes(t.kind)) return 'interact';
     if (t.kind === 'wall' && this.options.some((o) => o.action === 'setCharge' && o.targets.some((x) => x.at && samePos(x.at, at)))) return 'interact';
     if (t.prop === 'winch') return 'interact';
+    if ((t.prop === 'crate' || t.prop === 'barrel') && !(d.smashed ?? []).includes(k)) return 'interact';
     if (d.chests.some((c) => samePos(c.at, at) && !c.opened)) return 'interact';
     if (d.ground.some((g) => samePos(g.at, at) && g.items.length)) return 'interact';
     return 'plain';
@@ -688,7 +756,7 @@ export class Hud {
     const crew = this.state?.delve?.rivals;
     const isRival = !!unitId && !!crew?.members.some((m) => m.id === unitId);
     // 18.6: clicking a crew member that isn't fighting you opens the deal card, not an attack.
-    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley', 'free', 'revive'] : ['attack', 'firebolt', 'free', 'revive', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'winch', 'leave', 'dig', 'jump'];
+    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley', 'free', 'revive'] : ['attack', 'firebolt', 'free', 'revive', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'smashProp', 'winch', 'leave', 'dig', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -739,6 +807,14 @@ export class Hud {
         this.moveAlong(r);
         return;
       }
+      // 20.5: free move to any explored hex.
+      if (this.freeMove() && sel && this.vis) {
+        const path = this.hoverLong && samePos(this.hoverLong[this.hoverLong.length - 1]!, at) ? this.hoverLong : longPath(this.engine.castle(), s, this.vis, sel.heroId, at);
+        if (path) {
+          void this.host.send({ type: 'move', heroId: sel.heroId, path, sneak: this.sneak, follow: this.follow });
+          return;
+        }
+      }
       if (best) this.choose(best.option, best.target);
     }
   }
@@ -748,7 +824,8 @@ export class Hud {
     const sel = this.selected();
     if (!sel) return;
     const swings = r.risks?.swings ?? [];
-    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak });
+    const free = this.freeMove();
+    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak, follow: free ? this.follow : undefined });
     if (!swings.length) return go();
     const name = this.heroDef(sel.heroId)?.name ?? sel.heroId;
     const list = swings.map((sw) => `${this.nameOf(sw.id)} gets a free swing: ${sw.damage[0]}–${sw.damage[1]}`).join('; ');
@@ -1343,12 +1420,12 @@ export class Hud {
     if (hd.status === 'out') return h('span', { class: 'hc-fate good', title: 'Out of the castle: safe, with everything in the pack.' }, 'Out');
     if (hd.status === 'captured') return h('span', { class: 'hc-fate bad', title: 'Taken: a crew dragged them out of the castle. Back at camp a "Bring back" contract goes up on the notice post.' }, 'Taken');
     const held = !!hd.grabbedBy;
-    const mv = held ? 'Held: can\'t move' : hd.webbed ? 'Webbed: can\'t move' : hd.moved ? 'Moved this round' : 'Move ready';
+    const mv = held ? 'Held: can\'t move' : hd.webbed ? 'Webbed: can\'t move' : (hd.rooted ?? 0) > 0 ? 'Rooted: can\'t move' : hd.moved ? 'Moved this round' : 'Move ready';
     const ac = hd.dashed ? 'Dashed: the action went on a second move' : hd.acted ? 'Acted this round' : 'Action ready';
     return h(
       'span',
       { class: 'hc-turn', title: `${mv} · ${ac}\nEach round a hero may move once and act once, in either order. A hero who has moved can spend the action on a second move (a dash).` },
-      h('i', { class: `tp ${hd.moved || held || hd.webbed ? 'used' : ''}` }, 'Move'),
+      h('i', { class: `tp ${hd.moved || held || hd.webbed || (hd.rooted ?? 0) > 0 ? 'used' : ''}` }, 'Move'),
       h('i', { class: `tp ${hd.acted ? 'used' : ''}` }, 'Act'),
     );
   }
@@ -1375,6 +1452,10 @@ export class Hud {
     if (dragger) chip('bad dragged', '⇜ Dragged', `${dragger.name} is dragging ${name} toward the way out, 3 hexes a round. If they reach it, ${name} is taken.\nKill, down or fear ${dragger.name} to free ${name} (they stay downed where dropped).`);
     if (risk) chip('edge', `Edge · ${risk.damage}`, `On the edge: a shove would drop ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
     if (hd.webbed) chip('bad', 'Webbed', 'Stuck in a web: can\'t move this turn, can still act. It clears next round.');
+    // V3.7 (20.5): rooted, braced, shield.
+    if ((hd.rooted ?? 0) > 0) chip('bad rooted', `❃ Rooted · ${hd.rooted}`, `Rooted (a hamstring or briar): can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
+    if (hd.braced) chip('braced', '⛨ Braced', `Braced until the next player phase: every hit on ${name} does 1 less (after armor), enemies roll −${V37.bracePenalty}% against them, free swings keep their full slots.${this.heroDef(hd.heroId)?.shield ? ' The shield counts double: ranged hits do 2 less.' : ''}`);
+    if (this.heroDef(hd.heroId)?.shield && hd.status === 'active') chip('shield', '◉ Shield', `A shield from the forge: arrows, knockback shots, firebolts and darts do 1 less to ${name} (2 less while braced). Not the Dragon's breath.`);
     if (hd.veil > 0) chip('veil', `Veiled · ${hd.veil}`, `Veiled for ${hd.veil} more round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}.\nAttacking or making noise ${VEIL_BREAK_NOISE}+ breaks it.`);
     if (hd.ward > 0) chip('ward', `Warded · ${hd.ward}`, `Warded for ${hd.ward} more round${hd.ward === 1 ? '' : 's'}: takes 1 less damage per hit.`);
     if (hd.overwatch) chip('ow', 'Overwatch', `On overwatch: in the castle's turn, shoots the first enemy that moves or acts in sight within ${OVERWATCH_RANGE}.`);
@@ -1427,6 +1508,20 @@ export class Hud {
       h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}` }, 'Sneak ', h('kbd', null, 'S')),
     );
     const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
+    // 20.5: free move while calm: the state line and the Follow toggle.
+    if (sel && this.calmState().calm && d.phase === 'player') {
+      const left = stepsToTurn(d.calmSteps, V37.calmSteps);
+      move.classList.add('bar-group-calm');
+      move.append(
+        h('div', { class: 'bar-calm', title: `Free move · ${MOVE_HELP.calm}` }, h('span', { class: 'calm-glyph' }, '☽'), h('span', null, h('b', null, 'Free move'), ` · the castle turns in ${left} step${left === 1 ? '' : 's'}`)),
+        h(
+          'button',
+          { class: `act act-follow ${this.follow ? 'on' : ''}`, onclick: () => this.toggleFollow(), disabled: this.busy, 'data-action': 'follow', 'aria-pressed': this.follow ? 'true' : 'false', title: `Follow · ${this.follow ? 'on' : 'off'}\n${MOVE_HELP.follow}` },
+          h('span', { class: 'act-glyph' }, this.follow ? '⚑' : '⚐'),
+          h('span', { class: 'act-label' }, this.follow ? 'Party follows' : 'Walk alone'),
+        ),
+      );
+    }
     if (link) {
       usedKeys.add('t');
       const l = link.info;
@@ -1530,13 +1625,13 @@ export class Hud {
       groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
     }
     if (!opts.some((o) => o.action !== 'shutter' && o.action !== 'leave') && !link && !exit?.option && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
-    // End turn: how many heroes still have a move or an action.
-    const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
+    // End turn: how many heroes did nothing at all this round (20.5: a hero who moved and kept the action is ready, not waiting).
+    const waiting = d.heroes.filter((x) => x.status === 'active' && !x.moved && !x.acted).length;
     const end = h(
       'button',
-      { class: `btn btn-primary bar-end ${waiting === 0 ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy, title: `End turn (E): the castle takes its turn: the lantern burns 1 if open, monsters do what their marks say.\n${waiting ? `${waiting} hero${waiting === 1 ? '' : 'es'} still ha${waiting === 1 ? 's' : 've'} a move or an action.` : 'Everyone is spent.'}` },
+      { class: `btn btn-primary bar-end ${waiting === 0 ? 'pulse' : ''}`, onclick: () => this.endTurn(), disabled: this.busy, title: `End turn (E): the castle takes its turn: the lantern burns 1 if open, monsters do what their marks say.\n${waiting ? `${waiting} hero${waiting === 1 ? '' : 'es'} ha${waiting === 1 ? 's' : 've'} done nothing this round.` : 'Nobody is idle.'}` },
       h('span', null, 'End turn ', h('kbd', null, 'E')),
-      h('span', { class: `bar-end-note ${waiting ? 'waiting' : ''}` }, waiting ? `${waiting} still waiting` : 'all spent'),
+      h('span', { class: `bar-end-note ${waiting ? 'waiting' : ''}` }, waiting ? `${waiting} still waiting` : 'nobody idle'),
     );
     this.bar.append(left, ...groupEls, end);
     this.hint.replaceChildren(...this.contextHint());
@@ -2066,6 +2161,25 @@ export class Hud {
 
   // ------------------------------------------------------------ input
 
+  private toggleFollow(): void {
+    this.follow = !this.follow;
+    sfx.play('click', { pitch: this.follow ? 1.2 : 0.8 });
+    this.renderBar();
+  }
+
+  /** 20.5: free move ends: "Combat!" with the reason; begins: a quiet note. */
+  async calmBanner(calm: boolean, why: string | undefined, wait: (s: number) => Promise<void>): Promise<void> {
+    if (calm) {
+      this.toast(`Calm again: free move. ${why ?? ''}`.trim());
+      return;
+    }
+    clear(this.bannerEl);
+    this.bannerEl.className = 'hud-banner world combat';
+    this.bannerEl.append(h('div', { class: 'bn-title' }, 'Combat!'), h('div', { class: 'bn-sub' }, why ?? 'Something has noticed the party. Your move.'));
+    await wait(0.7);
+    this.bannerEl.classList.add('hidden');
+  }
+
   private setSneak(on: boolean): void {
     this.sneak = on;
     this.refresh();
@@ -2075,13 +2189,12 @@ export class Hud {
     if (this.busy) return;
     this.cancel();
     const d = this.state?.delve;
-    const waiting = d ? d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)) : [];
-    // 15.7: ask once when anyone still has a move or an action.
+    // 20.5: ask once, only for heroes who did nothing at all (neither moved nor acted).
+    const waiting = d ? d.heroes.filter((x) => x.status === 'active' && !x.moved && !x.acted) : [];
     if (waiting.length && !this.host.settings.noEndTurnAsk) {
       const names = waiting.map((x) => this.heroDef(x.heroId)?.name ?? x.heroId);
-      const what = waiting.map((x) => (!x.moved && !x.acted ? 'move and action' : !x.moved ? 'move' : 'action'));
-      const list = names.map((n, i) => `${n} (${what[i]})`).join(', ');
-      this.confirm(`${list} still ha${waiting.length === 1 ? 's' : 've'} something left. End the turn anyway?`, 'End turn', () => void this.host.send({ type: 'endTurn' }), { title: `${waiting.length} still waiting`, cancel: 'Keep playing' });
+      const list = names.join(', ');
+      this.confirm(`${list} ${waiting.length === 1 ? 'has' : 'have'} done nothing this round. End the turn anyway?`, 'End turn', () => void this.host.send({ type: 'endTurn' }), { title: `${waiting.length} idle`, cancel: 'Keep playing' });
       return;
     }
     void this.host.send({ type: 'endTurn' });
@@ -2258,6 +2371,8 @@ export function intentText(s: GameState, it: Intent): string {
       return 'throws a firecracker: noise 6 where it lands';
     case 'blink':
       return 'blinks away';
+    case 'hamstring':
+      return `shoots ${name(it.targetId)} in the legs (1 Finesse slot at −20%: a hit roots them 2 rounds)`;
     default:
       return 'waits';
   }

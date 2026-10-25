@@ -6,9 +6,9 @@
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
 import {
-  BLAST_INNER_DMG, BLAST_OUTER_DMG, BOW_RANGE, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
+  BLAST_INNER_DMG, BLAST_OUTER_DMG, BOW_RANGE, CALTROPS_DMG, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
   KNOCKBACK_RANGE, PYRO_BOLT_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_POTION_HEAL, SAPPER_CHARGE_RANGE,
-  SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE, SLEEP_RANGE, SPELL_RANGE, THROW_RANGE, VEIL_ROUNDS, WARD_ROUNDS, BLINK_RANGE,
+  SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE, SPELL_RANGE, THROW_RANGE, VEIL_ROUNDS, WARD_ROUNDS, BLINK_RANGE,
 } from './data';
 import { chance } from './rng';
 import { say, type Ctx, type HeroX, type RivalX } from './state';
@@ -610,12 +610,10 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       for (const id of ids) {
         const h = hd(c, id);
         if (h) {
-          const armor = t ? 0 : 0;
-          void armor;
+          // The heroes' fireball rule (spec 15.3): 2 per hit less armor (min 1), less the ward.
           const def = c.s.campaign.roster.find((x) => x.id === id)!;
-          const a = CLASSES[def.cls].armor + def.armorTier + (h.ward > 0 ? 1 : 0);
-          hurtHero(c, h, rr.hits * Math.max(0, Math.max(1, 2 - (CLASSES[def.cls].armor + def.armorTier)) - (h.ward > 0 ? 1 : 0)) + (rr.perfect ? 1 : 0), r.id, rr.perfect);
-          void a;
+          const per = Math.max(0, Math.max(1, 2 - (CLASSES[def.cls].armor + def.armorTier)) - (h.ward > 0 ? 1 : 0));
+          hurtHero(c, h, rr.hits * per + (rr.perfect ? 1 : 0), r.id, rr.perfect);
         } else {
           const m = c.d.monsters.find((x) => x.id === id);
           const armor = m ? monsterArmor(c, m) : 0;
@@ -646,6 +644,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       spendKit(r, 'caltrops');
       c.ev.push({ type: 'thrown', by: r.id, kind: 'caltrops', from: { ...r.at }, to: { ...it.to } });
       c.d.caltrops.push(posKey(it.to));
+      (c.d.rivalCaltrops ??= []).push(posKey(it.to));
       say(c, `${r.name} scatters caltrops.`);
       return true;
     }
@@ -700,6 +699,21 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
   return false;
 }
 
+/**
+ * A hero steps on caltrops a crew laid (the heroes' own rule, spec 15.4, turned on them): 2 damage
+ * and the walk ends here. The party's own caltrops never catch them. Returns true when it bit.
+ */
+export function rivalCaltropsStep(c: Ctx, h: HeroX, p: Pos): boolean {
+  const k = posKey(p);
+  if (!c.d.rivalCaltrops?.includes(k)) return false;
+  c.d.rivalCaltrops = c.d.rivalCaltrops.filter((x) => x !== k);
+  c.d.caltrops = c.d.caltrops.filter((x) => x !== k);
+  c.ev.push({ type: 'caltrops', id: h.heroId, at: { ...p } });
+  say(c, `${heroName(c, h.heroId)} treads on caltrops.`);
+  hurtHero(c, h, CALTROPS_DMG, 'caltrops');
+  return true;
+}
+
 // ---------------------------------------------------------------- captives (spec 20.4)
 
 /** A downed hero nobody is dragging who hasn't been robbed yet, within `n` of the member. */
@@ -726,15 +740,6 @@ function dragExit(c: Ctx, r: RivalX): Pos | undefined {
   return exitsBy(c, r.at)[0];
 }
 
-/** The dragger lets go (killed, downed or feared): the hero stays downed where they lie. */
-export function freeCaptive(c: Ctx, r: RivalX, why: string): void {
-  const id = r.dragging;
-  if (!id) return;
-  r.dragging = undefined;
-  const h = hd(c, id);
-  if (h && h.status === 'downed') say(c, `${r.name} ${why}. ${heroName(c, id)} is dropped where they lie.`);
-}
-
 /** The dragger's plan: three hexes toward the exit, the hero behind. */
 function dragPlan(c: Ctx, r: RivalX): Plan {
   const ex = dragExit(c, r);
@@ -756,13 +761,10 @@ export function dragAct(c: Ctx, r: RivalX): void {
     const stopped = walk(c, r.id, r, plan.path);
     if (!rivalsOnMap(c).includes(r)) return; // a free swing killed it: dropped
     const walked = plan.path.findIndex((p) => samePos(p, r.at));
+    // The hero trails one hex behind (the view hauls the figure along on the member's `moved`).
     const trail = walked <= 0 ? start : plan.path[walked - 1]!;
-    if (!samePos(trail, h.at)) {
-      h.at = { ...trail };
-      c.ev.push({ type: 'dragged', id: h.heroId, from: { ...start }, to: { ...trail } });
-    }
-    void stopped;
-    say(c, `${r.name} hauls ${heroName(c, h.heroId)} toward the way out.`);
+    if (!samePos(trail, h.at)) h.at = { ...trail };
+    if (!stopped) say(c, `${r.name} hauls ${heroName(c, h.heroId)} toward the way out.`);
   }
   if (kindAt(c.w, c.d, r.at) === 'exit') capture(c, r, h);
 }
@@ -893,4 +895,3 @@ export function hiredUse(c: Ctx, r: RivalX, it: Intent): boolean {
   return false;
 }
 
-void SLEEP_RANGE;

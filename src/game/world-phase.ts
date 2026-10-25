@@ -668,6 +668,8 @@ export function worldPhase(c: Ctx): void {
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
+    // V3.7 (spec 20.4): a crew member dragging them keeps them breathing (they're worth more alive).
+    if (d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut)) continue;
     h.bleed -= 1;
     if (h.bleed <= 0) killHero(c, h);
   }

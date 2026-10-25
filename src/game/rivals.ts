@@ -1,50 +1,66 @@
-// Section 10, 16.5 and 18.5: rival crews. The Lantern Sisters (prospectors) race the
-// party for loot on Level 1 and turn hostile when attacked or blocked; cutthroat crews
-// (the Ferrymen, the Gallows Choir) wait at a choke point on Level 2 and demand a toll.
-// Each member has a class and kit shown as intents the round before, like monsters.
-// Paid crews (spec 18.6) leave, keep a truce, do a job, or fight beside the party.
+// Section 10, 16.5, 18.5 and 20.4: rival crews. The Lantern Sisters (prospectors) race the
+// party for loot on Level 1 and turn hostile when attacked or blocked; cutthroat crews (the
+// Ferrymen, the Gallows Choir on Level 2; the Wake on Level 3) wait at a choke point and demand
+// a toll. V3.7 (spec 20.4): members are built like heroes of their class at the crew's level,
+// with tiers and a pack, and a hostile crew fights like a squad (crewai.ts). Paid crews (spec 18.6)
+// leave, keep a truce, do a job, or fight beside the party.
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { Intent, Item, RivalClass } from './types';
+import type { Intent, Item } from './types';
 import {
-  BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_PURSE, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
-  HIRE_KEEP, KNOCKBACK_RANGE, PROSPECTOR_CHANCE, PYRO_BOLT_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS,
-  PYRO_BOLTS, RIVAL_CLASSES, BLAST_INNER_DMG, BLAST_OUTER_DMG, SAPPER_CHARGE_RANGE, SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE,
-  SISTER_DARTS, SISTER_SMOKE, SISTERS_LEAVE_LIGHT, THROW_RANGE, VEIL_ROUNDS, WINCH_NOISE, type RivalStats,
+  BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CLASSES, CREW_PURSE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
+  HIRE_KEEP, PROSPECTOR_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_MOVE,
+  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, type CrewDef, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
-import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type HeroX, type RivalX } from './state';
+import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type RivalX } from './state';
 import {
   chestLoot, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
   rivalsOnMap, roll, valueOf,
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
-import { approach, attackSpots, blocked, exitsBy, hitRange, overwatchCheck, strike, targets, walk, type Target } from './ai';
-import { push, pushOutcome } from './falls';
-import { blastArea, fuseAt, setFuse } from './charges';
-import { pusherFor, smokeOut } from './delve';
+import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, walk, type Target } from './ai';
 import { faceToward, fleePlan, isSneaking, wouldNotice } from './stealth';
 import { litSet } from './world';
+import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
 
 // ---------------------------------------------------------------- making a crew
 
-/** A member's fighting numbers: its class, plus the Level 2 tier for cutthroats (spec 18.5). */
+/**
+ * A member's fighting numbers. V3.7 (spec 20.4): built like a hero of its class at the crew's level:
+ * the class weapon's slots and damage, its stat +5 per level above 1 (when it's the class's main
+ * stat) +10 per weapon tier, armor plus the armor tier, move 4. Members from V3.5 saves (no `level`)
+ * keep the old table with the Level 2 tier.
+ */
 export function rivalStats(r: RivalX): RivalStats {
+  if (r.level !== undefined) {
+    const def = CLASSES[r.cls];
+    const w = def.weapon;
+    const chance = def.stats[w.stat] + (w.stat === def.main ? 5 * (r.level - 1) : 0) + 10 * (r.weaponTier ?? 0);
+    return { hp: def.hp + 2 * (r.level - 1), slots: w.slots, chance, dmg: w.dmg, move: RIVAL_MOVE, armor: def.armor + (r.armorTier ?? 0), range: w.range ?? 1 };
+  }
   const base = RIVAL_CLASSES[r.cls];
   return (r.tier ?? 1) > 1 ? { ...base, chance: base.chance + CUTTHROAT_TIER.chance } : base;
 }
 
-function member(id: string, crew: CrewX['crew'], name: string, cls: RivalClass, at: Pos, tier: number): RivalX {
-  const hp = RIVAL_CLASSES[cls].hp + (tier > 1 ? CUTTHROAT_TIER.hp : 0);
-  return {
-    id, crew, name, at: { ...at }, hp, maxHp: hp, loot: [], goneOut: false, cls,
-    ...(tier > 1 ? { tier } : {}),
-    ...(cls === 'burglar' ? { darts: SISTER_DARTS } : {}),
-    ...(cls === 'shadowmancer' ? { smoke: SISTER_SMOKE, veil: 0 } : {}),
-    ...(cls === 'ranger' ? { overwatch: false } : {}),
-    ...(cls === 'sapper' ? { charges: 1 } : {}),
-    ...(cls === 'pyromancer' ? { charges: PYRO_BOLTS } : {}),
+/** The main stat a member rolls with (for the parley card and tests). */
+export function rivalLevelStat(r: RivalX): number {
+  return rivalStats(r).chance;
+}
+
+/** Spec 20.4: a member built as a hero of its class at the crew's level, with the crew's tiers and its pack. */
+function member(s: GameStateX, id: string, def: CrewDef, m: CrewDef['members'][number], at: Pos): RivalX {
+  const cls = CLASSES[m.cls];
+  const hp = cls.hp + 2 * (def.level - 1);
+  const r: RivalX = {
+    id, crew: def.id, name: m.name, at: { ...at }, hp, maxHp: hp, loot: [], goneOut: false, cls: m.cls,
+    level: def.level, weaponTier: def.weaponTier, armorTier: def.armorTier,
+    pack: m.pack.map((k) => makeItem({ s }, k)),
+    ...(m.cls === 'ranger' ? { overwatch: false } : {}),
+    ...(cls.mana ? { charges: cls.mana } : {}),
+    ...(m.cls === 'shadowmancer' ? { veil: 0 } : {}),
   };
+  return r;
 }
 
 /** Free standable hexes around `from` (from first), n of them, avoiding anyone already there. */
@@ -64,10 +80,33 @@ function spotsAround(w: World, d: DelveX, from: Pos, n: number, taken: (p: Pos) 
   return out;
 }
 
+/** The purse each member carries (spec 20.4: 30 gold at level 2-3, 50 at level 4), dropped when killed. */
+function purse(s: GameStateX, def: CrewDef): Item {
+  return makeItem({ s }, 'gold', CREW_PURSE[def.level] ?? CREW_PURSE[3]!);
+}
+
+/** A cutthroat crew from `def` at `post` (members on the free hexes around it), or null if there's no room. */
+function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
+  const spots = spotsAround(c.w, c.d, post, def.members.length, (p) => !!occupant(c, p));
+  if (spots.length < def.members.length) return null;
+  const crew: CrewX = {
+    crew: def.id, name: def.name, temperament: 'cutthroat', stance: 'waiting', goal: 'loot', spotted: false, entersRound: 1,
+    members: def.members.map((m, i) => {
+      const r = member(c.s, `r${i + 1}`, def, m, spots[i]!);
+      r.post = { ...spots[i]! };
+      return r;
+    }),
+    pickups: 0, entered: true,
+  };
+  for (const r of crew.members) r.loot.push(purse(c.s, def));
+  return crew;
+}
+
 /**
- * Spec 18.5: which crew this delve draws. A Level 1 contract: the Lantern Sisters, 50%, entering
- * from a rival entrance on round 3..6. Level 2 or 3: a cutthroat crew from the pool, 60%,
- * waiting from round 1 at a post on Level 2. Never both.
+ * Spec 18.5 and 20.4: which crew this delve draws. A Level 1 contract: the Lantern Sisters, 50%,
+ * entering from a rival entrance on round 3..6. Level 2: a cutthroat crew from the pool, 60%,
+ * waiting from round 1 at a post on Level 2. Level 3: the Wake, 60%, at a post on Level 3 (the
+ * pool on Level 2 when the castle has no Level 3 posts). Never two crews.
  */
 export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number): CrewX | null {
   const c: Ctx = { w, s, d, ev: [] };
@@ -78,28 +117,19 @@ export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number): Cre
     return {
       crew: def.id, name: def.name, temperament: 'prospector', stance: 'neutral', goal: 'loot', spotted: false,
       entersRound: int(s, 3, 6),
-      members: def.members.map((m, i) => member(`r${i + 1}`, def.id, m.name, m.cls, at, 1)),
+      members: def.members.map((m, i) => member(s, `r${i + 1}`, def, m, at)),
       pickups: 0, entered: false,
     };
   }
   const posts = w.castle.rivalPosts ?? [];
-  if (!posts.length || random(s) >= CUTTHROAT_CHANCE) return null;
-  const def = CREWS[pick(s, CUTTHROAT_POOL)];
-  const post = pick(s, posts);
-  const spots = spotsAround(w, d, post, def.members.length, (p) => !!occupant(c, p));
-  if (spots.length < def.members.length) return null;
-  const crew: CrewX = {
-    crew: def.id, name: def.name, temperament: 'cutthroat', stance: 'waiting', goal: 'loot', spotted: false, entersRound: 1,
-    members: def.members.map((m, i) => {
-      const r = member(`r${i + 1}`, def.id, m.name, m.cls, spots[i]!, 2);
-      r.post = { ...spots[i]! };
-      return r;
-    }),
-    pickups: 0, entered: true,
-  };
-  // Each cutthroat carries a purse (dropped when killed).
-  for (const r of crew.members) r.loot.push(makeItem({ s }, 'gold', CUTTHROAT_PURSE));
-  return crew;
+  const l3 = posts.filter((p) => p.level === 3);
+  if (level >= 3 && l3.length) {
+    if (random(s) >= WAKE_CHANCE) return null;
+    return postCrew(c, CREWS['the-wake'], pick(s, l3));
+  }
+  const l2 = posts.filter((p) => p.level === 2);
+  if (!l2.length || random(s) >= CUTTHROAT_CHANCE) return null;
+  return postCrew(c, CREWS[pick(s, CUTTHROAT_POOL)], pick(s, l2));
 }
 
 /** A crew of `id` standing on `spots` (for tests and fixtures): cutthroats waiting with posts and purses. */
@@ -109,13 +139,13 @@ export function buildCrew(s: GameStateX, id: CrewX['crew'], spots: Pos[]): CrewX
   const crew: CrewX = {
     crew: def.id, name: def.name, temperament: def.temperament, stance: cut ? 'waiting' : 'neutral', goal: 'loot', spotted: false, entersRound: 1,
     members: def.members.map((m, i) => {
-      const r = member(`r${i + 1}`, def.id, m.name, m.cls, spots[i]!, cut ? 2 : 1);
-      if (cut) r.post = { ...spots[i]! };
+      const r = member(s, `r${i + 1}`, def, m, spots[i] ?? spots[0]!);
+      if (cut) r.post = { ...r.at };
       return r;
     }),
     pickups: 0, entered: true,
   };
-  if (cut) for (const r of crew.members) r.loot.push(makeItem({ s }, 'gold', CUTTHROAT_PURSE));
+  if (cut) for (const r of crew.members) r.loot.push(purse(s, def));
   return crew;
 }
 
@@ -176,13 +206,13 @@ function bestLoot(c: Ctx, r: RivalX): (LootGoal & { reach: number }) | null {
 // ---------------------------------------------------------------- perception
 
 /** Heroes a member can see: same level, in line of sight (crews carry their own lanterns). */
-function heroesInSight(c: Ctx, r: RivalX, n: number): Target[] {
+export function heroesInSight(c: Ctx, r: RivalX, n: number): Target[] {
   return targets(c)
     .filter((t) => t.hero && within(t.at, r.at, n) && los(c.w, c.d, r.at, t.at))
     .sort((a, b) => distance(a.at, r.at) - distance(b.at, r.at) || (a.id < b.id ? -1 : 1));
 }
 
-function nearestHero(c: Ctx, r: RivalX): Target | undefined {
+export function nearestHero(c: Ctx, r: RivalX): Target | undefined {
   const ts = targets(c).filter((t) => t.hero);
   const field = distField(c.w, c.d, [r.at], { stairs: true });
   ts.sort((a, b) => (field.get(posKey(a.at)) ?? 999) - (field.get(posKey(b.at)) ?? 999) || (a.id < b.id ? -1 : 1));
@@ -265,187 +295,7 @@ function exitAim(c: Ctx, r: RivalX): RivalCrewAim | undefined {
 }
 type RivalCrewAim = NonNullable<CrewX['aim']>;
 
-// ---------------------------------------------------------------- the kit (spec 16.5, 18.5)
-
-/** Where a melee member ends up to strike `t` this round: here if adjacent, else the end of its approach. */
-function strikeFrom(c: Ctx, r: RivalX, t: Target): Pos | null {
-  if (within(r.at, t.at, 1)) return r.at;
-  const path = approach(c, r.id, r.at, attackSpots(c, t.at, r.id), rivalStats(r).move, true) ?? [];
-  const end = path[path.length - 1];
-  return end && within(end, t.at, 1) ? end : null;
-}
-
-function noCrewWithin(c: Ctx, p: Pos, n: number): boolean {
-  return !rivalsOnMap(c).some((m) => within(m.at, p, n));
-}
-
-/** The kit intent a member would use now, if any (hostile only, but for the veil). */
-function kitIntent(c: Ctx, r: RivalX): Intent | null {
-  const cr = c.d.rivals!;
-  if (r.intent?.kind === 'veil' && !r.veiled) return r.intent;
-  if (cr.stance !== 'hostile') return null;
-  switch (r.cls) {
-    case 'ranger': {
-      const kb = heroesInSight(c, r, KNOCKBACK_RANGE).find((t) => {
-        const o = pushOutcome(c, pusherFor(r.at, t.at), t.at, t.id);
-        return o.kind === 'fall' && !!o.fall;
-      });
-      if (kb) {
-        const o = pushOutcome(c, pusherFor(r.at, kb.at), kb.at, kb.id);
-        return { kind: 'shove', targetId: kb.id, to: o.dest, damage: [0, o.fall?.damage ?? 0] };
-      }
-      if (heroesInSight(c, r, BOW_RANGE).length) return null; // a shot
-      // No hero in reach this round (not even after walking): wait with an arrow nocked.
-      const t = nearestHero(c, r);
-      if (t) {
-        const path = approach(c, r.id, r.at, shootingSpots(c, r, t), rivalStats(r).move, true) ?? [];
-        const end = path[path.length - 1];
-        if (end && within(end, t.at, BOW_RANGE) && los(c.w, c.d, end, t.at)) return null;
-      }
-      return { kind: 'overwatch', targetId: r.id };
-    }
-    case 'shadowmancer': {
-      if ((r.smoke ?? 0) > 0 && cr.members.some((m) => m.hp > 0 && !m.goneOut && m.hp * 2 < m.maxHp)) {
-        const t = heroesInSight(c, r, THROW_RANGE.smoke)[0];
-        if (t) return { kind: 'smoke', targetId: t.id, to: { ...t.at } };
-      }
-      return null;
-    }
-    case 'burglar': {
-      if ((r.darts ?? 0) > 0) {
-        const t = heroesInSight(c, r, THROW_RANGE.dart)[0];
-        if (t) return { kind: 'dart', targetId: t.id };
-      }
-      return null;
-    }
-    case 'sellsword': {
-      // Like the orc: shove a hero standing at an unrailed edge over it.
-      const t = nearestHero(c, r);
-      if (!t) return null;
-      const from = strikeFrom(c, r, t);
-      if (!from) return null;
-      const o = pushOutcome(c, from, t.at, t.id);
-      if (o.kind !== 'fall' || !o.fall) return null;
-      r.shoveFrom = { ...from };
-      return { kind: 'shove', targetId: t.id, to: o.dest, damage: [0, o.fall.damage] };
-    }
-    case 'sapper': {
-      // V3.7 (spec 20.3): a fused charge (fuse 1) thrown onto the party's path, with the heroes' blast rules.
-      if ((r.charges ?? 0) <= 0) return null;
-      if (targets(c).some((t) => t.hero && within(t.at, r.at, 1))) return null; // in their face: the hammer
-      const t = heroesInSight(c, r, SAPPER_CHARGE_RANGE).find((x) => distance(x.at, r.at) >= 2 && noCrewWithin(c, x.at, 1) && !fuseAt(c.d, x.at));
-      if (!t) return null;
-      const hexes = blastArea(c.w, t.at);
-      return { kind: 'fuse', targetId: t.id, to: { ...t.at }, hexes, damage: [BLAST_OUTER_DMG, BLAST_INNER_DMG] };
-    }
-    case 'pyromancer': {
-      if ((r.charges ?? 0) <= 0) return null;
-      const t = heroesInSight(c, r, PYRO_BOLT_RANGE)[0];
-      if (!t) return null;
-      return { kind: 'firebolt', targetId: t.id, damage: hitRange(PYRO_BOLT_SLOTS, PYRO_BOLT_DMG, t.armor) };
-    }
-  }
-  return null;
-}
-
-/** Carry out a kit intent. Returns true if it used the member's turn. */
-function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
-  const cr = c.d.rivals!;
-  const st = rivalStats(r);
-  if (it.kind === 'veil') {
-    r.veil = VEIL_ROUNDS;
-    r.veiled = true;
-    c.ev.push({ type: 'cast', by: r.id, spell: 'veil', targetId: r.id });
-    say(c, `${r.name} melts into the shadows.`);
-    return true;
-  }
-  if (cr.stance !== 'hostile') return false;
-  const t = targets(c).find((x) => x.id === it.targetId);
-  switch (it.kind) {
-    case 'overwatch':
-      r.overwatch = true;
-      c.ev.push({ type: 'cast', by: r.id, spell: 'overwatch' });
-      say(c, `${r.name} nocks an arrow and waits.`);
-      return true;
-    case 'shove': {
-      if (!t?.hero) return false;
-      if (r.cls === 'sellsword') {
-        const from = r.shoveFrom ?? r.at;
-        r.shoveFrom = undefined;
-        if (!samePos(from, r.at)) {
-          if (occupant(c, from)) return false;
-          const path = approach(c, r.id, r.at, [from], st.move, true) ?? [];
-          walk(c, r.id, r, path);
-        }
-        if (!within(r.at, t.at, 1) || pushOutcome(c, r.at, t.at, t.id).kind !== 'fall') return false;
-        say(c, `${r.name} lunges to shove ${heroName(c, t.id)} over the edge.`);
-        if (chance(c.s, SELLSWORD_SHOVE_CHANCE)) push(c, t.id, r.at, r.id);
-        else {
-          c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
-          say(c, `${heroName(c, t.id)} keeps their footing.`);
-        }
-        return true;
-      }
-      if (!within(t.at, r.at, KNOCKBACK_RANGE) || !los(c.w, c.d, r.at, t.at)) return false;
-      say(c, `${r.name} aims to knock ${heroName(c, t.id)} off the edge.`);
-      const roll2 = roll(c, r.id, 'Knockback shot', 2, st.chance);
-      if (roll2.hits < 2) {
-        c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
-        return true;
-      }
-      c.ev.push({ type: 'cast', by: r.id, spell: 'knockback', targetId: t.id, at: { ...t.at } });
-      push(c, t.id, pusherFor(r.at, t.at), null);
-      return true;
-    }
-    case 'smoke': {
-      if ((r.smoke ?? 0) <= 0 || !t?.hero || !within(t.at, r.at, THROW_RANGE.smoke)) return false;
-      r.smoke = (r.smoke ?? 1) - 1;
-      c.ev.push({ type: 'thrown', by: r.id, kind: 'smoke', from: { ...r.at }, to: { ...t.at } });
-      const hexes = smokeOut(c, t.at);
-      c.ev.push({ type: 'cast', by: r.id, spell: 'smoke', at: { ...t.at }, hexes });
-      say(c, `${r.name} drops a smoke bomb at ${heroName(c, t.id)}'s feet.`);
-      return true;
-    }
-    case 'dart': {
-      if ((r.darts ?? 0) <= 0 || !t?.hero || !within(t.at, r.at, THROW_RANGE.dart) || !los(c.w, c.d, r.at, t.at)) return false;
-      r.darts = (r.darts ?? 1) - 1;
-      c.ev.push({ type: 'thrown', by: r.id, kind: 'dart', from: { ...r.at }, to: { ...t.at } });
-      const rr = roll(c, r.id, 'Sleep dart', 1, SISTER_DART_CHANCE);
-      c.ev.push({ type: 'cast', by: r.id, spell: 'dart', targetId: t.id, at: { ...t.at } });
-      if (rr.hits) {
-        const h = t.hero as HeroX;
-        h.dozing = true;
-        h.webbed = true;
-        c.ev.push({ type: 'hit', attacker: r.id, target: t.id, damage: 0, crit: false });
-        say(c, `${heroName(c, t.id)} slumps, drugged. Out for a turn.`);
-      } else {
-        c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
-      }
-      return true;
-    }
-    case 'fuse': {
-      // V3.7 (spec 20.3): the charge lands where the intent showed and burns a fuse of 1: it goes off at the end of the next world phase.
-      if ((r.charges ?? 0) <= 0 || !it.to || fuseAt(c.d, it.to)) return false;
-      r.charges = (r.charges ?? 1) - 1;
-      c.ev.push({ type: 'thrown', by: r.id, kind: 'charge', from: { ...r.at }, to: { ...it.to } });
-      setFuse(c, it.to, 1, r.id);
-      say(c, `${r.name} lobs a charge. The fuse is lit.`);
-      return true;
-    }
-    case 'firebolt': {
-      if ((r.charges ?? 0) <= 0 || !t?.hero || !within(t.at, r.at, PYRO_BOLT_RANGE) || !los(c.w, c.d, r.at, t.at)) return false;
-      r.charges = (r.charges ?? 1) - 1;
-      c.ev.push({ type: 'cast', by: r.id, spell: 'firebolt', targetId: t.id, at: { ...t.at } });
-      say(c, `${r.name} hurls a firebolt at ${heroName(c, t.id)}.`);
-      strike(c, r.id, t.id, PYRO_BOLT_SLOTS, PYRO_BOLT_CHANCE + (st.chance - RIVAL_CLASSES[r.cls].chance), PYRO_BOLT_DMG, 'Firebolt');
-      makeNoise(c, r.at, PYRO_BOLT_NOISE);
-      return true;
-    }
-  }
-  return false;
-}
-
-const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt'];
+// ---------------------------------------------------------------- the kit (spec 16.5, 18.5, 20.4: crewai.ts)
 
 /**
  * A hero moved or acted (spec 16.5): a hostile Ranger on overwatch who sees them
@@ -470,7 +320,7 @@ export function rivalOverwatchFire(c: Ctx, heroId: string): void {
 // ---------------------------------------------------------------- intents
 
 /** Hexes within `reach` of `t` with a line to them (a Ranger shoots from there). */
-function shootingSpots(c: Ctx, r: RivalX, t: { at: Pos }, reach = BOW_RANGE): Pos[] {
+export function shootingSpots(c: Ctx, r: RivalX, t: { at: Pos }, reach = BOW_RANGE): Pos[] {
   const out: Pos[] = [];
   for (let q = -reach; q <= reach; q++) {
     for (let rr = -reach; rr <= reach; rr++) {
@@ -505,6 +355,9 @@ function keepSpots(c: Ctx, r: RivalX): Pos[] {
 /** A hired member's plan: hit a monster in reach, else close in on one near the hirer, else keep up. */
 function hiredPlan(c: Ctx, r: RivalX): { intent: Intent; path: Pos[] } {
   const st = rivalStats(r);
+  // Spec 20.4: hired members use their packs for the party.
+  const kit = hiredKit(c, r);
+  if (kit) return { intent: kit, path: [] };
   const now = monstersInReach(c, r, r.at)[0];
   if (now) return { intent: { kind: 'attack', targetId: now.id, to: { ...r.at } }, path: [] };
   const cr = c.d.rivals!;
@@ -544,21 +397,8 @@ export function planRival(c: Ctx, r: RivalX): Intent {
   const cr = c.d.rivals!;
   const st = rivalStats(r);
   if ((r.feared ?? 0) > 0) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
-  const kit = kitIntent(c, r);
-  if (kit) return kit;
-  if (cr.stance === 'hostile') {
-    const t = nearestHero(c, r);
-    if (!t) return { kind: 'wait' };
-    const reach = st.range;
-    if (within(t.at, r.at, reach) && (reach === 1 || los(c.w, c.d, r.at, t.at))) {
-      return { kind: 'attack', targetId: t.id, to: { ...r.at }, damage: hitRange(st.slots, st.dmg, t.armor) };
-    }
-    const spots = reach > 1 ? shootingSpots(c, r, t) : attackSpots(c, t.at, r.id);
-    const path = approach(c, r.id, r.at, spots, st.move, true) ?? [];
-    const end = path[path.length - 1];
-    if (end && within(end, t.at, reach)) return { kind: 'attack', targetId: t.id, to: end, damage: hitRange(st.slots, st.dmg, t.armor) };
-    return end ? { kind: 'move', to: end, targetId: t.id } : { kind: 'wait' };
-  }
+  if (r.intent?.kind === 'veil' && !r.veiled && cr.stance !== 'hostile') return r.intent;
+  if (cr.stance === 'hostile') return hostilePlan(c, r).intent;
   if (cr.stance === 'hired') return hiredPlan(c, r).intent;
   if (cr.stance === 'demanding') {
     if (r !== rivalsOnMap(c)[0]) return { kind: 'wait' };
@@ -598,6 +438,7 @@ export function planRival(c: Ctx, r: RivalX): Intent {
 export function computeRivalIntents(c: Ctx): void {
   const cr = c.d.rivals;
   if (!cr || !cr.entered) return;
+  cr.target = undefined; // spec 20.4: one target a round, picked fresh (crewai.currentTarget)
   for (const r of rivalsOnMap(c)) r.intent = planRival(c, r);
   crewAim(c);
 }
@@ -618,24 +459,6 @@ function leaveAct(c: Ctx, r: RivalX): void {
   if (samePos(r.at, ex)) goOut(c, r);
 }
 
-function hostileAct(c: Ctx, r: RivalX): void {
-  const st = rivalStats(r);
-  const t = nearestHero(c, r);
-  if (!t) return;
-  if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
-  const reach = st.range;
-  const inRange = () => within(t.at, r.at, reach) && (reach === 1 || los(c.w, c.d, r.at, t.at));
-  if (!inRange()) {
-    const spots = reach > 1 ? shootingSpots(c, r, t) : attackSpots(c, t.at, r.id);
-    const path = approach(c, r.id, r.at, spots, st.move, true) ?? [];
-    walk(c, r.id, r, path);
-  }
-  if (inRange() && t.hero?.status === 'active') {
-    faceToward(r, t.at);
-    strike(c, r.id, t.id, st.slots, st.chance, st.dmg, r.cls === 'ranger' ? 'Shot' : 'Attack');
-  }
-}
-
 /** V3.7 (spec 20.2): a feared member runs from the caster with its whole move and does nothing else. */
 function fleeAct(c: Ctx, r: RivalX): void {
   const f = fleePlan(c, r, rivalStats(r).move);
@@ -648,11 +471,11 @@ function hitMonster(c: Ctx, r: RivalX, id: string): void {
   const m = c.d.monsters.find((x) => x.id === id);
   if (!m) return;
   const st = rivalStats(r);
-  const bolt = r.cls === 'pyromancer' && (r.charges ?? 0) > 0 && distance(m.at, r.at) <= PYRO_BOLT_RANGE;
+  const bolt = r.cls === 'pyromancer' && manaOf(r) > 0 && distance(m.at, r.at) <= PYRO_BOLT_RANGE && los(c.w, c.d, r.at, m.at);
   const slots = bolt ? PYRO_BOLT_SLOTS : st.slots;
   const dmg = bolt ? PYRO_BOLT_DMG : st.dmg;
   if (bolt) r.charges = (r.charges ?? 1) - 1;
-  const rr = roll(c, r.id, bolt ? 'Firebolt' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, bolt ? PYRO_BOLT_CHANCE : st.chance);
+  const rr = roll(c, r.id, bolt ? 'Firebolt' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, bolt ? spellChance(r) : st.chance);
   makeNoise(c, r.at, bolt ? PYRO_BOLT_NOISE : 2);
   if (!rr.hits) {
     c.ev.push({ type: 'miss', attacker: r.id, target: m.id });
@@ -664,6 +487,9 @@ function hitMonster(c: Ctx, r: RivalX, id: string): void {
 function hiredAct(c: Ctx, r: RivalX): void {
   if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
   const plan = hiredPlan(c, r);
+  if (plan.intent.kind === 'potion' || plan.intent.kind === 'mend') {
+    if (hiredUse(c, r, plan.intent)) return;
+  }
   walk(c, r.id, r, plan.path);
   if (plan.intent.kind === 'attack') {
     const ms = monstersInReach(c, r, r.at);
@@ -808,26 +634,27 @@ export function rivalsAct(c: Ctx): void {
   }
   if (cr.temperament === 'prospector' && (cr.stance === 'neutral' || cr.stance === 'truce') && cr.goal !== 'leave'
     && ((cr.pickups ?? 0) >= 3 || c.d.light <= SISTERS_LEAVE_LIGHT)) cr.goal = 'leave';
-  // Veils from earlier rounds fade (the one cast this phase lasts its full two rounds).
-  for (const r of cr.members) if ((r.veil ?? 0) > 0) r.veil! -= 1;
+  // Veils and wards from earlier rounds fade (the one cast this phase lasts its full two rounds).
+  for (const r of cr.members) {
+    if ((r.veil ?? 0) > 0) r.veil! -= 1;
+    if ((r.ward ?? 0) > 0) r.ward! -= 1;
+  }
   let jobDone = false;
   for (const r of rivalsOnMap(c)) {
-    r.overwatch = false; // an unfired overwatch lapses
     if ((r.feared ?? 0) > 0) {
+      r.overwatch = false;
       fleeAct(c, r);
       continue;
     }
-    // The kit first, as shown.
-    const kit = r.intent && KIT.includes(r.intent.kind) ? r.intent : null;
-    if (kit) {
-      if (cr.stance === 'hostile' && (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r))) continue;
-      if (useKit(c, r, kit)) {
-        r.intent = undefined;
-        continue;
-      }
-    }
     if (cr.stance === 'hostile') {
       hostileAct(c, r);
+      continue;
+    }
+    r.overwatch = false; // an unfired overwatch lapses
+    // The kit first, as shown (a prospector's veil, a potion).
+    const kit = r.intent && KIT.includes(r.intent.kind) ? r.intent : null;
+    if (kit && (kit.kind === 'veil' || kit.kind === 'potion') && useKit(c, r, kit)) {
+      r.intent = undefined;
       continue;
     }
     if (cr.stance === 'hired') {

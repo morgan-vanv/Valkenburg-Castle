@@ -56,6 +56,11 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   escape: 'chop',
   setCharge: 'click',
   dread: 'gloam',
+  brace: 'sword',
+  hamstring: 'arrow',
+  nightthorn: 'spell',
+  briar: 'spell',
+  smashProp: 'smash',
 };
 const LOADOUT_KEY = 'vc.loadout.v33';
 /** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
@@ -556,6 +561,30 @@ export class App {
           sfx.play('gloam', { pitch: 1.6, gain: 0.5 });
           await this.dio.playEvent(e);
           continue;
+        // ---- V3.7 (20.5)
+        case 'calm':
+          if (e.calm) sfx.play('flip', { pitch: 1.1, gain: 0.5 });
+          else {
+            sfx.play('horn', { pitch: 1.2, gain: 0.5 });
+            this.hud.pulse('hurt');
+          }
+          this.hud.log(e.calm ? `Calm again: free move.${e.why ? ` ${e.why}` : ''}` : `Combat! ${e.why ?? 'Something has noticed the party.'}`, e.calm ? 'log-ally' : 'log-enemy');
+          if (!instant() || !e.calm) await this.hud.calmBanner(e.calm, e.why, (x) => wait(instant() ? 0 : x));
+          continue;
+        case 'propSmashed':
+          sfx.play('smash', { pitch: 1.3, gain: 0.7 });
+          if (e.items.length) setTimeout(() => sfx.play('coin', { pitch: 1.1, gain: 0.6 }), 350);
+          await this.dio.playEvent(e);
+          continue;
+        case 'rooted':
+          sfx.play('web', { pitch: 1.2, gain: 0.6 });
+          if (this.isHero(e.id)) this.hud.pulse('hurt');
+          await this.dio.playEvent(e);
+          continue;
+        case 'braced':
+          sfx.play('click', { pitch: 0.9 });
+          await this.dio.playEvent(e);
+          continue;
         case 'noticed':
           if (this.dio.isWatchable(e.by)) sfx.play('click', { pitch: 0.55, gain: 0.8 });
           this.hud.log(`${this.hud.nameOf(e.by)} notices ${this.hud.nameOf(e.hero)}!`, 'log-enemy');
@@ -778,6 +807,10 @@ export class App {
       case 'robbed':
       case 'captured':
         return d.unitPos(e.hero);
+      case 'rooted':
+        return this.isHero(e.id) || d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
+      case 'propSmashed':
+        return d.canSee(e.at) ? e.at : null;
       case 'cast':
         // Overwatch shots fire in the world phase: show them.
         return d.canSee(e.at) ? (e.at ?? null) : d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null;

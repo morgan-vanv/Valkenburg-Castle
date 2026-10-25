@@ -3492,3 +3492,34 @@ input.seed {
 .taken-line { display: flex; gap: 6px; align-items: flex-start; }
 .hcard.st-captured { opacity: 0.6; filter: saturate(0.4); border-color: var(--red-dim); }
 .hcard.st-captured .hc-nm { color: #ffb4ac; }
+
+/* ---- 20.5: free move, brace, shield, rooted, crates */
+.bar-group-calm { border-color: #6a7fa0; }
+.bar-calm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid #6a7fa0;
+  background: rgba(10, 16, 40, 0.6);
+  color: #cfe0ff;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.bar-calm b { color: #fff; }
+.calm-glyph { color: #9ec0ff; }
+.act.act-follow { min-width: 92px; }
+.act.act-follow.on { border-color: #9ec0ff; color: #e8f0ff; }
+.act.act-follow .act-glyph { color: #9ec0ff; }
+.hud-banner.combat { background: linear-gradient(90deg, transparent, rgba(60, 8, 10, 0.92) 25%, rgba(60, 8, 10, 0.92) 75%, transparent); }
+.hud-banner.combat .bn-title { color: #ffb4ac; letter-spacing: 0.1em; }
+.hud-banner.combat .bn-sub { color: var(--parch); text-transform: none; letter-spacing: 0.04em; font-size: 0.85rem; }
+.chip.braced { border-color: #b8bcc4; color: #e8ecf4; }
+.chip.shield { border-color: #8a5a2a; color: #e0c8a8; }
+.chip.rooted { border-color: #6aa84a; color: #cfe8b8; }
+.tag-rooted { color: #a8e088; }
+.tag-braced { color: #e8ecf4; }
+.tag-shield { color: #e0c8a8; font-size: 0.7rem; }
+.shield-mark { color: #e0c8a8; font-size: 0.8em; }
+.shield-have { color: #e0c8a8; font-family: var(--mono); font-size: 0.8rem; }
+.intent-hamstring { border-color: #d8c080; color: #f0e8c8; background: rgba(24, 20, 6, 0.9); }

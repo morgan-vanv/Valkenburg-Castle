@@ -2149,15 +2149,15 @@ describe('16.5 the Lantern Sisters\' kit', () => {
     return s;
   }
 
-  it('each sister has a class and kit: ranger, shadowmancer (1 smoke), burglar (2 darts)', () => {
+  it('each sister has a class and kit: ranger, shadowmancer (1 smoke), burglar (2 darts) (V3.7: in their packs, spec 20.4)', () => {
     const s = withRivals(['brann']);
     const cr = s.delve!.rivals!;
     expect(cr.members.map((r) => r.cls)).toEqual(['ranger', 'shadowmancer', 'burglar']);
-    expect(cr.members[2]!.darts).toBe(2);
-    expect(cr.members[1]!.smoke).toBe(1);
+    expect(cr.members[2]!.pack!.filter((i) => i.kind === 'dart').length).toBe(2);
+    expect(cr.members[1]!.pack!.filter((i) => i.kind === 'smoke').length).toBe(1);
   });
 
-  it('burglar sister: sleep darts the nearest hero within 5 when hostile; a hit costs the hero their next turn', () => {
+  it('burglar sister: sleep darts the lantern bearer within 5 when hostile (spec 20.4; the nearest hero otherwise); a hit costs the hero their next turn', () => {
     let s = withRivals(['brann', 'keven']);
     put(s, 'brann', at(1, 10, 8));
     put(s, 'keven', at(1, 8, 8));
@@ -2165,11 +2165,14 @@ describe('16.5 the Lantern Sisters\' kit', () => {
     computeIntentsOf(ctx(s));
     const bur = s.delve!.rivals!.members[2]!;
     expect(bur.intent?.kind).toBe('dart');
-    expect(bur.intent?.targetId).toBe('brann');
+    expect(bur.intent?.targetId).toBe('keven'); // the lantern bearer, though Brann is nearer
     expect(e.intents(s)[bur.id]?.kind).toBe('dart');
+    s.delve!.lanternBearer = 'brann';
+    computeIntentsOf(ctx(s));
+    expect(s.delve!.rivals!.members[2]!.intent?.targetId).toBe('brann');
     const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'hit' && x.attacker === bur.id && x.target === 'brann' && x.damage === 0));
     s = r.state;
-    expect(s.delve!.rivals!.members[2]!.darts).toBe(1);
+    expect(s.delve!.rivals!.members[2]!.pack!.filter((i) => i.kind === 'dart').length).toBe(1);
     expect(e.reachable(s, 'brann', false)).toEqual([]);
     expect(e.actions(s, 'brann')).toEqual([]);
     s = ok(s, { type: 'endTurn' }).state;
@@ -2206,36 +2209,42 @@ describe('16.5 the Lantern Sisters\' kit', () => {
     expect(hero(r.state, 'brann').at.level).toBeGreaterThan(1);
   });
 
-  it('shadowmancer sister: veils herself when first spotted (shown first); smoke on the nearest hero when a sister is below half HP', () => {
-    let s = withRivals(['brann']);
+  it('shadowmancer sister: veils the striker (the burglar) when first spotted (shown first; spec 20.4); smoke around a sister below half that two heroes can shoot', () => {
+    let s = withRivals(['brann', 'keven']);
     put(s, 'brann', at(1, 10, 8));
+    put(s, 'keven', at(1, 2, 8)); // the gate room, out of it for now
     const cr = sisters(s, false, [at(1, 12, 6), at(1, 11, 6), at(1, 12, 7)]);
     cr.spotted = false;
     const r0 = ok(s, { type: 'move', heroId: 'brann', path: [at(1, 10, 7)], sneak: false });
     s = r0.state;
     expect(s.delve!.rivals!.spotted).toBe(true);
     const sh = s.delve!.rivals!.members[1]!;
-    expect(sh.intent?.kind).toBe('veil');
+    const bur = s.delve!.rivals!.members[2]!;
+    expect(sh.intent).toMatchObject({ kind: 'veil', targetId: bur.id });
     expect(e.intents(s)[sh.id]?.kind).toBe('veil');
     const r = ok(s, { type: 'endTurn' });
     s = r.state;
-    expect(r.events.some((x) => x.type === 'cast' && x.by === sh.id && x.spell === 'veil')).toBe(true);
-    expect(s.delve!.rivals!.members[1]!.veil).toBe(2);
+    expect(r.events.some((x) => x.type === 'cast' && x.by === sh.id && x.spell === 'veil' && x.targetId === bur.id)).toBe(true);
+    expect(s.delve!.rivals!.members[2]!.veil).toBe(2);
+    expect(s.delve!.rivals!.members[1]!.charges).toBe(2); // 1 mana spent
     // Veiled: not a target, not in intents.
-    expect(option(s, 'brann', 'attack')?.targets.some((t) => t.id === sh.id) ?? false).toBe(false);
-    expect(e.intents(s)[sh.id]).toBeUndefined();
-    // Smoke: a sister below half HP and hostile.
+    expect(option(s, 'brann', 'attack')?.targets.some((t) => t.id === bur.id) ?? false).toBe(false);
+    expect(e.intents(s)[bur.id]).toBeUndefined();
+    // Smoke: a sister below half HP, hostile, with two heroes able to shoot her: the smoke goes around her.
     s.delve!.rivals!.stance = 'hostile';
     s.delve!.rivals!.members[0]!.hp = 3;
     put(s, 'brann', at(1, 10, 8));
     computeIntentsOf(ctx(s));
+    expect(s.delve!.rivals!.members[1]!.intent?.kind).not.toBe('smoke'); // one line of fire isn't enough
+    put(s, 'keven', at(1, 9, 8));
+    computeIntentsOf(ctx(s));
     const sh2 = s.delve!.rivals!.members[1]!;
-    expect(sh2.intent?.kind).toBe('smoke');
-    expect(sh2.intent?.to).toEqual(at(1, 10, 8));
+    const hurtAt = { ...s.delve!.rivals!.members[0]!.at };
+    expect(sh2.intent).toMatchObject({ kind: 'smoke', item: 'smoke', to: hurtAt });
     const r2 = ok(s, { type: 'endTurn' });
     expect(r2.events.some((x) => x.type === 'cast' && x.by === sh2.id && x.spell === 'smoke')).toBe(true);
-    expect(r2.state.delve!.smoke[posKey(at(1, 10, 8))]).toBe(1); // thrown mid world phase: lasts through the next player phase
-    expect(r2.state.delve!.rivals!.members[1]!.smoke).toBe(0);
+    expect(r2.state.delve!.smoke[posKey(hurtAt)]).toBe(1); // thrown mid world phase: lasts through the next player phase
+    expect(r2.state.delve!.rivals!.members[1]!.pack!.some((i) => i.kind === 'smoke')).toBe(false);
   });
 
   it('neutral: only the burglar sister loots the pile the heroes left at an opened chest', () => {
@@ -2609,10 +2618,11 @@ describe('V3.5', () => {
       expect(seen['ferrymen']! + seen['gallows-choir']!).toBeLessThan(150);
       expect(seen['L1']!).toBeGreaterThan(70);
       expect(seen['L1']!).toBeLessThan(130);
+      // V3.7 (spec 20.4): built like level 3 heroes: class HP +2 per level above 1.
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 12], ['ranger', 9], ['sapper', 11]]);
+      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['ranger', 12], ['sapper', 14]]);
       const g = buildCrew(s as GameStateX, 'gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 12], ['burglar', 9], ['pyromancer', 8]]);
+      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['burglar', 11], ['pyromancer', 10]]);
     });
 
     it('waiting cutthroats see a hero within 6: they demand the toll (max of 50 and half the carried value), then turn hostile', () => {
@@ -2678,12 +2688,12 @@ describe('V3.5', () => {
       expect(r.events.some((x) => x.type === 'blast')).toBe(false);
       expect(s.delve!.fuses).toMatchObject([{ at: at(2, 16, 1), rounds: 1, by: sap.id }]);
       expect(hero(s, 'brann').hp).toBe(hp);
-      expect(s.delve!.rivals!.members[2]!.charges).toBe(0);
+      expect(s.delve!.rivals!.members[2]!.pack!.filter((i) => i.kind === 'charge').length).toBe(1); // one of two thrown
       const r2 = ok(s, { type: 'endTurn' });
       expect(r2.events).toContainEqual({ type: 'noise', at: at(2, 16, 1), radius: 8 });
       expect(r2.events.some((x) => x.type === 'blast' && 'by' in x && x.by === sap.id)).toBe(true);
       expect(hero(r2.state, 'brann').hp).toBeLessThanOrEqual(hp - 4);
-      expect(r2.state.delve!.fuses).toEqual([]);
+      expect(r2.state.delve!.fuses!.some((f) => samePos(f.at, at(2, 16, 1)))).toBe(false); // (his second charge may already be lit elsewhere)
     });
 
     it('pyromancer: shows a firebolt on a hero in range 5 and sight, then 3 Wits slots at 60%, 2 per hit', () => {
@@ -2696,8 +2706,8 @@ describe('V3.5', () => {
       expect(py.intent?.kind).toBe('firebolt');
       const r = ok(s, { type: 'endTurn' });
       const roll = rolls(r.events).find((x) => x.slots === 3 && r.events.some((y) => y.type === 'roll' && y.who === py.id && y.roll === x));
-      expect(roll).toMatchObject({ slots: 3, chance: 65 }); // 60 + the Level 2 tier's 5
-      expect(r.state.delve!.rivals!.members[2]!.charges).toBe(2);
+      expect(roll).toMatchObject({ slots: 3, chance: 85 }); // V3.7: Wits 75 + 5 per level above 1 (level 3)
+      expect(r.state.delve!.rivals!.members[2]!.charges).toBe(2); // mana left
     });
 
     it('a killed cutthroat drops its purse', () => {
@@ -3428,5 +3438,396 @@ describe('V3.7 stealth and swings', () => {
       (watcher as MonsterX).noticedIds = ['brann'];
       expect(e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(2, 9, 1)))!.risks?.notice).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------- V3.7 (spec 20.4): crews that fight back
+
+import { rivalStats } from './rivals';
+import { crewTarget, pathToSpots } from './crewai';
+import { CREWS } from './data';
+import { los as losFrom } from './world';
+
+describe('V3.7 crews', () => {
+  const WAKE_SPOTS = [at(3, 3, 4), at(3, 4, 4), at(3, 3, 5), at(3, 5, 5)];
+  type RivalX = DelveX['rivals'] extends infer R ? (R extends { members: (infer M)[] } ? M : never) : never;
+  const members = (s: GameState) => s.delve!.rivals!.members as RivalX[];
+  const member = (s: GameState, i: number) => members(s)[i]!;
+
+  it('builds members like heroes of their class at the crew\'s level, with tiers, a pack, mana and a purse', () => {
+    const s = delve({ heroes: ['brann'] });
+    const wake = buildCrew(s as GameStateX, 'the-wake', WAKE_SPOTS);
+    expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
+      ['sellsword', 16, 4, 2, 1], ['hedgewitch', 13, 4, 2, 1], ['shadowmancer', 12, 4, 2, 1], ['sapper', 16, 4, 2, 1],
+    ]);
+    expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['charge', 'charge', 'charge']]);
+    expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
+    // Sellsword: Sword 3 slots at Might 70 + 15 (three levels) + 20 (weapon 2); armor 1 + 1; move 4.
+    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 105, dmg: 2, armor: 2, move: 4, range: 1 });
+    // Hedgewitch: Staff 2 Might slots, Might isn't her main stat: 35 + 20.
+    expect(rivalStats(wake.members[1]!)).toMatchObject({ slots: 2, chance: 55, dmg: 1, armor: 1 });
+    expect(wake.members.every((r) => r.loot.length === 1 && r.loot[0]!.kind === 'gold' && r.loot[0]!.amount === 50)).toBe(true);
+    // The Sisters at level 2, weapon 1: the ranger's bow at Finesse 75 + 5 + 10, range 6, HP 10.
+    const sis = buildCrew(s as GameStateX, 'lantern-sisters', [at(1, 3, 6), at(1, 4, 6), at(1, 5, 6)]);
+    expect(rivalStats(sis.members[0]!)).toMatchObject({ hp: 10, slots: 3, chance: 90, range: 6, armor: 0 });
+    expect(sis.members[0]!.hp).toBe(10);
+    expect(sis.members.every((r) => r.loot.length === 0)).toBe(true); // prospectors carry no purse
+    expect(CREWS['the-wake'].hideout.siteId).toBe('the-wake-hideout');
+  });
+
+  it('a Level 3 contract draws the Wake 60% at a Level 3 post; Level 2 still draws the pool', () => {
+    const s = delve({ heroes: ['brann'] });
+    let wake = 0;
+    let none = 0;
+    for (let i = 1; i <= 100; i++) {
+      const t = structuredClone(s) as GameStateX;
+      t.rng = i * 2654435761 >>> 0;
+      const cr = makeCrew(w, t, t.delve!, 3);
+      if (!cr) { none++; continue; }
+      wake++;
+      expect(cr.crew).toBe('the-wake');
+      expect(cr.stance).toBe('waiting');
+      expect(cr.members.length).toBe(4);
+      expect(cr.members.every((r) => r.at.level === 3 && distance(r.at, at(3, 4, 6)) <= 2 && r.level === 4)).toBe(true);
+      const two = makeCrew(w, t, t.delve!, 2);
+      if (two) expect(['ferrymen', 'gallows-choir']).toContain(two.crew);
+    }
+    expect(wake).toBeGreaterThan(40);
+    expect(wake).toBeLessThan(80);
+    expect(none).toBeGreaterThan(0);
+  });
+
+  it('focus fire: the lantern bearer a member can reach, else the lowest-HP hero in reach; every member shows the same target', () => {
+    const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven', 'pim']);
+    put(s, 'keven', at(2, 15, 2)); // the bearer, nearest
+    put(s, 'brann', at(2, 14, 2));
+    hero(s, 'brann').hp = 2;
+    put(s, 'pim', at(2, 2, 1)); // far off, behind the wall
+    expect(crewTarget(ctx(s))!.id).toBe('keven');
+    computeIntentsOf(ctx(s));
+    for (const r of members(s)) expect(r.intent?.targetId, r.cls).toBe('keven');
+    // The bearer out of reach: the lowest-HP hero in reach.
+    put(s, 'keven', at(2, 2, 2));
+    s.delve!.rivals!.members.forEach((r) => (r.intent = undefined));
+    expect(crewTarget(ctx(s))!.id).toBe('brann');
+    // Nobody in reach: the nearest on foot.
+    put(s, 'brann', at(2, 3, 3));
+    hero(s, 'brann').hp = 10;
+    expect(['brann', 'keven']).toContain(crewTarget(ctx(s))!.id);
+  });
+
+  it('positioning: a member takes the attack spot the other heroes can\'t see when there is one', () => {
+    // Keven stands in the pantry doorway's line; Brann (the target) is in the pit hall just east of the door.
+    const s = crewDelve('ferrymen', [at(1, 11, 2), at(1, 17, 1), at(1, 16, 1)], 'hostile', ['brann', 'keven']);
+    put(s, 'brann', at(1, 8, 2));
+    put(s, 'keven', at(1, 3, 2));
+    s.delve!.doors[posKey(at(1, 7, 2))]!.open = true;
+    const c = ctx(s);
+    const r = member(s, 0);
+    const spots = posNeighborsOf(at(1, 8, 2)).filter((p) => w.tile(p)?.kind === 'floor');
+    const exposed = (p: Pos) => losFrom(w, c.d, at(1, 3, 2), p);
+    expect(spots.some(exposed)).toBe(true);
+    expect(spots.some((p) => !exposed(p))).toBe(true);
+    const path = pathToSpots(c, r, spots, 4, 'brann');
+    expect(path.length).toBeGreaterThan(0);
+    expect(exposed(path[path.length - 1]!)).toBe(false);
+  });
+
+  it('a member below half with a potion backs off a hex and drinks it (intent potion, shown first): +5', () => {
+    const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile');
+    put(s, 'brann', at(2, 15, 4));
+    const ss = member(s, 0);
+    ss.hp = 5;
+    computeIntentsOf(ctx(s));
+    expect(ss.intent).toMatchObject({ kind: 'potion', item: 'potion', targetId: ss.id });
+    expect(distance(ss.intent!.to!, at(2, 15, 4))).toBe(2);
+    const r = ok(s, { type: 'endTurn' });
+    const after = member(r.state, 0);
+    expect(after.hp).toBe(10);
+    expect(after.pack!.some((i) => i.kind === 'potion')).toBe(false);
+    expect(distance(after.at, at(2, 15, 4))).toBe(2);
+    expect(r.events.some((x) => x.type === 'cast' && x.by === ss.id && x.spell === 'potion')).toBe(true);
+  });
+
+  it('ranger: caltrops on the hex the nearest hero would charge through; a hero stepping there takes 2 and stops', () => {
+    const s = crewDelve('ferrymen', [at(2, 2, 1), at(2, 16, 4), at(2, 18, 4)], 'hostile');
+    member(s, 0).hp = 0; // only the ranger (and a far sapper)
+    member(s, 2).at = at(2, 17, 8);
+    put(s, 'brann', at(2, 12, 2));
+    computeIntentsOf(ctx(s));
+    const ran = member(s, 1);
+    expect(ran.intent).toMatchObject({ kind: 'caltrops', item: 'caltrops' });
+    const spot = ran.intent!.to!;
+    expect(distance(spot, ran.at)).toBe(1);
+    expect(distance(spot, at(2, 12, 2))).toBeLessThan(distance(ran.at, at(2, 12, 2)));
+    let t = ok(s, { type: 'endTurn' }).state;
+    expect(t.delve!.caltrops).toContain(posKey(spot));
+    expect(member(t, 1).pack!.filter((i) => i.kind === 'caltrops').length).toBe(1);
+    // Brann walks onto them.
+    put(t, 'brann', posNeighborsOf(spot).find((p) => w.tile(p)?.kind === 'floor' && !samePos(p, ran.at) && distance(p, ran.at) > 1)!);
+    const hp = hero(t, 'brann').hp;
+    const r = ok(t, { type: 'move', heroId: 'brann', path: [spot], sneak: false });
+    expect(r.events).toContainEqual({ type: 'caltrops', id: 'brann', at: spot });
+    expect(hero(r.state, 'brann').hp).toBe(hp - 2);
+    expect(samePos(hero(r.state, 'brann').at, spot)).toBe(true);
+    expect(r.state.delve!.caltrops).not.toContain(posKey(spot));
+    t = r.state;
+    // The party's own caltrops never catch them.
+    t.delve!.caltrops.push(posKey(at(2, 13, 2)));
+    put(t, 'brann', at(2, 12, 2));
+    const r2 = ok(t, { type: 'move', heroId: 'brann', path: [at(2, 13, 2)], sneak: false });
+    expect(r2.events.some((x) => x.type === 'caltrops')).toBe(false);
+  });
+
+  it('sellsword: glue where two heroes stand next to each other (they lose their next move); guards the caster', () => {
+    const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+    put(s, 'brann', at(2, 14, 2));
+    put(s, 'keven', at(2, 15, 2));
+    computeIntentsOf(ctx(s));
+    const ss = member(s, 0);
+    expect(ss.intent).toMatchObject({ kind: 'glue', item: 'glue' });
+    expect(distance(ss.intent!.to!, at(2, 14, 2)) <= 1 && distance(ss.intent!.to!, at(2, 15, 2)) <= 1).toBe(true);
+    const r = ok(s, { type: 'endTurn' });
+    expect(r.events.some((x) => x.type === 'cast' && x.by === ss.id && x.spell === 'glue')).toBe(true);
+    expect(e.reachable(r.state, 'brann', false)).toEqual([]);
+    expect(e.reachable(r.state, 'keven', false)).toEqual([]);
+    expect(option(r.state, 'brann', 'attack') ?? option(r.state, 'brann', 'parley')).toBeTruthy(); // can still act
+    // Guard: the Sellsword beside the Pyromancer takes Brann's hit on her.
+    const t = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile');
+    member(t, 1).hp = 0;
+    member(t, 2).at = at(2, 15, 3);
+    put(t, 'brann', at(2, 14, 3));
+    computeIntentsOf(ctx(t));
+    const r2 = ok(t, { type: 'endTurn' }).state;
+    const guard = member(r2, 0);
+    expect(guard.guarding).toBe(member(r2, 2).id);
+    const r3 = until(r2, { type: 'act', heroId: 'brann', action: 'attack', target: { id: member(r2, 2).id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'hit' && x.attacker === 'brann'));
+    const hitEv = r3.events.find((x) => x.type === 'hit' && x.attacker === 'brann') as { target: string };
+    expect(hitEv.target).toBe(guard.id);
+    expect(member(r3.state, 2).hp).toBe(10);
+  });
+
+  it('hedgewitch mends the member below half, wards the striker; shadowmancer blinks away below half', () => {
+    const s = crewDelve('the-wake', WAKE_SPOTS, 'hostile');
+    put(s, 'brann', at(3, 5, 3));
+    member(s, 0).hp = 6;
+    computeIntentsOf(ctx(s));
+    const witch = member(s, 1);
+    expect(witch.intent).toMatchObject({ kind: 'mend', targetId: member(s, 0).id });
+    let r = ok(s, { type: 'endTurn' });
+    expect(member(r.state, 0).hp).toBe(10);
+    expect(member(r.state, 1).charges).toBe(2);
+    // Healed: she wards the striker next.
+    let t = r.state;
+    put(t, 'brann', at(3, 5, 3));
+    member(t, 0).hp = 16;
+    computeIntentsOf(ctx(t));
+    expect(member(t, 1).intent).toMatchObject({ kind: 'ward', targetId: member(t, 0).id });
+    r = ok(t, { type: 'endTurn' });
+    t = r.state;
+    expect(r.events.some((x) => x.type === 'cast' && x.spell === 'ward')).toBe(true);
+    const warded = member(t, 0);
+    put(t, 'brann', posNeighborsOf(warded.at).find((p) => w.tile(p)?.kind === 'floor' && !t.delve!.rivals!.members.some((m) => samePos(m.at, p)))!);
+    const pv = e.preview(t, 'brann', 'attack', { id: warded.id });
+    expect(pv.modifiers).toContain('Warded −1');
+    expect(pv.modifiers).toContain('Armor −2');
+    expect(pv.outcomes[1]).toBe('0 dmg');
+    // The Shadowmancer below half blinks to the hex in sight farthest from the heroes.
+    const u = crewDelve('the-wake', WAKE_SPOTS, 'hostile');
+    put(u, 'brann', at(3, 5, 3));
+    member(u, 2).hp = 4;
+    computeIntentsOf(ctx(u));
+    const sh = member(u, 2);
+    expect(sh.intent?.kind).toBe('blink');
+    expect(distance(sh.intent!.to!, at(3, 5, 3))).toBeGreaterThan(distance(sh.at, at(3, 5, 3)));
+    const r4 = ok(u, { type: 'endTurn' });
+    expect(r4.events.some((x) => x.type === 'blinked' && x.id === sh.id)).toBe(true);
+    expect(samePos(member(r4.state, 2).at, sh.intent!.to!)).toBe(true);
+  });
+
+  it('pyromancer: fireball (2 mana) where three heroes stand within 1 of a hex, else firebolt', () => {
+    const s = crewDelve('gallows-choir', [at(2, 17, 8), at(2, 18, 8), at(2, 16, 4)], 'hostile', ['brann', 'keven', 'pim']);
+    member(s, 0).hp = 0;
+    member(s, 1).hp = 0;
+    put(s, 'brann', at(2, 13, 1));
+    put(s, 'keven', at(2, 14, 1));
+    put(s, 'pim', at(2, 13, 2));
+    computeIntentsOf(ctx(s));
+    const py = member(s, 2);
+    expect(py.intent?.kind).toBe('fireball');
+    const r = ok(s, { type: 'endTurn' });
+    expect(r.events.some((x) => x.type === 'cast' && x.by === py.id && x.spell === 'fireball')).toBe(true);
+    expect(member(r.state, 2).charges).toBe(1);
+    expect(Object.keys(r.state.delve!.burning).length).toBeGreaterThan(0);
+    computeIntentsOf(ctx(r.state));
+    expect(member(r.state, 2).intent?.kind).toBe('firebolt'); // 1 mana left
+  });
+
+  it('a hero a member downs is robbed on the spot: gold and gems to its loot; then dragged 3 a round toward the exit, trailing behind', () => {
+    let s = crewDelve('ferrymen', [at(1, 16, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile');
+    member(s, 1).hp = 0;
+    member(s, 2).hp = 0;
+    put(s, 'brann', at(1, 15, 7));
+    const b = hero(s, 'brann');
+    b.hp = 1;
+    b.pack.push(gold(40, 'bg'), { id: 'bgem', kind: 'gem', name: 'Garnet', amount: 60, slots: 1 }, { id: 'btorch', kind: 'torch', name: 'Torch', amount: 1, slots: 1 });
+    computeIntentsOf(ctx(s));
+    const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'downed' && x.id === 'brann'));
+    s = r.state;
+    expect(r.events.some((x) => x.type === 'robbed' && x.hero === 'brann' && x.by === 'r1' && x.items.length === 2)).toBe(true);
+    const ss = member(s, 0);
+    expect(ss.loot.map((i) => i.id)).toEqual(expect.arrayContaining(['bg', 'bgem']));
+    expect(hero(s, 'brann').pack.map((i) => i.id)).toEqual(['btorch']);
+    expect(ss.dragging).toBe('brann');
+    expect(ss.intent).toMatchObject({ kind: 'drag', targetId: 'brann' });
+    expect(e.intents(s)['r1']?.kind).toBe('drag');
+    // The world phase: no bleeding while dragged; the member walks toward the east exit, Brann one hex behind.
+    const bleed = hero(s, 'brann').bleed;
+    const r2 = ok(s, { type: 'endTurn' });
+    s = r2.state;
+    expect(hero(s, 'brann').bleed).toBe(bleed);
+    expect(hero(s, 'brann').status).toBe('downed');
+    const d = distance(member(s, 0).at, hero(s, 'brann').at);
+    expect(d).toBe(1);
+    expect(r2.events.some((x) => x.type === 'moved' && x.id === 'r1')).toBe(true);
+  });
+
+  it('the dragger on an exit takes the hero: captured; back at camp they leave the roster for the captives, a "Bring back" job goes up, and the rescue brings them home', () => {
+    let s = crewDelve('ferrymen', [at(1, 17, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+    member(s, 1).hp = 0;
+    member(s, 2).hp = 0;
+    put(s, 'keven', at(1, 2, 8));
+    put(s, 'brann', at(1, 16, 7));
+    const b = hero(s, 'brann') as HeroX;
+    b.status = 'downed';
+    b.hp = 0;
+    b.bleed = 2;
+    b.robbed = true;
+    member(s, 0).dragging = 'brann';
+    computeIntentsOf(ctx(s));
+    expect(member(s, 0).intent).toMatchObject({ kind: 'drag', targetId: 'brann', to: at(1, 18, 7) });
+    const r = ok(s, { type: 'endTurn' });
+    s = r.state;
+    expect(r.events).toContainEqual({ type: 'captured', hero: 'brann', by: 'r1' });
+    expect(r.events).toContainEqual({ type: 'out', id: 'r1' });
+    expect(hero(s, 'brann').status).toBe('captured');
+    expect(member(s, 0).goneOut).toBe(true);
+    // Keven leaves; the summary notes it; camp lists the captive and the job.
+    s = ok(s, { type: 'act', heroId: 'keven', action: 'leave', target: {}, focus: 0 }).state;
+    expect(s.summary!.notes.some((n) => /Brann was dragged out by The Ferrymen/.test(n))).toBe(true);
+    expect(s.summary!.dead).toEqual([]);
+    const back = e.apply(s, { type: 'backToCamp' });
+    expect(back.error).toBeUndefined();
+    s = back.state;
+    expect(s.stage).toBe('camp');
+    expect(s.campaign.roster.map((h) => h.id)).not.toContain('brann');
+    expect(s.campaign.captives).toMatchObject([{ crew: 'ferrymen', siteId: 'ferrymen-hideout', hero: { id: 'brann', hp: 1, level: 1 } }]);
+    const job = s.campaign.board.find((k) => k.id === 'cap-brann')!;
+    expect(job).toMatchObject({ kind: 'rescue', title: 'Bring back Brann', siteId: 'ferrymen-hideout', level: 3, bounty: 220 });
+    expect(job.warnings).toContain('The Ferrymen');
+    // The regular board never uses a hideout.
+    expect(s.campaign.board.filter((k) => k.siteId.endsWith('-hideout') && k.id !== 'cap-brann')).toEqual([]);
+    // The rescue: the prisoner is Brann at HP 1; freed and out, he rejoins with that HP.
+    let t = ok(s, { type: 'startDelve', contractId: job.id, heroIds: ['keven'], entrance: 0, packs: {} }).state;
+    expect(t.delve!.prisoner).toMatchObject({ name: 'Brann', hp: 1, at: at(3, 3, 7) });
+    t.delve!.monsters = [];
+    t.delve!.rivals = null;
+    const k = hero(t, 'keven');
+    k.at = at(1, 18, 7);
+    const pr = t.delve!.prisoner!;
+    pr.freed = true;
+    pr.escortedBy = 'keven';
+    pr.at = at(1, 17, 7);
+    k.escorting = pr.id;
+    t = ok(t, { type: 'act', heroId: 'keven', action: 'leave', target: {}, focus: 0 }).state;
+    expect(t.summary!.contractDone).toBe(true);
+    const home = e.apply(t, { type: 'backToCamp' });
+    expect(home.error).toBeUndefined();
+    expect(home.state.campaign.captives).toEqual([]);
+    const brann = home.state.campaign.roster.find((h) => h.id === 'brann')!;
+    expect(brann).toMatchObject({ name: 'Brann', hp: 1, cls: 'sellsword' });
+    expect(home.state.campaign.board.some((x) => x.id === 'cap-brann')).toBe(false);
+    expect(home.state.campaign.roster.filter((h) => h.name === 'Brann').length).toBe(1); // no second "prisoner joins"
+  });
+
+  it('the heir carried off ends the campaign', () => {
+    let s = crewDelve('ferrymen', [at(1, 17, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+    member(s, 1).hp = 0;
+    member(s, 2).hp = 0;
+    put(s, 'brann', at(1, 2, 8));
+    put(s, 'keven', at(1, 16, 7));
+    const k = hero(s, 'keven') as HeroX;
+    k.status = 'downed';
+    k.hp = 0;
+    k.bleed = 2;
+    k.robbed = true;
+    member(s, 0).dragging = 'keven';
+    s = ok(s, { type: 'endTurn' }).state;
+    expect(hero(s, 'keven').status).toBe('captured');
+    s = ok(s, { type: 'act', heroId: 'brann', action: 'leave', target: {}, focus: 0 }).state;
+    const back = e.apply(s, { type: 'backToCamp' });
+    expect(back.state.stage).toBe('over');
+    expect(back.state.overReason).toBe('The heir is taken. Valkenburg stays dark.');
+  });
+
+  it('killing, downing or fearing the dragger frees the hero where they lie; a killed member drops pack and purse', () => {
+    const s = delve({ heroes: ['brann', 'sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+    s.delve!.rivals = buildCrew(s as GameStateX, 'the-wake', [at(1, 14, 7), at(1, 10, 1), at(1, 11, 1), at(1, 12, 1)]);
+    s.delve!.rivals.stance = 'hostile';
+    put(s, 'brann', at(1, 15, 7));
+    put(s, 'sable', at(1, 12, 7));
+    const b = hero(s, 'brann') as HeroX;
+    b.status = 'downed';
+    b.hp = 0;
+    b.bleed = 2;
+    b.robbed = true;
+    const ss = member(s, 0);
+    ss.dragging = 'brann';
+    // Dread: feared, it lets go.
+    const r = until(s, { type: 'act', heroId: 'sable', action: 'dread', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'feared' && x.id === ss.id));
+    expect(member(r.state, 0).dragging).toBeUndefined();
+    expect(hero(r.state, 'brann').status).toBe('downed');
+    expect(samePos(hero(r.state, 'brann').at, at(1, 15, 7))).toBe(true);
+    // Killed: pack (2 potions) and purse (50) on the ground, and the hero dropped.
+    const t = structuredClone(s);
+    member(t, 0).hp = 1;
+    member(t, 0).dragging = 'brann';
+    put(t, 'sable', at(1, 13, 7));
+    const r2 = until(t, { type: 'act', heroId: 'sable', action: 'attack', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied' && x.id === ss.id));
+    const pile = r2.state.delve!.ground.find((g) => samePos(g.at, at(1, 14, 7)))!;
+    expect(pile.items.filter((i) => i.kind === 'potion').length).toBe(2);
+    expect(pile.items.some((i) => i.kind === 'gold' && i.amount === 50)).toBe(true);
+    expect(member(r2.state, 0).dragging).toBeUndefined();
+    expect(member(r2.state, 0).pack).toEqual([]);
+    // Bleeding resumes once dropped.
+    const r3 = ok(r2.state, { type: 'endTurn' });
+    expect(hero(r3.state, 'brann').bleed).toBe(1);
+  });
+
+  it('a downed hero within 2 of a member draws a rob intent the round before; hired members drink potions for the party', () => {
+    const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+    put(s, 'keven', at(2, 2, 1));
+    put(s, 'brann', at(2, 14, 4));
+    const b = hero(s, 'brann') as HeroX;
+    b.status = 'downed';
+    b.hp = 0;
+    b.bleed = 2;
+    b.pack.push(gold(25, 'bg'));
+    computeIntentsOf(ctx(s));
+    expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+    const r = ok(s, { type: 'endTurn' });
+    expect(r.events.some((x) => x.type === 'robbed' && x.hero === 'brann')).toBe(true);
+    expect(member(r.state, 0).loot.some((i) => i.id === 'bg')).toBe(true);
+    expect(members(r.state).filter((m) => m.dragging === 'brann').length).toBe(1);
+    // Hired: a member below half shows a potion.
+    const t = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hired');
+    (t.delve!.rivals as { hiredBy?: string }).hiredBy = 'brann';
+    t.delve!.rivals!.hiredRounds = 5;
+    put(t, 'brann', at(2, 15, 4));
+    member(t, 0).hp = 4;
+    computeIntentsOf(ctx(t));
+    expect(member(t, 0).intent?.kind).toBe('potion');
+    const r2 = ok(t, { type: 'endTurn' });
+    expect(member(r2.state, 0).hp).toBe(9);
   });
 });

@@ -45,6 +45,16 @@ export const V37 = {
   blastOuter: liveNum(2, 'BLAST_DMG_OUTER', 'BLAST_OUTER_DMG'),
   blastNoise: liveNum(8, 'BLAST_NOISE', 'CHARGE_NOISE'),
   charges: SAPPER_CHARGES,
+  /** Spec 20.5. */
+  calmSteps: liveNum(4, 'CALM_STEPS'),
+  shieldPrice: liveNum(50, 'SHIELD_PRICE'),
+  bracePenalty: liveNum(15, 'BRACE_PENALTY', 'BRACE_TO_HIT'),
+  hamstringRange: liveNum(5, 'HAMSTRING_RANGE'),
+  hamstringPenalty: liveNum(20, 'HAMSTRING_PENALTY'),
+  hamstringRounds: liveNum(2, 'HAMSTRING_ROUNDS', 'ROOT_ROUNDS'),
+  thornRange: liveNum(5, 'NIGHTTHORN_RANGE', 'THORN_RANGE'),
+  briarRange: liveNum(4, 'BRIAR_RANGE'),
+  smashNoise: liveNum(4, 'SMASH_PROP_NOISE', 'PROP_SMASH_NOISE'),
 };
 
 /** Every class the UI knows (V3.1 'mage' kept so old data still renders). */
@@ -116,10 +126,14 @@ export const CLASS_GEAR: Record<AnyClass, string> = {
 
 /** Abilities and spells per class: [name, cost or kind, effect]. */
 export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
-  heir: [['Rally', 'ability', '+1 Focus to allies within 3; ready every 3 rounds.']],
+  heir: [
+    ['Rally', 'ability', '+1 Focus to allies within 3; ready every 3 rounds.'],
+    ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
+  ],
   sellsword: [
     ['Guard', 'ability', 'Soak blows aimed at an adjacent ally until your next turn.'],
     ['Shove', 'ability', '+1 slot: push an enemy 1 hex (into a pit, it falls).'],
+    ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
   ],
   burglar: [
     ['Pick', 'ability', 'Pick locks on doors and chests. Anyone else needs lockpicks.'],
@@ -134,6 +148,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   ],
   ranger: [
     ['Overwatch', 'action', 'Shoot the first enemy that moves or acts in sight within 6 next world phase.'],
+    ['Hamstring', 'action', '1 Finesse slot at −20%, range 5: a hit roots the target 2 rounds (no move, no dash).'],
     ['Knockback shot', 'ability', '2 Finesse slots, range ≤ 5: 2 hits push the target 1 hex (pits!).'],
     ['Close quarters', 'passive', 'Adjacent bow shots lose 1 slot.'],
   ],
@@ -142,6 +157,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Set charge', 'action', `On a hex, wall, door or chest next to you, fuse 1 or 2 turns: ${V37.blastInner} damage within 1, ${V37.blastOuter} within 2, breaks built walls on Levels 1 and 2. The Sapper takes nothing from their own blast.`],
     ['Throw charge', 'action', `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1.`],
     ['Dig', 'action', `Clear adjacent rubble, a cracked wall or blast rubble, no charge. Noise ${DIG_NOISE}.`],
+    ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
   ],
   pyromancer: [
     ['Firebolt', '1 mana', 'Fire at range.'],
@@ -152,11 +168,13 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Veil', '1 mana', 'An ally within 3 is unseen by monsters for 2 rounds (until they attack or make noise ≥ 4).'],
     ['Sleep', '1 mana', '2 Wits slots, range ≤ 5: 1+ hits puts a monster to sleep (not the Dragon or the Gloam).'],
     ['Dread', '1 mana', `${V37.dreadSlots} Wits slots, range ≤ ${V37.dreadRange}: 1+ hits and the monster flees from you for ${V37.fearRounds} turns, taking free swings as it goes. Not the Dragon or the Gloam.`],
+    ['Night thorn', '1 mana', '2 Wits slots at range ≤ 5: 1 damage per hit, ignores armor. Silent.'],
     ['Blink', '1 mana', 'Teleport up to 4 hexes in sight, across pits and gaps. Silent.'],
   ],
   hedgewitch: [
     ['Mend', '1 mana', 'Heal 4 on an ally within 3.'],
     ['Ward', '1 mana', 'An ally within 3 takes 1 less per hit for 2 rounds.'],
+    ['Briar', '1 mana', '2 Wits slots at range ≤ 4: 1 damage per hit; any hit roots the target 1 round (perfect: 2). Noise 1.'],
     ['Gust', '1 mana', 'Push every figure within 1 of a hex (range ≤ 4) 1 hex outward. Noise 2.'],
   ],
 };
@@ -279,6 +297,11 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   nightsight: '◉',
   setCharge: '✹',
   dread: '☠',
+  brace: '⛨',
+  hamstring: '➴',
+  nightthorn: '✶',
+  briar: '❃',
+  smashProp: '✊',
 };
 
 /**
@@ -321,6 +344,11 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   knockback: `2 Finesse slots at range ${KNOCKBACK_RANGE} or less: 2 hits push the target 1 hex away from you (into pits!).`,
   throwCharge: `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; breaks walls within 1 on Levels 1 and 2. Noise ${V37.blastNoise}. You take nothing from your own blast; other heroes take half.`,
   setCharge: `Sapper. Set a charge on a hex, a breakable wall, a door or a chest next to you, then pick the fuse: 1 blows at the end of the coming castle turn, 2 the turn after. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away: pits count), ${V37.blastOuter} within 2. Opens locks, breaks built walls on Levels 1 and 2 into rubble. Noise ${V37.blastNoise}, heard a level up and down. You take nothing from your own blast; other heroes take half. The fuse and the blast area show to everyone.`,
+  brace: `Plant your feet until your next turn: every hit on you does 1 less (after armor), enemies roll −${V37.bracePenalty}% against you, and your free swings keep their full slots. A shield counts double while braced.`,
+  hamstring: `A bow shot at the legs: 1 Finesse slot at −${V37.hamstringPenalty}%, range ${V37.hamstringRange} in sight. A hit roots the target for ${V37.hamstringRounds} rounds: it can't move or dash, it can still act. Noise 1.`,
+  nightthorn: `1 mana. 2 Wits slots at range ${V37.thornRange} in sight: 1 damage per hit that ignores armor. Silent.`,
+  briar: `1 mana. 2 Wits slots at range ${V37.briarRange} in sight, 1 damage per hit; any hit roots the target for 1 round (all slots hit: 2). Rooted: can't move or dash. Noise 1.`,
+  smashProp: `Break a crate or barrel next to you. Noise ${V37.smashNoise}. Most hold a few coins, some a torch, potion, firecracker or caltrops; the loot drops on the hex.`,
   dread: `1 mana. ${V37.dreadSlots} Wits slots at range ${V37.dreadRange} in sight: 1 hit and the monster or crew member is feared for ${V37.fearRounds} castle turns: it runs its full move away from you, attacks nobody, drops any hold, and every hero it leaves gets a free swing at it. Not the Dragon or the Gloam. Silent.`,
   dig: `Clear rubble, a cracked wall or blast rubble next to you, no charge needed. Noise ${DIG_NOISE}.`,
   fireball: `2 mana. Radius 1 at range ${FIREBALL_RANGE} or less: 3 Wits slots, 2 damage per hit to everyone there, allies too. Burns ${BURN_ROUNDS} rounds. Noise ${FIREBALL_NOISE}.`,
@@ -371,6 +399,8 @@ export function modifierHelp(m: string): string {
   if (/^Backstab/.test(m)) return 'the Burglar\'s knife in an unwary back';
   if (/^Sneak attack|^Unnoticed|^Unaware/.test(m)) return 'it has not noticed you yet';
   if (/^Free swing/.test(m)) return 'a swing as it leaves your reach: 1 slot fewer';
+  if (/^Braced/.test(m)) return 'the target has planted their feet';
+  if (/^Hamstring|^Legs/.test(m)) return 'a shot at the legs is harder';
   if (/^Raised/.test(m)) return 'shooting from raised floor';
   if (/^Adjacent/.test(m)) return 'bows are clumsy point-blank';
   if (/^Flanked/.test(m)) return 'an ally stands across from it';
@@ -391,6 +421,8 @@ export const AWARENESS_TEXT: Record<string, string> = {
 
 /** V3.7 (spec 20.1): the move modes explained with the live numbers. */
 export const MOVE_HELP = {
+  calm: `Free move: nothing hunts the party, so the castle only turns every ${V37.calmSteps} steps you take. Click any explored hex to walk there, however far; the hex-by-hex rules still apply (noise, wake rolls, traps). The walk stops the moment something notices you, a sleeper wakes or a trap goes off, and your party acts first.`,
+  follow: 'Follow: every other active hero within 3 comes along behind in single file, the lantern with them. Off: only the selected hero walks.',
   walk: `Walk: up to 4 hexes, noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you in sight within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (half that in their blind arc). Hovering a hex shows what the move risks.
 After moving, a second move (a dash) spends the action.`,
   sneak: `Sneak (S): up to 2 hexes (Burglar 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (half unlit; ending next to one ${V37.wakeEndSneak}%). Awake monsters notice you within ${V37.noticeLitSneak} lit, ${V37.noticeDarkSneak} unlit, and never from behind: the dim hexes behind each enemy are its blind arc, the marked hex right behind it is safe. Your first strike on a monster that has not noticed you gets +1 slot.`,
@@ -483,6 +515,11 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   nightsight: 'n',
   setCharge: 'w',
   dread: 'f',
+  brace: 'x',
+  hamstring: 'h',
+  nightthorn: 'n',
+  briar: 'i',
+  smashProp: 'x',
 };
 
 export const ITEM_GLYPH: Record<string, string> = {

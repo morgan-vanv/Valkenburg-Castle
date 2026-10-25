@@ -180,10 +180,15 @@ export const testCastle: CastleDef = {
     { id: 'res1', kind: 'rescue', at: at(2, 16, 8), where: 'the cells' },
     { id: 'res2', kind: 'rescue', at: at(1, 16, 8), where: 'the east hall' },
     { id: 'slay', kind: 'slay', at: at(3, 16, 4), where: 'the Lair' },
+    // V3.7 (spec 20.4): crew hideouts for "Bring back" contracts (never on the regular board).
+    { id: 'lantern-sisters-hideout', kind: 'rescue', at: at(2, 3, 8), where: 'the winch room', hideout: 'lantern-sisters' },
+    { id: 'ferrymen-hideout', kind: 'rescue', at: at(3, 3, 7), where: 'the Hollow', hideout: 'ferrymen' },
+    { id: 'gallows-choir-hideout', kind: 'rescue', at: at(3, 10, 7), where: 'the Hollow', hideout: 'gallows-choir' },
+    { id: 'the-wake-hideout', kind: 'rescue', at: at(3, 11, 2), where: 'the Hollow', hideout: 'the-wake' },
   ],
   rivalEntrances: [at(1, 18, 7)],
-  // V3.5 (spec 18.5): a cutthroat post on the Crossing, east of the pit.
-  rivalPosts: [at(2, 14, 5)],
+  // V3.5 (spec 18.5): a cutthroat post on the Crossing, east of the pit. V3.7: the Wake's post in the Hollow by the lift base.
+  rivalPosts: [at(2, 14, 5), at(3, 4, 6)],
   lights: [
     { at: at(1, 4, 6), radius: 2, kind: 'sconce' },
     { at: at(1, 2, 8), radius: 3, kind: 'daylight' },

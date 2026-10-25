@@ -178,6 +178,8 @@ export class LevelView {
   readonly cracked = new Map<string, Extra>();
   /** Rubble heaps by posKey (hidden once dug out, V3.2). */
   readonly rubble = new Map<string, THREE.Object3D>();
+  /** V3.7 (20.5): crate and barrel instances by posKey, so a smashed one can vanish. */
+  readonly breakables = new Map<string, { mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }[]>();
   /** Hexes that can be clicked (walkable-ish), by hexKey. */
   readonly walkable = new Set<string>();
   /** Pit hexes by hexKey. */
@@ -756,6 +758,11 @@ export class LevelView {
           const g = this.glow.get(hexKey(p.h));
           if (g) glow.setXYZ(i, g.r, g.g, g.b);
           srcs.push([this.pk(p.h)]);
+          if (kind === 'crate' || kind === 'barrel') {
+            const list2 = this.breakables.get(this.pk(p.h)) ?? [];
+            list2.push({ mesh, index: i, matrix: m.clone() });
+            this.breakables.set(this.pk(p.h), list2);
+          }
         });
         mesh.instanceMatrix.needsUpdate = true;
         this.group.add(mesh);
@@ -1252,6 +1259,19 @@ export class LevelView {
       if (blown) this.walkable.add(k.split(':')[1] ?? '');
     }
     for (const [k, g] of this.rubble) for (const c of g.children) c.visible = !keys.has(k);
+  }
+
+  /** V3.7 (20.5): smashed crates and barrels vanish (their instance collapses to nothing); the hex is floor. */
+  setSmashed(keys: Set<string>): void {
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (const [k, list] of this.breakables) {
+      const gone = keys.has(k);
+      for (const b of list) {
+        b.mesh.setMatrixAt(b.index, gone ? zero : b.matrix);
+        b.mesh.instanceMatrix.needsUpdate = true;
+      }
+      if (gone) this.walkable.add(k.split(':')[1] ?? '');
+    }
   }
 
   // ------------------------------------------------------------ room labels

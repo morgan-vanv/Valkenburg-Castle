@@ -344,6 +344,161 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   } else skip('set charge', 'no Sapper in the party');
 }
 
+// ---- 4b. spec 20.5: free move while calm, the idle-only end-turn rule, Brace, Hamstring/Night thorn/Briar, crates
+{
+  await p.evaluate(async () => {
+    const fx = await import('/src/view/fixtures.ts');
+    let st = window.vc.state();
+    if (location.search.includes('fixture')) st = fx.fixtureDelve(window.vcEngine.castle());
+    st = structuredClone(st);
+    // Nothing hunting, no fuse, nobody held: calm.
+    for (const m of st.delve.monsters) if (m.awareness === 'hunting') m.awareness = 'alert';
+    st.delve.fuses = [];
+    st.delve.rivals = null;
+    for (const h of st.delve.heroes) Object.assign(h, { moved: false, acted: false, dashed: false, status: h.status === 'captured' ? 'active' : h.status });
+    // Explore a wide ring round the party so a long walk has somewhere to go.
+    const lead = st.delve.heroes.find((h) => h.status === 'active');
+    const lv = window.vcEngine.castle().levels.find((l) => l.level === lead.at.level);
+    for (const k of Object.keys(lv.tiles)) {
+      const [q, r] = k.split(',').map(Number);
+      const dd = Math.max(Math.abs(q - lead.at.q), Math.abs(r - lead.at.r), Math.abs(q + r - lead.at.q - lead.at.r));
+      if (dd <= 9 && !st.delve.explored.includes(`${lead.at.level}:${k}`)) st.delve.explored.push(`${lead.at.level}:${k}`);
+    }
+    window.vc.load(st);
+  });
+  await p.waitForTimeout(250);
+  s = await state();
+  const calm = await p.evaluate(() => window.vcEngine.calm?.(window.vc.state()) ?? null);
+  const lead = s.delve.heroes.find((h) => h.status === 'active');
+  await p.evaluate((id) => window.vc.hud.select(id), lead.heroId);
+  await p.waitForTimeout(150);
+  if (calm?.calm) {
+    const bar = await p.$eval('.hud-bar', (e) => e.innerText);
+    check('calm: the bar says "Free move · the castle turns in N steps"', /Free move/.test(bar) && /castle turns in \d step/.test(bar), bar.replace(/\n/g, ' | ').slice(0, 160));
+    check('...and a Follow toggle, on by default', !!(await p.$('.hud-bar .act-follow.on')));
+    check('...no budget rings while calm', (await p.evaluate(() => window.vc.dio.highlights.get('walk').count + window.vc.dio.highlights.get('sneak').count)) === 0);
+    // A far explored hex: the long path shows on hover and the click walks it.
+    const far = await p.evaluate(async (id) => {
+      const pth = await import('/src/view/pathing.ts');
+      const st = window.vc.state();
+      const E = window.vcEngine;
+      const vis = E.visibility(st);
+      const h = st.delve.heroes.find((x) => x.heroId === id);
+      const reach = new Set(E.reachable(st, id, false).map((r) => `${r.to.q},${r.to.r}`));
+      const keys = [...vis.explored].filter((k) => k.startsWith(`${h.at.level}:`)).map((k) => { const [q, r] = k.slice(2).split(',').map(Number); return { level: h.at.level, q, r }; });
+      let best = null;
+      for (const q of keys) {
+        if (reach.has(`${q.q},${q.r}`)) continue;
+        const path = pth.longPath(E.castle(), st, vis, id, q);
+        if (path && (!best || path.length > best.path.length)) best = { to: q, path };
+      }
+      return best;
+    }, lead.heroId);
+    if (far) {
+      const tip = await hoverTip(far.to);
+      check('hovering a far explored hex: "Free move · walk N hexes · the castle turns in..."', /Free move/.test(tip) && /castle turns in/.test(tip), tip.slice(0, 120));
+      check('...the long path is drawn', (await p.evaluate(() => window.vc.dio.pathDots.count)) >= far.path.length - 1, `${far.path.length} hexes`);
+      await p.evaluate((at) => window.vc.hud.onClick(at, null, { button: 0 }), far.to);
+      await idle();
+      await p.waitForTimeout(250);
+      s = await state();
+      const h2 = s.delve.heroes.find((x) => x.heroId === lead.heroId);
+      const arrived = h2.at.q === far.to.q && h2.at.r === far.to.r;
+      const log = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
+      check('clicking it walks there (or stops for combat with a "Combat!" line)', arrived || /Combat!/.test(log), `${JSON.stringify(h2.at)} vs ${JSON.stringify(far.to)}; ${log.split('\n').slice(-1)}`);
+      if (far.path.length >= 4 && arrived) check('the castle turned on the way (round advanced)', s.delve.round > 3 || s.delve.calmSteps >= 4, `round ${s.delve.round}, steps ${s.delve.calmSteps}`);
+    } else skip('free move walk', 'no far explored hex');
+    await unhover();
+  } else skip('free move', `not calm: ${calm?.why ?? 'engine.calm missing'}`);
+  // Combat banner.
+  await p.evaluate(async () => { await window.vc.hud.calmBanner(false, 'An orc has seen Pim.', () => Promise.resolve()); });
+  check('calmBanner builds the Combat! banner', true);
+  // End turn: only idle heroes prompt.
+  await edit(`for (const h of s.delve.heroes) { h.moved = true; h.acted = false; }`);
+  await p.waitForTimeout(150);
+  await p.keyboard.press('e');
+  await p.waitForTimeout(150);
+  let modal = await p.$eval('.hud-modal', (e) => (e.classList.contains('hidden') ? '' : e.innerText)).catch(() => '');
+  check('end turn with everyone moved but not acted: no prompt (they are ready, not idle)', !modal, modal.slice(0, 60));
+  await idle();
+  await p.evaluate(() => { localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: false })); });
+  await edit(`for (const h of s.delve.heroes) { h.moved = false; h.acted = false; }`);
+  await p.evaluate(() => { window.vc.hud.host?.settings && (window.vc.hud.host.settings.noEndTurnAsk = false); });
+  await p.waitForTimeout(100);
+  const note = await p.$eval('.bar-end-note', (e) => e.innerText);
+  check('"still waiting" counts the idle heroes', /still waiting/i.test(note), note);
+  // Brace, shield, crates, hamstring/thorn/briar.
+  s = await state();
+  const heir = s.delve.heroes.find((h) => roster(h.heroId)?.cls === 'heir');
+  if (heir) {
+    await p.evaluate((id) => window.vc.hud.select(id), heir.heroId);
+    await p.waitForTimeout(150);
+    const braceBtn = await p.$('.hud-bar .act[data-action="brace"]');
+    check('heir: Brace in the Abilities group', !!braceBtn && (await braceBtn.evaluate((e) => !!e.closest('.bar-group-abilities'))));
+    if (braceBtn) {
+      const help = await braceBtn.evaluate((e) => e.dataset.tip ?? e.title);
+      check('Brace help: 1 less and −15%', /1 less/.test(help) && /−15%/.test(help), help.slice(0, 100));
+      await braceBtn.click();
+      await idle();
+      await p.waitForTimeout(200);
+      s = await state();
+      const b = s.delve.heroes.find((h) => h.heroId === heir.heroId);
+      if (b.braced) {
+        check('braced badge on the card', !!(await p.$(`.hcard[data-hero="${heir.heroId}"] .chip.braced`)));
+        check('...and on the figure tag', (await visible('.unit-tag .tag-braced')).length > 0);
+      } else skip('braced badge', 'the engine did not set braced');
+    }
+    const shieldChip = await p.$eval(`.hcard[data-hero="${heir.heroId}"] .chip.shield`, (e) => e.title).catch(() => '');
+    if (roster(heir.heroId)?.shield) {
+      check('shield chip on the card with the rule', /1 less/.test(shieldChip) && /braced/.test(shieldChip), shieldChip.slice(0, 80));
+      check('round shield on the figure', await p.evaluate((id) => !!window.vc.dio.units.get(id)?.fig.getObjectByName('shield'), heir.heroId));
+    }
+  }
+  // Crates: hover and smash.
+  s = await state();
+  const lvl = castle.levels.find((l) => l.level === 1);
+  const crateKey = Object.entries(lvl.tiles).find(([, t]) => t.kind === 'prop' && (t.prop === 'crate' || t.prop === 'barrel'))?.[0];
+  if (crateKey) {
+    const [cq, cr] = crateKey.split(',').map(Number);
+    const crate = { level: 1, q: cq, r: cr };
+    const who = s.delve.heroes.find((h) => h.status === 'active');
+    const spot = nb(crate).find((q) => STAND.has(tileAt(q)?.kind) && !s.delve.monsters.some((m) => m.at.q === q.q && m.at.r === q.r) && !s.delve.heroes.some((h) => h.heroId !== who.heroId && h.at.q === q.q && h.at.r === q.r));
+    await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; if (!s.delve.explored.includes('1:' + a.c.q + ',' + a.c.r)) s.delve.explored.push('1:' + a.c.q + ',' + a.c.r);`, { id: who.heroId, at: spot, c: crate });
+    await p.evaluate((id) => window.vc.hud.select(id), who.heroId);
+    await p.waitForTimeout(200);
+    const tip = await hoverTip(crate);
+    check('crate hover: "Crate · Smash: loud, may hold something"', /(Crate|Barrel)/.test(tip) && /Smash: loud, may hold something/.test(tip), tip.slice(0, 80));
+    await unhover();
+    const sm = await p.$('.hud-bar .act[data-action="smashProp"]');
+    check('Smash in the Interact group', !!sm && (await sm.evaluate((e) => !!e.closest('.bar-group-interact'))));
+    if (sm) {
+      await p.evaluate((at) => window.vc.hud.onClick(at, null, { button: 0 }), crate);
+      await idle();
+      await p.waitForTimeout(300);
+      s = await state();
+      check('the crate is in smashed and gone from the level', (s.delve.smashed ?? []).includes(`1:${crateKey}`) && (await p.evaluate((k) => { const lv = window.vc.dio.levels.get(1); const b = lv.breakables.get(k)?.[0]; if (!b) return false; const m = new Float32Array(16); b.mesh.getMatrixAt(b.index, { fromArray: (a) => m.set(a), elements: m, toArray: () => [...m], copy() {} }); return b.mesh.instanceMatrix.array[b.index * 16] === 0; }, `1:${crateKey}`)));
+      const drop = s.delve.ground.find((g) => g.at.q === crate.q && g.at.r === crate.r);
+      if (drop) check('the drop glows on the floor', (await p.evaluate(() => window.vc.dio.lootGlow.children.length)) > 0);
+      const t2 = await hoverTip(crate);
+      check('hover after: splinters, and the loot if any', /Splinters|Loot/.test(t2), t2.slice(0, 80));
+      await unhover();
+    }
+  } else skip('crates', 'no crate or barrel on Level 1');
+  // Hamstring / Night thorn / Briar buttons: whichever class is in the party.
+  s = await state();
+  for (const [cls, action] of [['ranger', 'hamstring'], ['shadowmancer', 'nightthorn'], ['hedgewitch', 'briar']]) {
+    const hero = heroOf(cls);
+    if (!hero) { skip(`${action} button`, `no ${cls}`); continue; }
+    await edit(`const h = s.delve.heroes.find((x) => x.heroId === a); h.acted = false; h.mana = Math.max(1, h.mana); const m = s.delve.monsters.find((x) => x.awareness !== 'asleep' && x.kind !== 'dragon') ?? s.delve.monsters[0]; if (m) { const free = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]].map(([q, r]) => ({ level: h.at.level, q: h.at.q + q * 2, r: h.at.r + r * 2 })); m.at = h.at.level === m.at.level ? m.at : m.at; }`, hero.heroId);
+    await p.evaluate((id) => window.vc.hud.select(id), hero.heroId);
+    await p.waitForTimeout(150);
+    const btn = await p.$(`.hud-bar .act[data-action="${action}"]`);
+    if (!btn) { skip(`${action} button`, 'nothing in range'); continue; }
+    const help = await btn.evaluate((e) => e.dataset.tip ?? e.title);
+    check(`${action} button with help`, /root/i.test(help) || /ignores armor/.test(help), help.slice(0, 80));
+  }
+}
+
 // ---- 5. crews: member info, intents, dragging, captured banner (fixture crews; real engine: injected members)
 {
   await p.evaluate(async () => {

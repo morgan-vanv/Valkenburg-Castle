@@ -50,6 +50,8 @@ export interface RivalX extends Rival {
   ward?: number;
   /** V3.7: the kit intent's helper hex (a Sapper's set spot, a potion's step back). */
   kitFrom?: Pos;
+  /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar (like a monster's `stuck`): no walking. */
+  stuck?: number;
 }
 
 export interface CrewX extends RivalCrew {
@@ -76,6 +78,8 @@ export interface DelveX extends Delve {
   rivals: CrewX | null;
   /** V3.7 (spec 20.3): blast rubble (broken walls in `blown`) dug out to floor, by posKey. */
   dug?: string[];
+  /** V3.7 (spec 20.4): caltrops a crew laid (also in `caltrops`): these catch heroes. */
+  rivalCaltrops?: string[];
   /** XP earned this delve by hero id (kills). */
   xp?: Record<string, number>;
   /** Item ids dropped by heroes who died (become lostGear). */

@@ -134,9 +134,11 @@ describe('castle', () => {
     expect(bad).toEqual([]);
   });
 
-  it('puts the cutthroat posts on Level 2 floor, off spawns, reachable on foot from an entrance (spec 18.5)', () => {
-    const posts = castle.rivalPosts ?? [];
+  it('puts the cutthroat posts on Level 2 floor (the Wake\'s on Level 3), off spawns, reachable on foot from an entrance (spec 18.5, 20.4)', () => {
+    const posts = (castle.rivalPosts ?? []).filter((p) => p.level === 2);
+    const posts3 = (castle.rivalPosts ?? []).filter((p) => p.level === 3);
     expect(posts.length).toBeGreaterThanOrEqual(3);
+    expect(posts3.length).toBeGreaterThanOrEqual(2);
     const seen = new Set<string>();
     const queue: Pos[] = [...castle.entrances];
     while (queue.length) {
@@ -162,6 +164,37 @@ describe('castle', () => {
       const rooms = new Set([p, ...posNeighbors(p)].map((n) => tile(n)?.room));
       expect(rooms.has('bridges') || rooms.has('winch'), show(p)).toBe(true);
     }
+    // V3.7 (spec 20.4): the Wake's posts: floor on Level 3 by the lift base and on the Lair approach, four free hexes around, no spawn within 2.
+    for (const p of posts3) {
+      expect(tile(p)?.kind, show(p)).toBe('floor');
+      expect(['lift', 'bones', 'lair'].includes(tile(p)?.room ?? ''), show(p)).toBe(true);
+      expect(posNeighbors(p).filter((n) => tile(n)?.kind === 'floor').length, show(p)).toBeGreaterThanOrEqual(3);
+      for (const sp of castle.spawns) expect(sp.at.level === 3 && distance(sp.at, p) <= 2, `spawn ${sp.kind} by ${show(p)}`).toBe(false);
+    }
+    expect(posts3.some((p) => tile(p)?.room === 'lift')).toBe(true);
+  });
+
+  it('has one hideout site per crew (spec 20.4): floor, off everything else, never on the regular board', () => {
+    const hide = castle.contractSites.filter((s) => s.hideout);
+    expect(hide.map((s) => s.hideout).sort()).toEqual(['ferrymen', 'gallows-choir', 'lantern-sisters', 'the-wake']);
+    const taken = new Set([
+      ...castle.spawns.map((s) => s.at),
+      ...castle.chests.map((c) => c.at),
+      ...castle.coins.map((c) => c.at),
+      ...castle.traps.map((t) => t.at),
+      ...castle.contractSites.filter((s) => !s.hideout).map((s) => s.at),
+      ...(castle.rivalPosts ?? []),
+    ].map(posKey));
+    for (const s of hide) {
+      expect(s.kind).toBe('rescue');
+      expect(s.id).toBe(`${s.hideout}-hideout`);
+      expect(tile(s.at)?.kind, s.id).toBe('floor');
+      expect(taken.has(posKey(s.at)), `${s.id} shares a hex`).toBe(false);
+      for (const sp of castle.spawns) expect(sp.at.level === s.at.level && distance(sp.at, s.at) <= 1, `${s.id} next to a ${sp.kind}`).toBe(false);
+    }
+    // One level below the crew's own (capped at 3): the Sisters' on Level 2, the rest on Level 3.
+    expect(hide.find((s) => s.hideout === 'lantern-sisters')!.at.level).toBe(2);
+    for (const s of hide) if (s.hideout !== 'lantern-sisters') expect(s.at.level, s.id).toBe(3);
   });
 
   it('lists every brazier tile as a brazier', () => {
@@ -314,7 +347,7 @@ describe('castle', () => {
     expect(castle.chests.filter(on(1)).every((c) => c.tier <= 2)).toBe(true);
     expect(castle.chests.filter(on(3)).every((c) => c.tier === 3)).toBe(true);
     const sites = castle.contractSites;
-    const count = (kind: string, lv: number) => sites.filter((s) => s.kind === kind && !s.story && s.at.level === lv).length;
+    const count = (kind: string, lv: number) => sites.filter((s) => s.kind === kind && !s.story && !s.hideout && s.at.level === lv).length;
     expect([count('rescue', 1), count('rescue', 2), count('rescue', 3)]).toEqual([1, 2, 1]);
     expect([count('recover', 1), count('recover', 2), count('recover', 3)]).toEqual([2, 2, 2]);
     const ids = [...castle.chests.map((c) => c.id), ...sites.map((s) => s.id)];

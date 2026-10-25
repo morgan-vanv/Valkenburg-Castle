@@ -5,7 +5,7 @@ import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, It
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
 import { HEAL_PER_HP } from '../game/data';
-import { ALE, CREW, ITEM_EFFECT, STORY, aleNeeds, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel, storyFix } from './names';
+import { ALE, CREW, ITEM_EFFECT, STORY, V37, aleNeeds, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel, storyFix } from './names';
 
 export interface ScreenHost {
   engine: Engine;
@@ -347,7 +347,7 @@ function heroChip(hr: Hero): HTMLElement {
     'div',
     { class: `hchip ${hurt(hr) ? 'wounded' : ''}`, 'data-hero': hr.id },
     classBadge(hr.cls),
-    h('div', { class: 'hchip-body' }, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr), next ? ` · XP ${hr.xp}/${next}` : '')),
+    h('div', { class: 'hchip-body' }, h('b', null, hr.name, hr.shield ? h('span', { class: 'shield-mark', title: 'Carries a shield: ranged hits do 1 less (2 while braced).' }, ' ◉') : ''), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr), next ? ` · XP ${hr.xp}/${next}` : '')),
     hr.ale ? aleBadge(hr.ale, hr.name) : '',
   );
 }
@@ -493,9 +493,9 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     el.append(h('p', { class: 'dim small' }, 'With Gerda home: weapon tiers add +10% per slot per tier, armor tiers soak 1 more damage per hit.'));
     return;
   }
-  el.append(stationHead('Forge', "Gerda's forge. Weapon tiers add +10% per slot per tier. Armor tiers soak 1 more damage per hit."));
+  el.append(stationHead('Forge', `Gerda's forge. Weapon tiers add +10% per slot per tier. Armor tiers soak 1 more damage per hit. A shield (${V37.shieldPrice}) takes 1 off every arrow, bolt and dart (2 while braced).`));
   const t = h('table', { class: 'tbl' });
-  t.append(h('tr', null, h('th', null, 'Hero'), h('th', null, 'Weapon'), h('th', null, 'Armor')));
+  t.append(h('tr', null, h('th', null, 'Hero'), h('th', null, 'Weapon'), h('th', null, 'Armor'), h('th', { title: `Shield · ${V37.shieldPrice} gold, any class. Ranged hits (arrows, knockback shots, firebolts, darts) do 1 less; 2 less while braced. Not the Dragon's breath.` }, 'Shield')));
   for (const hr of s.campaign.roster) {
     const cell = (part: 'weapon' | 'armor') => {
       const tier = part === 'weapon' ? hr.weaponTier : hr.armorTier;
@@ -519,7 +519,27 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
             ),
       );
     };
-    t.append(h('tr', null, h('td', null, classBadge(hr.cls), ' ', hr.name), cell('weapon'), cell('armor')));
+    // V3.7 (20.5): a shield per hero.
+    const shield = h(
+      'td',
+      { class: 'td-shield' },
+      hr.shield
+        ? h('span', { class: 'shield-have', title: `${hr.name} carries a shield: ranged hits do 1 less (2 while braced).` }, '◉ Shield')
+        : h(
+            'button',
+            {
+              class: 'btn btn-small',
+              'data-shield': hr.id,
+              disabled: s.campaign.gold < V37.shieldPrice,
+              title: `Buy a shield for ${hr.name} · ${V37.shieldPrice} gold\nRanged hits do 1 less; 2 less while braced. Any class.`,
+              onclick: async () => {
+                if (await host.send({ type: 'buyShield', heroId: hr.id })) sfx.play('smash', { pitch: 1.6, gain: 0.4 });
+              },
+            },
+            `Buy a shield · ${V37.shieldPrice}`,
+          ),
+    );
+    t.append(h('tr', null, h('td', null, classBadge(hr.cls), ' ', hr.name), cell('weapon'), cell('armor'), shield));
   }
   el.append(t);
 }
