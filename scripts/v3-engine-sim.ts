@@ -29,6 +29,11 @@
 // lit fuses' blast areas. SAPPER=1 hires a Sapper first. The report prints fuses lit, blasts,
 // walls broken and locks blown.
 //
+// V3.7 (spec 20.4): crews fight back. On every third delve with a crew the bot picks a fight (refuses
+// the toll, or tells the Sisters to fight) instead of paying; it attacks the lowest-HP enemy in reach,
+// drinks a potion below half, and takes "Bring back" contracts for captured heroes first. The report
+// prints crew fights won (every member dead) / lost (a hero dead or taken) / fled, heroes captured, rescues.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -58,7 +63,7 @@ const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
 const SAPPER = process.env.SAPPER === '1';
-const sap = { fuses: 0, blasts: 0, walls: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
+const sap = { fuses: 0, blasts: 0, walls: 0, collapsed: 0, rubbled: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
 const sapLog: string[] = [];
 const pits: Pos[] = [];
 for (const l of castle.levels) for (const k of Object.keys(l.tiles)) {
@@ -78,10 +83,13 @@ function run(s: GameState, cmd: Command): GameState {
     evCount[key] = (evCount[key] ?? 0) + 1;
     if (ev.type === 'hit' && (ev.attacker === gloamId || r.state.delve?.monsters.find((m) => m.id === ev.attacker)?.kind === 'gloam')) gloamStrikes++;
     // V3.7 (spec 20.3): the Sapper's work.
+    if (ev.type === 'downed' && s.delve?.rivals?.stance === 'hostile') crewStats.heroesDowned++;
     if (ev.type === 'fuseSet' && s.delve?.heroes.some((h) => h.heroId === ev.by)) sap.fuses++;
     if (ev.type === 'blast' && 'by' in ev && s.delve?.heroes.some((h) => h.heroId === ev.by)) {
       sap.blasts++;
       sap.walls += ev.broke.length;
+      sap.collapsed += ev.collapsed?.length ?? 0;
+      sap.rubbled += ev.rubbled?.length ?? 0;
       const doorsOpened = r.events.filter((x) => x.type === 'doorChanged' && x.open && s.delve!.doors[posKey(x.at)]?.locked).length;
       const chestsOpened = r.events.filter((x) => x.type === 'chestOpened' && s.delve!.chests.find((c) => c.id === x.id)?.locked).length;
       sap.locks += doorsOpened + chestsOpened;
@@ -205,11 +213,33 @@ function lanternCheck(s: GameState, id: string): GameState {
   return s;
 }
 
-/** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. */
+/** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. V3.7: on every third crew delve, fight on purpose. */
 let crewLog: string[] = [];
+let crewDelves = 0;
+let pickFight = false;
+const crewStats = { fights: 0, won: 0, lost: 0, fled: 0, captured: 0, rescuesTried: 0, rescuesDone: 0, membersKilled: 0, heroesDowned: 0 };
+const fightLog: string[] = [];
 function parleyCheck(s: GameState, id: string): GameState {
   const cr = s.delve?.rivals;
-  if (!cr || cr.stance !== 'demanding') return s;
+  if (!cr) return s;
+  if (pickFight && cr.stance !== 'hostile' && cr.stance !== 'demanding') {
+    // The Sisters (or a crew under truce): tell them to fight when in parley range.
+    const f = e.deals(s, id).find((d) => d.deal === 'fight');
+    if (f?.ok) {
+      crewLog.push('picked a fight');
+      return run(s, { type: 'deal', heroId: id, deal: 'fight' });
+    }
+    return s;
+  }
+  if (cr.stance !== 'demanding') return s;
+  if (pickFight) {
+    const f = e.deals(s, id).find((d) => d.deal === 'fight');
+    if (f?.ok) {
+      crewLog.push(`refused toll ${cr.toll ?? '?'} (on purpose)`);
+      return run(s, { type: 'deal', heroId: id, deal: 'fight' });
+    }
+    return s; // out of parley range: they turn hostile on their own next phase
+  }
   let ds = e.deals(s, id);
   if (!ds.length) {
     // Out of parley range (4) of the crew that demanded from 6: step closer if the purse covers the toll.
@@ -335,10 +365,24 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const me = hero()!;
     const def = e.heroById(s, id)!;
     // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
-    const order: ActionKind[] = ['escape', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
+    const order: ActionKind[] = ['escape', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
       const o = option(s, id, a);
       if (!o) continue;
+      // V3.7: a potion on oneself below half (crews focus fire; a careful player drinks).
+      if (a === 'potion' && !(me.hp * 2 < def.maxHp && o.targets.some((t) => t.id === id))) continue;
+      if (a === 'potion') {
+        const self = o.targets.find((t) => t.id === id)!;
+        const before = s;
+        s = act(s, id, a, self, 0);
+        if (s !== before) return true;
+        continue;
+      }
+      // V3.7: focus fire back: the lowest-HP enemy in reach (crew members and monsters alike).
+      if (a === 'attack' || a === 'firebolt') {
+        const hpOf = (tid: string) => s.delve!.monsters.find((m) => m.id === tid)?.hp ?? s.delve!.rivals?.members.find((r) => r.id === tid)?.hp ?? 99;
+        o.targets.sort((x, y) => hpOf(x.id!) - hpOf(y.id!));
+      }
       if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50)) continue;
       if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
       if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
@@ -527,9 +571,13 @@ for (let i = 0; i < N; i++) {
   if (!fit.length) break;
   // Spec 18.3: the surgeon first; other story contracts every other delve; else the regular ones in turn.
   const stories = s.campaign.board.filter((x) => x.story);
-  const regular = s.campaign.board.filter((x) => !x.story);
+  const rescues = s.campaign.board.filter((x) => x.id.startsWith('cap-'));
+  const regular = s.campaign.board.filter((x) => !x.story && !x.id.startsWith('cap-'));
   const story = stories.find((x) => x.story === 'surgeon') ?? (i % 2 === 1 ? stories[0] : undefined);
-  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
+  // V3.7 (spec 20.4): a captured hero is fetched back first, once the party is 3 strong.
+  const rescue = fit.length >= 3 ? rescues[0] : undefined;
+  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
+  if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
@@ -553,6 +601,12 @@ for (let i = 0; i < N; i++) {
   }
   const rivals = !!s.delve!.rivals;
   const crewName = s.delve!.rivals?.crew ?? '';
+  if (rivals) {
+    crewDelves++;
+    pickFight = crewDelves % 3 === 0;
+    if (pickFight) crewLog.push('fight delve');
+  } else pickFight = false;
+  const isRescue = k.id.startsWith('cap-');
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
@@ -582,6 +636,24 @@ for (let i = 0; i < N; i++) {
   }
   const sum = s.summary!;
   const d = s.delve!;
+  if (isRescue && sum.contractDone) crewStats.rescuesDone++;
+  if (d.rivals && (d.rivals as { entered?: boolean }).entered) {
+    const cr = d.rivals;
+    const fought = cr.stance === 'hostile' || cr.members.some((m) => m.hp <= 0) || d.heroes.some((h) => h.status === 'captured') || crewLog.some((x) => /fight|refused/.test(x));
+    const taken = d.heroes.filter((h) => h.status === 'captured').length;
+    crewStats.captured += taken;
+    if (fought) {
+      crewStats.fights++;
+      const dead = cr.members.filter((m) => m.hp <= 0).length;
+      crewStats.membersKilled += dead;
+      const allDead = cr.members.every((m) => m.hp <= 0);
+      const lost = sum.dead.length > 0 || taken > 0;
+      if (allDead && !lost) crewStats.won++;
+      else if (lost) crewStats.lost++;
+      else crewStats.fled++;
+      fightLog.push(`${k.kind} L${k.level} vs ${cr.name} (L${cr.members[0]?.level ?? '?'}): ${allDead && !lost ? 'won' : lost ? 'lost' : 'fled'}, members killed ${dead}/${cr.members.length}, heroes dead ${sum.dead.length}, taken ${taken}, squad ${d.heroes.map((h) => `${e.heroById(s, h.heroId)?.cls.slice(0, 4)}${e.heroById(s, h.heroId)?.level}`).join('/')}`);
+    }
+  }
   rows.push({
     squad: d.heroes.map((h) => e.heroById(s, h.heroId)?.cls.slice(0, 4) ?? '?').join('/'),
     contract: `${k.kind} L${k.level}`,
@@ -628,6 +700,8 @@ for (const r of crews) {
 }
 console.log(`crews (spec 18.5): ${crews.length} delves with a crew; ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).length}, refused ${crews.filter((r) => r.crew.includes('refused toll')).length}; deaths in crew delves ${crews.reduce((a, r) => a + r.deaths, 0)}`);
+console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
+for (const f of fightLog) console.log(`  ${f}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
 console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
 for (const lv of [1, 2, 3]) {
@@ -636,7 +710,7 @@ for (const lv of [1, 2, 3]) {
   console.log(`  L${lv}    ${String(rs.length).padStart(3)}  ${String(rs.filter((r) => r.done).length).padStart(4)}  ${String(rs.reduce((a, r) => a + r.deaths, 0)).padStart(6)}  ${String(rs.reduce((a, r) => a + r.darkRounds, 0)).padStart(16)}  ${String(rs.reduce((a, r) => a + r.gloamStrikes, 0)).padStart(13)}`);
 }
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
-console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
+console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, floor collapsed ${sap.collapsed} / rubbled ${sap.rubbled}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
 if (sapLog.length) console.log(`  blasts: ${sapLog.slice(0, 12).join('; ')}${sapLog.length > 12 ? '; ...' : ''}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);
 console.log(`first five L1 delves: done ${first.filter((r) => r.done).length}/${first.length}, deaths ${first.reduce((a, r) => a + r.deaths, 0)}`);

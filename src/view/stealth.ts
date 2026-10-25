@@ -186,19 +186,64 @@ export function fuseWords(rounds: number): string {
   return rounds <= 1 ? 'goes off at the end of the coming castle turn' : `goes off in ${rounds} castle turns`;
 }
 
+const NO_FLOOR_BLAST = new Set(['stairs', 'lift', 'exit', 'door', 'brazier', 'tallprop', 'sealed', 'prop']);
+
+/**
+ * 20.3a: what a blast at `at` does to the ground within 1, by the view's reading of the rule (the
+ * engine's `blastPreview` is the truth once it lands): walls that break, floor next to a pit that
+ * collapses (Levels 1 and 2), other floor that turns to rubble. Already blown, collapsed or
+ * unbreakable hexes and the untouchable kinds are left out.
+ */
+export function blastPreview(castle: CastleDef, d: { blown: string[]; collapsed?: string[] } | null, at: Pos): { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[] } {
+  const lv = castle.levels.find((l) => l.level === at.level);
+  const out = { breaks: [] as Pos[], collapses: [] as Pos[], rubbles: [] as Pos[] };
+  if (!lv) return out;
+  const blown = new Set(d?.blown ?? []);
+  const collapsed = new Set(d?.collapsed ?? []);
+  const isPit = (p: Pos) => lv.tiles[hexKey(p)]?.kind === 'pit' || collapsed.has(posKey(p));
+  for (const h of range(at, 1)) {
+    const p = { level: at.level, q: h.q, r: h.r };
+    const k = posKey(p);
+    const t = lv.tiles[hexKey(p)];
+    if (!t || blown.has(k) || collapsed.has(k) || t.unbreakable) continue;
+    if (t.kind === 'wall' || t.kind === 'cracked') {
+      if (t.kind === 'cracked' || breakableWall(castle, p)) out.breaks.push(p);
+      continue;
+    }
+    if (t.kind !== 'floor' || NO_FLOOR_BLAST.has(t.kind)) continue;
+    if (at.level <= 2 && DIRS.some((dd) => isPit(add(p, dd) as Pos))) out.collapses.push(p);
+    else out.rubbles.push(p);
+  }
+  return out;
+}
+
+/** 20.3a: floor next to a pit on Levels 1 and 2: a charge here drops it (for the hover line). */
+export function collapsible(castle: CastleDef, d: { collapsed?: string[] } | null, p: Pos): boolean {
+  if (p.level > 2) return false;
+  const lv = castle.levels.find((l) => l.level === p.level);
+  const t = lv?.tiles[hexKey(p)];
+  if (!lv || !t || t.kind !== 'floor' || t.unbreakable) return false;
+  const collapsed = new Set(d?.collapsed ?? []);
+  return DIRS.some((dd) => {
+    const n = add(p, dd);
+    return lv.tiles[hexKey(n)]?.kind === 'pit' || collapsed.has(posKey({ level: p.level, ...n }));
+  });
+}
+
 /** The tile under a pos, for callers without a LevelView. */
 export function tileAt(castle: CastleDef, p: Pos): TileDef | undefined {
   return castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)];
 }
 
-/** posKeys of blown entries that were built walls (they show as rubble, spec 20.3). */
+/** posKeys of blown entries that were built walls or floor (they show as rubble, spec 20.3, 20.3a); cracked walls and dug rubble are not in it. */
 export function blownWalls(castle: CastleDef, blown: string[]): Set<string> {
   const out = new Set<string>();
   for (const k of blown) {
     const [l, rest] = k.split(':');
     const [q, r] = (rest ?? '').split(',').map(Number);
     const p = { level: Number(l), q: q ?? 0, r: r ?? 0 };
-    if (tileAt(castle, p)?.kind === 'wall') out.add(posKey(p));
+    const kind = tileAt(castle, p)?.kind;
+    if (kind === 'wall' || kind === 'floor') out.add(posKey(p));
   }
   return out;
 }

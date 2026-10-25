@@ -76,6 +76,7 @@ export function buildLevel1(): LevelBuilder {
 
   // V3.7 (spec 20.3): the tower stair's shaft can't be blown into (the outer curtain is marked in finish).
   b.unbreakableAround('tower');
+  b.protectAround(37, 3); // the floor beside the stairs never collapses or rubbles (spec 20.3a)
 
   // Railing: a few short bits left on the pit mouth's rim.
   b.railing([[25, 11], [26, 11], [22, 14], [22, 15]]);

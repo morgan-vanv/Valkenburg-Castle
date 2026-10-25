@@ -5,7 +5,7 @@
 import type { ActionOption, Engine, FallInfo, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
 import { DIRS, distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, AleOffer, ApplyResult, CastleDef, Command, CrewId, DealOption, GameState, Hero, HeroClass, Intent, Item, Rival, RivalCrew, ShopOffer, StoryId } from '../game/types';
-import { backDirs, blastRings, breakableWall, wallsBlastWouldBreak } from './stealth';
+import { backDirs, blastPreview, blastRings, breakableWall } from './stealth';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
   return { id, name, cls, level: 1, xp: 0, maxHp, hp: maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
@@ -730,8 +730,10 @@ export function fixtureEngine(castle0: CastleDef): Engine {
             continue;
           }
           const rings = blastRings(castle, f.at);
-          const broke = wallsBlastWouldBreak(castle, f.at).filter((p) => !d.blown.includes(posKey(p)));
-          for (const p of broke) d.blown.push(posKey(p));
+          const pv = blastPreview(castle, d, f.at);
+          const broke = pv.breaks;
+          for (const p of [...pv.breaks, ...pv.rubbles]) d.blown.push(posKey(p));
+          d.collapsed = [...(d.collapsed ?? []), ...pv.collapses.map((p) => posKey(p))];
           for (const p of rings.inner) {
             const door = d.doors[posKey(p)];
             if (door?.locked) {
@@ -761,7 +763,18 @@ export function fixtureEngine(castle0: CastleDef): Engine {
             if (m.hp <= 0) ev.push({ type: 'monsterDied', id: m.id });
           }
           d.monsters = d.monsters.filter((m) => m.hp > 0);
-          ev.push({ type: 'blast', at: f.at, by: f.by, broke }, { type: 'noise', at: f.at, radius: 8 });
+          ev.push({ type: 'blast', at: f.at, by: f.by, broke, collapsed: pv.collapses, rubbled: pv.rubbles }, { type: 'noise', at: f.at, radius: 8 });
+          // 20.3a: whoever stood on collapsed floor falls by the column rules.
+          for (const hx of d.heroes) {
+            const c = pv.collapses.find((p) => samePos(p, hx.at));
+            if (!c || hx.status !== 'active') continue;
+            const f2 = fallFrom(castle, c) ?? fallFrom({ ...castle, levels: castle.levels.map((l) => (l.level === c.level ? { ...l, tiles: { ...l.tiles, [hexKey(c)]: { kind: 'pit' } } } : l)) }, c);
+            if (!f2) continue;
+            hx.hp = Math.max(1, hx.hp - f2.damage);
+            const from = hx.at;
+            hx.at = f2.to;
+            ev.push({ type: 'fell', id: hx.heroId, from, to: f2.to, levels: f2.levels, damage: f2.damage });
+          }
         }
         d.fuses = left;
         d.round++;

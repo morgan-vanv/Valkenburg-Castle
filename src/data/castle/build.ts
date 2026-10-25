@@ -185,6 +185,15 @@ export class LevelBuilder {
     return this;
   }
 
+  /** V3.7 (spec 20.3a): no blast collapses or rubbles the hexes around (c, r) (the landing of a stair or lift) or the hex itself. */
+  protectAround(c: number, r: number): this {
+    for (const [nc, nr] of [[c, r] as Off, ...offNeighbors(c, r)]) {
+      const t = this.get(nc, nr);
+      if (t && t.kind !== 'pit') t.unbreakable = true;
+    }
+    return this;
+  }
+
   /** A sconce on the wall next to floor hex (c, r). */
   sconce(c: number, r: number): this {
     const t = this.get(c, r);

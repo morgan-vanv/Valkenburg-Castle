@@ -13,7 +13,7 @@ import {
   HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
 } from './data';
 import { placeHoard } from './dragon';
-import { HOARD_PIECES } from './data';
+import { HOARD_PIECES, SHIELD_PRICE } from './data';
 import { pick, random, shuffle } from './rng';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
@@ -333,6 +333,18 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       C.gold -= o.price;
       h.ale = o.kind;
       events.push({ type: 'say', text: `Wim draws ${h.name} a ${o.name}. Drunk at the start of the next delve.` });
+      return { events };
+    }
+    case 'buyShield': {
+      // V3.7 (spec 20.5): a round shield from the forge: ranged hits do 1 less (2 while braced). Any class.
+      const h = C.roster.find((x) => x.id === cmd.heroId);
+      if (!h) return err('No such hero.');
+      if (!villageOf(s).smith) return err(LOCKED.smith);
+      if (h.shield) return err(`${h.name} already carries a shield.`);
+      if (C.gold < SHIELD_PRICE) return err('Not enough gold.');
+      C.gold -= SHIELD_PRICE;
+      h.shield = true;
+      events.push({ type: 'say', text: `Gerda straps a shield to ${h.name}'s arm (${SHIELD_PRICE} gold).` });
       return { events };
     }
     case 'upgrade': {

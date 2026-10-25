@@ -10,9 +10,9 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Fuse, HeroInDelve, Item } from './types';
 import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG } from './data';
 import { say, type Ctx, type DelveX } from './state';
-import { chestLoot, hd, hurtAny, makeNoise, nameOf, onMap, putOnGround, rivalsOnMap } from './common';
-import { doorAt, kindAt, type World } from './world';
-import { figure, push } from './falls';
+import { chestLoot, hd, hurtAny, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
+import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
+import { fall, figure, push } from './falls';
 
 /** Engine-private: when a fuse was lit, so one set during a world phase isn't counted down in that same phase. */
 export interface FuseX extends Fuse {
@@ -116,6 +116,62 @@ export function wallsBrokenBy(w: World, d: DelveX | null, at: Pos): Pos[] {
   return blastArea(w, at, 1).filter((p) => blastableWall(w, d, p));
 }
 
+// ---------------------------------------------------------------- the floor (spec 20.3a)
+
+/**
+ * Floor within 1 of a blast that can give way: floor or raised floor (by kindAt, so a dug hole
+ * counts and rubble doesn't), not `unbreakable`, no chest and no hoard on it. Stairs, lift, exits,
+ * doors, braziers, tall props and the sealed stair aren't floor and never go.
+ */
+function softFloor(c: Ctx, p: Pos): boolean {
+  const t = c.w.tile(p);
+  if (!t || t.unbreakable || kindAt(c.w, c.d, p) !== 'floor') return false;
+  if (c.d.chests.some((x) => samePos(x.at, p))) return false;
+  if (c.d.ground.some((g) => samePos(g.at, p) && g.items.some((i) => i.kind === 'hoard'))) return false;
+  return true;
+}
+
+/** Where floor at `p` would land if it collapsed now (the first non-pit level below), for previews. */
+export function collapseDrop(w: World, d: DelveX | null, p: Pos): { level: number; levels: number; damage: number } | null {
+  for (let lv = p.level + 1; w.levels.has(lv); lv++) {
+    if (kindAt(w, d, { level: lv, q: p.q, r: p.r }) === 'pit') continue;
+    return { level: lv, levels: lv - p.level, damage: fallDamage(lv - p.level) };
+  }
+  return null;
+}
+
+export interface BlastPlan {
+  /** Walls that break (cracked and breakable built walls within 1). */
+  broke: Pos[];
+  /** Floor that drops into the pit column (next to a pit, with a level below). */
+  collapsed: Pos[];
+  /** Floor that turns to rubble. */
+  rubbled: Pos[];
+  /** Figures (ids) within 2: everything the blast damages. */
+  hit: string[];
+}
+
+/** What a blast at `at` would do to the map and who it hits, by the state as it is now (for the preview and the blast). */
+export function blastPreview(c: Ctx, at: Pos): BlastPlan {
+  const near = blastArea(c.w, at, 1);
+  const broke = near.filter((p) => blastableWall(c.w, c.d, p));
+  const collapsed: Pos[] = [];
+  const rubbled: Pos[] = [];
+  const below = c.w.levels.has(at.level + 1);
+  for (const p of near) {
+    if (!softFloor(c, p)) continue;
+    // Next to a pit (an original one or one already collapsed), with somewhere to fall: it goes.
+    if (below && pitsNextTo(c.w, c.d, p).length) collapsed.push(p);
+    else rubbled.push(p);
+  }
+  const hit: string[] = [];
+  for (const p of blastArea(c.w, at, 2)) {
+    const o = occupant(c, p);
+    if (o) hit.push(o.id);
+  }
+  return { broke, collapsed, rubbled, hit };
+}
+
 /** Count every fuse down at the end of a world phase; those at 0 go off, in the order they were lit. */
 export function tickFuses(c: Ctx): void {
   const list = fuses(c.d);
@@ -155,14 +211,14 @@ export function shielded(c: Ctx, by: string, id: string, dmg: number): number {
  * walls within 1 break; noise 8 heard a level up and down. Kills count for `by`.
  */
 export function blast(c: Ctx, at: Pos, by: string): void {
-  const broke: Pos[] = [];
+  const plan = blastPreview(c, at);
+  const { broke, collapsed, rubbled } = plan;
   const near = blastArea(c.w, at, 1);
   // Walls, doors and chests within 1.
   for (const p of near) {
     const k = kindAt(c.w, c.d, p);
     if (k === 'cracked' || breakableWall(c.w, c.d, p)) {
       c.d.blown.push(posKey(p));
-      broke.push(p);
     } else if (k === 'door') {
       const door = doorAt(c.d, p);
       if (door && (!door.open || door.locked)) {
@@ -182,9 +238,9 @@ export function blast(c: Ctx, at: Pos, by: string): void {
     }
   }
   c.w.fixedCache = null;
-  c.ev.push({ type: 'blast', at: { ...at }, by, broke });
+  c.ev.push({ type: 'blast', at: { ...at }, by, broke, collapsed, rubbled });
   const setter = hd(c, by) ? nameOf(c, by) : c.d.rivals?.members.find((r) => r.id === by)?.name;
-  say(c, `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.${broke.length ? ` The wall comes down.` : ''}`);
+  say(c, `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.${broke.length ? ' The wall comes down.' : ''}${collapsed.length ? ' The floor gives way.' : ''}`);
   // Damage: inner ring 4, outer ring 2; the shield for the setter's side.
   const hurt: [string, Pos][] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, m.at]);
@@ -197,9 +253,38 @@ export function blast(c: Ctx, at: Pos, by: string): void {
     const dmg = shielded(c, by, id, distance(p, at) <= 1 ? BLAST_INNER_DMG : BLAST_OUTER_DMG);
     if (dmg > 0) hurtAny(c, id, dmg, hd(c, id) ? null : (credit ?? by), { noise: false });
   }
-  // The inner ring is thrown back (shove outcomes: pits, walls, fire, each other).
+  // Spec 20.3a: the floor. Rubble first, then the collapse: whoever stands on it falls down the column.
+  for (const p of rubbled) c.d.blown.push(posKey(p));
+  if (collapsed.length) {
+    const col = (c.d.collapsed ??= []);
+    for (const p of collapsed) {
+      const key = posKey(p);
+      col.push(key);
+      c.d.ropes = c.d.ropes.filter((k) => k !== key);
+      if (c.d.fuses) c.d.fuses = c.d.fuses.filter((f) => !samePos(f.at, p));
+    }
+    for (const p of collapsed) {
+      // Loot on the hex goes down with it.
+      const g = c.d.ground.find((x) => samePos(x.at, p));
+      if (g) {
+        const landing = fallColumn(c.w, c.d, p);
+        c.d.ground = c.d.ground.filter((x) => x !== g);
+        if (landing) putOnGround(c, landing.to, g.items);
+      }
+      const o = occupant(c, p);
+      if (o) {
+        say(c, `The floor drops out from under ${nameOf(c, o.id)}.`);
+        fall(c, o.id, p, credit);
+      }
+    }
+  }
+  // The inner ring is thrown back (shove outcomes: pits, walls, fire, each other); not those who already fell.
   for (const [id, p] of hurt) {
-    if (distance(p, at) !== 1 || !figure(c, id)) continue;
+    if (distance(p, at) !== 1) continue;
+    const f = figure(c, id);
+    if (!f) continue;
+    const now = f.kind === 'hero' ? f.h.at : f.kind === 'monster' ? f.m.at : f.kind === 'rival' ? f.r.at : c.d.prisoner!.at;
+    if (!samePos(now, p)) continue;
     push(c, id, at, credit);
   }
   makeNoise(c, at, BLAST_NOISE, { otherLevels: true });

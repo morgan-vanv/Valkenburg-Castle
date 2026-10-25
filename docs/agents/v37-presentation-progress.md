@@ -1,6 +1,6 @@
 # V3.7 presentation progress
 
-Status: 2026-10-25, in progress. Built against the contract and the fixture engine; switching checks to the real engine as the stealth and sapper pieces land.
+Status: 2026-10-25, built; checks pass on the fixture and on the real engine for 20.1–20.4 (stealth and sapper landed; crews 20.4 and the kit 20.5 still fixture-only where noted).
 
 ## Done (first pass, typecheck clean in my paths)
 
@@ -14,9 +14,29 @@ Status: 2026-10-25, in progress. Built against the contract and the fixture engi
 - **src/view/fixtures.ts**: captives, `fixtureCaptive`, `fixtureWake`; Brann is a Sapper (satchel of 3), Aldous a Shadowmancer (Dread, Sleep); monsters have facings; `reachable` fills `risks`; move applies swings/wake/notice; setCharge/throwCharge set fuses; endTurn counts fuses down and blasts (walls broken into `blown`, locks opened, damage with the shield rule), feared monsters flee with hero swings.
 - **src/style.css**: block "V3.7".
 
+## Done (second pass: spec 20.5 and 20.3a)
+
+- **src/view/pathing.ts** (new, pure): `longPath` (Dijkstra over explored standable hexes: rubble 2, stairs and a working lift 1, open doors only, round monsters, other heroes passable but not an endpoint), `standable`, `stepsToTurn`.
+- **Free move (20.5)**: `Hud.calmState()` (engine.calm, else `Delve.calm`); while calm in the player phase the Move group shows "☽ Free move · the castle turns in N steps" and a Follow toggle ("Party follows" / "Walk alone", default on, `hud.follow`); no budget rings; hovering any explored hex draws the long path with "Free move · walk 9 hexes · the castle turns in 2 steps (2 turns on the way) · the party follows"; clicking sends `move` with the whole path and `follow`; hexes inside the normal reach keep the engine's risks. `calm` event: "Combat!" banner with the reason (`calmBanner`), log line; calm again: toast + log.
+- **End turn**: the prompt and "still waiting" count only heroes who neither moved nor acted ("3 idle"); the note reads "nobody idle" otherwise.
+- **Brace / shield**: Brace in the Abilities group with help; `⛨ Braced` chip and figure tag; `◉ Shield` chip (rule in the tooltip), ◉ on the camp roster chip, a round shield mesh on the hero's back (`setShield`); the forge table gets a Shield column: "Buy a shield · 50" per hero (`buyShield`) or "◉ Shield".
+- **Hamstring / Night thorn / Briar**: buttons from the engine's actions (hamstring in Abilities, the spells in Abilities as spells) with help and keys (H / N / I); `hamstring` intent glyph ➴, line and words; `rooted` event: green thorn ring + "Rooted · 2"; `❃ Rooted · n` chip on heroes (Move mark used), `rooted · n` tag on monsters (`stuck`) and in the monster tooltip; `braced` event: a brace pop.
+- **Crates and barrels**: hover "Crate · Smash: loud, may hold something" ("Splinters" after); Smash (`smashProp`) in the Interact group and on click; `propSmashed`: lunge, splinters and dust, the prop vanishes (`LevelView.breakables` + `setSmashed`, crates and barrels are instanced per kind), "+ 7 gold" float and the loot glow on the drop ("Nothing inside" otherwise).
+- **Blasting the floor (20.3a)**: `blastPreview(castle, delve, at)` in stealth.ts (break / collapse next to a pit on L1–2 / rubble; the untouchable kinds and `unbreakable` left out) and `collapsible`; while set-charge, throw or charge is pending, hovering a target hex shows the three outcomes by colour (orange outline = breaks, red fill = drops into the pit, pale fill = rubble, plus the outer ring) and the fuse picker names them ("Drops 3 floor hexes into the pit, 3 to rubble") with a colour key; hover on floor by a pit: "Floor · a charge here would drop it into the pit"; collapsed hexes: "Collapsed · a blast dropped this floor into the pit", rubbled floor: "Blast rubble"; the level rebuild turns collapsed hexes into pits (ledges and skirts come with the rebuild) and blown floor into rubble; the blast plays debris from every broken, collapsed and rubbled hex, "The floor drops away", and the engine's `fell` events then animate anyone on it.
+- **names.ts**: `V37` gains calmSteps (CALM_STEPS), shieldPrice, brace/hamstring/thorn/briar/smash numbers (spec fallbacks until data.ts exports them); glyphs, help and keys for brace, hamstring, nightthorn, briar, smashProp; class kits list them; `MOVE_HELP.calm` / `.follow`.
+- **fixtures.ts**: `engine.calm`, free move (castle turns every 4 steps, followers in file, stops and `calm:false` when a sleeper wakes), `smashed`/`calmSteps`, `withBreakables` (a crate and a barrel near the entrance: the test castle has none), brace/hamstring/nightthorn/briar/smashProp actions and events, `buyShield`, Keven starts with a shield; blasts collapse floor by pits and rubble the rest, with `fell` for anyone on it.
+
 ## Next
 
-- scripts/v37-ui-check.mjs on `?fixture=1`, then on the real engine; stress bot; two screenshots.
+- Switch the 20.5 and 20.3a checks to the real engine when the kit agent lands (`engine.calm`, `blastPreview` from charges.ts: swap `src/view/stealth.ts#blastPreview` for it if its signature is simple).
+
+## How tested
+
+- `npx tsc --noEmit`: clean in src/view, src/ui, src/audio (the remaining errors are the engine agents' in-progress files).
+- `npx vitest run src/view/stealth.test.ts`: 7 tests (dirIndexOf ties, facing, blind arc with and without a wall, breakable walls on the test castle, blast rings, blown walls).
+- `node scripts/v37-ui-check.mjs http://localhost:5184/?fixture=1` and `... http://localhost:5184/` (real engine, seed 42; the second and third heroes are turned into a Sapper and a Shadowmancer when the campfire has none): ~90 DOM/state checks, 0 console errors. Real engine covers risks, blind arcs, swings and the confirm, Dread, set charge → fuse → blast → rubble, crew hover/parley/tags, captives at camp; 20.5 and 20.3a run on the fixture (skipped on the real engine until the kit lands).
+- `node scripts/v3-stress.mjs http://localhost:5184/ 2`: 0 errors.
+- Shots (real engine): docs/agents/v37-shots/v37-risks.png (move preview: red ring and facing wedge on the orc, "👁 Orc notices you" in the tip), v37-fuse.png (a fuse-2 charge on a wall: blast rings, the ✹2 tag, the hover text), v37-blast.png (the wall gone, "Blast rubble" on hover).
 
 ## Contract requests
 
@@ -25,6 +45,14 @@ Status: 2026-10-25, in progress. Built against the contract and the fixture engi
 - `GameEvent` still carries the old `{ type: 'blast'; at }` beside the new one; the UI accepts both.
 - `swing`: if the engine also emits `roll`/`hit` for the swing, the damage number shows twice (the UI shows `−damage` from the swing event itself). Tell me which and I'll drop one.
 
+- `Delve.dug` (blast rubble dug to floor) is engine-private: the view keeps its own set from `dug` events, lost on reload (the sapper agent asked for the same).
+- `blastPreview`: an `Engine.blastPreview(state, at)` (or a simple export) would replace the view's copy of the rule.
+- `reachable` while calm: if the engine returns only the 4-hex budget, the UI paths the rest itself (no risks on long paths); an engine `risks` for a given path would let the long hover show them too.
+
 ## Known issues
 
-- Blind arc hexes are by nearest sector (±60° cone) with a straight-line wall test; the engine's rule may be narrower or wider at distance.
+- Blind arc hexes follow the engine's `dirIndex` (largest dot product, ties low) with a straight-line wall test; the engine's own line of sight may differ by a hex at the edges.
+- The fuse tag and the "Fuse 2" floater overlap for a second after setting.
+- Risk tags over an enemy that stands under the hero cards are hidden by the cards (camera framing).
+- Captured heroes' "dragged" chip and the summary line rely on `status: 'captured'` and `Rival.dragging`; the crews rework (lead) decides when those are set.
+- The engine agents' file edits make vite reload the page mid-check; rerun when the tree is quiet.

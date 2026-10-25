@@ -32,7 +32,7 @@ export interface DioramaHooks {
   levelChanged(level: number): void;
 }
 
-export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area' | 'breakable';
+export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area' | 'breakable' | 'collapse' | 'rubble';
 
 export type FloatKind = 'damage' | 'heal' | 'info' | 'warn' | 'gold' | 'miss';
 
@@ -63,6 +63,8 @@ const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
   ally: 0x7fbf5a,
   danger: COLORS.danger,
   breakable: 0xff9a40,
+  collapse: 0xff2a30,
+  rubble: 0xb8a88a,
 };
 
 export class Diorama {
@@ -187,6 +189,8 @@ export class Diorama {
   private nextState: GameState | null = null;
   /** Blast rubble dug back to floor (`dug` events; the engine keeps this privately: contract request). */
   private dugWalls = new Set<string>();
+  /** 20.3a: loose stone round collapsed hexes, so the new pit edge reads ragged. */
+  private collapseDebris = new THREE.Group();
 
   constructor(
     private readonly container: HTMLElement,
@@ -230,9 +234,10 @@ export class Diorama {
     // Overlays.
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
       const fill = style === 'walk' || style === 'sneak' || style === 'dash';
+      const disc = style === 'collapse' || style === 'rubble';
       const m = new THREE.InstancedMesh(
-        fill ? hexRing(0.7, 0.8) : hexRing(0.68, 0.88),
-        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.6 : 0.9, depthWrite: false }),
+        disc ? new THREE.CircleGeometry(0.84, 6).rotateX(-Math.PI / 2).rotateY(Math.PI / 6) : fill ? hexRing(0.7, 0.8) : hexRing(0.68, 0.88),
+        new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: disc ? 0.45 : fill ? 0.6 : 0.9, depthWrite: false }),
         600,
       );
       m.count = 0;
@@ -284,7 +289,7 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks, this.collapseDebris);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -440,6 +445,7 @@ export class Diorama {
     this.refreshProps();
     this.refreshIntentVisibility();
     for (const l of this.lips.children) l.visible = l.userData.level === level;
+    for (const c of this.collapseDebris.children) c.visible = c.userData.level === level;
     this.facingKey = '';
     this.blindKey = '';
     this.fuseKey = '';
@@ -1238,8 +1244,8 @@ export class Diorama {
       door.hinge.rotation.y = ds.open ? -Math.PI * 0.55 : 0;
       door.padlock.visible = ds.locked && !ds.open;
     }
-    // V3.7 (20.3): built walls a blast broke are rubble now: rebuild those levels.
-    this.applyBrokenWalls(d.blown);
+    // V3.7 (20.3, 20.3a): walls a blast broke are rubble, floor it dropped is pit: rebuild those levels.
+    this.applyBrokenWalls(d.blown, d.collapsed ?? []);
     // V3.7 (20.5): smashed crates and barrels are gone.
     for (const lv of this.levels.values()) lv.setSmashed(new Set(d.smashed ?? []));
     // Braziers.
@@ -1980,16 +1986,18 @@ export class Diorama {
   }
 
   /** 20.3: rebuild a level with its blast-broken walls as rubble (walls are batched, so the level is remade). */
-  private applyBrokenWalls(blown: string[]): void {
+  private applyBrokenWalls(blown: string[], collapsed: string[] = this.state?.delve?.collapsed ?? []): void {
     if (!this.castle) return;
     const broken = blownWalls(this.castle, blown);
     for (const ld of this.castle.levels) {
       const mine = [...broken].filter((k) => k.startsWith(`${ld.level}:`)).sort();
-      const key = mine.join('|');
-      if ((this.brokenKey.get(ld.level) ?? '') === key) continue;
+      const fallen = collapsed.filter((k) => k.startsWith(`${ld.level}:`)).sort();
+      const key = `${mine.join('|')}#${fallen.join('|')}`;
+      if ((this.brokenKey.get(ld.level) ?? '#') === key) continue;
       this.brokenKey.set(ld.level, key);
       const old = this.levels.get(ld.level);
       if (old) this.scene.remove(old.group);
+      for (const c of [...this.collapseDebris.children]) if (c.userData.level === ld.level) this.collapseDebris.remove(c);
       const tiles = { ...ld.tiles };
       for (const k of mine) {
         const hk = k.slice(k.indexOf(':') + 1);
@@ -1997,8 +2005,36 @@ export class Diorama {
         if (!t) continue;
         // Rubble takes the room of a floor neighbour so it is lit and tinted like the room it opens into.
         const h = parseHexKey(hk);
-        const room = DIRS.map((dd) => tiles[hexKey(add(h, dd))]).find((n) => n && n.kind !== 'wall' && n.room)?.room;
-        tiles[hk] = { kind: 'rubble', room: room ?? t.room };
+        const room = t.room ?? DIRS.map((dd) => tiles[hexKey(add(h, dd))]).find((n) => n && n.kind !== 'wall' && n.room)?.room;
+        tiles[hk] = { kind: 'rubble', room };
+      }
+      // 20.3a: collapsed floor is a pit now (railings gone with it).
+      for (const k of fallen) {
+        const hk = k.slice(k.indexOf(':') + 1);
+        const t = tiles[hk];
+        if (!t) continue;
+        tiles[hk] = { kind: 'pit', room: t.room };
+      }
+      // Ragged edge: broken slabs and stones on the floor round each collapsed hex, a few hanging over the drop.
+      for (const k of fallen) {
+        const p = parsePos(k);
+        const stone = new THREE.MeshLambertMaterial({ color: 0x6e645a, flatShading: true });
+        for (const dd of DIRS) {
+          const n = add(p, dd);
+          const nt = tiles[hexKey(n)];
+          if (!nt || nt.kind === 'pit' || nt.kind === 'wall') continue;
+          const a = this.worldOf({ level: p.level, ...n }, 0);
+          const b = this.worldOf(p, 0);
+          for (let i = 0; i < 2; i++) {
+            const t = 0.3 + i * 0.22 + (hashStr(`${k}${dd.q}${dd.r}${i}`) % 10) / 60;
+            const m = new THREE.Mesh(new THREE.BoxGeometry(0.16 + (i % 2) * 0.1, 0.07, 0.12), stone);
+            m.position.lerpVectors(a, b, t);
+            m.position.y = a.y + 0.03 - (t > 0.5 ? (t - 0.5) * 0.5 : 0);
+            m.rotation.set((t - 0.5) * 0.8, hashStr(k + i) % 6, 0);
+            m.userData.level = p.level;
+            this.collapseDebris.add(m);
+          }
+        }
       }
       const def: LevelDef = { ...ld, tiles };
       const lv = new LevelView(def, this.castle);
@@ -2014,7 +2050,7 @@ export class Diorama {
   /** 20.3: a blast: flash, shake, dust and debris flying out, the broken walls crumbling into rubble. */
   private async playBlast(ev: Extract<GameEvent, { type: 'blast' }>): Promise<void> {
     // The contract still carries the old `{ type: 'blast', at }` shape beside the V3.7 one.
-    const e = { at: ev.at, by: 'by' in ev ? ev.by : '', broke: 'broke' in ev ? ev.broke : [] };
+    const e = { at: ev.at, by: 'by' in ev ? ev.by : '', broke: 'broke' in ev ? ev.broke : [], collapsed: 'collapsed' in ev ? (ev.collapsed ?? []) : [], rubbled: 'rubbled' in ev ? (ev.rubbled ?? []) : [] };
     const clock = this.clock;
     const watch = e.at.level === this.shownLevel;
     const at = this.worldOf(e.at, 0.6);
@@ -2027,11 +2063,15 @@ export class Diorama {
     this.fuseKey = '';
     this.refreshFuses();
     const breakNow = () => {
-      if (!e.broke.length || !this.state?.delve) return;
+      if (!(e.broke.length || e.collapsed.length || e.rubbled.length) || !this.state?.delve) return;
       const blown = this.state.delve.blown;
-      const more = e.broke.map((p) => posKey(p)).filter((k) => !blown.includes(k));
+      const more = [...e.broke, ...e.rubbled].map((p) => posKey(p)).filter((k) => !blown.includes(k));
       if (more.length) this.state.delve.blown = [...blown, ...more];
-      this.applyBrokenWalls(this.state.delve.blown);
+      const col = this.state.delve.collapsed ?? [];
+      const moreCol = e.collapsed.map((p) => posKey(p)).filter((k) => !col.includes(k));
+      if (moreCol.length) this.state.delve.collapsed = [...col, ...moreCol];
+      this.applyBrokenWalls(this.state.delve.blown, this.state.delve.collapsed ?? []);
+      this.applyLitFog();
       this.levels.get(e.at.level)?.setBlown(this.blownForView(this.state.delve.blown));
       this.levels.get(e.at.level)?.applyFogLit(this.fogLit, this.fogUnlit, this.vis.explored);
     };
@@ -2050,9 +2090,9 @@ export class Diorama {
     const group = new THREE.Group();
     const stone = new THREE.MeshLambertMaterial({ color: 0x8a8076, flatShading: true });
     const ember = new THREE.MeshBasicMaterial({ color: 0xff8a30 });
-    for (const o of [e.at, ...e.broke]) {
+    for (const o of [e.at, ...e.broke, ...e.collapsed, ...e.rubbled]) {
       const base = this.worldOf(o, 0.3);
-      const n = samePos(o, e.at) ? 14 : 10;
+      const n = samePos(o, e.at) ? 14 : e.broke.some((b) => samePos(b, o)) ? 10 : 5;
       for (let i = 0; i < n; i++) {
         const sz = 0.08 + Math.random() * 0.14;
         const m = new THREE.Mesh(new THREE.BoxGeometry(sz, sz * 0.8, sz * 1.2), Math.random() < 0.3 ? ember : stone);
@@ -2095,6 +2135,11 @@ export class Diorama {
     stone.dispose();
     ember.dispose();
     for (const b of e.broke) if (b.level === this.shownLevel) this.floatText(this.worldOf(b, 0.9), 'Wall broken', 'warn', 1.4);
+    if (e.collapsed.length) {
+      const c = e.collapsed[0]!;
+      if (c.level === this.shownLevel) this.floatText(this.worldOf(c, 0.9), e.collapsed.length === 1 ? 'The floor drops away' : `${e.collapsed.length} hexes drop into the pit`, 'warn', 1.6);
+      for (const p of e.collapsed) this.dustPuff(this.worldOf(p, 0.1));
+    }
   }
 
   // ------------------------------------------------------------ edge risk and landing previews

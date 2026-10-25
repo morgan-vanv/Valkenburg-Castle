@@ -8,10 +8,10 @@ import { at, testCastle } from './test/testCastle';
 import { hexKey, posKey, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, CastleDef, Command, GameEvent, GameState, Monster, MonsterKind } from './types';
 import { MONSTERS } from './data';
-import { World } from './world';
-import type { DelveX } from './state';
+import { kindAt, World } from './world';
+import type { DelveX, GameStateX } from './state';
 import { makeHero } from './camp';
-import { breakableWall, chargeCount } from './charges';
+import { blastPreview, breakableWall, chargeCount } from './charges';
 
 const e = createEngine(testCastle);
 const w = new World(testCastle);
@@ -67,7 +67,7 @@ function dx(s: GameState): DelveX {
 
 /** The V3.7 blast event (the contract still lists the old `{ type: 'blast', at }` shape too). */
 function blastOf(ev: GameEvent[]) {
-  return ev.find((x): x is { type: 'blast'; at: Pos; by: string; broke: Pos[] } => x.type === 'blast' && 'by' in x);
+  return ev.find((x): x is { type: 'blast'; at: Pos; by: string; broke: Pos[]; collapsed: Pos[]; rubbled: Pos[] } => x.type === 'blast' && 'by' in x);
 }
 
 function give(s: GameState, id: string, kind: 'charge'): string {
@@ -159,7 +159,7 @@ describe('V3.7 sapper', () => {
       expect(r.events.some((x) => x.type === 'blast')).toBe(false);
       expect(r.state.delve!.fuses).toMatchObject([{ at: at(1, 17, 7), rounds: 1 }]);
       r = ok(r.state, { type: 'endTurn' });
-      expect(r.events).toContainEqual({ type: 'blast', at: at(1, 17, 7), by: 'sam', broke: [] });
+      expect(blastOf(r.events)).toMatchObject({ at: at(1, 17, 7), by: 'sam', broke: [] });
       expect(r.state.delve!.fuses).toEqual([]);
       // Fuse 1.
       st = act(s, 'sam', 'setCharge', { at: at(1, 17, 7), fuse: 1 }).state;
@@ -191,7 +191,7 @@ describe('V3.7 sapper', () => {
       const below = monster(s, 'orc', at(2, 16, 7)); // the level below, same column: hears noise 8
       const st = act(s, 'sam', 'setCharge', { at: at(1, 16, 7), fuse: 1 }).state;
       const r = ok(st, { type: 'endTurn' });
-      expect(r.events).toContainEqual({ type: 'blast', at: at(1, 16, 7), by: 'sam', broke: [] });
+      expect(blastOf(r.events)).toMatchObject({ at: at(1, 16, 7), by: 'sam', broke: [] });
       expect(r.events).toContainEqual({ type: 'noise', at: at(1, 16, 7), radius: 8 });
       const d = r.state.delve!;
       const m = (id: string) => d.monsters.find((x) => x.id === id);
@@ -259,6 +259,107 @@ describe('V3.7 sapper', () => {
       expect(chest.opened).toBe(true);
       expect(cr.events.some((x) => x.type === 'chestOpened' && x.id === 'c2')).toBe(true);
       expect(cr.state.delve!.ground.some((g) => samePos(g.at, at(1, 17, 1)) && g.items.length > 0)).toBe(true);
+    });
+  });
+
+  describe('blasting the floor (20.3a)', () => {
+    it('a charge on a bridge drops the floor next to the pit, and the hero on it, into the Hollow; the hole is a pit from then on', () => {
+      const s = delve({ heroes: ['sam', 'brann'] });
+      put(s, 'sam', at(2, 13, 3));
+      put(s, 'brann', at(2, 11, 3)); // the railed bridge end, over the column
+      const hp = hero(s, 'brann').hp;
+      const pv = e.preview(s, 'sam', 'setCharge', { at: at(2, 12, 3), fuse: 1 });
+      expect(pv.modifiers).toContain('Floor collapses into the pit: 2 hexes'); // (11,3) and the railed (12,4), both beside the column
+      expect(pv.warning).toMatch(/floor under Brann collapses.*1 level.*Hollow/);
+      expect(pv.confirm).toBe(true);
+      const plan = blastPreview({ w, s: s as GameStateX, d: s.delve as DelveX, ev: [] }, at(2, 12, 3));
+      expect(plan.collapsed).toEqual(expect.arrayContaining([at(2, 11, 3), at(2, 12, 4)]));
+      expect(plan.collapsed).toHaveLength(2);
+      expect(plan.rubbled).toContainEqual(at(2, 12, 3));
+      expect(plan.hit).toEqual(expect.arrayContaining(['sam', 'brann']));
+      const r = ok(act(s, 'sam', 'setCharge', { at: at(2, 12, 3), fuse: 1 }).state, { type: 'endTurn' });
+      const bl = blastOf(r.events)!;
+      expect(bl.collapsed).toHaveLength(2);
+      expect(bl.rubbled).toContainEqual(at(2, 12, 3));
+      expect(r.events.some((x) => x.type === 'fell' && x.id === 'brann' && x.levels === 1)).toBe(true);
+      const b = hero(r.state, 'brann');
+      expect(b.at.level).toBe(3);
+      expect(b.hp).toBe(hp - 2 - 4); // half the blast, then the fall
+      const d = r.state.delve as DelveX;
+      expect(d.collapsed).toContain(posKey(at(2, 11, 3)));
+      expect(kindAt(w, d, at(2, 12, 4))).toBe('pit'); // the railing went with it
+      expect(kindAt(w, d, at(2, 11, 3))).toBe('pit');
+      expect(kindAt(w, d, at(2, 12, 3))).toBe('rubble');
+      // The new pit: a fall target, a jump target, an edge risk, not walkable, seen through; a later blast widens it.
+      expect(e.fallInfo(r.state, at(2, 11, 3))?.to.level).toBe(3);
+      put(r.state, 'sam', at(2, 12, 3));
+      hero(r.state, 'sam').moved = false;
+      hero(r.state, 'sam').acted = false;
+      expect(option(r.state, 'sam', 'jump')!.targets).toContainEqual({ at: at(2, 11, 3) });
+      expect(e.edgeRisk(r.state, 'sam')).not.toBeNull();
+      expect(e.reachable(r.state, 'sam', false).some((x) => samePos(x.to, at(2, 11, 3)))).toBe(false);
+      expect(e.visibility(r.state).visible.has(posKey(at(2, 10, 2)))).toBe(true);
+      const again = blastPreview({ w, s: r.state as GameStateX, d, ev: [] }, at(2, 11, 2));
+      expect(again.collapsed).toContainEqual(at(2, 11, 2)); // floor next to the new hole goes too
+      // Falling from Level 1 through the new hole reaches the Hollow.
+      expect(e.fallInfo(r.state, at(1, 11, 4))?.levels).toBe(2);
+    });
+
+    it('a charge in the middle of a room turns the ring to rubble (move 2) and nothing collapses; Dig clears it', () => {
+      const s = delve({ heroes: ['sam'] });
+      put(s, 'sam', at(1, 15, 7));
+      const r = ok(act(s, 'sam', 'setCharge', { at: at(1, 16, 7), fuse: 1 }).state, { type: 'endTurn' });
+      const bl = blastOf(r.events)!;
+      expect(bl.collapsed).toEqual([]);
+      expect(bl.rubbled).toHaveLength(7);
+      const d = r.state.delve as DelveX;
+      expect(kindAt(w, d, at(1, 16, 7))).toBe('rubble');
+      put(r.state, 'sam', at(1, 15, 7));
+      hero(r.state, 'sam').moved = false;
+      hero(r.state, 'sam').acted = false;
+      expect(e.reachable(r.state, 'sam', false).find((x) => samePos(x.to, at(1, 16, 7)))!.cost).toBe(2);
+      const dug = act(r.state, 'sam', 'dig', { at: at(1, 16, 7) }).state;
+      expect(kindAt(w, dug.delve as DelveX, at(1, 16, 7))).toBe('floor');
+    });
+
+    it('never touches stairs, exits, doors, lifts, chests or unbreakable floor; the Hollow only rubbles', () => {
+      const s = delve({ heroes: ['sam'] });
+      put(s, 'sam', at(1, 3, 6)); // next to the stairs (2,7) and the door (3,5)
+      const r = ok(act(s, 'sam', 'setCharge', { at: at(1, 3, 7), fuse: 1 }).state, { type: 'endTurn' });
+      const bl = blastOf(r.events)!;
+      const d = r.state.delve as DelveX;
+      expect(kindAt(w, d, at(1, 2, 7))).toBe('stairs');
+      expect(bl.rubbled.some((p) => samePos(p, at(1, 2, 7)))).toBe(false);
+      expect(bl.collapsed).toEqual([]);
+      // A chest's hex and an unbreakable floor hex stay floor; the exit stays an exit.
+      const c = delve({ heroes: ['sam'] });
+      put(c, 'sam', at(1, 16, 1));
+      (c.delve as DelveX).ground.push({ at: at(1, 16, 2), items: [] });
+      const castle = structuredClone(testCastle);
+      castle.levels[0]!.tiles[hexKey(at(1, 15, 1))]!.unbreakable = true;
+      const eng = createEngine(castle);
+      const c2 = delve({ heroes: ['sam'], castle });
+      put(c2, 'sam', at(1, 16, 1));
+      const cr = ok(act(c2, 'sam', 'setCharge', { at: at(1, 17, 2), fuse: 1 }, eng).state, { type: 'endTurn' }, eng);
+      const cb = blastOf(cr.events)!;
+      expect(cb.rubbled.some((p) => samePos(p, at(1, 17, 1)))).toBe(false); // chest c2
+      expect(cb.rubbled.some((p) => samePos(p, at(1, 18, 2)))).toBe(true);
+      const u = delve({ heroes: ['sam'], castle });
+      put(u, 'sam', at(1, 14, 2));
+      const ur = ok(act(u, 'sam', 'setCharge', { at: at(1, 15, 2), fuse: 1 }, eng).state, { type: 'endTurn' }, eng);
+      expect(blastOf(ur.events)!.rubbled.some((p) => samePos(p, at(1, 15, 1)))).toBe(false);
+      // Level 2's lift tile and the exit on Level 1 are never rubble.
+      const l = delve({ heroes: ['sam'] });
+      put(l, 'sam', at(2, 2, 6));
+      const lr = ok(act(l, 'sam', 'setCharge', { at: at(2, 1, 6), fuse: 1 }).state, { type: 'endTurn' });
+      expect(kindAt(w, lr.state.delve as DelveX, at(2, 1, 6))).toBe('lift');
+      // The Hollow: rubble, never a collapse (nothing below).
+      const h = delve({ heroes: ['sam'] });
+      put(h, 'sam', at(3, 5, 5));
+      const hr = ok(act(h, 'sam', 'setCharge', { at: at(3, 6, 5), fuse: 1 }).state, { type: 'endTurn' });
+      const hb = blastOf(hr.events)!;
+      expect(hb.collapsed).toEqual([]);
+      expect(hb.rubbled.length).toBeGreaterThan(3);
     });
   });
 

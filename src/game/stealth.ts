@@ -251,7 +251,8 @@ export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos): boolean {
     if (h.at.level === to.level && distance(h.at, to) <= 1) continue;
     const def = heroDef(c, h.heroId)!;
     const cls = CLASSES[def.cls];
-    const slots = cls.weapon.range ? SWING_BOW_SLOTS : Math.max(1, cls.weapon.slots - SWING_SLOT_PENALTY);
+    // V3.7 (spec 20.5): a braced hero swings at full slots.
+    const slots = cls.weapon.range ? SWING_BOW_SLOTS : h.braced ? cls.weapon.slots : Math.max(1, cls.weapon.slots - SWING_SLOT_PENALTY);
     const p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + lightPenaltyFor(c.w, c, h);
     say(c, `${heroName(c, h.heroId)} swings at ${t.name} as it goes.`);
     const r = roll(c, h.heroId, 'Free swing', slots, p);

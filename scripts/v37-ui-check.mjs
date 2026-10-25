@@ -13,6 +13,19 @@ const shots = process.env.SHOTS ?? '';
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
 await p.route(/fonts\./, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+// No HMR: other agents editing src/game mid-run would otherwise reload the page under the check.
+await p.route(/\/@vite\/client/, (r) =>
+  r.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: `const sheets = new Map();
+export function updateStyle(id, css) { let el = sheets.get(id); if (!el) { el = document.createElement('style'); el.setAttribute('data-vite-dev-id', id); document.head.appendChild(el); sheets.set(id, el); } el.textContent = css; }
+export function removeStyle(id) { sheets.get(id)?.remove(); sheets.delete(id); }
+export function injectQuery(u) { return u; }
+export function createHotContext() { return { accept() {}, acceptExports() {}, dispose() {}, prune() {}, on() {}, off() {}, send() {}, invalidate() {}, data: {} }; }
+export class ErrorOverlay extends HTMLElement {}`,
+  }),
+);
 let errors = 0;
 let failed = 0;
 let skipped = 0;
@@ -219,7 +232,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       const dr = opts.find((o) => o.action === 'dread');
       if (dr && dr.targets.length && !dr.blocked) {
         await p.evaluate(([id, t]) => { window.vc.hud.startAction ? null : null; }, [sh.heroId, dr.targets[0]]);
-        await btn.click();
+        await p.click('.hud-bar .act[data-action="dread"]');
         await p.waitForTimeout(150);
         // Pick the first target via the picker list or the map.
         const row = await p.$('.hud-picker .picker-row');
@@ -277,7 +290,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       const btn = await p.$('.hud-bar .act[data-action="setCharge"]');
       check('Set charge in the bar (Abilities)', !!btn && (await btn.evaluate((e) => !!e.closest('.bar-group-abilities'))));
       if (btn) {
-        await btn.click();
+        await p.click('.hud-bar .act[data-action="setCharge"]');
         await p.waitForTimeout(200);
         const pick = await p.$eval('.hud-picker', (e) => e.innerText).catch(() => '');
         check('aim hint says outlined walls can be broken, fuse next', /Outlined walls can be broken/.test(pick), pick.replace(/\n/g, ' | ').slice(0, 100));
@@ -293,7 +306,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
         const text = await p.$eval('.hud-picker', (e) => e.innerText).catch(() => '');
         check('...names the blast (4 within 1, 2 within 2)', /4 damage within 1/.test(text) && /2 within 2/.test(text), text.replace(/\n/g, ' | ').slice(0, 140));
         if (fuses.length === 2) {
-          await fuses[1].click();
+          await p.click('.hud-picker .fuse-btn.fuse-2');
           await idle();
           await p.waitForTimeout(250);
           s = await state();
@@ -344,6 +357,65 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   } else skip('set charge', 'no Sapper in the party');
 }
 
+// ---- 4a. spec 20.3a: a charge on floor next to a pit drops it
+{
+  s = await state();
+  const sap = heroOf('sapper');
+  const col = await p.evaluate(async () => {
+    const st = await import('/src/view/stealth.ts');
+    const castle = window.vcEngine.castle();
+    const d = window.vc.state().delve;
+    const lv = castle.levels.find((l) => l.level === 1);
+    const out = [];
+    for (const k of Object.keys(lv.tiles)) { const [q, r] = k.split(',').map(Number); const p = { level: 1, q, r }; if (st.collapsible(castle, d, p)) out.push(p); }
+    return out;
+  });
+  check('the view finds floor next to pits on Level 1', col.length > 0, `${col.length}`);
+  if (sap && col.length) {
+    let placed = null;
+    for (const c of col) {
+      const f = nb(c).find((q) => tileAt(q)?.kind === 'floor' && !col.some((x) => x.q === q.q && x.r === q.r) && !s.delve.monsters.some((m) => m.at.q === q.q && m.at.r === q.r) && !s.delve.heroes.some((h) => h.heroId !== sap.heroId && h.at.q === q.q && h.at.r === q.r));
+      if (f) { placed = { edge: c, at: f }; break; }
+    }
+    if (placed) {
+      await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; h.dashed = false; if (!h.pack.some((i) => i.kind === 'charge')) h.pack.push({ id: 'sat2', kind: 'charge', name: 'Satchel: 3 charges', amount: 3, slots: 0 }); for (const k of [a.at, a.edge]) { const kk = '1:' + k.q + ',' + k.r; if (!s.delve.explored.includes(kk)) s.delve.explored.push(kk); }`, { id: sap.heroId, at: placed.at, edge: placed.edge });
+      await p.evaluate((id) => window.vc.hud.select(id), sap.heroId);
+      await p.waitForTimeout(200);
+      const tip = await hoverTip(placed.edge);
+      check('hover on floor by a pit: "a charge here would drop it into the pit"', /charge here would drop it into the pit/.test(tip), tip.slice(0, 100));
+      await unhover();
+      const btn = await p.$('.hud-bar .act[data-action="setCharge"]');
+      if (btn) {
+        await p.click('.hud-bar .act[data-action="setCharge"]');
+        await p.waitForTimeout(150);
+        await hoverTip(placed.edge);
+        await p.waitForTimeout(100);
+        check('aiming at it: collapse outcome drawn in red', (await p.evaluate(() => window.vc.dio.highlights.get('collapse').count)) > 0);
+        await unhover();
+        await p.evaluate((at) => window.vc.hud.onClick(at, null, { button: 0 }), placed.edge);
+        await p.waitForTimeout(200);
+        const pick = await p.$eval('.hud-picker', (e) => e.innerText).catch(() => '');
+        check('fuse picker names the drop', /drops \d floor hex/i.test(pick), pick.replace(/\n/g, ' | ').slice(0, 120));
+        const f1 = await p.$('.hud-picker .fuse-btn.fuse-1');
+        if (f1) {
+          await p.click('.hud-picker .fuse-btn.fuse-1');
+          await idle();
+          await p.evaluate(() => window.vc.send({ type: 'endTurn' }));
+          await idle();
+          await p.waitForTimeout(300);
+          s = await state();
+          const ck = `1:${placed.edge.q},${placed.edge.r}`;
+          check('after the blast the hex is in collapsed', (s.delve.collapsed ?? []).includes(ck), `collapsed: ${(s.delve.collapsed ?? []).join(' ')}`);
+          check('the level redraws it as a pit', await p.evaluate((k) => window.vc.dio.levels.get(1).def.tiles[k.slice(2)]?.kind === 'pit', ck));
+          const t2 = await hoverTip(placed.edge);
+          check('hover: Collapsed / pit', /Collapsed|Pit/.test(t2), t2.slice(0, 80));
+          await unhover();
+        }
+      }
+    } else skip('floor collapse', 'no floor beside a pit-edge hex');
+  } else skip('floor collapse', sap ? 'no pit edges' : 'no Sapper');
+}
+
 // ---- 4b. spec 20.5: free move while calm, the idle-only end-turn rule, Brace, Hamstring/Night thorn/Briar, crates
 {
   await p.evaluate(async () => {
@@ -356,7 +428,8 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     st.delve.fuses = [];
     st.delve.rivals = null;
     for (const h of st.delve.heroes) Object.assign(h, { moved: false, acted: false, dashed: false, status: h.status === 'captured' ? 'active' : h.status });
-    // Explore a wide ring round the party so a long walk has somewhere to go.
+    // Doors open and a wide ring explored round the party, so a long walk has somewhere to go.
+    for (const k of Object.keys(st.delve.doors)) Object.assign(st.delve.doors[k], { open: true, locked: false });
     const lead = st.delve.heroes.find((h) => h.status === 'active');
     const lv = window.vcEngine.castle().levels.find((l) => l.level === lead.at.level);
     for (const k of Object.keys(lv.tiles)) {
@@ -438,7 +511,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     if (braceBtn) {
       const help = await braceBtn.evaluate((e) => e.dataset.tip ?? e.title);
       check('Brace help: 1 less and −15%', /1 less/.test(help) && /−15%/.test(help), help.slice(0, 100));
-      await braceBtn.click();
+      await p.click('.hud-bar .act[data-action="brace"]');
       await idle();
       await p.waitForTimeout(200);
       s = await state();
@@ -476,7 +549,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       await idle();
       await p.waitForTimeout(300);
       s = await state();
-      check('the crate is in smashed and gone from the level', (s.delve.smashed ?? []).includes(`1:${crateKey}`) && (await p.evaluate((k) => { const lv = window.vc.dio.levels.get(1); const b = lv.breakables.get(k)?.[0]; if (!b) return false; const m = new Float32Array(16); b.mesh.getMatrixAt(b.index, { fromArray: (a) => m.set(a), elements: m, toArray: () => [...m], copy() {} }); return b.mesh.instanceMatrix.array[b.index * 16] === 0; }, `1:${crateKey}`)));
+      check('the crate is in smashed and gone from the level', (s.delve.smashed ?? []).includes(`1:${crateKey}`) && (await p.evaluate((k) => { const lv = window.vc.dio.levels.get(1); const b = lv.breakables.get(k)?.[0]; return !!b && b.mesh.instanceMatrix.array[b.index * 16] === 0; }, `1:${crateKey}`)));
       const drop = s.delve.ground.find((g) => g.at.q === crate.q && g.at.r === crate.r);
       if (drop) check('the drop glows on the floor', (await p.evaluate(() => window.vc.dio.lootGlow.children.length)) > 0);
       const t2 = await hoverTip(crate);

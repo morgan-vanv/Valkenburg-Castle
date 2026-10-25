@@ -19,8 +19,9 @@ import { awayFrom, checkDelveEnd, pusherFor, refreshSight, setLight, unlitOnL3, 
 import { push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
 import {
-  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
+  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
 } from './ai';
+import { HAMSTRING_RANGE } from './data';
 import { computeRivalIntents, rivalsAct } from './rivals';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, noticeHero, perceivable } from './stealth';
@@ -35,7 +36,7 @@ interface Plan {
 const WAIT: Plan = { intent: { kind: 'wait' }, path: [] };
 
 /** Abilities that must be shown as an intent the round before they go off (spec 16.4). */
-const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove'];
+const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove', 'hamstring'];
 
 function canSteal(t: Target): boolean {
   return !!t.hero && t.hero.pack.some((i) => i.kind !== 'heirloom');
@@ -128,6 +129,9 @@ function archerPlan(c: Ctx, m: MonsterX, t: Target, move: number, lit: Set<strin
       m.shoveFrom = { ...to };
       return sh;
     }
+    // V3.7 (spec 20.5): a hero closing in and not yet rooted gets an arrow in the leg first.
+    const ham = noAbility ? null : hamstringIntent(c, to, t);
+    if (ham) return { intent: ham, path };
     return { intent: { kind: 'attack', targetId: t.id, to, damage: hitRange(st.slots, st.dmg, t.armor) }, path };
   };
   const d = m.at.level === t.at.level ? distance(m.at, t.at) : 99;
@@ -404,6 +408,8 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
       if (!within(to, t!.at, ARCHER_RANGE) || !los(c.w, c.d, to, t!.at)) return null;
     } else if (!adjacentTo(to, t!.at)) return null;
   }
+  // V3.7 (spec 20.5): the hamstring shot as shown, while the hero is still in range and not rooted yet.
+  if (it.kind === 'hamstring' && (!t?.hero || (t.hero.rooted ?? 0) > 0 || !within(to, t.at, HAMSTRING_RANGE) || !los(c.w, c.d, to, t.at))) return null;
   return { intent: it, path };
 }
 
@@ -518,6 +524,14 @@ function monsterAct(c: Ctx, m: MonsterX): void {
           push(c, landed, m.at, m.id);
         }
       }
+      break;
+    }
+    case 'hamstring': {
+      // V3.7 (spec 20.5): the orc archer roots a hero.
+      const t = targets(c).find((x) => x.id === it.targetId);
+      if (!t?.hero || t.at.level !== m.at.level || !within(m.at, t.at, HAMSTRING_RANGE) || !los(c.w, c.d, m.at, t.at)) break;
+      faceToward(m, t.at);
+      hamstringShot(c, m.id, t, st.chance);
       break;
     }
     case 'steal': {
@@ -666,6 +680,8 @@ export function worldPhase(c: Ctx): void {
   // Spec 18.4: the Black Cask's hiccups: noise 1 at the drinker every world phase.
   for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
+  // V3.7 (spec 20.5): roots (hamstring, briar) wear off at the start of the phase: a hero rooted by an archer sits out two of their turns.
+  for (const h of d.heroes) if ((h.rooted ?? 0) > 0) h.rooted! -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
     // V3.7 (spec 20.4): a crew member dragging them keeps them breathing (they're worth more alive).
@@ -686,12 +702,15 @@ export function worldPhase(c: Ctx): void {
   // V3.7 (spec 20.3): fuses count down; charges at 0 go off now, at the end of the world phase.
   tickFuses(c);
   // 5. New round.
+  // V3.7 (spec 20.5): the castle has turned: free movement counts its steps afresh; braces end at the next player phase.
+  d.calmSteps = 0;
   for (const h of d.heroes) {
     h.moved = false;
     h.acted = false;
     h.dashed = false;
     h.overwatch = false;
     h.guarding = undefined;
+    h.braced = undefined;
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;
@@ -719,6 +738,8 @@ export function worldPhase(c: Ctx): void {
       r.feared! -= 1;
       if (r.feared === 0) r.fearOf = undefined;
     }
+    // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) comes loose.
+    if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
   }
   tick(d.smoke);
   tick(d.glue);

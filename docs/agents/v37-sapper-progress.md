@@ -18,12 +18,22 @@
   - engine.test.ts: the 15.3 sapper test and the 18.5 rival sapper test updated to fuses.
 - docs/decisions.md: one line on the satchel, fuse timing, breakable rule and the shield.
 
+## 20.3a blasting the floor (added 14:50)
+
+- `charges.ts`: `blastPreview(c, at) → { broke, collapsed, rubbled, hit }` (pure; the blast itself uses the same plan) and `collapseDrop(w, d, p)` (where collapsing floor lands, for previews). In `blast`: floor/raised floor within 1 (by kindAt, so a dug hole counts, rubble doesn't; never `unbreakable`, chest or hoard hexes, and stairs/lift/exit/door/brazier/tallprop/sealed aren't floor) → next to a pit (original or collapsed) with a level below: `Delve.collapsed`; occupants fall by the column rules (`falls.fall`) after the blast damage; ropes and fuses on it are dropped, ground loot falls to the landing hex; the rest → `blown` (rubble, Dig clears it via `dug`); the Hollow only rubbles. Event `blast { broke, collapsed, rubbled }`. The inner-ring push skips figures who already fell.
+- `world.ts kindAt`: floor in `collapsed` → 'pit' (so sight, movement, shoves, jump targets, fallColumn from above, pitsNextTo/edgeRisk and later blasts all see it); floor in `blown` → 'rubble' (floor once in `dug`). `falls.railed` is false on a collapsed hex.
+- `delve.ts` (mine only): `blastSpec` adds modifiers "Floor collapses into the pit: n hexes" / "Rubble: n hexes", a `warning` + `confirm` when a hero stands on collapsing floor ("The floor under Brann collapses: falls 1 level into the Hollow, 4 damage on top of the blast."); the dig case sends blasted floor to `dug`.
+- Data: `LevelBuilder.protectAround(c, r)` marks the hex and its neighbours `unbreakable`; applied to L1 stairs (37,3), L2 stairs (37,3) and lift (24,27), L3 lift (24,27). castle.test checks it.
+- Tests (charges.test.ts, 3 new): bridge charge drops Brann to the Hollow (half blast + fall damage), the hole is a pit (fallInfo, jump target, edge risk, unwalkable, seen through, widens on a later blast, L1 falls pass through it); room-centre charge rubbles 7 hexes, nothing collapses, Dig clears; stairs/exit/lift/chest/unbreakable floor untouched, the Hollow only rubbles.
+- Sim line now prints `floor collapsed n / rubbled n`.
+
 ## For the presentation agent
 
 - Satchel = one pack item `{ kind: 'charge', slots: 0, amount: n, name: 'Satchel: n charges' }`; bought charges are normal 1-slot items. Count = `chargeCount(h)` from charges.ts, or sum it yourself.
 - `setCharge` targets come in pairs per hex: `{ at, fuse: 1 }` and `{ at, fuse: 2 }` (pick 'hex', area 2). Preview with the chosen fuse: `outcomes[0]` "Fuse n: blows ...", `modifiers` has "Breaks the wall" / "Breaks n walls", `warning` names friends in the blast, `hexes` = within 2, `affects` = figures there.
 - `Delve.fuses[]` is the marker list (`rounds` = the number to show). `fuseSet` and `blast { at, by, broke }` events. A rival's `fuse` intent shows `to` and `hexes` (within 2).
 - Breakable wall for the hover hint: `breakableWall(world, delve, pos)` in charges.ts (pure). A built wall whose posKey is in `blown` is rubble (draw a hole with debris); once dug it's floor but that's only in the engine-private `delve.dug`.
+- Blast preview by colour (20.3a): `blastPreview(ctx, at)` in charges.ts returns `{ broke, collapsed, rubbled, hit }`; it needs a `Ctx` (`{ w: World, s, d: state.delve, ev: [] }`). `engine.preview(...)` for setCharge/throwCharge/charge already folds it into `modifiers` and `warning`; a contract query (`Engine.blastPreview(state, at)`) would be the clean way to get the hex lists. Redraw: `delve.collapsed` posKeys = new pit hexes (ragged edge); floor posKeys in `delve.blown` = rubble.
 
 ## Fuse timing
 
@@ -34,6 +44,8 @@
 - Drop the old `{ type: 'blast'; at: Pos }` event variant from `GameEvent` (types.ts line ~802); both shapes coexist, so `ev.by` needs an `'by' in ev` guard.
 - `Delve.dug?: string[]` in the contract if the view should draw dug blast rubble as floor (now engine-private).
 - `Engine.breakable(state, at): boolean` would be cleaner than the view importing `breakableWall` from charges.ts.
+- `Engine.blastPreview(state, at): { broke, collapsed, rubbled, hit }` for the coloured blast overlay (20.3a).
+- Chest hexes don't collapse or rubble (not in the spec's list, but a chest hanging over a pit would break opening/loot); say if you'd rather they fall.
 
 ## Known issues
 

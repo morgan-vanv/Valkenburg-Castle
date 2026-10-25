@@ -11,7 +11,7 @@ import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
-import { backDirs, breakableWall, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords, wallsBlastWouldBreak } from '../view/stealth';
+import { backDirs, blastPreview, breakableWall, collapsible, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
@@ -477,8 +477,8 @@ export class Hud {
       this.dio.showLanding(null, null, '', false);
       if (t) this.showActionLanding(this.pending.action, t);
     }
-    // Area preview while aiming a hex action (fireball, gust, smoke, glue).
-    if (this.pending?.area && at) {
+    // Area preview while aiming a hex action (fireball, gust, smoke, glue); charges always (20.3a).
+    if ((this.pending?.area || (this.pending && ['setCharge', 'throwCharge', 'charge'].includes(this.pending.action))) && at) {
       const t = this.pending.targets.find((x) => x.at && samePos(x.at, at));
       this.drawPendingArea(t ? at : null);
     }
@@ -584,8 +584,37 @@ export class Hud {
     this.areaDrawn = key;
     this.dio.clearHighlights();
     const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
+    const charge = this.pending.action === 'setCharge' || this.pending.action === 'throwCharge' || this.pending.action === 'charge';
+    if (charge) {
+      const castle = this.engine.castle();
+      const walls = ats.filter((p) => breakableWall(castle, p));
+      this.dio.highlight(walls, 'breakable');
+      this.dio.highlight(ats.filter((p) => !walls.some((w) => samePos(w, p))), 'dash');
+      if (at) this.showBlastOutcomes(at);
+      return;
+    }
     this.dio.highlight(ats, 'dash');
     if (at && this.pending.area) this.dio.highlight(this.areaAround(at, this.pending.area), 'area');
+  }
+
+  /** 20.3a: the three things a blast at `at` does to the ground, by colour: break (walls), collapse (floor into the pit), rubble. */
+  private showBlastOutcomes(at: Pos): { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[] } {
+    const pv = blastPreview(this.engine.castle(), this.state?.delve ?? null, at);
+    this.dio.highlight(pv.breaks, 'breakable');
+    this.dio.highlight(pv.collapses, 'collapse');
+    this.dio.highlight(pv.rubbles, 'rubble');
+    this.dio.highlight(this.areaAround(at, 2).filter((p) => !this.areaAround(at, 1).some((q) => samePos(p, q))), 'area');
+    this.dio.highlight([at], 'target');
+    return pv;
+  }
+
+  /** "breaks 1 wall, drops 2 hexes into the pit, 3 to rubble". */
+  private blastWords(pv: { breaks: Pos[]; collapses: Pos[]; rubbles: Pos[] }): string {
+    const parts: string[] = [];
+    if (pv.breaks.length) parts.push(`breaks ${pv.breaks.length} wall${pv.breaks.length === 1 ? '' : 's'}`);
+    if (pv.collapses.length) parts.push(`drops ${pv.collapses.length} floor hex${pv.collapses.length === 1 ? '' : 'es'} into the pit`);
+    if (pv.rubbles.length) parts.push(`${pv.rubbles.length} to rubble`);
+    return parts.join(', ');
   }
 
   private monsterLines(m: Monster): string[] {
@@ -701,13 +730,16 @@ export class Hud {
     else if (t.kind === 'sealed') parts.push('<b>Sealed.</b> Nothing opens it yet.');
     else if (t.kind === 'wall' && d.blown.includes(k)) act('Blast rubble', "a wall a charge broke · costs 2 to cross, or Sapper's Dig");
     else if (t.kind === 'wall' && breakableWall(castle, at)) act('Wall', `a Sapper's charge could break it${selDef?.cls === 'sapper' ? ' (Set charge next to it)' : ''}`);
+    else if (t.kind === 'floor' && (d.collapsed ?? []).includes(k)) parts.push('<b class="neg">Collapsed</b> <span class="tip-how">· a blast dropped this floor into the pit</span>');
+    else if (t.kind === 'floor' && d.blown.includes(k)) act('Blast rubble', "floor a charge broke up · costs 2 to cross, or Sapper's Dig");
+    else if (t.kind === 'floor' && collapsible(castle, d, at)) parts.push('<b>Floor</b> <span class="tip-how">· a charge here would drop it into the pit</span>');
     else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
     // V3.7 (20.3): a charge on this hex.
     const fuse = fuseAt(d, at);
     if (fuse) {
       const side = fuseSide(s, fuse.by);
-      const breaks = wallsBlastWouldBreak(castle, at).filter((p) => !d.blown.includes(posKey(p))).length;
-      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="tip-how">· set by ${this.nameOf(fuse.by)}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${breaks ? `, breaks ${breaks} wall${breaks === 1 ? '' : 's'}` : ''}</span>`);
+      const words = this.blastWords(blastPreview(castle, d, at));
+      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="tip-how">· set by ${this.nameOf(fuse.by)}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
     }
     if (t.railing) parts.push('Railing');
     const vent = castle.lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
@@ -953,16 +985,16 @@ export class Hud {
     clear(this.picker);
     const castle = this.engine.castle();
     const d = this.state!.delve!;
-    const breaks = wallsBlastWouldBreak(castle, at).filter((p) => !d.blown.includes(posKey(p)));
+    void castle;
+    void d;
     const where = this.targetLabel({ at });
     this.dio.clearHighlights();
-    this.dio.highlight([at], 'target');
-    this.dio.highlight(breaks, 'breakable');
-    this.dio.highlight(this.areaAround(at, 1), 'danger');
-    this.dio.highlight(this.areaAround(at, 2).filter((p) => !this.areaAround(at, 1).some((q) => samePos(p, q))), 'area');
+    const pv = this.showBlastOutcomes(at);
+    const words = this.blastWords(pv);
     this.picker.append(
       h('div', { class: 'kicker' }, `Set charge · ${where}`),
-      h('div', { class: 'small' }, `${V37.blastInner} damage within 1 (red, and a shove), ${V37.blastOuter} within 2 (orange).${breaks.length ? ` Breaks ${breaks.length} wall${breaks.length === 1 ? '' : 's'}.` : ''} Pick the fuse:`),
+      h('div', { class: 'small' }, `${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2.${words ? ` ${words[0]!.toUpperCase()}${words.slice(1)}.` : ''} Pick the fuse:`),
+      h('div', { class: 'small blast-key' }, h('i', { class: 'bk bk-break' }), ' breaks ', h('i', { class: 'bk bk-collapse' }), ' drops into the pit ', h('i', { class: 'bk bk-rubble' }), ' rubble'),
       h('div', { class: 'fuse-pick' }, ...fuses.map((f) => h('button', { class: `btn btn-small fuse-btn fuse-${f}`, 'data-fuse': `${f}`, title: f === 1 ? 'Fuse 1 · goes off at the end of the coming castle turn. Step out of the rings first.' : 'Fuse 2 · goes off at the end of the castle turn after next: time to walk clear, or to lure something onto it.', onclick: () => { this.fusePicked = true; this.choose(o, { ...t, fuse: f }); } }, h('span', { class: 'fuse-big num' }, `${f}`), h('span', { class: 'small' }, f === 1 ? 'end of this castle turn' : 'the turn after next')))),
       h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
     );

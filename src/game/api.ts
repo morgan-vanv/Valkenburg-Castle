@@ -171,6 +171,8 @@ export interface Engine {
   shop(state?: GameState): ShopOffer[];
   /** V3.5 (spec 18.4): the Flagon's ales, each `locked` until its brewing gear is home. */
   ales(state: GameState): AleOffer[];
+  /** V3.7 (spec 20.3): what a blast at `at` would do, for the coloured overlay before committing. */
+  blastPreview(state: GameState, at: Pos): { broke: Pos[]; collapsed: Pos[]; rubbled: Pos[]; /** ids of figures the blast would damage */ hit: string[] };
   /** V3.7 (spec 20.5): is the party calm (free movement on)? With a reason when not ("An orc hunts Pim"). */
   calm(state: GameState): { calm: boolean; why?: string };
   /** V3.5 (spec 18.6): the parley deals a hero can make with the crew right now (empty if none in reach). */

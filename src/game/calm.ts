@@ -10,11 +10,12 @@ import type { Reach } from './api';
 import { CALM_STEPS } from './data';
 import { say, type Ctx, type HeroX } from './state';
 import { activeHeroes, hd, heroName, levelHeal, makeNoise, nameOf, occupant, onMap, rivalsOnMap, wakeAdjacent } from './common';
-import { brightnessOf, dijkstra, doorAt, kindAt, litSet, pathTo, steps } from './world';
+import { brightnessOf, dijkstra, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
 import { moveRisks, provokeSwings, stepNoise, wakeRolls } from './stealth';
 import { ventCheck } from './falls';
-import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, springTrap, visNow } from './delve';
+import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, springTrap } from './delve';
 import { worldPhase } from './world-phase';
+import { rivalCaltropsStep } from './crewai';
 
 // ---------------------------------------------------------------- the calm test
 
@@ -118,12 +119,13 @@ interface Walker {
   seg: Pos[];
 }
 
-/** Monsters and crew members the heroes can see right now. */
-function figuresInSight(c: Ctx): Set<string> {
-  const vis = visNow(c);
+/** Monsters and crew members (not a hired crew's) some active hero can see right now. Per figure, not the whole visible set: this runs every step. */
+function figuresInSight(c: Ctx, lit: Set<string>): Set<string> {
   const out = new Set<string>();
-  for (const m of onMap(c)) if (vis.has(posKey(m.at))) out.add(m.id);
-  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && vis.has(posKey(r.at))) out.add(r.id);
+  const eyes = activeHeroes(c);
+  const figs: { id: string; at: Pos }[] = [...onMap(c)];
+  if (c.d.rivals?.stance !== 'hired') for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0) figs.push(r);
+  for (const f of figs) if (eyes.some((h) => seesHex(c.w, c.d, h.at, f.at, lit))) out.add(f.id);
   return out;
 }
 
@@ -160,7 +162,10 @@ function stepTo(c: Ctx, wk: Walker, p: Pos, sneak: boolean, last: boolean, lit: 
   if (noise) makeNoise(c, p, noise, { quiet: true });
   wakeRolls(c, h, p, last, sneak, lit);
   let trap = false;
-  if (c.d.traps[posKey(p)]) {
+  if (rivalCaltropsStep(c, h as HeroX, p)) {
+    flush(c, wk);
+    trap = true;
+  } else if (c.d.traps[posKey(p)]) {
     flush(c, wk);
     springTrap(c, h, p);
     trap = true;
@@ -203,7 +208,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
   for (const f of line) (f.h as HeroX).sneaked = sneak;
   const trail: Pos[] = [{ ...h.at }];
   const name = heroName(c, h.heroId);
-  let seen = figuresInSight(c);
+  let seen = figuresInSight(c, litSet(c.w, d));
   let hp = new Map(d.heroes.map((x) => [x.heroId, x.hp]));
   let stage = brightnessOf(d.light);
   let lastNoise = 0;
@@ -218,7 +223,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     if (woke) return `${nameOf(c, woke)} stirs`;
     const st = brightnessOf(d.light);
     if (st !== stage) return `the light is ${st}`;
-    const now = figuresInSight(c);
+    const now = figuresInSight(c, litSet(c.w, d));
     for (const id of now) if (!seen.has(id)) return `${nameOf(c, id)} in sight`;
     return undefined;
   };
@@ -299,8 +304,9 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
       }
       if (tripped) return stop('a trap');
     }
+    // A crew not yet spotted, or waiting at its post, is looked for every step (refreshSight is the whole visible set: only then).
     c.visCache = undefined;
-    refreshSight(c);
+    if (d.rivals && (!d.rivals.spotted || d.rivals.stance === 'waiting')) refreshSight(c);
     if (c.s.stage !== 'delve') return stop('the delve is over', false);
     // The castle turns every CALM_STEPS steps: a full world phase and a new round, then the walk goes on
     // (deferred a step while the mover stands on a friend's hex, passing through).
@@ -325,7 +331,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     if (halted) return stop(halted, false);
     hp = new Map(d.heroes.map((x) => [x.heroId, x.hp]));
     stage = brightnessOf(d.light);
-    seen = figuresInSight(c);
+    seen = figuresInSight(c, litSet(c.w, d));
   }
   settle();
   if (c.s.stage === 'delve') {

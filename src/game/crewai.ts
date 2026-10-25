@@ -14,7 +14,7 @@ import { chance } from './rng';
 import { say, type Ctx, type HeroX, type RivalX } from './state';
 import { activeHeroes, hd, heroName, hurtAny, hurtHero, makeNoise, monsterArmor, occupant, onMap, rivalsOnMap, roll } from './common';
 import { canEnter, dijkstra, distField, isFloorish, kindAt, los, pathTo, standable, within } from './world';
-import { adjacentTo, approach, attackSpots, blocked, exitsBy, hitRange, overwatchCheck, strike, targets, walk, type Target } from './ai';
+import { adjacentTo, approach, attackSpots, blocked, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, strike, targets, walk, type Target } from './ai';
 import { push, pushOutcome } from './falls';
 import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
@@ -302,6 +302,13 @@ function knockbackIntent(c: Ctx, r: RivalX): Intent | null {
   return { kind: 'shove', targetId: kb.id, to: o.dest, damage: [0, o.fall?.damage ?? 0] };
 }
 
+/** Spec 20.5: a rival Ranger hamstrings a hero closing in (the kit agent's `hamstringIntent`): the crew's target first. */
+function rangerHamstring(c: Ctx, r: RivalX, t: Target | null): Intent | null {
+  const seen = heroesInSight(c, r, 3);
+  const x = (t && seen.find((s) => s.id === t.id)) ?? seen[0];
+  return x ? hamstringIntent(c, r.at, x) : null;
+}
+
 /** Overwatch when no hero is in bow reach, even after walking. */
 function overwatchIntent(c: Ctx, r: RivalX): Intent | null {
   if (heroesInSight(c, r, BOW_RANGE).length) return null;
@@ -444,7 +451,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
     case 'burglar':
       return dartIntent(c, r) ?? smokeIntent(c, r);
     case 'ranger':
-      return knockbackIntent(c, r) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
+      return knockbackIntent(c, r) ?? rangerHamstring(c, r, t) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
     case 'sellsword':
       return shoveIntent(c, r) ?? glueIntent(c, r);
     case 'sapper':
@@ -459,7 +466,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   return null;
 }
 
-export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item'];
+export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring'];
 
 /** A sleep dart on a hero: a hit costs them their next move and action (spec 16.5). */
 function throwDart(c: Ctx, r: RivalX, t: Target): void {
@@ -581,6 +588,12 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       if (!set) c.ev.push({ type: 'thrown', by: r.id, kind: 'charge', from: { ...r.at }, to: { ...it.to } });
       setFuse(c, it.to, 1, r.id);
       say(c, set ? `${r.name} sets a charge on the way in. The fuse is lit.` : `${r.name} lobs a charge. The fuse is lit.`);
+      return true;
+    }
+    case 'hamstring': {
+      if (!t?.hero || !hamstringIntent(c, r.at, t)) return false;
+      faceToward(r, t.at);
+      hamstringShot(c, r.id, t, st.chance);
       return true;
     }
     case 'firebolt': {

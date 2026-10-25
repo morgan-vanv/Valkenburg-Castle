@@ -79,13 +79,19 @@ export class World {
   }
 }
 
-/** Tile kind at p with runtime changes (blown cracked walls are floor; a blasted built wall is rubble until dug, spec 20.3). */
+/** Tile kind at p with runtime changes (blown cracked walls are floor; a blasted built wall or floor is rubble until dug; collapsed floor is a pit, spec 20.3). */
 export function kindAt(w: World, d: DelveX | null, p: Pos): TileKind | undefined {
   const t = w.tile(p);
   if (!t) return undefined;
   if (!d) return t.kind;
-  if ((t.kind === 'cracked' || t.kind === 'rubble') && d.blown.includes(posKey(p))) return 'floor';
-  if (t.kind === 'wall' && d.blown.includes(posKey(p))) return d.dug?.includes(posKey(p)) ? 'floor' : 'rubble';
+  const key = posKey(p);
+  // V3.7 (spec 20.3a): floor blown into the pit column is a pit; floor blown to rubble is rubble until dug.
+  if (t.kind === 'floor' && d.collapsed?.includes(key)) return 'pit';
+  if (t.kind === 'floor' && d.blown.includes(key)) return d.dug?.includes(key) ? 'floor' : 'rubble';
+  if ((t.kind === 'cracked' || t.kind === 'rubble') && d.blown.includes(key)) return 'floor';
+  if (t.kind === 'wall' && d.blown.includes(key)) return d.dug?.includes(key) ? 'floor' : 'rubble';
+  // V3.7 (spec 20.5): a smashed crate or barrel is floor.
+  if (t.kind === 'prop' && d.smashed?.includes(posKey(p))) return 'floor';
   return t.kind;
 }
 

@@ -648,6 +648,8 @@ export interface Delve {
   smashed?: string[];
   /** V3.7 (spec 20.3): floor blown open next to a pit, by posKey: the hex is a pit now (the column widens). */
   collapsed?: string[];
+  /** V3.7 (spec 20.3): rubble (natural, blast-made or a cracked wall's) dug out, by posKey: floor now. */
+  dug?: string[];
   /** Ropes anchored at the pit, by posKey of the edge hex. */
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */

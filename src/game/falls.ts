@@ -75,9 +75,9 @@ export function fallInfo(c: Ctx, pit: Pos, self?: string): FallInfo | null {
   return { to, levels: col.levels, damage: fallDamage(col.levels), levelName: c.w.levelName(to.level) };
 }
 
-/** Is this hex railed against shoves? */
+/** Is this hex railed against shoves? A railing on floor that has collapsed into the pit (spec 20.3a) is gone. */
 export function railed(c: Ctx, p: Pos): boolean {
-  return !!c.w.tile(p)?.railing;
+  return !!c.w.tile(p)?.railing && kindAt(c.w, c.d, p) !== 'pit';
 }
 
 /** The worst fall a shove could cause to someone standing at `at` (null if none or railed). */

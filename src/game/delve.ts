@@ -21,7 +21,7 @@ import {
 } from './world';
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
-import { blastableWall, chargeCount, fuseAt, isSatchel, setFuse, spendCharge, wallsBrokenBy } from './charges';
+import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isSatchel, setFuse, spendCharge } from './charges';
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { rivalCaltropsStep, striker } from './crewai';
@@ -29,6 +29,14 @@ import { parleyTargets } from './parley';
 import { fleePlan, forgetHeroes, hasNoticed, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
 import { DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS } from './data';
+import {
+  BRIAR_DMG, BRIAR_MANA, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS,
+  HAMSTRING_SLOTS, NIGHTTHORN_DMG, NIGHTTHORN_MANA, NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SHIELD_BRACED_DMG, SMASH_GOLD, SMASH_GOLD_CHANCE, SMASH_ITEM_CHANCE,
+  SMASH_ITEMS, SMASH_NOISE,
+} from './data';
+import { int, pick } from './rng';
+import { makeItem, rootFigure } from './common';
+import { calmWalk, isCalm } from './calm';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -63,9 +71,10 @@ export function refreshSight(c: Ctx): void {
     if (cr.temperament === 'cutthroat') say(c, `${cr.name} hold the way ahead. Cutthroats.`);
     else say(c, `${cr.name}. They want ${cr.goal === 'leave' ? 'out' : 'the loot'}.`);
     // The Shadowmancer sister slips into shadow the moment she's seen (spec 16.5): shown as an intent first.
-    // V3.7 (spec 20.4): she veils the crew's striker (the melee member within 3), or herself.
+    // V3.7 (spec 20.4): she veils the crew's striker (the melee member within 3), or herself. (A hostile
+    // crew plans its own kit in crewai.ts; this is the prospectors' and the waiting crews' first reflex.)
     for (const r of rivalsOnMap(c)) {
-      if (r.cls !== 'shadowmancer' || r.veiled || cr.stance === 'hired') continue;
+      if (r.cls !== 'shadowmancer' || r.veiled || cr.stance === 'hired' || cr.stance === 'hostile') continue;
       const s = striker(c);
       r.intent = { kind: 'veil', targetId: s && s !== r && within(s.at, r.at, SPELL_RANGE) ? s.id : r.id };
     }
@@ -128,7 +137,7 @@ function trapPenalty(c: Ctx, p: Pos): number {
 
 /** Can this hero move now? 'walk' = first move; 'dash' = second move that spends the action (spec 15.2). */
 export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
-  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing) return null;
+  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing || (h.rooted ?? 0) > 0) return null;
   if (!h.moved) return 'walk';
   if (!h.acted && !h.dashed) return 'dash';
   return null;
@@ -163,18 +172,20 @@ export function moveNoise(sneak: boolean): number {
   return sneak ? 0 : 1;
 }
 
-export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): string | undefined {
+export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, follow = false): string | undefined {
   const h = hd(c, heroId);
   if (!h) return 'No such hero.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't move.`;
   if (h.webbed) return `${heroName(c, heroId)} is stuck in a web.`;
   if (h.grabbedBy) return `${heroName(c, heroId)} is held fast. Break free first.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
+  if ((h.rooted ?? 0) > 0) return `${heroName(c, heroId)} is rooted to the spot for ${h.rooted} more ${h.rooted === 1 ? 'round' : 'rounds'}.`;
   const mk = moveKind(h);
   if (!mk) return h.dashed ? `${heroName(c, heroId)} has already dashed.` : `${heroName(c, heroId)} has already moved.`;
   if (!path.length) return 'Pick a destination.';
   c.visCache = undefined;
   // Validate.
+  const calm = isCalm(c);
   let cost = 0;
   let prev = h.at;
   for (const p of path) {
@@ -184,8 +195,15 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     cost += st[1];
     prev = p;
   }
-  if (cost > moveBudget(c, h, sneak)) return 'Too far.';
+  if (!calm && cost > moveBudget(c, h, sneak)) return 'Too far.';
   if (occupant(c, path[path.length - 1]!)) return 'Someone is already there.';
+  // V3.7 (spec 20.5): calm: a walk of any length, hex by hex, the castle turning every CALM_STEPS steps; `moved` stays clear.
+  if (calm) {
+    calmWalk(c, h, path, sneak, follow);
+    checkHolds(c);
+    if (c.s.stage === 'delve') rivalOverwatchFire(c, heroId);
+    return undefined;
+  }
   // Walk (or dash: the action goes on the second move).
   h.moved = true;
   if (mk === 'dash') {
@@ -249,7 +267,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
   return undefined;
 }
 
-function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
+export function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
   delete c.d.traps[posKey(at)];
   c.ev.push({ type: 'trap', at, id: h.heroId, damage: 3 });
   say(c, `A trap bites ${heroName(c, h.heroId)}.`);
@@ -699,8 +717,28 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return h.grabbedBy && onMap(c).some((m) => m.id === h.grabbedBy) ? [{ id: h.grabbedBy }] : [];
     case 'leave':
       return kindAt(c.w, c.d, h.at) === 'exit' ? [{ at: h.at }] : [];
+    // ---- V3.7 (spec 20.5) kit
+    case 'brace':
+      return (cls === 'heir' || cls === 'sellsword' || cls === 'sapper') && !h.braced ? [{ id: h.heroId }] : [];
+    case 'hamstring':
+      if (!CLASSES[cls].weapon.range) return [];
+      return enemiesInSight(c, h, HAMSTRING_RANGE, { noDragon: true }).filter((t) => c.d.monsters.find((m) => m.id === t.id)?.awareness !== 'asleep');
+    case 'nightthorn':
+      if (!mage('shadowmancer', NIGHTTHORN_MANA)) return [];
+      return enemiesInSight(c, h, NIGHTTHORN_RANGE);
+    case 'briar':
+      if (!mage('hedgewitch', BRIAR_MANA)) return [];
+      return enemiesInSight(c, h, BRIAR_RANGE, { noDragon: true });
+    case 'smashProp':
+      return posNeighbors(h.at).filter((p) => smashable(c, p)).map((at) => ({ at }));
   }
   return [];
+}
+
+/** V3.7 (spec 20.5): a crate or barrel still standing at `p`. */
+export function smashable(c: Ctx, p: Pos): boolean {
+  const t = c.w.tile(p);
+  return !!t && t.kind === 'prop' && (t.prop === 'crate' || t.prop === 'barrel') && kindAt(c.w, c.d, p) === 'prop';
 }
 
 const LABELS: Record<ActionKind, string> = {
@@ -713,11 +751,12 @@ const LABELS: Record<ActionKind, string> = {
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust', dread: 'Dread',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught',
+  brace: 'Brace', hamstring: 'Hamstring', nightthorn: 'Night thorn', briar: 'Briar', smashProp: 'Smash',
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar'];
 const ORDER: ActionKind[] = [
-  'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'dread', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
+  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
@@ -731,17 +770,18 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
+  brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2 };
-const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA };
+const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
 /** Attacks break a Veil (spec 15.3). */
-const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash'];
+const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash', 'hamstring', 'nightthorn', 'briar', 'smashProp'];
 /** Whole-turn actions: need both move and action. */
 const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
 
 function canDo(h: HeroInDelve, action: ActionKind): boolean {
   if ((h as HeroX).dozing) return false;
-  if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted;
+  if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted && !((h.rooted ?? 0) > 0);
   if (FREE.includes(action)) return true;
   return !h.acted;
 }
@@ -876,10 +916,20 @@ function blastSpec(c: Ctx, h: HeroInDelve, at: Pos, fuse: number): Spec {
   const sp: Spec = { ok: true, slots: 0, chance: 0, modifiers: [], outcomes: [text], noise: BLAST_NOISE, light: 0 };
   sp.hexes = areaOf(c, at, 2);
   sp.affects = figuresOn(c, sp.hexes);
-  const broke = wallsBrokenBy(c.w, c.d, at);
+  const plan = blastPreview(c, at);
+  const { broke, collapsed, rubbled } = plan;
   if (broke.length) sp.modifiers.push(broke.length === 1 ? 'Breaks the wall' : `Breaks ${broke.length} walls`);
+  // Spec 20.3a: the floor next to the pit goes; the rest turns to rubble.
+  if (collapsed.length) sp.modifiers.push(`Floor collapses into the pit: ${collapsed.length} hex${collapsed.length === 1 ? '' : 'es'}`);
+  if (rubbled.length) sp.modifiers.push(`Rubble: ${rubbled.length} hex${rubbled.length === 1 ? '' : 'es'}`);
   const friends = c.d.heroes.filter((o) => o.heroId !== h.heroId && (o.status === 'active' || o.status === 'downed') && sp.affects!.includes(o.heroId));
-  if (friends.length) sp.warning = `${friends.map((o) => heroName(c, o.heroId)).join(' and ')} ${friends.length === 1 ? 'stands' : 'stand'} in the blast.`;
+  const dropped = c.d.heroes.filter((o) => (o.status === 'active' || o.status === 'downed') && collapsed.some((p) => samePos(p, o.at)));
+  if (dropped.length) {
+    const names = dropped.map((o) => heroName(c, o.heroId)).join(' and ');
+    const drop = collapseDrop(c.w, c.d, dropped[0]!.at);
+    sp.warning = `The floor under ${names} collapses: ${drop ? `falls ${drop.levels === 1 ? '1 level' : `${drop.levels} levels`} into ${c.w.levelName(drop.level)}, ${drop.damage} damage` : 'a long fall'} on top of the blast.`;
+    sp.confirm = true;
+  } else if (friends.length) sp.warning = `${friends.map((o) => heroName(c, o.heroId)).join(' and ')} ${friends.length === 1 ? 'stands' : 'stand'} in the blast.`;
   return sp;
 }
 
@@ -1107,6 +1157,34 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'mend': return withMana(simple('Heal 4'), 1);
     case 'passLantern': return simple(`${heroName(c, t.id!)} carries the lantern`);
     case 'leave': return simple('Leave the castle');
+    // ---- V3.7 (spec 20.5) kit
+    case 'brace': {
+      const sh = def.shield ? ` Shield: ranged hits ${SHIELD_BRACED_DMG} less.` : '';
+      return simple(`Braced until your next turn: hits do 1 less, enemies roll −15% against you. Free swings at full slots.${sh}`);
+    }
+    case 'hamstring': {
+      const f = foe(c, t.id)!;
+      let p = withLight(def.stats.finesse) + HAMSTRING_PENALTY;
+      mods.push(`Aimed low ${sign(HAMSTRING_PENALTY)}`);
+      if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
+      const who = f.monster?.name ?? f.rival?.name ?? 'It';
+      return base('finesse', HAMSTRING_SLOTS, p, ['Miss', `${who} rooted for ${HAMSTRING_ROUNDS} rounds`], HAMSTRING_NOISE);
+    }
+    case 'nightthorn': {
+      const p = withLight(def.stats.wits);
+      const outcomes = [];
+      for (let i = 0; i <= NIGHTTHORN_SLOTS; i++) outcomes.push(i === 0 ? 'Miss' : `${i * NIGHTTHORN_DMG + (i === NIGHTTHORN_SLOTS ? 1 : 0)} dmg, armor ignored`);
+      return withMana(base('wits', NIGHTTHORN_SLOTS, p, outcomes, 0, NIGHTTHORN_DMG), NIGHTTHORN_MANA);
+    }
+    case 'briar': {
+      const f = foe(c, t.id)!;
+      const p = withLight(def.stats.wits);
+      const who = f.monster?.name ?? f.rival?.name ?? 'It';
+      const outcomes = ['Miss', `${BRIAR_DMG} dmg, ${who} rooted ${BRIAR_ROOT} round`, `${2 * BRIAR_DMG + 1} dmg, ${who} rooted ${BRIAR_ROOT_PERFECT} rounds`];
+      return withMana(base('wits', BRIAR_SLOTS, p, outcomes, BRIAR_NOISE, BRIAR_DMG), BRIAR_MANA);
+    }
+    case 'smashProp':
+      return simple(`Smash the ${c.w.tile(t.at!)?.prop ?? 'crate'}: loud, may hold something`, SMASH_NOISE);
   }
   return no('Unknown action.');
 }
@@ -1247,8 +1325,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'dig': {
       const k = kindAt(c.w, c.d, t.at!);
       const key = posKey(t.at!);
-      // V3.7 (spec 20.3): blast rubble (a broken wall already in `blown`) is dug to floor.
-      if (c.w.tile(t.at!)?.kind === 'wall') (c.d.dug ??= []).push(key);
+      // V3.7 (spec 20.3): blast rubble (a broken wall or blasted floor already in `blown`) is dug to floor.
+      if (k === 'rubble' && c.w.tile(t.at!)?.kind !== 'rubble') (c.d.dug ??= []).push(key);
       else c.d.blown.push(key);
       c.ev.push({ type: 'dug', at: t.at! });
       say(c, k === 'rubble' ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
@@ -1687,6 +1765,68 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'leave':
       leaveCastle(c, h);
       break;
+    // ---- V3.7 (spec 20.5) kit
+    case 'brace':
+      h.braced = true;
+      c.ev.push({ type: 'braced', id: heroId });
+      say(c, `${name} sets their feet and braces.`);
+      break;
+    case 'hamstring': {
+      const r = doRoll();
+      const tid = t.id!;
+      makeNoise(c, h.at, sp.noise);
+      if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
+      wakeTarget(c, tid, h.at, heroId);
+      if (!r.hits) {
+        c.ev.push({ type: 'miss', attacker: heroId, target: tid });
+        break;
+      }
+      c.ev.push({ type: 'hit', attacker: heroId, target: tid, damage: 0, crit: r.perfect });
+      rootFigure(c, tid, HAMSTRING_ROUNDS, heroId);
+      break;
+    }
+    case 'nightthorn': {
+      const r = doRoll();
+      const tid = t.id!;
+      c.ev.push({ type: 'cast', by: heroId, spell: 'nightthorn', targetId: tid, at: figurePos(c, tid) });
+      if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
+      if (!r.hits) {
+        c.ev.push({ type: 'miss', attacker: heroId, target: tid });
+        wakeTarget(c, tid, h.at, heroId);
+        break;
+      }
+      hurtAny(c, tid, r.hits * NIGHTTHORN_DMG + (r.perfect ? 1 : 0), heroId, { crit: r.perfect });
+      break;
+    }
+    case 'briar': {
+      const r = doRoll();
+      const tid = t.id!;
+      c.ev.push({ type: 'cast', by: heroId, spell: 'briar', targetId: tid, at: figurePos(c, tid) });
+      makeNoise(c, h.at, sp.noise);
+      if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
+      if (!r.hits) {
+        c.ev.push({ type: 'miss', attacker: heroId, target: tid });
+        wakeTarget(c, tid, h.at, heroId);
+        break;
+      }
+      hurtAny(c, tid, r.hits * BRIAR_DMG + (r.perfect ? 1 : 0), heroId, { crit: r.perfect });
+      if (figurePos(c, tid)) rootFigure(c, tid, r.perfect ? BRIAR_ROOT_PERFECT : BRIAR_ROOT, heroId);
+      break;
+    }
+    case 'smashProp': {
+      const at = t.at!;
+      const what = c.w.tile(at)?.prop ?? 'crate';
+      (c.d.smashed ??= []).push(posKey(at));
+      const items: Item[] = [];
+      const roll100 = int(c.s, 1, 100);
+      if (roll100 <= SMASH_GOLD_CHANCE) items.push(makeItem(c, 'gold', int(c.s, SMASH_GOLD[0], SMASH_GOLD[1])));
+      else if (roll100 <= SMASH_GOLD_CHANCE + SMASH_ITEM_CHANCE) items.push(makeItem(c, pick(c.s, SMASH_ITEMS)));
+      putOnGround(c, at, items);
+      c.ev.push({ type: 'propSmashed', at: { ...at }, by: heroId, items });
+      say(c, items.length ? `${name} smashes the ${what}. ${items.map((i) => i.name).join(', ')} spills out.` : `${name} smashes the ${what}. Nothing but splinters.`);
+      makeNoise(c, at, SMASH_NOISE);
+      break;
+    }
   }
   checkHolds(c);
   if (action !== 'shutter' && action !== 'leave' && action !== 'parley') rivalOverwatchFire(c, heroId);

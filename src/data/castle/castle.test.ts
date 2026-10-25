@@ -620,8 +620,14 @@ describe('castle V3.7: breakable walls (20.3)', () => {
   const breakable = walls.filter(([p]) => breakableWall(w, null, p)).map(([p]) => p);
   const roomsBeside = (p: Pos) => new Set(posNeighbors(p).map((n) => tile(n)?.room).filter((r): r is string => !!r));
 
-  it('marks unbreakable only on walls: the outer curtain, the tower stair shaft, the guard post landing and the lift shaft', () => {
-    for (const [p, t] of allTiles()) if (t.unbreakable) expect(t.kind, show(p)).toBe('wall');
+  it('marks unbreakable on walls (the outer curtain, the tower stair shaft, the guard post landing, the lift shaft) and on the hexes beside stairs and lifts', () => {
+    const landings = allTiles().filter(([, t]) => t.kind === 'stairs' || t.kind === 'lift').map(([p]) => p);
+    const byLanding = (p: Pos) => landings.some((l) => samePos(l, p) || posNeighbors(l).some((n) => samePos(n, p)));
+    for (const [p, t] of allTiles()) {
+      if (t.unbreakable) expect(t.kind === 'wall' || byLanding(p), show(p)).toBe(true);
+      // Spec 20.3a: the floor on either side of the tower stair and the lift never collapses or rubbles.
+      if (byLanding(p) && t.kind !== 'pit') expect(t.unbreakable, show(p)).toBe(true);
+    }
     for (const [p, t] of walls) {
       const rooms = roomsBeside(p);
       // Outer: nothing behind it and one room before it (a wall between two rooms that touches void is interior).

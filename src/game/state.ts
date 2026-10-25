@@ -76,8 +76,6 @@ export interface DelveX extends Delve {
   heroes: HeroX[];
   monsters: MonsterX[];
   rivals: CrewX | null;
-  /** V3.7 (spec 20.3): blast rubble (broken walls in `blown`) dug out to floor, by posKey. */
-  dug?: string[];
   /** V3.7 (spec 20.4): caltrops a crew laid (also in `caltrops`): these catch heroes. */
   rivalCaltrops?: string[];
   /** XP earned this delve by hero id (kills). */

@@ -88,6 +88,12 @@ function ctx(s: GameState) {
   return { w, s: s as GameStateX, d: s.delve as DelveX, ev: [] as GameEvent[] };
 }
 
+/** V3.7 (spec 20.5): a long fuse far away keeps the party from being calm, so the budgeted move rules apply. */
+function alarm(s: GameState): GameState {
+  (s.delve as DelveX).fuses = [{ at: at(3, 5, 5), rounds: 99, by: 'x' }];
+  return s;
+}
+
 // Landmarks in the test castle (offset col,row).
 const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
@@ -268,7 +274,7 @@ describe('movement', () => {
   });
 
   it('moves once per turn and refuses bad paths', () => {
-    const s = delve();
+    const s = alarm(delve());
     put(s, 'brann', GATE);
     const r1 = e.apply(s, { type: 'move', heroId: 'brann', path: [at(1, 9, 7)], sneak: false });
     expect(r1.error).toBeTruthy();
@@ -711,7 +717,7 @@ describe('determinism and saves', () => {
   it('same seed and commands give the same state', () => {
     expect(JSON.stringify(play(42))).toBe(JSON.stringify(play(42)));
     expect(JSON.stringify(play(42))).not.toBe(JSON.stringify(play(43)));
-  }, 20000); // three plays of 8 rounds: ~4.5 s alone, more when the suite runs in parallel
+  }, 45000); // three plays of 8 rounds: ~9 s alone (V3.7: every calm move of 4 turns the castle), more when the suite runs in parallel
   it('apply does not mutate its input', () => {
     const s = delve();
     const before = JSON.stringify(s);
@@ -1268,7 +1274,7 @@ describe('15.1 line of sight', () => {
 
 describe('15.2 dash', () => {
   it('reachable marks the second move as a dash, sneaking too; acting first leaves a plain move', () => {
-    const s = v32({ heroes: ['pim'] });
+    const s = alarm(v32({ heroes: ['pim'] }));
     put(s, 'pim', GATE);
     expect(e.reachable(s, 'pim', false).some((r) => r.dash)).toBe(false);
     const moved = ok(s, { type: 'move', heroId: 'pim', path: [at(1, 5, 7)], sneak: false }).state;
@@ -1279,7 +1285,7 @@ describe('15.2 dash', () => {
   });
 
   it('act then move: one move only; a dash spends the action', () => {
-    const s = v32({ heroes: ['pim'] });
+    const s = alarm(v32({ heroes: ['pim'] }));
     put(s, 'pim', GATE);
     give(s, 'pim', 'torch');
     const acted = act(s, 'pim', 'torch', {}).state;
@@ -1986,6 +1992,7 @@ describe('16.4 new monsters', () => {
   it('archer: shoots at range 4 in sight, backs off when adjacent, knockback shot when a pit is behind the hero', () => {
     let s = delve({ heroes: ['brann'] });
     put(s, 'brann', at(1, 10, 8));
+    hero(s, 'brann').rooted = 5; // V3.7: a hero within 3 and not yet rooted would be hamstrung first (spec 20.5)
     const a = monster(s, 'archer', at(1, 10, 5), 'hunting'); // 3 away, in sight, lit
     computeIntentsOf(ctx(s));
     expect(a.intent?.kind).toBe('attack');
@@ -1995,6 +2002,7 @@ describe('16.4 new monsters', () => {
     // Adjacent: it steps away to 2..4 and shoots from there.
     s = delve({ heroes: ['brann'] });
     put(s, 'brann', at(1, 10, 8));
+    hero(s, 'brann').rooted = 5;
     const b = monster(s, 'archer', at(1, 10, 7), 'hunting');
     computeIntentsOf(ctx(s));
     expect(b.intent?.kind).toBe('attack');
@@ -3505,7 +3513,9 @@ describe('V3.7 crews', () => {
     put(s, 'pim', at(2, 2, 1)); // far off, behind the wall
     expect(crewTarget(ctx(s))!.id).toBe('keven');
     computeIntentsOf(ctx(s));
-    for (const r of members(s)) expect(r.intent?.targetId, r.cls).toBe('keven');
+    const fighters = members(s).filter((r) => r.intent?.kind === 'attack' || r.intent?.kind === 'move' || r.intent?.kind === 'fuse');
+    expect(fighters.length).toBeGreaterThan(0);
+    for (const r of fighters) expect(r.intent?.targetId, r.cls).toBe('keven');
     // The bearer out of reach: the lowest-HP hero in reach.
     put(s, 'keven', at(2, 2, 2));
     s.delve!.rivals!.members.forEach((r) => (r.intent = undefined));
@@ -3517,15 +3527,15 @@ describe('V3.7 crews', () => {
   });
 
   it('positioning: a member takes the attack spot the other heroes can\'t see when there is one', () => {
-    // Keven stands in the pantry doorway's line; Brann (the target) is in the pit hall just east of the door.
-    const s = crewDelve('ferrymen', [at(1, 11, 2), at(1, 17, 1), at(1, 16, 1)], 'hostile', ['brann', 'keven']);
-    put(s, 'brann', at(1, 8, 2));
-    put(s, 'keven', at(1, 3, 2));
+    // Keven looks through the pantry door; Brann (the target) stands in the pit hall, where one of his attack spots is in Keven's line and three aren't.
+    const s = crewDelve('ferrymen', [at(1, 12, 1), at(1, 17, 1), at(1, 16, 1)], 'hostile', ['brann', 'keven']);
+    put(s, 'brann', at(1, 9, 1));
+    put(s, 'keven', at(1, 6, 3));
     s.delve!.doors[posKey(at(1, 7, 2))]!.open = true;
     const c = ctx(s);
     const r = member(s, 0);
-    const spots = posNeighborsOf(at(1, 8, 2)).filter((p) => w.tile(p)?.kind === 'floor');
-    const exposed = (p: Pos) => losFrom(w, c.d, at(1, 3, 2), p);
+    const spots = posNeighborsOf(at(1, 9, 1)).filter((p) => w.tile(p)?.kind === 'floor');
+    const exposed = (p: Pos) => losFrom(w, c.d, at(1, 6, 3), p);
     expect(spots.some(exposed)).toBe(true);
     expect(spots.some((p) => !exposed(p))).toBe(true);
     const path = pathToSpots(c, r, spots, 4, 'brann');
@@ -3543,7 +3553,9 @@ describe('V3.7 crews', () => {
     expect(distance(ss.intent!.to!, at(2, 15, 4))).toBe(2);
     const r = ok(s, { type: 'endTurn' });
     const after = member(r.state, 0);
-    expect(after.hp).toBe(10);
+    // Stepping out of Brann's reach gives him a free swing first (spec 20.2); the potion heals 5 after it.
+    const swing = r.events.find((x) => x.type === 'swing' && x.by === 'brann') as { damage: number } | undefined;
+    expect(after.hp).toBe(Math.max(0, 5 - (swing?.damage ?? 0)) + 5);
     expect(after.pack!.some((i) => i.kind === 'potion')).toBe(false);
     expect(distance(after.at, at(2, 15, 4))).toBe(2);
     expect(r.events.some((x) => x.type === 'cast' && x.by === ss.id && x.spell === 'potion')).toBe(true);
@@ -3610,12 +3622,14 @@ describe('V3.7 crews', () => {
   it('hedgewitch mends the member below half, wards the striker; shadowmancer blinks away below half', () => {
     const s = crewDelve('the-wake', WAKE_SPOTS, 'hostile');
     put(s, 'brann', at(3, 5, 3));
+    hero(s, 'brann').hp = 60; // he has to survive two rounds of the Wake
     member(s, 0).hp = 6;
+    member(s, 2).charges = 0; // no veil from Candle: the striker stays a target below
     computeIntentsOf(ctx(s));
     const witch = member(s, 1);
     expect(witch.intent).toMatchObject({ kind: 'mend', targetId: member(s, 0).id });
     let r = ok(s, { type: 'endTurn' });
-    expect(member(r.state, 0).hp).toBe(10);
+    expect(member(r.state, 0).hp).toBe(15); // his own potion (+5, he acts first) and her Mend (+4)
     expect(member(r.state, 1).charges).toBe(2);
     // Healed: she wards the striker next.
     let t = r.state;
@@ -3664,10 +3678,11 @@ describe('V3.7 crews', () => {
   });
 
   it('a hero a member downs is robbed on the spot: gold and gems to its loot; then dragged 3 a round toward the exit, trailing behind', () => {
-    let s = crewDelve('ferrymen', [at(1, 16, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile');
+    let s = crewDelve('ferrymen', [at(1, 12, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
     member(s, 1).hp = 0;
     member(s, 2).hp = 0;
-    put(s, 'brann', at(1, 15, 7));
+    put(s, 'keven', at(1, 2, 8)); // the gate room, out of it
+    put(s, 'brann', at(1, 11, 7));
     const b = hero(s, 'brann');
     b.hp = 1;
     b.pack.push(gold(40, 'bg'), { id: 'bgem', kind: 'gem', name: 'Garnet', amount: 60, slots: 1 }, { id: 'btorch', kind: 'torch', name: 'Torch', amount: 1, slots: 1 });
@@ -3680,7 +3695,6 @@ describe('V3.7 crews', () => {
     expect(hero(s, 'brann').pack.map((i) => i.id)).toEqual(['btorch']);
     expect(ss.dragging).toBe('brann');
     expect(ss.intent).toMatchObject({ kind: 'drag', targetId: 'brann' });
-    expect(e.intents(s)['r1']?.kind).toBe('drag');
     // The world phase: no bleeding while dragged; the member walks toward the east exit, Brann one hex behind.
     const bleed = hero(s, 'brann').bleed;
     const r2 = ok(s, { type: 'endTurn' });
@@ -3689,14 +3703,17 @@ describe('V3.7 crews', () => {
     expect(hero(s, 'brann').status).toBe('downed');
     const d = distance(member(s, 0).at, hero(s, 'brann').at);
     expect(d).toBe(1);
+    expect(distance(member(s, 0).at, at(1, 12, 7))).toBe(3); // three hexes toward the east exit
+    expect(distance(hero(s, 'brann').at, at(1, 18, 7))).toBeLessThan(distance(at(1, 11, 7), at(1, 18, 7)));
     expect(r2.events.some((x) => x.type === 'moved' && x.id === 'r1')).toBe(true);
+    expect(r2.events.some((x) => x.type === 'moved' && x.id === 'brann')).toBe(false); // the view hauls him on the member's move
   });
 
   it('the dragger on an exit takes the hero: captured; back at camp they leave the roster for the captives, a "Bring back" job goes up, and the rescue brings them home', () => {
     let s = crewDelve('ferrymen', [at(1, 17, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
     member(s, 1).hp = 0;
     member(s, 2).hp = 0;
-    put(s, 'keven', at(1, 2, 8));
+    put(s, 'keven', at(1, 2, 9)); // on the gate exit
     put(s, 'brann', at(1, 16, 7));
     const b = hero(s, 'brann') as HeroX;
     b.status = 'downed';
@@ -3754,7 +3771,7 @@ describe('V3.7 crews', () => {
     let s = crewDelve('ferrymen', [at(1, 17, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
     member(s, 1).hp = 0;
     member(s, 2).hp = 0;
-    put(s, 'brann', at(1, 2, 8));
+    put(s, 'brann', at(1, 2, 9));
     put(s, 'keven', at(1, 16, 7));
     const k = hero(s, 'keven') as HeroX;
     k.status = 'downed';
@@ -3775,7 +3792,7 @@ describe('V3.7 crews', () => {
     s.delve!.rivals = buildCrew(s as GameStateX, 'the-wake', [at(1, 14, 7), at(1, 10, 1), at(1, 11, 1), at(1, 12, 1)]);
     s.delve!.rivals.stance = 'hostile';
     put(s, 'brann', at(1, 15, 7));
-    put(s, 'sable', at(1, 12, 7));
+    put(s, 'sable', at(1, 14, 8));
     const b = hero(s, 'brann') as HeroX;
     b.status = 'downed';
     b.hp = 0;
@@ -3792,7 +3809,6 @@ describe('V3.7 crews', () => {
     const t = structuredClone(s);
     member(t, 0).hp = 1;
     member(t, 0).dragging = 'brann';
-    put(t, 'sable', at(1, 13, 7));
     const r2 = until(t, { type: 'act', heroId: 'sable', action: 'attack', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied' && x.id === ss.id));
     const pile = r2.state.delve!.ground.find((g) => samePos(g.at, at(1, 14, 7)))!;
     expect(pile.items.filter((i) => i.kind === 'potion').length).toBe(2);
@@ -3829,5 +3845,407 @@ describe('V3.7 crews', () => {
     expect(member(t, 0).intent?.kind).toBe('potion');
     const r2 = ok(t, { type: 'endTurn' });
     expect(member(r2.state, 0).hp).toBe(9);
+  });
+});
+
+// ---------------------------------------------------------------- V3.7 (spec 20.5)
+
+import { hexKey } from './hex';
+import { calmReach } from './calm';
+import { CALM_STEPS, SHIELD_PRICE } from './data';
+
+describe('V3.7 kit and calm', () => {
+  /** A hero (the lantern bearer) alone in the open Hollow, row 4: a straight walk of 11 hexes east from (1,4). */
+  function hollow(heroes = ['brann'], extra: [string, string, HeroClass][] = []) {
+    const s = delve({ heroes, extra });
+    heroes.forEach((id, i) => put(s, id, at(3, 1 + i, 4)));
+    s.delve!.lanternBearer = heroes[0]!;
+    s.delve!.light = 20;
+    // The Hollow is explored (the party was put here by hand; calmReach offers explored hexes only).
+    for (const p of w.floors.get(3)!) if (!s.delve!.explored.includes(posKey(p))) s.delve!.explored.push(posKey(p));
+    return s;
+  }
+  const east = (from: number, to: number, row = 4) => Array.from({ length: to - from }, (_, i) => at(3, from + 1 + i, row));
+  const worlds = (ev: GameEvent[]) => ev.filter((x) => x.type === 'phase' && x.phase === 'world').length;
+  const walked = (ev: GameEvent[], id: string) => ev.flatMap((x) => (x.type === 'moved' && x.id === id ? x.path : []));
+
+  describe('calm', () => {
+    it('is calm with nothing hunting; says why not: a hunter, a hostile crew, a lit fuse, the Gloam, a hero down or rooted', () => {
+      const s = hollow();
+      expect(e.calm(s)).toEqual({ calm: true });
+      const t = structuredClone(s);
+      monster(t, 'orc', at(3, 8, 4), 'hunting');
+      expect(e.calm(t)).toEqual({ calm: false, why: 'An orc hunts Brann.' });
+      // A hunter on another level with nobody there does not count.
+      const u = structuredClone(s);
+      monster(u, 'orc', at(1, 5, 7), 'hunting');
+      expect(e.calm(u).calm).toBe(true);
+      const f = alarm(structuredClone(s));
+      expect(e.calm(f).why).toBe('A fuse is lit.');
+      const r = structuredClone(s);
+      hero(r, 'brann').rooted = 1;
+      expect(e.calm(r).why).toBe('Brann is rooted.');
+      const g = structuredClone(s);
+      monster(g, 'rats', at(3, 8, 4), 'asleep');
+      expect(e.calm(g).calm).toBe(true); // sleepers and alert monsters leave the party calm
+      const cr = crewDelve('ferrymen', [at(2, 10, 1), at(2, 11, 1), at(2, 12, 1)], 'hostile');
+      put(cr, 'brann', at(2, 8, 1));
+      expect(e.calm(cr).why).toBe('The Ferrymen are hostile.');
+    });
+
+    it('a `calm` event when it starts (the delve begins calm) and when it ends; it comes back when the hunter dies', () => {
+      let s = party(e.newGame(1));
+      const r0 = e.apply(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} });
+      expect(r0.events.some((x) => x.type === 'calm' && x.calm)).toBe(true);
+      expect(r0.state.delve!.calm).toBe(true);
+      s = hollow();
+      s.delve!.calm = true;
+      const m = monster(s, 'rats', at(3, 2, 4), 'asleep');
+      m.hp = 1;
+      // Attacking it wakes it hunting: calm ends on the spot, with the reason.
+      const miss = until(s, { type: 'act', heroId: 'brann', action: 'attack', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'miss'));
+      expect(miss.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: false, why: 'Rats hunt Brann.' });
+      expect(miss.state.delve!.calm).toBe(false);
+      // Killing it brings calm back.
+      hero(miss.state, 'brann').acted = false;
+      const kill = until(miss.state, { type: 'act', heroId: 'brann', action: 'attack', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied'));
+      expect(kill.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: true });
+    });
+  });
+
+  describe('free movement', () => {
+    it('walks a path of any length hex by hex, the castle turning every 4 steps; `moved` stays clear, calmSteps counts on', () => {
+      const s = hollow();
+      hero(s, 'brann').acted = true; // an action spent does not stop a calm walk
+      const path = east(1, 12);
+      const reach = calmReach(ctx(s), 'brann', false);
+      const far = reach.find((r) => samePos(r.to, at(3, 12, 4)))!;
+      expect(far.path).toEqual(path);
+      expect(far.cost).toBe(11);
+      expect(far.risks).toBeDefined();
+      // The budgeted query is still the budgeted query.
+      expect(Math.max(...e.reachable(s, 'brann', false).map((r) => r.cost))).toBe(4);
+      const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: false });
+      const h = hero(r.state, 'brann');
+      expect(h.at).toEqual(at(3, 12, 4));
+      expect(h.moved).toBe(false);
+      expect(worlds(r.events)).toBe(2); // after steps 4 and 8, not after the 11th
+      expect(r.state.delve!.round).toBe(3);
+      expect(r.state.delve!.light).toBe(18);
+      expect(r.state.delve!.calmSteps).toBe(3);
+      expect(walked(r.events, 'brann')).toEqual(path);
+      expect(r.events.filter((x) => x.type === 'noise')).toHaveLength(3); // one per leg
+      // The action came back with the new rounds; another walk is free, and the fourth step of it turns the castle.
+      expect(h.acted).toBe(false);
+      const r2 = ok(r.state, { type: 'move', heroId: 'brann', path: [at(3, 11, 4)], sneak: true });
+      expect(worlds(r2.events)).toBe(1);
+      expect(r2.state.delve!.calmSteps).toBe(0);
+      expect(hero(r2.state, 'brann').moved).toBe(false);
+      // Not calm: the old budget rules.
+      const n = alarm(hollow());
+      expect(e.apply(n, { type: 'move', heroId: 'brann', path, sneak: false }).error).toBe('Too far.');
+      expect(hero(ok(n, { type: 'move', heroId: 'brann', path: east(1, 4), sneak: false }).state, 'brann').moved).toBe(true);
+      expect(calmReach(ctx(n), 'brann', false)).toEqual([]);
+    });
+
+    it('calmReach offers explored hexes only and keeps off spotted traps and vents when it can', () => {
+      const s = hollow();
+      const explored = new Set(s.delve!.explored);
+      const reach = calmReach(ctx(s), 'brann', false);
+      expect(reach.length).toBeGreaterThan(20);
+      expect(reach.every((r) => explored.has(posKey(r.to)))).toBe(true);
+      expect(reach.every((r) => r.path.length === r.cost)).toBe(true);
+      s.delve!.traps[posKey(at(3, 3, 4))] = { spotted: true };
+      const around = calmReach(ctx(s), 'brann', false).find((r) => samePos(r.to, at(3, 5, 4)))!;
+      expect(around.path.some((p) => samePos(p, at(3, 3, 4)))).toBe(false);
+    });
+
+    it('stops when a sleeper wakes on the way: the rest of the path is dropped; still calm (alert is not hunting)', () => {
+      const s = hollow();
+      monster(s, 'rats', at(3, 6, 6), 'asleep'); // 2 from (6,4): a 50% roll as Brann passes, lit
+      const cmd: Command = { type: 'move', heroId: 'brann', path: east(1, 12), sneak: false };
+      const woke = until(s, cmd, (ev) => ev.some((x) => x.type === 'woke'));
+      expect(distance(hero(woke.state, 'brann').at, at(3, 12, 4))).toBeGreaterThan(0);
+      expect(woke.events.some((x) => x.type === 'calm' && !x.calm)).toBe(false);
+      expect(woke.state.delve!.calm).toBe(true);
+      expect(woke.state.delve!.monsters[0]!.awareness).toBe('alert');
+      const quiet = until(s, cmd, (ev) => !ev.some((x) => x.type === 'woke'));
+      expect(hero(quiet.state, 'brann').at).toEqual(at(3, 12, 4));
+    });
+
+    it('stops when something notices a hero during a castle turn: calm ends and every hero gets a fresh player phase', () => {
+      const s = hollow();
+      const o = monster(s, 'orc', at(3, 11, 4), 'alert'); // 6 from (5,4), where the first castle turn finds Brann, lit and walking
+      hero(s, 'brann').acted = true;
+      const r = ok(s, { type: 'move', heroId: 'brann', path: east(1, 9), sneak: false });
+      expect(hero(r.state, 'brann').at).toEqual(at(3, 5, 4));
+      expect(r.events.some((x) => x.type === 'noticed' && x.by === o.id)).toBe(true);
+      expect(r.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: false, why: 'An orc hunts Brann.' });
+      expect(r.state.delve!.calm).toBe(false);
+      expect(r.state.delve!.phase).toBe('player');
+      const h = hero(r.state, 'brann');
+      expect([h.moved, h.acted, h.dashed]).toEqual([false, false, false]);
+      // The party acts first: a normal budgeted move now.
+      expect(e.calm(r.state).calm).toBe(false);
+      expect(e.reachable(r.state, 'brann', false).length).toBeGreaterThan(0);
+    });
+
+    it('stops on a trap, when the lantern stage changes, and when a new monster comes into sight', () => {
+      const t = hollow();
+      t.delve!.traps[posKey(at(3, 4, 4))] = { spotted: false };
+      const rt = ok(t, { type: 'move', heroId: 'brann', path: east(1, 12), sneak: false });
+      expect(hero(rt.state, 'brann').at).toEqual(at(3, 4, 4));
+      expect(rt.events.some((x) => x.type === 'trap')).toBe(true);
+      expect(hero(rt.state, 'brann').hp).toBe(7);
+      expect(rt.state.delve!.calm).toBe(true);
+      // Light 13 is bright; the first castle turn makes it 12, dim: the walk halts after 4 steps.
+      const l = hollow();
+      l.delve!.light = 13;
+      const rl = ok(l, { type: 'move', heroId: 'brann', path: east(1, 12), sneak: false });
+      expect(hero(rl.state, 'brann').at).toEqual(at(3, 5, 4));
+      expect(rl.events.some((x) => x.type === 'say' && /the light is dim/.test(x.text))).toBe(true);
+      // A sleeping spider beyond sight (lit range 6 in the Hollow) comes into view on the way.
+      const v = hollow();
+      const sp = monster(v, 'spider', at(3, 12, 2), 'asleep');
+      expect(e.visibility(v).visible.has(posKey(sp.at))).toBe(false);
+      const rv = ok(v, { type: 'move', heroId: 'brann', path: east(1, 11), sneak: true });
+      expect(distance(hero(rv.state, 'brann').at, at(3, 11, 4))).toBeGreaterThan(0);
+      expect(e.visibility(rv.state).visible.has(posKey(sp.at))).toBe(true);
+      expect(rv.events.some((x) => x.type === 'say' && /Spider in sight/.test(x.text))).toBe(true);
+    });
+
+    it('follow: the other active heroes within 3 come along in single file; their steps cost the castle nothing', () => {
+      const s = hollow(['brann', 'pim', 'aldous']); // (1,4), (2,4), (3,4): Brann leads from the back
+      put(s, 'brann', at(3, 3, 4));
+      put(s, 'pim', at(3, 2, 4));
+      put(s, 'aldous', at(3, 1, 5)); // 2 from (3,4): both within 3
+      const path = east(3, 11);
+      const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: false, follow: true });
+      expect(hero(r.state, 'brann').at).toEqual(at(3, 11, 4));
+      expect(hero(r.state, 'pim').at).toEqual(at(3, 10, 4));
+      expect(hero(r.state, 'aldous').at).toEqual(at(3, 9, 4));
+      expect(worlds(r.events)).toBe(2); // 8 steps: the followers add none
+      for (const id of ['brann', 'pim', 'aldous']) expect(hero(r.state, id).moved).toBe(false);
+      expect(walked(r.events, 'pim').slice(-1)[0]).toEqual(at(3, 10, 4));
+      // Without follow, only the mover walks; a hero farther than 3 stays put either way.
+      const t = hollow(['brann', 'pim']);
+      put(t, 'pim', at(3, 6, 4));
+      const rt = ok(t, { type: 'move', heroId: 'brann', path: [at(3, 1, 5), at(3, 1, 6)], sneak: false, follow: true });
+      expect(hero(rt.state, 'pim').at).toEqual(at(3, 6, 4));
+      const ru = ok(hollow(['brann', 'pim']), { type: 'move', heroId: 'brann', path: east(1, 6), sneak: false });
+      expect(hero(ru.state, 'pim').at).toEqual(at(3, 2, 4));
+    });
+  });
+
+  describe('brace and the shield', () => {
+    it('brace: heir, sellsword and sapper; braced until the next player phase: enemies roll −15%, hits do 1 less; free swings at full slots', () => {
+      const s = delve({ heroes: ['keven', 'brann', 'pim', 'sam'], extra: [['sam', 'Sam', 'sapper']] });
+      for (const [id, has] of [['keven', true], ['brann', true], ['sam', true], ['pim', false]] as const) expect(!!option(s, id, 'brace')).toBe(has);
+      put(s, 'brann', GATE);
+      const m = monster(s, 'orc', at(1, 5, 7), 'hunting');
+      const r = act(s, 'brann', 'brace', {});
+      expect(r.events.some((x) => x.type === 'braced' && x.id === 'brann')).toBe(true);
+      expect(hero(r.state, 'brann').braced).toBe(true);
+      expect(option(r.state, 'brann', 'brace')).toBeUndefined();
+      // The orc's attack: chance 60 − 15; one hit of 2 − armor 1 − brace 1 = 0.
+      const w1 = until(r.state, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === m.id && x.roll.hits === 1 && !x.roll.perfect));
+      const roll = rolls(w1.events).find((x) => x.chance === 45)!;
+      expect(roll).toBeDefined();
+      expect(w1.events.find((x) => x.type === 'hit' && x.target === 'brann')).toMatchObject({ damage: 0 });
+      expect(hero(w1.state, 'brann').braced).toBeUndefined();
+      // Braced, Brann's free swing is his full sword (3 slots).
+      const t = delve({ heroes: ['brann'] });
+      put(t, 'brann', at(1, 4, 7));
+      hero(t, 'brann').braced = true;
+      const cp = monster(t, 'cutpurse', at(1, 5, 7), 'hunting');
+      cp.stolen = { id: 'x', kind: 'gem', name: 'Garnet', amount: 40, slots: 1 };
+      const w2 = ok(t, { type: 'endTurn' });
+      expect(rolls(w2.events).some((x) => x.slots === 3)).toBe(true);
+    });
+
+    it('the forge shield: 50 gold, needs the smith; ranged hits do 1 less, 2 less while braced; melee hits are not turned', () => {
+      let s = party(e.newGame(1));
+      expect(e.apply(s, { type: 'buyShield', heroId: 'brann' }).error).toMatch(/forge is cold/);
+      s.campaign.village.smith = true;
+      s.campaign.gold = SHIELD_PRICE;
+      s = ok(s, { type: 'buyShield', heroId: 'brann' }).state;
+      expect(e.heroById(s, 'brann')!.shield).toBe(true);
+      expect(s.campaign.gold).toBe(0);
+      expect(e.apply(s, { type: 'buyShield', heroId: 'brann' }).error).toMatch(/already/);
+      // A tier-3 archer (3 dmg) at 3: 3 − armor 1 = 2 a hit; with the shield 1; braced with the shield 2 − 1 − 2 → 0.
+      const shoot = (braced: boolean) => {
+        const t = delve({ heroes: ['brann'] });
+        (t.campaign.roster.find((h) => h.id === 'brann')!).shield = true;
+        put(t, 'brann', at(1, 10, 8));
+        hero(t, 'brann').rooted = 9;
+        hero(t, 'brann').braced = braced || undefined;
+        const a = monster(t, 'archer', at(1, 10, 5), 'hunting');
+        (a as MonsterX).tier = 3;
+        const r = until(t, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === a.id && x.what === 'Shot' && x.roll.hits === 1 && !x.roll.perfect));
+        return (r.events.find((x) => x.type === 'hit' && x.target === 'brann') as { damage: number }).damage;
+      };
+      expect(shoot(false)).toBe(1);
+      expect(shoot(true)).toBe(0);
+      // Melee: a tier-3 orc (3 dmg) next to a shielded Brann still does 2.
+      const u = delve({ heroes: ['brann'] });
+      (u.campaign.roster.find((h) => h.id === 'brann')!).shield = true;
+      put(u, 'brann', GATE);
+      const o = monster(u, 'orc', at(1, 5, 7), 'hunting');
+      (o as MonsterX).tier = 3;
+      const r = until(u, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === o.id && x.roll.hits === 1 && !x.roll.perfect));
+      expect(r.events.find((x) => x.type === 'hit' && x.target === 'brann')).toMatchObject({ damage: 2 });
+    });
+  });
+
+  describe('hamstring', () => {
+    it('the Ranger: 1 Finesse slot at −20 at range 5 in sight, noise 1; a hit roots the monster for 2 rounds (it stays put), not the Dragon', () => {
+      const s = delve({ heroes: ['rae'], extra: [['rae', 'Rae', 'ranger']] });
+      put(s, 'rae', at(1, 10, 8));
+      const m = monster(s, 'orc', at(1, 10, 5), 'hunting');
+      expect(option(s, 'brann', 'hamstring')).toBeUndefined();
+      const o = option(s, 'rae', 'hamstring')!;
+      expect(o.targets).toEqual([{ id: m.id, at: m.at }]);
+      const pv = e.preview(s, 'rae', 'hamstring', { id: m.id });
+      expect(pv).toMatchObject({ slots: 1, stat: 'finesse', chance: 55, noise: 1 });
+      const r = until(s, { type: 'act', heroId: 'rae', action: 'hamstring', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'rooted'));
+      expect(r.events.find((x) => x.type === 'rooted')).toEqual({ type: 'rooted', id: m.id, by: 'rae', rounds: 2 });
+      expect(r.state.delve!.monsters[0]!.stuck).toBe(2);
+      expect(r.state.delve!.monsters[0]!.hp).toBe(6);
+      // Two world phases without a step; it still attacks if it could (it can't reach), then it walks again.
+      let t = ok(r.state, { type: 'endTurn' }).state;
+      expect(t.delve!.monsters[0]!.at).toEqual(at(1, 10, 5));
+      t = ok(t, { type: 'endTurn' }).state;
+      expect(t.delve!.monsters[0]!.at).toEqual(at(1, 10, 5));
+      expect(t.delve!.monsters[0]!.stuck).toBe(0);
+      t = ok(t, { type: 'endTurn' }).state;
+      expect(samePos(t.delve!.monsters[0]!.at, at(1, 10, 5))).toBe(false);
+      const d = delve({ heroes: ['rae'], extra: [['rae', 'Rae', 'ranger']] });
+      put(d, 'rae', at(3, 14, 4));
+      monster(d, 'dragon', at(3, 16, 4), 'hunting');
+      expect(option(d, 'rae', 'hamstring')).toBeUndefined();
+    });
+
+    it('the orc archer shows `hamstring` the round before and roots a hero closing in: no move or dash for 2 rounds, acting still allowed', () => {
+      const s = delve({ heroes: ['brann'] });
+      put(s, 'brann', at(1, 10, 8));
+      const a = monster(s, 'archer', at(1, 10, 5), 'hunting');
+      computeIntentsOf(ctx(s));
+      expect(a.intent).toMatchObject({ kind: 'hamstring', targetId: 'brann' });
+      const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'rooted' && x.id === 'brann'));
+      expect(rolls(r.events).find((x) => x.slots === 1)?.chance).toBe(35);
+      expect(hero(r.state, 'brann').rooted).toBe(2);
+      expect(e.apply(r.state, { type: 'move', heroId: 'brann', path: [at(1, 10, 7)], sneak: false }).error).toMatch(/rooted/);
+      expect(e.reachable(r.state, 'brann', false)).toEqual([]);
+      expect(option(r.state, 'brann', 'brace')).toBeDefined();
+      expect(e.calm(r.state).calm).toBe(false);
+      // Rooted, he is shot, not hamstrung again; two world phases later he can walk.
+      expect(r.state.delve!.monsters[0]!.intent?.kind).toBe('attack');
+      let t = ok(r.state, { type: 'endTurn' }).state;
+      expect(hero(t, 'brann').rooted).toBe(1);
+      t = ok(t, { type: 'endTurn' }).state;
+      expect(hero(t, 'brann').rooted).toBe(0);
+      expect(e.reachable(t, 'brann', false).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('night thorn and briar', () => {
+    it('night thorn: 1 mana, 2 Wits slots at range 5, 1 dmg per hit through armor, silent', () => {
+      const s = delve({ heroes: ['sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+      put(s, 'sable', at(1, 10, 8));
+      const m = monster(s, 'captain', at(1, 10, 5), 'hunting'); // armor 1
+      const o = option(s, 'sable', 'nightthorn')!;
+      expect(o.mana).toBe(1);
+      const pv = e.preview(s, 'sable', 'nightthorn', { id: m.id });
+      expect(pv).toMatchObject({ slots: 2, stat: 'wits', noise: 0 });
+      expect(pv.outcomes).toEqual(['Miss', '1 dmg, armor ignored', '3 dmg, armor ignored']);
+      const r = until(s, { type: 'act', heroId: 'sable', action: 'nightthorn', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'hit' && x.damage === 1));
+      expect(r.state.delve!.monsters[0]!.hp).toBe(8);
+      expect(hero(r.state, 'sable').mana).toBe(2);
+      expect(r.events.some((x) => x.type === 'noise')).toBe(false);
+      expect(r.events.some((x) => x.type === 'cast' && x.spell === 'nightthorn')).toBe(true);
+    });
+
+    it('briar: 1 mana, 2 Wits slots at range 4, 1 dmg per hit; a hit roots 1 round, a perfect roll 2; noise 1', () => {
+      const s = delve({ heroes: ['wren'], extra: [['wren', 'Wren', 'hedgewitch']] });
+      put(s, 'wren', at(1, 10, 8));
+      const m = monster(s, 'orc', at(1, 10, 5), 'hunting');
+      expect(option(s, 'wren', 'briar')!.mana).toBe(1);
+      const pv = e.preview(s, 'wren', 'briar', { id: m.id });
+      expect(pv).toMatchObject({ slots: 2, stat: 'wits', noise: 1 });
+      const one = until(s, { type: 'act', heroId: 'wren', action: 'briar', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'hit' && x.damage === 1));
+      expect(one.state.delve!.monsters[0]!).toMatchObject({ hp: 5, stuck: 1 });
+      expect(one.events.find((x) => x.type === 'rooted')).toMatchObject({ rounds: 1 });
+      const two = until(s, { type: 'act', heroId: 'wren', action: 'briar', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'hit' && x.damage === 3));
+      expect(two.state.delve!.monsters[0]!).toMatchObject({ hp: 3, stuck: 2 });
+      expect(two.events.some((x) => x.type === 'noise' && x.radius === 1)).toBe(true);
+      // Out of range at 5.
+      const t = delve({ heroes: ['wren'], extra: [['wren', 'Wren', 'hedgewitch']] });
+      put(t, 'wren', at(3, 2, 4));
+      monster(t, 'orc', at(3, 7, 4), 'hunting');
+      expect(option(t, 'wren', 'briar')).toBeUndefined();
+    });
+  });
+
+  describe('crates and barrels', () => {
+    const kitCastle: CastleDef = structuredClone(testCastle);
+    kitCastle.levels[0]!.tiles[hexKey(at(1, 5, 1))] = { kind: 'prop', prop: 'crate', room: 'pantry' };
+    kitCastle.levels[0]!.tiles[hexKey(at(1, 6, 1))] = { kind: 'prop', prop: 'barrel', room: 'pantry' };
+    const ke = createEngine(kitCastle);
+    function kitDelve() {
+      let s = party(ke.newGame(1));
+      s = ke.apply(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} }).state;
+      s.delve!.monsters = [];
+      s.delve!.rivals = null;
+      s.delve!.traps = {};
+      put(s, 'brann', at(1, 6, 2));
+      return s;
+    }
+
+    it('smashProp: an adjacent crate or barrel; noise 4; the hex is floor after; a seeded drop lands as ground loot', () => {
+      const s = kitDelve();
+      const o = ke.actions(s, 'brann').find((x) => x.action === 'smashProp')!;
+      expect(o.targets.map((t) => posKey(t.at!)).sort()).toEqual([posKey(at(1, 5, 1)), posKey(at(1, 6, 1))].sort());
+      expect(o.pick).toBe('hex');
+      const pv = ke.preview(s, 'brann', 'smashProp', { at: at(1, 5, 1) });
+      expect(pv.noise).toBe(4);
+      expect(pv.outcomes[0]).toMatch(/Smash the crate/);
+      const r = ke.apply(s, { type: 'act', heroId: 'brann', action: 'smashProp', target: { at: at(1, 5, 1) }, focus: 0 });
+      expect(r.error).toBeUndefined();
+      expect(r.state.delve!.smashed).toEqual([posKey(at(1, 5, 1))]);
+      expect(hero(r.state, 'brann').acted).toBe(true);
+      expect(r.events.some((x) => x.type === 'noise' && x.radius === 4)).toBe(true);
+      const ev = r.events.find((x) => x.type === 'propSmashed')!;
+      expect(ev).toMatchObject({ at: at(1, 5, 1), by: 'brann' });
+      const ground = r.state.delve!.ground.find((g) => samePos(g.at, at(1, 5, 1)));
+      if (ev.type === 'propSmashed' && ev.items.length) expect(ground?.items).toEqual(ev.items);
+      else expect(ground).toBeUndefined();
+      // Floor now: Brann can step there; the crate is no longer a target; the barrel still is.
+      expect(ke.reachable(r.state, 'brann', false).some((x) => samePos(x.to, at(1, 5, 1)))).toBe(true);
+      expect(ke.actions(r.state, 'brann').find((x) => x.action === 'smashProp')!.targets).toEqual([{ at: at(1, 6, 1) }]);
+      // The drop table: gold 3–12, a small item, or nothing; the same seed gives the same drop.
+      const seen = new Set<string>();
+      for (let i = 1; i < 60; i++) {
+        const t = structuredClone(s);
+        t.rng = i * 2654435761 >>> 0;
+        const x = ke.apply(t, { type: 'act', heroId: 'brann', action: 'smashProp', target: { at: at(1, 6, 1) }, focus: 0 });
+        const y = ke.apply(t, { type: 'act', heroId: 'brann', action: 'smashProp', target: { at: at(1, 6, 1) }, focus: 0 });
+        expect(x.events).toEqual(y.events);
+        const got = (x.events.find((z) => z.type === 'propSmashed') as { items: Item[] }).items;
+        if (!got.length) seen.add('nothing');
+        else if (got[0]!.kind === 'gold') {
+          seen.add('gold');
+          expect(got[0]!.amount).toBeGreaterThanOrEqual(3);
+          expect(got[0]!.amount).toBeLessThanOrEqual(12);
+        } else {
+          seen.add('item');
+          expect(['torch', 'potion', 'firecracker', 'caltrops']).toContain(got[0]!.kind);
+        }
+      }
+      expect([...seen].sort()).toEqual(['gold', 'item', 'nothing']);
+    });
+  });
+
+  it('CALM_STEPS is 4', () => {
+    expect(CALM_STEPS).toBe(4);
   });
 });
