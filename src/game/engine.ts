@@ -6,6 +6,7 @@ import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { blastPreview } from './charges';
+import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
@@ -201,6 +202,11 @@ export function createEngine(castle: CastleDef): Engine {
 
     shop: (state) => shopOffers(state),
     ales: (state) => aleOffers(state),
+    calmReach(state, heroId, sneak) {
+      const c = rctx(state);
+      return c ? calmReach(c, heroId, sneak) : [];
+    },
+
     blastPreview(state, at) {
       const c = rctx(state);
       if (!c) return { broke: [], collapsed: [], rubbled: [], hit: [] as string[] };

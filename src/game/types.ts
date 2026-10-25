@@ -548,6 +548,8 @@ export interface Rival {
   dragging?: string;
   /** V3.7 (spec 20.1): heroes this member has noticed (sneak attack applies to the others). */
   noticedIds?: string[];
+  /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar: no walking. */
+  stuck?: number;
 }
 
 export interface RivalCrew {
@@ -855,6 +857,7 @@ export type GameEvent =
   | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
   | { type: 'robbed'; hero: string; by: string; items: Item[] }
   | { type: 'calm'; calm: boolean; why?: string } // spec 20.5: free movement starts or ends ("An orc has seen Pim")
+  | { type: 'walkStopped'; heroId: string; at: Pos; why: string } // spec 20.5: a calm walk halted early while still calm (a trap, a new monster in sight)
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }
   | { type: 'rooted'; id: string; by: string; rounds: number }
   | { type: 'braced'; id: string }

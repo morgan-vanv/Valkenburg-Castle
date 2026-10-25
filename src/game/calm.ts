@@ -255,6 +255,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
       const calmNow = isCalm(c);
       if (!calmNow) fresh();
       say(c, combat && !calmNow ? `${name} stops. ${calmReason(c)}` : `${name} stops: ${why}.`);
+      if (calmNow) c.ev.push({ type: 'walkStopped', heroId: h.heroId, at: { ...h.at }, why });
       updateCalm(c);
       checkDelveEnd(c);
     }
@@ -274,7 +275,10 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     trail.push({ ...p });
     if (last) reachedEnd = true;
     if (st.trap) return stop('a trap');
-    // Followers step into the hex the one ahead just left (single file along the same path).
+    // Followers step into the hex the one ahead just left (single file along the same path). The line
+    // is re-ordered by distance to the mover each step, so a hero the mover walked through keeps its place.
+    const rank = new Map(line.map((f, i) => [f, i]));
+    line.sort((a, b) => distance(a.h.at, h.at) - distance(b.h.at, h.at) || rank.get(a)! - rank.get(b)!);
     for (let k = 0; k < line.length; k++) {
       const f = line[k]!;
       const idx = trail.length - 2 - k;
@@ -287,7 +291,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
         const nodes = dijkstra(c.w, d, f.h.at, { enter: (q) => !blocksHero(c, q), stairs: true, budget: 6 });
         hop = nodes.has(posKey(to)) ? pathTo(nodes, to) : [];
       }
-      if (!hop.length || hop.some((q) => occupant(c, q))) {
+      if (!hop.length || occupant(c, to)) {
         say(c, `${heroName(c, f.h.heroId)} falls behind.`);
         flush(c, f);
         line.splice(k, 1);
@@ -308,9 +312,9 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     c.visCache = undefined;
     if (d.rivals && (!d.rivals.spotted || d.rivals.stance === 'waiting')) refreshSight(c);
     if (c.s.stage !== 'delve') return stop('the delve is over', false);
-    // The castle turns every CALM_STEPS steps: a full world phase and a new round, then the walk goes on
-    // (deferred a step while the mover stands on a friend's hex, passing through).
-    if (!last && (d.calmSteps ?? 0) >= CALM_STEPS && !d.heroes.some((x) => x !== h && (x.status === 'active' || x.status === 'downed') && samePos(x.at, h.at))) {
+    // The castle turns every CALM_STEPS steps (the last step of a path included): a full world phase and a
+    // new round, then the walk goes on (deferred a step while the mover stands on a friend's hex, passing through).
+    if ((d.calmSteps ?? 0) >= CALM_STEPS && !d.heroes.some((x) => x !== h && (x.status === 'active' || x.status === 'downed') && samePos(x.at, h.at))) {
       flush(c, lead);
       for (const f of line) flush(c, f);
       if (lastNoise) c.ev.push({ type: 'noise', at: { ...h.at }, radius: lastNoise });
