@@ -86,16 +86,17 @@ const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
 
 describe('camp', () => {
-  it('new game: 160 gold, Hobart alone, 4 recruits of 3+ classes (spec 15.3)', () => {
+  it('new game: 120 gold, Hobart alone, 4 level-1 recruits of 3+ classes at 60 (spec 15.3, 17.1)', () => {
     const s = e.newGame(7);
-    expect(s.campaign.gold).toBe(160);
+    expect(s.campaign.gold).toBe(120);
+    expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
     expect(s.campaign.roster.map((h) => h.id)).toEqual(['hobart']);
     expect(s.campaign.board).toHaveLength(2); // the test castle has only 2 sites
     expect(s.campaign.recruits).toHaveLength(4);
     for (let seed = 1; seed < 30; seed++) {
       const t = e.newGame(seed);
       expect(new Set(t.campaign.recruits.map((r) => r.hero.cls)).size).toBeGreaterThanOrEqual(3);
-      expect(t.campaign.recruits.every((r) => r.price === 40 + 20 * (r.hero.level - 1))).toBe(true);
+      expect(t.campaign.recruits.every((r) => r.price === 60 + 40 * (r.hero.level - 1))).toBe(true);
       expect(t.campaign.recruits.every((r) => r.hero.cls !== 'hobart')).toBe(true);
     }
     expect(s.campaign.board.every((k) => k.level === 1)).toBe(true);
@@ -118,7 +119,7 @@ describe('camp', () => {
   it('buys, hires, refuses when poor', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
-    expect(s.campaign.gold).toBe(140);
+    expect(s.campaign.gold).toBe(100);
     expect(s.campaign.stash.map((i) => i.kind)).toEqual(['potion']);
     s.campaign.gold = 5;
     const r = e.apply(s, { type: 'buy', kind: 'charge' });
@@ -126,11 +127,31 @@ describe('camp', () => {
     expect(r.state).toBe(s);
   });
 
-  it('refuses wounded heroes', () => {
+  it('two level-1 hires spend the starting purse; one leaves room for cheap gear only (17.1)', () => {
+    let s = e.newGame(7);
+    s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
+    expect(s.campaign.gold).toBe(60);
+    s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
+    expect(s.campaign.gold).toBe(0);
+    expect(e.apply(s, { type: 'buy', kind: 'torch' }).error).toBeTruthy();
+  });
+
+  it('HP carries over between delves; the infirmary heals 3 gold per HP, as far as the gold goes (17.2)', () => {
     const s = party(e.newGame(7));
-    s.campaign.roster[1]!.wounded = 2;
-    const r = e.apply(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} });
-    expect(r.error).toMatch(/wounded/);
+    const brann = s.campaign.roster.find((h) => h.id === 'brann')!;
+    brann.hp = 4;
+    let r = e.apply(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} });
+    expect(r.error).toBeFalsy();
+    expect(r.state.delve!.heroes[0]!.hp).toBe(4);
+    const t = party(e.newGame(7));
+    const b = t.campaign.roster.find((h) => h.id === 'brann')!;
+    b.hp = b.maxHp - 5;
+    t.campaign.gold = 10;
+    r = ok(t, { type: 'heal', heroId: 'brann' });
+    const b2 = r.state.campaign.roster.find((h) => h.id === 'brann')!;
+    expect(b2.hp).toBe(b.maxHp - 2); // 3 HP for 9 gold
+    expect(r.state.campaign.gold).toBe(1);
+    expect(e.apply(r.state, { type: 'heal', heroId: 'brann' }).error).toMatch(/gold/);
   });
 });
 
@@ -469,7 +490,7 @@ describe('combat', () => {
     expect(hero(s, 'brann').status).toBe('dead');
   });
 
-  it('revive brings a downed hero back at 3 HP, wounded after', () => {
+  it('revive brings a downed hero back at 3 HP', () => {
     let s = delve();
     put(s, 'brann', GATE);
     put(s, 'hobart', at(1, 5, 7));
@@ -1099,6 +1120,7 @@ describe('sight and fixed light (14.5)', () => {
   it('the glimpse uses the sight range', () => {
     const s = delve();
     put(s, 'brann', at(3, 2, 4));
+    s.delve!.lanternBearer = 'brann'; // the range comes from the party's own light (17.4)
     s.delve!.light = 20;
     const far = glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at).length;
     s.delve!.light = 0;
@@ -1119,14 +1141,37 @@ describe('sight and fixed light (14.5)', () => {
     expect(e.visibility(s).lit.has(posKey(at(3, 3, 2)))).toBe(true); // fungus on L3
   });
 
-  it('lit hexes in line of sight are visible from up to 14; dark ones only within range', () => {
+  it('far lights show from up to 14, not the floor they light (17.4); dark hexes only within range', () => {
     const s = delve({ heroes: ['brann'] });
     s.delve!.light = 5; // dark: range 4 on L3, lantern radius 2
     put(s, 'brann', at(3, 12, 2));
     const vis = e.visibility(s).visible;
-    expect(vis.has(posKey(at(3, 3, 2)))).toBe(true); // fungus-lit, 9 away
+    expect(vis.has(posKey(at(3, 3, 2)))).toBe(true); // the fungus itself, 9 away
+    expect(e.visibility(s).lit.has(posKey(at(3, 4, 2)))).toBe(true);
+    expect(vis.has(posKey(at(3, 4, 2)))).toBe(false); // fungus-lit floor, but beyond range
     expect(vis.has(posKey(at(3, 6, 6)))).toBe(false); // dark, beyond range
     expect(vis.has(posKey(at(3, 10, 2)))).toBe(true); // dark but within range
+  });
+
+  it('sight in a castle light: daylight 8; others 4 minus depth, min 2; the party light uses the stage (17.4)', () => {
+    const s = delve({ heroes: ['brann'] });
+    s.delve!.lanternOpen = false;
+    put(s, 'brann', at(1, 2, 7)); // daylight
+    expect(e.sightRange(s, 'brann')).toBe(8);
+    put(s, 'brann', at(3, 2, 3)); // next to the fungus, L3
+    expect(e.sightRange(s, 'brann')).toBe(2);
+    s.delve!.lanternOpen = true;
+    s.delve!.light = 20;
+    expect(e.sightRange(s, 'brann')).toBe(6); // bright 8 minus 2 for the Hollow
+  });
+
+  it('daylight still counts as a far light over its whole patch; other lights only at the source (17.4)', () => {
+    const s = delve({ heroes: ['brann'] });
+    const far = farLit(w, s.delve as DelveX);
+    expect(far.has(posKey(at(1, 2, 8)))).toBe(true); // daylight source
+    expect(far.has(posKey(at(1, 4, 8)))).toBe(true); // daylit floor 2 away
+    expect(far.has(posKey(at(3, 3, 2)))).toBe(true); // the fungus
+    expect(far.has(posKey(at(3, 4, 2)))).toBe(false); // the floor it lights
   });
 
   it('a hero ending a move on a fire vent takes 3', () => {
@@ -1139,7 +1184,7 @@ describe('sight and fixed light (14.5)', () => {
 
 // ---------------------------------------------------------------- V3.2 (spec section 15)
 
-import { los as losOf } from './world';
+import { los as losOf, farLit } from './world';
 
 function v32(opts: { heroes?: string[]; extra?: [string, string, HeroClass][]; kind?: 'rescue' | 'recover' } = {}) {
   return delve({ heroes: opts.heroes, extra: opts.extra, kind: opts.kind });
@@ -1482,7 +1527,7 @@ describe('15.4 quartermaster', () => {
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
-    expect(s.campaign.gold).toBe(150);
+    expect(s.campaign.gold).toBe(110);
     expect(s.campaign.stash[0]!.kind).toBe('firecracker');
   });
 

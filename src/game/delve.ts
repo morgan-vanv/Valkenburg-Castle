@@ -938,7 +938,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const o = hd(c, t.id!)!;
       return simple(o.status === 'downed' ? 'Back up with 5 HP' : 'Heal 5');
     }
-    case 'revive': return simple('Back up with 3 HP, wounded after');
+    case 'revive': return simple('Back up with 3 HP');
     case 'charge': return simple('Blows at end of turn: 4 dmg within 1, 2 within 2', 8);
     case 'rope': return simple('Rope anchored here');
     case 'climb': return simple(t.at!.level < h.at.level ? 'Climb up the rope' : 'Climb down the rope, no damage');

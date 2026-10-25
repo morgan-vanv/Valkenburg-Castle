@@ -8,7 +8,7 @@
 // out of walking reach it goes to the winch and works it, or failing that jumps
 // down a pit column that lands closer.
 //
-// V3.2: a campaign starts with Hobart alone and 160 gold; the bot hires 2 to 3 recruits at the
+// V3.2: a campaign starts with Hobart alone (V3.4: 120 gold, hires 60 + 40 a level); the bot hires 2 to 3 recruits at the
 // tavern (a front-liner first, then a quiet one, then a mage), re-hiring when the roster thins.
 // Heroes dash (second move) toward the goal when nothing is in reach to hit.
 //
@@ -320,10 +320,11 @@ for (let i = 0; i < N; i++) {
   }
   // Squad building (spec 15.3): 3 heroes to start (Hobart + 2), 4 once the gold is there.
   s = recruit(s, i === 0 ? 3 : 4);
-  for (const h of s.campaign.roster) if (h.wounded) s = run(s, { type: 'heal', heroId: h.id });
+  // V3.4 (spec 17.2): HP carries over; heal whoever is hurt, Hobart first, as far as the gold goes.
+  for (const h of s.campaign.roster) if (h.hp < h.maxHp && s.campaign.gold >= 3) s = run(s, { type: 'heal', heroId: h.id });
   if (s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
   if (DRAGON && s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
-  const fit = s.campaign.roster.filter((h) => !h.wounded).slice(0, 4).map((h) => h.id);
+  const fit = s.campaign.roster.slice(0, 4).map((h) => h.id);
   if (!fit.length) break;
   const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? s.campaign.board[i % s.campaign.board.length]!;
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.

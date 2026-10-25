@@ -6,9 +6,9 @@ import type {
   Campaign, Command, Contract, GameEvent, Hero, HeroClass, HeroInDelve, Item, Recruit, SpawnDef,
 } from './types';
 import {
-  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEAL_PRICE, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
+  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP, SISTER,
-  SISTER_CLASSES, SISTER_DARTS, SISTER_NAMES, SISTER_SMOKE, START_GOLD, TAVERN_SIZE, TIERS, WEAPON_PRICE,
+  SISTER_CLASSES, SISTER_DARTS, SISTER_NAMES, SISTER_SMOKE, START_GOLD, TAVERN_SIZE, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
 } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES } from './data';
@@ -27,7 +27,7 @@ type Res = { error?: string; events: GameEvent[] };
 export function makeHero(id: string, name: string, cls: HeroClass, level = 1): Hero {
   const c = CLASSES[cls];
   const h: Hero = {
-    id, name, cls, level: 1, xp: 0, maxHp: c.hp, stats: { ...c.stats },
+    id, name, cls, level: 1, xp: 0, maxHp: c.hp, hp: c.hp, stats: { ...c.stats },
     weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0,
   };
   while (h.level < level) levelUp(h);
@@ -38,6 +38,7 @@ export function makeHero(id: string, name: string, cls: HeroClass, level = 1): H
 function levelUp(h: Hero): void {
   h.level += 1;
   h.maxHp += 2;
+  h.hp += 2;
   const main = CLASSES[h.cls].main;
   h.stats[main] += 5;
 }
@@ -90,10 +91,22 @@ export function refreshCamp(w: World, s: GameStateX): void {
     const name = pick(s, pool.length ? pool : RECRUIT_NAMES);
     names.add(name);
     const cls = classes[i]!;
-    const level = random(s) < 0.35 ? 2 : 1;
-    recruits.push({ hero: makeHero(newHeroId(s), name, cls, level), price: 40 + 20 * (level - 1) });
+    // The opening tavern is all level 1 (spec 17.1), so two hires is a real option.
+    const level = s.campaign.delveCount > 0 && random(s) < 0.35 ? 2 : 1;
+    recruits.push({ hero: makeHero(newHeroId(s), name, cls, level), price: recruitPrice(level) });
   }
   s.campaign.recruits = recruits;
+}
+
+export function recruitPrice(level: number): number {
+  return RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL * (level - 1);
+}
+
+/** Spec 17.2: what healing this hero costs now: HP that gold buys, up to full. */
+export function healQuote(h: Hero, gold: number): { hp: number; cost: number; missing: number } {
+  const missing = Math.max(0, h.maxHp - h.hp);
+  const hp = Math.min(missing, Math.floor(gold / HEAL_PER_HP));
+  return { hp, cost: hp * HEAL_PER_HP, missing };
 }
 
 function makeBoard(w: World, s: GameStateX): Contract[] {
@@ -185,11 +198,12 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
     case 'heal': {
       const h = C.roster.find((x) => x.id === cmd.heroId);
       if (!h) return err('No such hero.');
-      if (!h.wounded) return err(`${h.name} is fit.`);
-      if (C.gold < HEAL_PRICE) return err('Not enough gold.');
-      C.gold -= HEAL_PRICE;
-      h.wounded = 0;
-      events.push({ type: 'say', text: `${h.name} is patched up.` });
+      const q = healQuote(h, C.gold);
+      if (!q.missing) return err(`${h.name} is unhurt.`);
+      if (!q.hp) return err('Not enough gold.');
+      C.gold -= q.cost;
+      h.hp += q.hp;
+      events.push({ type: 'say', text: h.hp >= h.maxHp ? `${h.name} is patched up (${q.cost} gold).` : `${h.name} gets ${q.hp} HP back (${q.cost} gold, all you could pay).` });
       return { events };
     }
     case 'upgrade': {
@@ -222,7 +236,6 @@ export function partyProblem(s: GameStateX, heroIds: string[]): string | null {
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
     if (!h) return 'No such hero.';
-    if (h.wounded > 0) return `${h.name} is still wounded.`;
   }
   return null;
 }
@@ -247,7 +260,6 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
     if (!h) return err('No such hero.');
-    if (h.wounded > 0) return err(`${h.name} is still wounded.`);
     heroes.push(h);
   }
   const entrance = w.castle.entrances[cmd.entrance];
@@ -365,7 +377,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     const hid: HeroInDelve = {
       heroId: id,
       at: spots[i] ?? { ...entrance },
-      hp: h.maxHp,
+      hp: Math.max(1, Math.min(h.maxHp, h.hp ?? h.maxHp)),
       focus: FOCUS_MAX,
       pack: packs[id] ?? [],
       status: 'active',
@@ -487,7 +499,8 @@ export function buildSummary(c: Ctx): void {
     bounty: done ? d.contract.bounty : 0,
     lootValue,
     survivors: out.map((h) => h.heroId),
-    wounded: out.filter((h) => h.revived).map((h) => h.heroId),
+    // Spec 17.2: everyone who comes out hurt (they keep that HP until the infirmary heals them).
+    wounded: out.filter((h) => h.hp < (c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? 0)).map((h) => h.heroId),
     dead: d.heroes.filter((h) => h.status === 'dead').map((h) => h.heroId),
     xp,
     levelUps,
@@ -516,17 +529,15 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Heroes.
   const going = new Set(d.heroes.map((h) => h.heroId));
   for (const h of C.roster) {
-    if (!going.has(h.id)) {
-      if (h.wounded > 0) h.wounded -= 1;
-      continue;
-    }
+    if (!going.has(h.id)) continue;
     const hid = d.heroes.find((x) => x.heroId === h.id)!;
     h.kills += d.kills[h.id] ?? 0;
     h.xp += sum.xp[h.id] ?? 0;
     if (hid.status === 'out') {
       h.delves += 1;
+      // HP carries over (spec 17.2); level-ups still add their +2.
+      h.hp = Math.max(1, Math.min(h.maxHp, hid.hp));
       while (h.level < MAX_LEVEL && xpLevel(h.xp) > h.level) levelUp(h);
-      if (hid.revived) h.wounded = 2;
     }
   }
   const lost: { at: Pos; items: Item[] }[] = [];

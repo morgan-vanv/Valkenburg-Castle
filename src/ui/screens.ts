@@ -4,6 +4,7 @@ import type { Engine } from '../game/api';
 import type { Command, Contract, GameState, Hero, Item } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
+import { HEAL_PER_HP } from '../game/data';
 import { ITEM_EFFECT, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel } from './names';
 
 export interface ScreenHost {
@@ -36,7 +37,6 @@ const SUBTITLE = "Hobart's Revenge";
 
 const WEAPON_PRICE = [0, 60, 150];
 const ARMOR_PRICE = [0, 80, 200];
-const HEAL_PRICE = 30;
 const LEVEL_XP = [0, 0, 5, 12, 20, 30, 45];
 
 // ------------------------------------------------------------ title
@@ -81,7 +81,7 @@ const STATIONS: { id: Station; name: string; glyph: string; blurb: string }[] = 
   { id: 'quartermaster', name: 'Quartermaster', glyph: '⚱', blurb: 'Torches, potions, rope' },
   { id: 'smithy', name: 'Smithy', glyph: '⚒', blurb: 'Better blades and mail' },
   { id: 'tavern', name: 'Tavern', glyph: '☕', blurb: 'Hire hands' },
-  { id: 'infirmary', name: 'Infirmary', glyph: '✚', blurb: 'Patch the wounded' },
+  { id: 'infirmary', name: 'Infirmary', glyph: '✚', blurb: `Heal for ${HEAL_PER_HP} gold per HP` },
   { id: 'stash', name: 'Stash', glyph: '▣', blurb: 'Gold and goods' },
   { id: 'memorial', name: 'Memorial', glyph: '✝', blurb: 'The fallen' },
 ];
@@ -91,7 +91,7 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
   const c = s.campaign;
   const nav = h('nav', { class: 'camp-nav' });
   for (const st of STATIONS) {
-    const badge = st.id === 'infirmary' ? c.roster.filter((x) => x.wounded > 0).length : st.id === 'memorial' ? c.fallen.length : st.id === 'tavern' ? c.recruits.length : 0;
+    const badge = st.id === 'infirmary' ? c.roster.filter(hurt).length : st.id === 'memorial' ? c.fallen.length : st.id === 'tavern' ? c.recruits.length : 0;
     nav.append(
       h(
         'button',
@@ -149,16 +149,30 @@ function classBadge(cls: string): HTMLElement {
 
 /** Hobart alone: the squad needs hiring before the first delve. */
 function needsHire(s: GameState): boolean {
-  return !s.campaign.roster.some((x) => x.cls !== 'hobart' && x.wounded === 0);
+  return !s.campaign.roster.some((x) => x.cls !== 'hobart');
+}
+
+/** Spec 17.2: HP carries over between delves. */
+function hpOf(hr: Hero): number {
+  return Math.min(hr.maxHp, hr.hp ?? hr.maxHp);
+}
+function hurt(hr: Hero): boolean {
+  return hpOf(hr) < hr.maxHp;
+}
+/** "7/10 HP", marked when hurt (badly when at a third or less). */
+function hpText(hr: Hero): HTMLElement {
+  const hp = hpOf(hr);
+  const cls = hp >= hr.maxHp ? '' : hp * 3 <= hr.maxHp ? 'neg' : 'warn';
+  return h('span', { class: `hp-text ${cls}`, title: hp < hr.maxHp ? `${hr.name} goes in with ${hp} of ${hr.maxHp} HP. Wounds don't mend between delves; the infirmary heals for ${HEAL_PER_HP} gold per HP.` : 'Unhurt.' }, `${hp}/${hr.maxHp} HP`);
 }
 
 function heroChip(hr: Hero): HTMLElement {
   const next = LEVEL_XP[hr.level + 1];
   return h(
     'div',
-    { class: `hchip ${hr.wounded ? 'wounded' : ''}` },
+    { class: `hchip ${hurt(hr) ? 'wounded' : ''}` },
     classBadge(hr.cls),
-    h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP${next ? ` · XP ${hr.xp}/${next}` : ''}`), hr.wounded ? h('div', { class: 'neg small' }, `Wounded: sits out ${hr.wounded}`) : ''),
+    h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr), next ? ` · XP ${hr.xp}/${next}` : '')),
   );
 }
 
@@ -352,35 +366,71 @@ function recruitCard(hr: Hero, price: number, s: GameState, host: ScreenHost): H
 // ---- infirmary
 
 function infirmaryStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Infirmary', `Wounded heroes sit out contracts. The surgeon can patch one up at once for ${HEAL_PRICE} gold.`));
-  const hurt = s.campaign.roster.filter((x) => x.wounded > 0);
-  if (!hurt.length) {
-    el.append(h('p', { class: 'dim' }, 'Every cot is empty.'));
+  const c = s.campaign;
+  el.append(stationHead('Infirmary', `Wounds don't mend on their own: a hero goes back in with the HP they came out with. The surgeon charges ${HEAL_PER_HP} gold per HP.`));
+  const list = c.roster.filter(hurt);
+  if (!list.length) {
+    el.append(h('p', { class: 'dim' }, 'Every cot is empty. Nobody needs patching.'));
     return;
   }
-  const list = h('div', { class: 'shop' });
-  for (const hr of hurt)
-    list.append(
+  const quote = (hr: Hero, purse: number) => {
+    const missing = hr.maxHp - hpOf(hr);
+    const hp = Math.min(missing, Math.floor(purse / HEAL_PER_HP));
+    return { missing, hp, cost: hp * HEAL_PER_HP };
+  };
+  const rows = h('div', { class: 'shop' });
+  for (const hr of list) {
+    const q = quote(hr, c.gold);
+    const label = !q.hp ? `Heal · ${q.missing * HEAL_PER_HP}` : q.hp < q.missing ? `Heal ${q.hp} of ${q.missing} HP · ${q.cost}` : `Heal ${q.hp} HP · ${q.cost}`;
+    rows.append(
       h(
         'div',
         { class: 'shop-row' },
         classBadge(hr.cls),
-        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `Sits out ${hr.wounded} more contract${hr.wounded > 1 ? 's' : ''}`)),
-        h('span', null),
+        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr))),
+        h('span', { class: 'dim small' }, `Full: ${q.missing * HEAL_PER_HP} gold`),
         h(
           'button',
           {
             class: 'btn btn-small',
-            disabled: s.campaign.gold < HEAL_PRICE,
+            disabled: !q.hp,
+            title: q.hp < q.missing ? 'You can only pay for part of it. Heals as much as your gold covers.' : '',
             onclick: async () => {
               if (await host.send({ type: 'heal', heroId: hr.id })) sfx.play('spell');
             },
           },
-          `Heal now · ${HEAL_PRICE}`,
+          label,
         ),
       ),
     );
-  el.append(list);
+  }
+  el.append(rows);
+  if (list.length > 1) {
+    const total = list.reduce((n, hr) => n + (hr.maxHp - hpOf(hr)) * HEAL_PER_HP, 0);
+    el.append(
+      h(
+        'div',
+        { class: 'screen-actions' },
+        h(
+          'button',
+          {
+            class: 'btn',
+            disabled: c.gold < HEAL_PER_HP,
+            title: 'Heals everyone in roster order, as far as your gold goes.',
+            onclick: async () => {
+              let ok = false;
+              for (const hr of list) {
+                if (!(await host.send({ type: 'heal', heroId: hr.id }))) break;
+                ok = true;
+              }
+              if (ok) sfx.play('spell');
+            },
+          },
+          `Heal everyone · ${total}`,
+        ),
+      ),
+    );
+  }
 }
 
 // ---- stash
@@ -444,7 +494,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     return;
   }
   // Clean the remembered loadout against the current state.
-  const fit = (id: string) => c.roster.some((x) => x.id === id && x.wounded === 0);
+  const fit = (id: string) => c.roster.some((x) => x.id === id);
   const l: Loadout = {
     contractId: contract.id,
     heroIds: prev.heroIds.filter(fit).slice(0, 4),
@@ -466,7 +516,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     }
     l.packs[id] = pack;
   }
-  if (!l.heroIds.length) l.heroIds = c.roster.filter((x) => x.wounded === 0).slice(0, 4).map((x) => x.id);
+  if (!l.heroIds.length) l.heroIds = c.roster.slice(0, 4).map((x) => x.id);
   const save = () => {
     host.saveLoadout(l);
     host.setStation('prepare');
@@ -480,12 +530,12 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   const party = h('div', { class: 'prep-party' });
   for (const hr of c.roster) {
     const on = l.heroIds.includes(hr.id);
-    const disabled = hr.wounded > 0 || (!on && l.heroIds.length >= 4);
+    const disabled = !on && l.heroIds.length >= 4;
     party.append(
       h(
         'button',
         {
-          class: `pick-hero ${on ? 'on' : ''} ${hr.wounded ? 'wounded' : ''}`,
+          class: `pick-hero ${on ? 'on' : ''} ${hurt(hr) ? 'wounded' : ''}`,
           disabled,
           onclick: () => {
             if (on) {
@@ -498,7 +548,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         },
         h('span', { class: 'tick' }, on ? '✔' : ''),
         classBadge(hr.cls),
-        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, hr.wounded ? `Wounded (${hr.wounded})` : `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP`)),
+        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · `, hpText(hr))),
       ),
     );
   }
@@ -630,6 +680,12 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
     return;
   }
   const name = (id: string) => s.campaign.roster.find((x) => x.id === id)?.name ?? id;
+  /** 17.2: what each survivor carries home (HP stays until the infirmary heals it). */
+  const outHp = (id: string) => {
+    const hd = s.delve?.heroes.find((x) => x.heroId === id);
+    const max = s.campaign.roster.find((x) => x.id === id)?.maxHp ?? 0;
+    return hd ? `${hd.hp}/${max} HP` : 'out';
+  };
   const hobartDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'hobart');
   el.append(
     h(
@@ -653,7 +709,7 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
                 'li',
                 { class: sm.dead.includes(id) ? 'dead' : '' },
                 h('b', null, name(id)),
-                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : sm.wounded.includes(id) ? ' wounded' : ' out'),
+                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : ` out · ${outHp(id)}`),
                 sm.xp[id] ? h('span', { class: 'small pos' }, ` +${sm.xp[id]} XP`) : '',
                 sm.levelUps.includes(id) ? h('span', { class: 'chip good' }, 'Level up!') : '',
               ),

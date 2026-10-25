@@ -211,6 +211,8 @@ export const MONSTER_SIGHT = 6;
 export const MONSTER_DARK_SIGHT = 3;
 /** Sight range of a hero standing in an unlit hex, by level (16.2). */
 export const DARK_SIGHT: Record<number, number> = { 1: 4, 2: 2, 3: 1 };
+/** Spec 17.4: standing in a castle light that isn't daylight (fire, brazier, sconce, fungus, glow), you see this far minus depth (min 2). */
+export const FIXED_LIGHT_SIGHT = 4;
 export const ARCHER_RANGE = 4;
 export const ARCHER_KEEP = 2; // archers stay at least this far away
 export const CAPTAIN_SHOUT_RANGE = 8;
@@ -275,7 +277,11 @@ export const SHOP: ShopOffer[] = [
 ];
 
 // Section 15 numbers.
-export const START_GOLD = 160;
+/** Spec 17.1: enough for two level-1 hires and nothing else, or one hire and a few cheap items. */
+export const START_GOLD = 120;
+/** Spec 17.1: a recruit costs RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL × (level − 1). */
+export const RECRUIT_PRICE = 60;
+export const RECRUIT_PRICE_PER_LEVEL = 40;
 export const TAVERN_SIZE = 4;
 export const SAPPER_CHARGES = 2;
 export const BOW_RANGE = 6;
@@ -302,7 +308,8 @@ export const CALTROPS_DMG = 2;
 export const OIL_LIGHT = 8;
 export const FIRECRACKER_NOISE = 6;
 
-export const HEAL_PRICE = 30;
+/** Spec 17.2: the infirmary heals for this much gold per HP. Nothing heals for free between delves. */
+export const HEAL_PER_HP = 3;
 export const WEAPON_PRICE = [0, 60, 150];
 export const ARMOR_PRICE = [0, 80, 200];
 

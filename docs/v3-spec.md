@@ -314,3 +314,31 @@ Each sister has a class (`Rival.cls`) and uses the heroes' own rules, intents sh
 ### 15.8a Scale decision (owner, 2026-10-24 22:07)
 
 From the three-panel study (mockup/shots/scale-options.png, mockup/scale-options.ts): **option C, "RuneScape"**: hero 2.0 units tall, natural blocky proportions (head 1/5, limb thickness 0.07, shoulders 0.34, legs 0.44 of height), rat 0.35x, spider 0.8x, orc 1.05x, walls 2.6 (thin), Dragon as is. "Good enough for now"; the owner wants to revisit scale and proportion later.
+
+## 17. V3.4: tighter purse, wounds that stay, darker falls (owner's play-test, 2026-10-24 late night)
+
+Overrides earlier sections where they disagree. Rival crews and the pub are proposals only (https://claude.ai/artifact/PttJ4kNWutJvUAegNgAxeA), not built.
+
+### 17.1 Starting economy
+
+- A campaign starts with **120 gold** (`START_GOLD`). Recruits cost **60 + 40 × (level − 1)** (`RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`): level 1 60, level 2 100. The opening tavern offers only level 1 recruits; after the first delve 35% are level 2 as before.
+- So a new player can afford two level 1 hires and nothing else, or one hire and about 60 gold of gear (torch 10, rope 15, potion 20, firecracker 10). Shop prices are unchanged.
+
+### 17.2 Wounds carry over; the infirmary charges per HP
+
+- `Hero.hp` (campaign) carries between delves. A delve starts each hero at their campaign HP (at least 1); a survivor's HP when they leave is written back, and level-ups add +2 to both HP and max HP. Nothing heals for free between delves.
+- Infirmary: `heal` restores HP at **3 gold per HP** (`HEAL_PER_HP`) up to full, or as much as the gold covers. The UI also offers "Heal everyone".
+- The old wounded rule (revived heroes sit out 2 contracts; heal 30) is gone: a revived hero just comes out with the HP they have. `Hero.wounded` stays in the type, always 0, until it's removed. `DelveSummary.wounded` lists survivors below full HP.
+
+### 17.3 View and HUD (no rule change)
+
+- Hero torsos taper and lose their box corners. Walls stand at full height at every camera angle (the cutaway is off; a setting brings it back).
+- Hero cards: the pack is a row of 4 sockets with names and uses on hover; no overlap with the light panel; every action, item, status, stage and pip explains itself on hover with the real numbers (Kindle: +6 lantern light for 1 mana, silent).
+
+### 17.4 Sight in the dark: far lights and fixed-light sight
+
+Owner's screenshot (docs/agents/v34-fall-reveal.png): a hero who jumps unlit into the Hollow saw the whole Lair and the Bone Pile, because any lit hex in line of sight showed from up to 14 hexes.
+
+- **Far lights.** Beyond a hero's own sight range, only light sources show (up to `LIT_SIGHT` 14, in line of sight): the hex of a fixed light other than daylight (fire, fungus, glow, sconce), a lit brazier, a burning hex, the open lantern's bearer, a hero with a lit torch. The floor they light is not revealed until a hero is within sight range. Daylight still shows its whole lit patch (Level 1 stays navigable shuttered). Walls next to seen floor are revealed as before, but not around far lights. `farLit(w, d)` in src/game/world.ts.
+- **Sight in a castle light.** A hero's sight range when their hex is lit depends on what lights it: the party's own light (the open lantern, a lit torch) gives the stage range minus depth as before; daylight gives 8; any other light (fire, brazier, sconce, fungus, glow, burning) gives 4 minus depth (`FIXED_LIGHT_SIGHT`), never below 2. Unlit is unchanged (4/2/1). So landing in the pit glow in the Hollow gives sight 2, not 6.
+- Check: scripts/v34-fall-reveal.ts (shuttered two-level jump: Level 3 explored on landing went from 118 hexes to 28).

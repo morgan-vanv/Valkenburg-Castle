@@ -4,7 +4,7 @@
 import { distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
 import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
-import { DARK_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
+import { DARK_SIGHT, FIXED_LIGHT_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
 
 export class World {
   readonly levels = new Map<number, LevelDef>();
@@ -20,7 +20,7 @@ export class World {
   /** Solid hexes that burn (the forge): a 'fire' light on a non-walkable hex. */
   readonly fires = new Set<string>();
   /** Fixed lit hexes, cached by door/blown state. */
-  fixedCache: { key: string; lit: Set<string> } | null = null;
+  fixedCache: { key: string; lit: Set<string>; day?: Set<string> } | null = null;
 
   constructor(readonly castle: CastleDef) {
     for (const l of castle.levels) {
@@ -210,7 +210,7 @@ export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>
   if (dist <= 1) return true;
   if (smoky(d, p)) return false;
   if (dist > LIT_SIGHT) return false;
-  if (dist > sightRangeAt(w, d, from, lit) && !lit.has(posKey(p))) return false;
+  if (dist > sightRangeAt(w, d, from, lit) && !farLitTest(w, d, lit)(posKey(p))) return false;
   return los(w, d, from, p);
 }
 
@@ -272,20 +272,52 @@ export function litSet(w: World, d: DelveX): Set<string> {
 
 /** Hexes lit for good by the castle's fixed lights (sconces, daylight, fires, fungus, glow). */
 export function fixedLit(w: World, d: DelveX): Set<string> {
+  return fixedLights(w, d).lit;
+}
+
+function fixedLights(w: World, d: DelveX): { lit: Set<string>; day: Set<string> } {
   const lights: LightDef[] = w.castle.lights ?? [];
-  if (!lights.length) return new Set();
+  if (!lights.length) return { lit: new Set(), day: new Set() };
   const key = Object.entries(d.doors).filter(([, v]) => v.open).map(([k]) => k).sort().join('|') + '#' + [...d.blown].sort().join('|');
-  if (w.fixedCache && w.fixedCache.key === key) return w.fixedCache.lit;
+  if (w.fixedCache && w.fixedCache.key === key && w.fixedCache.day) return { lit: w.fixedCache.lit, day: w.fixedCache.day };
   const out = new Set<string>();
+  const day = new Set<string>();
   for (const L of lights) {
     for (const h of range(L.at, L.radius)) {
       const p = { level: L.at.level, ...h };
       if (!w.tile(p)) continue;
-      if (lightLos(w, d, L.at, p)) out.add(posKey(p));
+      if (lightLos(w, d, L.at, p)) {
+        out.add(posKey(p));
+        if (L.kind === 'daylight') day.add(posKey(p));
+      }
     }
   }
-  w.fixedCache = { key, lit: out };
-  return out;
+  w.fixedCache = { key, lit: out, day };
+  return { lit: out, day };
+}
+
+/**
+ * What a hero can make out beyond their own sight range (spec 17.4): daylight floods the
+ * ground it falls on, so every daylit hex counts; anywhere else only the lights themselves
+ * show (a fire, a fungus cluster, the pit glow, a lit brazier, a burning hex, another
+ * hero's lantern or torch), not the floor around them. Only hexes that are lit right now.
+ */
+export function farLit(w: World, d: DelveX, lit: Set<string> = litSet(w, d)): Set<string> {
+  const test = farLitTest(w, d, lit);
+  return new Set([...lit].filter(test));
+}
+
+/** `farLit` as a membership test, without building the set (hot path: visibleSet). */
+export function farLitTest(w: World, d: DelveX, lit: Set<string>): (k: string) => boolean {
+  const day = fixedLights(w, d).day;
+  const src = new Set<string>();
+  for (const L of w.castle.lights ?? []) if (L.kind !== 'daylight') src.add(posKey(L.at));
+  for (const k of d.lit) src.add(k);
+  for (const [k, n] of Object.entries(d.burning ?? {})) if (n > 0) src.add(k);
+  const lp = d.lanternOpen === false ? null : lanternPos(d);
+  if (lp && LANTERN_RADIUS[brightnessOf(d.light)] > 0) src.add(posKey(lp));
+  for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) src.add(posKey(h.at));
+  return (k) => lit.has(k) && (day.has(k) || src.has(k));
 }
 
 /** Sight range by lantern stage and depth (spec 14.5): bright 8, dim 6, dark 4, pitch 2; −1 per level below 1; never below 2. */
@@ -294,14 +326,31 @@ export function sightRangeOf(light: number, level: number): number {
   return Math.max(2, SIGHT_BY_STAGE[brightnessOf(light)] - Math.max(0, level - 1));
 }
 /**
- * Sight range of someone standing at `at` (spec 16.2): the stage range minus depth when the
- * hex is lit; the level's dark range (L1 4, L2 2, L3 1) when not.
+ * Sight range of someone standing at `at` (spec 16.2, 17.4). Unlit: the level's dark range
+ * (L1 4, L2 2, L3 1). Lit by the party's own light (the open lantern, a torch): the stage
+ * range minus depth. Lit only by the castle: daylight 8; any other light (a fire, a brazier,
+ * a sconce, fungus, the pit glow, a burning hex) FIXED_LIGHT_SIGHT minus depth, never below 2.
  */
 export function sightRangeAt(w: World, d: DelveX, at: Pos, lit: Set<string> = litSet(w, d)): number {
-  if (lit.has(posKey(at))) return sightRangeOf(d.light, at.level);
-  return DARK_SIGHT[at.level] ?? 1;
+  const k = posKey(at);
+  if (!lit.has(k)) return DARK_SIGHT[at.level] ?? 1;
+  if (partyLights(w, d, at)) return sightRangeOf(d.light, at.level);
+  if (fixedLights(w, d).day.has(k)) return SIGHT_BY_STAGE.bright;
+  return Math.max(2, FIXED_LIGHT_SIGHT - Math.max(0, at.level - 1));
 }
-/** Lit hexes in line of sight are visible from this far, whatever the sight range. */
+
+/** Does the party's own light (open lantern, a lit torch) reach `at`? */
+export function partyLights(w: World, d: DelveX, at: Pos): boolean {
+  const lp = d.lanternOpen === false ? null : lanternPos(d);
+  const r = LANTERN_RADIUS[brightnessOf(d.light)];
+  if (lp && lp.level === at.level && r > 0 && distance(lp, at) <= r && lightLos(w, d, lp, at)) return true;
+  for (const h of d.heroes) {
+    if (h.torch <= 0 || (h.status !== 'active' && h.status !== 'downed') || h.at.level !== at.level) continue;
+    if (distance(h.at, at) <= 2 && lightLos(w, d, h.at, at)) return true;
+  }
+  return false;
+}
+/** Far lights (see `farLit`) in line of sight are visible from this far, whatever the sight range. */
 export const LIT_SIGHT = 14;
 
 /**
@@ -320,12 +369,14 @@ export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>): P
 
 /**
  * Hexes the active heroes see now (units there are seen): every hex within 1,
- * every hex in line of sight within the sight range (lit or not), and lit
- * hexes in line of sight up to LIT_SIGHT.
+ * every hex in line of sight within the sight range (lit or not), and, up to
+ * LIT_SIGHT, the far lights of `farLit` (spec 17.4).
  */
 export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> {
   const L = lit ?? litSet(w, d);
+  const far = farLitTest(w, d, L);
   const out = new Set<string>();
+  const distant = new Set<string>();
   const eyes = d.heroes.filter((h) => h.status === 'active');
   for (const h of eyes) {
     const sr = sightRangeAt(w, d, h.at, L);
@@ -339,12 +390,16 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
         out.add(k);
         continue;
       }
-      if (dist > sr && !L.has(k)) continue;
+      const near = dist <= sr;
+      if (!near && !far(k)) continue;
       if (smoky(d, p) || smoky(d, h.at)) continue; // smoke blocks sight both ways
-      if (los(w, d, h.at, p)) out.add(k);
+      if (los(w, d, h.at, p)) (near ? out : distant).add(k);
     }
   }
+  // Walls next to seen floor are revealed (15.1), but not around a far light (17.4): a
+  // distant fire shows the fire, not the room. Daylight still floods its whole patch.
   addEdgeWalls(w, d, out);
+  for (const k of distant) out.add(k);
   return out;
 }
 

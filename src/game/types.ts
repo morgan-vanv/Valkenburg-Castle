@@ -233,11 +233,13 @@ export interface Hero {
   level: number;
   xp: number;
   maxHp: number;
+  /** Spec 17.2: HP carries over between delves; only the infirmary restores it (for gold). */
+  hp: number;
   stats: Stats;
   /** Smithy upgrades: weapon +10% per slot per tier, armor +1 per tier. */
   weaponTier: 0 | 1 | 2;
   armorTier: 0 | 1 | 2;
-  /** Contracts left to sit out in the infirmary (0 = fit). */
+  /** Unused since V3.4 (always 0): hurt heroes now keep their HP instead of sitting out (spec 17.2). */
   wounded: number;
   /** Delves survived, for the memorial and bragging. */
   delves: number;
@@ -515,6 +517,7 @@ export interface DelveSummary {
   /** Value of loot carried out (gold + valuables + heirloom bonus). */
   lootValue: number;
   survivors: string[];
+  /** Survivors who came out below full HP (spec 17.2). */
   wounded: string[];
   dead: string[];
   xp: Record<string, number>;
