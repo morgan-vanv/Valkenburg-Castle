@@ -245,9 +245,23 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
 
 /** The Gloam (spec 5, 16.2): hunts heroes standing in the dark, keeps to dark hexes, strikes for 4. */
 function planGloam(c: Ctx, g: MonsterX, lit: Set<string>): Plan {
+  const avoid = (p: Pos) => lit.has(posKey(p));
+  if (avoid(g.at)) {
+    // Light has reached it: it recoils to the nearest dark hex.
+    const nodes = dijkstra(c.w, c.d, g.at, { enter: (p) => !blocked(c, p, g.id), stairs: true, allowLocked: true, budget: GLOAM_MOVE });
+    let best: Pos | null = null;
+    let bestCost = Infinity;
+    for (const n of nodes.values()) {
+      if (samePos(n.p, g.at) || avoid(n.p) || occupant(c, n.p) || !isFloorish(c.w, c.d, n.p)) continue;
+      if (n.cost < bestCost) {
+        bestCost = n.cost;
+        best = n.p;
+      }
+    }
+    return best ? { intent: { kind: 'flee', to: best }, path: pathTo(nodes, best) } : WAIT;
+  }
   const ts = targets(c).filter((t) => t.hero && !lit.has(posKey(t.at)));
   if (!ts.length) return WAIT;
-  const avoid = (p: Pos) => lit.has(posKey(p));
   const o = { stairs: true, allowLocked: true, avoid };
   const field = new Map<string, number>();
   {
@@ -347,16 +361,17 @@ function pushDest(from: Pos, at: Pos): Pos {
 function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
   const it = m.intent;
   if (!it || it.kind === 'wait' || it.kind === 'flee') return null;
+  if (m.kind === 'gloam') return null; // always re-plans: the light may have moved
   if (m.kind === 'dragon') {
     // Breath and sweep always go off as shown; bites/moves re-plan if stale.
     if (it.kind === 'breath' || it.kind === 'sweep') return { intent: it, path: [] };
     return null;
   }
-  const stairs = m.awareness === 'hunting' || m.kind === 'gloam';
+  const stairs = m.awareness === 'hunting';
   const pathTo2 = (to: Pos): Pos[] | null => {
     if (samePos(to, m.at)) return [];
     if (occupant(c, to)) return null;
-    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs, allowLocked: m.kind === 'gloam', budget: move });
+    const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs, budget: move });
     if (!nodes.has(posKey(to))) return null;
     return pathTo(nodes, to);
   };
@@ -387,6 +402,7 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
 
 function monsterAct(c: Ctx, m: MonsterX): void {
   const lit = litSet(c.w, c.d);
+  const wasPatrol = m.awareness === 'patrol';
   perceive(c, m, lit);
   if (!c.d.monsters.includes(m) || m.awareness === 'asleep' || m.buried) return;
   const st = monsterStats(m);
@@ -398,7 +414,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   m.intent = plan.intent;
   const startAt = m.at;
   const patrolling = m.awareness === 'patrol';
-  const visBefore = patrolling && plan.path.length ? visNow(c) : null;
+  const visBefore = (patrolling || wasPatrol) && plan.path.length ? visNow(c) : null;
   // Overwatch: moving or acting in a Ranger's sight draws the shot first.
   if (m.kind !== 'gloam' && (plan.path.length || plan.intent.kind !== 'wait') && overwatchCheck(c, m.id, m.at)) return;
   if (!c.d.monsters.includes(m)) return;

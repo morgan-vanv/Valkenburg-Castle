@@ -20,8 +20,8 @@ import { MapEffects, effectsFromState } from './effects';
 import { linkEnds, linkMarker } from './links';
 
 const MAX_LIGHTS = 12;
-/** 15.8: floating text starts above a hex-tall figure's head. */
-const FLOAT_LIFT = 2.8;
+/** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
+const FLOAT_LIFT = 2.25;
 /** How far below the shown level we draw through pits. */
 const BELOW_HALO = 3;
 
@@ -318,7 +318,7 @@ export class Diorama {
       el.className = `link-tag ${l.kind === 'lift' ? 'lift' : 'stairs'} ${l.down ? 'down' : 'up'}`;
       el.textContent = linkMarker(l);
       this.fx.appendChild(el);
-      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.5), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
+      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.3), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
     }
     this.showLevel(def.levels[0]?.level ?? 1, true);
   }
@@ -1142,7 +1142,7 @@ export class Diorama {
     glow.scale.setScalar(2.4);
     glow.userData = { phase: 2 };
     this.beacon.add(pillar, ring, glow);
-    this.beaconAt = this.worldOf(o.at, o.kind === 'slay' ? 4.6 : 2.8);
+    this.beaconAt = this.worldOf(o.at, o.kind === 'slay' ? 4.6 : 2.3);
     this.beaconTag.className = `beacon-tag ${o.kind}`;
     this.beaconTag.textContent = o.label;
     this.beaconTag.classList.remove('hidden');
@@ -1357,11 +1357,11 @@ export class Diorama {
         el.title = `${name}: throws a smoke bomb at the marked hexes${target ? ` (near ${target})` : ''}.`;
       }
       // A line to the target or destination.
-      const from = this.worldOf(at, 1.1);
+      const from = this.worldOf(at, 0.9);
       let to: THREE.Vector3 | null = null;
       if (it.targetId) {
         const tp = targetPos(state, it.targetId);
-        if (tp && tp.level === at.level) to = this.worldOf(tp, 1.1);
+        if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
       } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
       if (to && at.level === this.shownLevel) {
         const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' ? COLORS.danger : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
@@ -2047,7 +2047,7 @@ export class Diorama {
         return;
       }
       case 'thrown': {
-        const a = this.worldOf(e.from, 1.6);
+        const a = this.worldOf(e.from, 1.3);
         const b = this.worldOf(e.to, 0.2);
         const watch = e.from.level === this.shownLevel && (this.canSee(e.from) || this.canSee(e.to));
         if (!watch) return;

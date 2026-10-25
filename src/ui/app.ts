@@ -55,8 +55,8 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   escape: 'chop',
 };
 const LOADOUT_KEY = 'vc.loadout.v33';
-/** 15.8: default camera distance at delve start; figures are hex-tall now, so a bit further out. */
-const DELVE_DISTANCE = 22;
+/** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
+const DELVE_DISTANCE = 19;
 
 export class App {
   private state: GameState | null = null;

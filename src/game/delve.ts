@@ -281,7 +281,7 @@ function aroundAndSelf(p: Pos): Pos[] {
 function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] {
   const out: ActionTarget[] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
-  for (const r of rivalsOnMap(c)) if (adjacent(r.at, h.at)) out.push({ id: r.id, at: r.at });
+  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && adjacent(r.at, h.at)) out.push({ id: r.id, at: r.at });
   return out;
 }
 

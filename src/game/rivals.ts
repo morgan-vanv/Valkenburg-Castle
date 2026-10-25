@@ -276,6 +276,8 @@ export function rivalsAct(c: Ctx): void {
   rivalEnter(c);
   if (!cr.entered) return;
   if (cr.stance !== 'hostile' && cr.goal !== 'leave' && ((cr.pickups ?? 0) >= 3 || c.d.light <= SISTERS_LEAVE_LIGHT)) cr.goal = 'leave';
+  // Veils from earlier rounds fade (the one cast this phase lasts its full two rounds).
+  for (const r of cr.members) if ((r.veil ?? 0) > 0) r.veil! -= 1;
   for (const r of rivalsOnMap(c)) {
     r.overwatch = false; // an unfired overwatch lapses
     // The kit first, as shown.
@@ -322,7 +324,8 @@ export function rivalsAct(c: Ctx): void {
     // Loot.
     const g = bestLoot(c, r);
     if (!g) {
-      if (!lootGoals(c, r).length) cr.goal = 'leave';
+      // Nothing left for anyone: time to go. (A sister with nothing to do waits for the others.)
+      if (!rivalsOnMap(c).some((m) => lootGoals(c, m).length)) cr.goal = 'leave';
       continue;
     }
     cr.goal = g.objective ? 'objective' : 'loot';
@@ -367,8 +370,6 @@ export function rivalsAct(c: Ctx): void {
       c.ev.push({ type: 'looted', id: r.id, items });
     }
   }
-  // Veils fade.
-  for (const r of cr.members) if ((r.veil ?? 0) > 0) r.veil! -= 1;
   // Gone?
   for (const r of cr.members) if (r.goneOut && r.loot.length) {
     noteOnce(c, `The Lantern Sisters left with ${valueOf(r.loot)} gold in loot.`);

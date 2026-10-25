@@ -82,7 +82,7 @@ await idle();
 await p.waitForTimeout(150);
 const m1 = await p.evaluate(() => ({ state: document.querySelector('.light-state')?.textContent ?? '', open: window.vc.state().delve.lanternOpen, hint: document.querySelector('.light-hint')?.textContent ?? '', log: [...document.querySelectorAll('.log-line')].map((e) => e.textContent).join(' | ') }));
 check('L opens the lantern: "Open · burning"', m1.open === true && /Open · burning/.test(m1.state), m1.state);
-check('Level 1 daylight hint shows while open', /daylight/.test(m1.hint), m1.hint);
+check('Level 1 daylight hint shows while open', /Daylight/.test(m1.hint), m1.hint);
 // The meter button shutters it again.
 await p.click('.light-toggle');
 await idle();

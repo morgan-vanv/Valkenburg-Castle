@@ -2778,8 +2778,7 @@ input.seed {
 .light-shut { border-top-color: #4a4038 !important; }
 .light-shut .light-stage { color: var(--muted); }
 .light-shut .light-fill { filter: grayscale(0.85) brightness(0.6); box-shadow: none; }
-.light-hint {
-  margin-top: 4px;
+.light-foot .light-hint {
   color: var(--gold);
   font-style: italic;
 }

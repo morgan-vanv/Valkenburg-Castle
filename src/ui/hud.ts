@@ -932,8 +932,8 @@ export class Hud {
     const at = (v: number) => `left:${Math.min(100, (v / sc.max) * 100)}%`;
     const d = this.state?.delve;
     const onL1 = !!d && d.heroes.some((x) => x.status === 'active' && x.at.level === 1);
-    // Level 1 is mostly daylit: say so once in a while (first rounds, lantern open).
-    const hint = open && onL1 && !!d && d.round <= 10 ? h('div', { class: 'light-hint small' }, 'The ruins have daylight. Shutter the lantern to save oil.') : '';
+    // Level 1 is mostly daylit: say so in the first rounds while the lantern is open (in the "next" slot, so the meter keeps its height).
+    const daylight = open && onL1 && !!d && d.round <= 10;
     const toggle = h(
       'button',
       {
@@ -957,10 +957,11 @@ export class Hud {
         'div',
         { class: 'light-foot' },
         h('span', { class: `light-state ${open ? 'open' : 'shut'}` }, open ? 'Open · burning' : 'Shuttered · not burning'),
-        h('span', { class: 'light-next dim small' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
+        daylight
+          ? h('span', { class: 'light-next light-hint small', title: 'Most of the Ruined Keep is daylit. A shuttered lantern burns no oil; open it when it gets dark.' }, 'Daylight here: shutter to save oil')
+          : h('span', { class: 'light-next dim small' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
         toggle,
       ),
-      hint,
     );
   }
 
