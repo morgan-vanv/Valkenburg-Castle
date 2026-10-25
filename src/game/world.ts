@@ -280,7 +280,7 @@ export function glimpseSet(w: World, d: DelveX, from: Pos): Pos[] {
   const seen = new Set<string>();
   for (const h of range(from, sightRangeOf(d.light, from.level))) {
     const p = { level: from.level, ...h };
-    if (w.tile(p) && (distance(from, p) <= 1 || los(w, d, from, p))) seen.add(posKey(p));
+    if (w.tile(p) && (distance(from, p) <= 1 || (!smoky(d, from) && los(w, d, from, p)))) seen.add(posKey(p));
   }
   addEdgeWalls(w, d, seen);
   return [...seen].map(parsePos);
@@ -308,7 +308,7 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
         continue;
       }
       if (dist > sr && !L.has(k)) continue;
-      if (smoky(d, p)) continue;
+      if (smoky(d, p) || smoky(d, h.at)) continue; // smoke blocks sight both ways
       if (los(w, d, h.at, p)) out.add(k);
     }
   }

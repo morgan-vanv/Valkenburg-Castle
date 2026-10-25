@@ -59,7 +59,7 @@ interface Plan {
 /** Heroes the Dragon can see: same level, within 10, line of sight. */
 function dragonTargets(c: Ctx, m: MonsterX) {
   return c.d.heroes
-    .filter((h) => h.status === 'active' && h.at.level === m.at.level && distance(h.at, m.at) <= 10 && los(c.w, c.d, m.at, h.at))
+    .filter((h) => h.status === 'active' && h.veil <= 0 && h.at.level === m.at.level && distance(h.at, m.at) <= 10 && los(c.w, c.d, m.at, h.at))
     .sort((a, b) => distance(a.at, m.at) - distance(b.at, m.at) || (a.heroId < b.heroId ? -1 : 1));
 }
 
