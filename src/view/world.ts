@@ -67,6 +67,11 @@ export const CLASS_COLORS: Record<string, number> = {
   sellsword: 0xb03a2e,
   burglar: 0x3b9a4a,
   mage: 0x8a4cc9,
+  ranger: 0x8fbf3a,
+  sapper: 0xe08a2a,
+  pyromancer: 0xff5a1a,
+  shadowmancer: 0x7a4cff,
+  hedgewitch: 0x5ad08a,
 };
 
 export function easeOutCubic(t: number): number {

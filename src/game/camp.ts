@@ -7,8 +7,8 @@ import type {
 } from './types';
 import {
   ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEAL_PRICE, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
-  MANA_MAX, MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP, SISTER,
-  SISTER_NAMES, WEAPON_PRICE,
+  MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP, SISTER,
+  SISTER_NAMES, START_GOLD, TAVERN_SIZE, WEAPON_PRICE,
 } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES } from './data';
@@ -49,14 +49,9 @@ export function newGame(w: World, seed: number): GameStateX {
     rng: seed >>> 0,
     stage: 'camp',
     campaign: {
-      gold: 100,
+      gold: START_GOLD,
       stash: [],
-      roster: [
-        makeHero('hobart', 'Lord Hobart', 'hobart'),
-        makeHero('brann', 'Brann', 'sellsword'),
-        makeHero('pim', 'Pim', 'burglar'),
-        makeHero('aldous', 'Aldous', 'mage'),
-      ],
+      roster: [makeHero('hobart', 'Lord Hobart', 'hobart')],
       recruits: [],
       board: [],
       reputation: 0,
@@ -87,11 +82,14 @@ export function refreshCamp(w: World, s: GameStateX): void {
   s.campaign.board = makeBoard(w, s);
   const names = usedNames(s);
   const recruits: Recruit[] = [];
-  for (let i = 0; i < 2; i++) {
+  // Four recruits, at least three different classes (spec 15.3): three distinct, one free pick.
+  const classes = shuffle(s, [...RECRUIT_CLASSES]).slice(0, 3);
+  classes.push(pick(s, RECRUIT_CLASSES));
+  for (let i = 0; i < TAVERN_SIZE; i++) {
     const pool = RECRUIT_NAMES.filter((n) => !names.has(n));
     const name = pick(s, pool.length ? pool : RECRUIT_NAMES);
     names.add(name);
-    const cls = pick(s, ['sellsword', 'burglar', 'mage'] as HeroClass[]);
+    const cls = classes[i]!;
     const level = random(s) < 0.35 ? 2 : 1;
     recruits.push({ hero: makeHero(newHeroId(s), name, cls, level), price: 40 + 20 * (level - 1) });
   }
@@ -214,6 +212,21 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
   }
 }
 
+/** Why a delve can't start with this party (spec 15.3), or null. */
+export function partyProblem(s: GameStateX, heroIds: string[]): string | null {
+  const C = s.campaign;
+  const ids = [...new Set(heroIds)];
+  if (C.roster.length < 1) return 'Hire at least one hero at the tavern.';
+  if (ids.length < 1) return 'Pick at least one hero.';
+  if (ids.length > 4) return 'Four heroes at most.';
+  for (const id of ids) {
+    const h = C.roster.find((x) => x.id === id);
+    if (!h) return 'No such hero.';
+    if (h.wounded > 0) return `${h.name} is still wounded.`;
+  }
+  return null;
+}
+
 export function upgradePrice(h: Hero, part: 'weapon' | 'armor'): number | null {
   const tier = part === 'weapon' ? h.weaponTier : h.armorTier;
   if (tier >= 2) return null;
@@ -228,7 +241,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   const contract = C.board.find((k) => k.id === cmd.contractId) as ContractX | undefined;
   if (!contract) return err('No such contract.');
   const ids = [...new Set(cmd.heroIds)];
-  if (ids.length < 1 || ids.length > 4) return err('Take 1 to 4 heroes.');
+  const problem = partyProblem(s, ids);
+  if (problem) return err(problem);
   const heroes: Hero[] = [];
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
@@ -296,6 +310,10 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     blown: [],
     ropes: [],
     liftWorking: false,
+    smoke: {},
+    glue: {},
+    burning: {},
+    caltrops: [],
     prisoner: null,
     explored: [],
     log: [],
@@ -358,10 +376,18 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       moved: false,
       acted: false,
       webbed: false,
-      mana: h.cls === 'mage' ? MANA_MAX : 0,
+      mana: CLASSES[h.cls].mana,
       rallyCooldown: 0,
       revived: false,
+      dashed: false,
+      overwatch: false,
+      veil: 0,
+      ward: 0,
     };
+    // Sappers bring two free charges (spec 15.3), on top of what fits.
+    if (h.cls === 'sapper') {
+      for (let i = 0; i < SAPPER_CHARGES && packUsed(hid.pack) < PACK_SLOTS; i++) hid.pack.push(makeItem({ s }, 'charge', 1, 'Blasting charge'));
+    }
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -487,7 +513,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   C.litBraziers = [...d.lit];
   // Prisoner joins.
   if (d.contract.kind === 'rescue' && d.prisoner?.out) {
-    const cls = pick(s, ['sellsword', 'burglar', 'mage'] as HeroClass[]);
+    const cls = pick(s, RECRUIT_CLASSES);
     C.roster.push(makeHero(`h${(s.nextHero = (s.nextHero ?? 1) + 1) - 1}`, d.prisoner.name, cls));
   }
   const hobartDead = sum.dead.includes('hobart');

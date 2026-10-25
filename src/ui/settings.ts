@@ -6,9 +6,11 @@ export interface Settings {
   speed: number;
   reduceShake: boolean;
   reduceFlashes: boolean;
+  /** Skip the "still waiting" question on End turn (15.7 asks once by default). */
+  noEndTurnAsk: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false };
 
 export function loadSettings(): Settings {
   try {

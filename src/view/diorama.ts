@@ -16,6 +16,8 @@ import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
+import { MapEffects, effectsFromState } from './effects';
+import { linkEnds, linkMarker } from './links';
 
 const MAX_LIGHTS = 12;
 /** How far below the shown level we draw through pits. */
@@ -27,7 +29,7 @@ export interface DioramaHooks {
   levelChanged(level: number): void;
 }
 
-export type HighlightStyle = 'walk' | 'sneak' | 'target' | 'ally' | 'danger';
+export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area';
 
 export type FloatKind = 'damage' | 'heal' | 'info' | 'warn' | 'gold' | 'miss';
 
@@ -52,6 +54,8 @@ function hexRing(rIn: number, rOut: number): THREE.BufferGeometry {
 const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
   walk: 0xffd08a,
   sneak: 0x9ec0ff,
+  dash: 0x5ae0d0,
+  area: 0xffa040,
   target: COLORS.danger,
   ally: 0x7fbf5a,
   danger: COLORS.danger,
@@ -120,11 +124,27 @@ export class Diorama {
   private landingTag: HTMLElement;
   private landingAt: THREE.Vector3 | null = null;
   private breathMarks = new THREE.Group();
+  /** 15.6: gold glow under unlooted piles (opened chests, seen ground loot), plus DOM coin markers. */
+  private lootGlow = new THREE.Group();
+  private lootTags = new Map<string, { el: HTMLElement; at: THREE.Vector3 }>();
+  /** V3.2 effects: smoke, glue, caltrops, fire, veil, ward, overwatch, sleep. */
+  readonly effects: MapEffects;
+  /** 15.7: pulsing ring on the stairs/lift hex the selected hero stands on. */
+  private linkPulse: THREE.Mesh;
+  /** 15.7: floating level markers over explored stairs and lift ends ("↓ L2"). */
+  private linkTags: { el: HTMLElement; pos: Pos; at: THREE.Vector3; key: string; level: number; lift: boolean }[] = [];
+  /** 15.7: the contract objective's beacon (light pillar + DOM diamond) once its hex is explored. */
+  private beacon = new THREE.Group();
+  private beaconTag: HTMLElement;
+  private beaconAt: THREE.Vector3 | null = null;
+  private beaconKey = '';
 
   constructor(
     private readonly container: HTMLElement,
     private readonly hooks: DioramaHooks,
   ) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
     const canvas = document.createElement('canvas');
     canvas.className = 'dio-canvas';
     container.appendChild(canvas);
@@ -160,7 +180,7 @@ export class Diorama {
 
     // Overlays.
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
-      const fill = style === 'walk' || style === 'sneak';
+      const fill = style === 'walk' || style === 'sneak' || style === 'dash';
       const m = new THREE.InstancedMesh(
         fill ? hexRing(0.7, 0.8) : hexRing(0.68, 0.88),
         new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLORS[style], transparent: true, opacity: fill ? 0.6 : 0.9, depthWrite: false }),
@@ -189,9 +209,26 @@ export class Diorama {
     this.rippleMesh.count = 0;
     this.rippleMesh.renderOrder = 2;
     this.rippleMesh.frustumCulled = false;
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks);
+    this.linkPulse = new THREE.Mesh(hexRing(0.62, 0.94), new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.linkPulse.visible = false;
+    this.linkPulse.renderOrder = 4;
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon);
     this.landingTag = document.createElement('div');
     this.landingTag.className = 'landing-tag hidden';
+    this.beaconTag = document.createElement('div');
+    this.beaconTag.className = 'beacon-tag hidden';
+    this.effects = new MapEffects({
+      worldOf: (p, lift) => this.worldOf(p, lift ?? 0),
+      get shownLevel() {
+        return self.shownLevel;
+      },
+      known: (p) => this.vis.explored.has(posKey(p)) || this.vis.visible.has(posKey(p)),
+      visible: (p) => this.vis.visible.has(posKey(p)),
+      unit: (id) => this.units.get(id),
+      fx: this.fx,
+      project: (v) => this.project(v),
+    });
+    this.overlay.add(this.effects.group);
 
     // Dust motes drifting in the lantern light.
     const n = 160;
@@ -208,6 +245,7 @@ export class Diorama {
     this.scene.add(this.sparks);
 
     this.fx.appendChild(this.landingTag);
+    this.fx.appendChild(this.beaconTag);
     this.bindPointer(canvas);
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -220,7 +258,9 @@ export class Diorama {
     if (this.castle === def) return;
     for (const lv of this.levels.values()) this.scene.remove(lv.group);
     for (const t of this.roomTags) t.el.remove();
+    for (const t of this.linkTags) t.el.remove();
     this.roomTags = [];
+    this.linkTags = [];
     this.levels.clear();
     this.castle = def;
     for (const ld of def.levels) {
@@ -235,7 +275,33 @@ export class Diorama {
         this.roomTags.push({ el, at: l.at, key: l.key, level: ld.level });
       }
     }
+    // 15.7: a level marker over each stairs and lift end, shown once that hex is explored.
+    for (const l of linkEnds(def)) {
+      const el = document.createElement('div');
+      el.className = `link-tag ${l.kind === 'lift' ? 'lift' : 'stairs'} ${l.down ? 'down' : 'up'}`;
+      el.textContent = linkMarker(l);
+      this.fx.appendChild(el);
+      this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.5), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
+    }
     this.showLevel(def.levels[0]?.level ?? 1, true);
+  }
+
+  /** 15.7: pulse the hex the selected hero stands on when it's stairs or a working lift. */
+  showLinkPulse(at: Pos | null): void {
+    if (!at || at.level !== this.shownLevel) {
+      this.linkPulse.visible = false;
+      return;
+    }
+    this.linkPulse.visible = true;
+    this.linkPulse.position.copy(this.worldOf(at, 0.06));
+  }
+
+  /** 15.7: the hover ring says whether the hex is something you can use (ember), a hazard (red) or floor. */
+  setHoverStyle(kind: 'plain' | 'interact' | 'danger'): void {
+    const m = this.hoverMesh.material as THREE.MeshBasicMaterial;
+    m.color.setHex(kind === 'interact' ? COLORS.emberHot : kind === 'danger' ? COLORS.danger : COLORS.parchment);
+    m.opacity = kind === 'plain' ? 0.8 : 1;
+    this.hoverMesh.scale.setScalar(kind === 'plain' ? 1 : 1.04);
   }
 
   showLevel(level: number, instant = false): void {
@@ -349,6 +415,7 @@ export class Diorama {
       for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
+      this.effects.update(t);
       this.renderer.render(this.scene, this.rig.camera);
       this.updateDom();
     }
@@ -468,7 +535,25 @@ export class Diorama {
         ((g.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.3 * k;
       } else if (g.userData.sweep) g.rotation.y = t * 0.8;
     }
+    for (const g of this.lootGlow.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 2.6 + g.position.x * 1.7 + g.position.z);
+      (g as THREE.Sprite).material.opacity = 0.45 + 0.35 * k;
+      g.scale.setScalar(1.25 + 0.2 * k);
+    }
     for (const l of this.lips.children) ((l as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(t * 5);
+    if (this.linkPulse.visible) {
+      const k = 0.5 + 0.5 * Math.sin(t * 3.2);
+      this.linkPulse.scale.setScalar(1 + k * 0.22);
+      (this.linkPulse.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.55 * (1 - k);
+    }
+    for (const b of this.beacon.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 1.8 + (b.userData.phase as number));
+      if (b.userData.pillar) ((b as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.1 * k;
+      else if (b.userData.ring) {
+        b.scale.setScalar(1 + 0.12 * k);
+        ((b as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.4 * (1 - k);
+      }
+    }
     // Ripple: hex rings fade outward in a wave.
     if (this.rippleData && this.rippleMesh.count) {
       const m = this.rippleMesh.material as THREE.MeshBasicMaterial;
@@ -521,6 +606,11 @@ export class Diorama {
       el.style.display = p.behind ? 'none' : '';
       el.style.transform = `translate(${p.x}px, ${p.y - 22}px) translate(-50%, -100%)`;
     }
+    for (const t of this.lootTags.values()) {
+      const p = this.project(t.at);
+      t.el.style.display = p.behind ? 'none' : '';
+      t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
     if (this.landingAt) {
       const p = this.project(this.landingAt);
       this.landingTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
@@ -534,6 +624,26 @@ export class Diorama {
       const p = this.project(r.at);
       r.el.style.display = p.behind ? 'none' : '';
       r.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+    }
+    // 15.7: level markers over explored stairs and lift ends; the lift's is greyed until the winch runs.
+    for (const l of this.linkTags) {
+      const show = l.level === this.shownLevel && this.vis.explored.has(l.key) && !!this.state?.delve;
+      if (!show) {
+        l.el.style.display = 'none';
+        continue;
+      }
+      // Above a figure standing there, so it doesn't sit on their HP tag.
+      let occupied = false;
+      for (const v of this.units.values()) if (v.shown && samePos(v.at, l.pos)) occupied = true;
+      const p = this.project(occupied ? l.at.clone().setY(l.at.y + 1.4) : l.at);
+      l.el.style.display = p.behind ? 'none' : '';
+      l.el.classList.toggle('dead', l.lift && !this.liftWorking);
+      l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
+    if (this.beaconAt) {
+      const p = this.project(this.beaconAt);
+      this.beaconTag.style.display = p.behind ? 'none' : '';
+      this.beaconTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
   }
 
@@ -566,6 +676,7 @@ export class Diorama {
       for (const v of [...this.units.values()]) this.removeUnit(v.id);
       for (const id of [...this.props.keys()]) this.removeProp(id);
       this.clearIntents();
+      this.refreshLootGlow();
       return;
     }
     this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
@@ -772,7 +883,76 @@ export class Diorama {
     }
   }
 
+  /**
+   * 15.7: where the contract objective is, if its hex has been explored: the heirloom on the
+   * ground (or carried by a rival, then none), the prisoner until freed, the Dragon while it lives.
+   * Null before it's seen or once it's done.
+   */
+  objectiveAt(): { at: Pos; kind: 'recover' | 'rescue' | 'slay'; label: string } | null {
+    const d = this.state?.delve;
+    if (!d) return null;
+    const k = d.contract;
+    let at: Pos | null = null;
+    let label = '';
+    if (k.kind === 'recover') {
+      const g = d.ground.find((x) => x.items.some((i) => i.contractId === k.id || i.kind === 'heirloom'));
+      if (g) {
+        at = g.at;
+        label = g.items.find((i) => i.contractId === k.id || i.kind === 'heirloom')!.name;
+      }
+    } else if (k.kind === 'rescue') {
+      const p = d.prisoner;
+      if (p && !p.freed && !p.out && !p.dead) {
+        at = p.at;
+        label = p.name;
+      }
+    } else {
+      const m = d.monsters.find((x) => x.kind === 'dragon' && x.hp > 0);
+      if (m) {
+        at = m.at;
+        label = m.name;
+      }
+    }
+    if (!at || !this.vis.explored.has(posKey(at))) return null;
+    return { at, kind: k.kind, label };
+  }
+
+  /** Rebuild the beacon (pillar of light + diamond) for the objective, on the shown level only. */
+  private refreshBeacon(): void {
+    const o = this.objectiveAt();
+    const key = o && o.at.level === this.shownLevel ? `${posKey(o.at)}:${o.kind}` : '';
+    if (key === this.beaconKey) return;
+    this.beaconKey = key;
+    this.beacon.clear();
+    this.beaconAt = null;
+    this.beaconTag.classList.add('hidden');
+    if (!o || !key) return;
+    const col = BEACON_COLOR[o.kind];
+    const base = this.worldOf(o.at, 0.05);
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.5, 7, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+    );
+    pillar.position.copy(base).add(new THREE.Vector3(0, 3.5, 0));
+    pillar.userData = { pillar: true, phase: 0 };
+    const ring = new THREE.Mesh(hexRing(0.55, 0.92), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false }));
+    ring.position.copy(base);
+    ring.userData = { ring: true, phase: 1 };
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+    glow.position.copy(base).add(new THREE.Vector3(0, 0.3, 0));
+    glow.scale.setScalar(2.4);
+    glow.userData = { phase: 2 };
+    this.beacon.add(pillar, ring, glow);
+    this.beaconAt = this.worldOf(o.at, 2.2);
+    this.beaconTag.className = `beacon-tag ${o.kind}`;
+    this.beaconTag.textContent = o.label;
+    this.beaconTag.classList.remove('hidden');
+  }
+
   private refreshProps(): void {
+    this.refreshLootGlow();
+    this.refreshBeacon();
+    this.effects.set(effectsFromState(this.state));
     for (const p of this.props.values()) {
       const at = p.obj.userData.at as Pos;
       const k = posKey(at);
@@ -780,6 +960,45 @@ export class Diorama {
       p.obj.visible = at.level === this.shownLevel && fog > 0;
       setMaterialFog(p.mats, fog);
     }
+  }
+
+  /** 15.6: every pile on an explored hex of the shown level glows gold until taken. */
+  private refreshLootGlow(): void {
+    const d = this.state?.delve;
+    const want = new Map<string, Pos>();
+    if (d)
+      for (const g of d.ground) {
+        if (!g.items.length || g.at.level !== this.shownLevel) continue;
+        const k = posKey(g.at);
+        if (this.vis.explored.has(k)) want.set(k, g.at);
+      }
+    for (const [k, t] of this.lootTags)
+      if (!want.has(k)) {
+        t.el.remove();
+        this.lootTags.delete(k);
+      }
+    this.lootGlow.clear();
+    for (const [k, at] of want) {
+      const sp = new THREE.Sprite(this.lootGlowMat());
+      sp.position.copy(this.worldOf(at, 0.25));
+      sp.renderOrder = 3;
+      this.lootGlow.add(sp);
+      if (!this.lootTags.has(k)) {
+        const el = document.createElement('div');
+        el.className = 'loot-marker';
+        el.textContent = '';
+        el.title = 'Unlooted';
+        this.fx.appendChild(el);
+        this.lootTags.set(k, { el, at: this.worldOf(at, 0.9) });
+      }
+    }
+  }
+
+  private lootMat: THREE.SpriteMaterial | null = null;
+  private lootGlowMat(): THREE.SpriteMaterial {
+    // One material per sprite so each can pulse on its own phase.
+    if (!this.lootMat) this.lootMat = new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc040, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
+    return this.lootMat.clone();
   }
 
   // ------------------------------------------------------------ highlights
@@ -801,6 +1020,7 @@ export class Diorama {
     for (const m of this.highlights.values()) m.count = 0;
     this.showPath(null);
     this.showRipple(null, 0);
+    this.linkPulse.visible = false;
   }
 
   showPath(path: Pos[] | null): void {
@@ -1092,6 +1312,26 @@ export class Diorama {
   isWatchable(id: string): boolean {
     const v = this.units.get(id);
     return !!v && v.root.visible;
+  }
+
+  /** Can any hero see this hex, in the current or the incoming state (level independent)? */
+  canSee(p: Pos | null | undefined): boolean {
+    if (!p) return false;
+    const k = posKey(p);
+    return this.vis.visible.has(k) || !!this.extraVisible?.has(k);
+  }
+
+  /**
+   * 15.5: move the camera to an event on any level and hold a beat (scaled by the clock speed).
+   * Skips the pan when already looking close by.
+   */
+  async panTo(p: Pos, hold = 0.35): Promise<void> {
+    const w = this.worldOf(p);
+    const cur = this.rig.currentTarget();
+    const near = p.level === this.shownLevel && Math.hypot(cur.x - w.x, cur.z - w.z) < 2.5;
+    if (p.level !== this.shownLevel) this.showLevel(p.level);
+    this.lookAt(p);
+    if (!near) await this.clock.wait(hold);
   }
 
   async playEvent(e: GameEvent): Promise<void> {
@@ -1403,11 +1643,147 @@ export class Diorama {
         await clock.wait(0.6);
         return;
       }
+      case 'thrown': {
+        const a = this.worldOf(e.from, 0.9);
+        const b = this.worldOf(e.to, 0.2);
+        const watch = e.from.level === this.shownLevel && (this.canSee(e.from) || this.canSee(e.to));
+        if (!watch) return;
+        const by = this.units.get(e.by);
+        if (by) by.face(b.x - a.x, b.z - a.z);
+        const color = THROW_COLOR[e.kind] ?? 0xd8d0c0;
+        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color }));
+        this.overlay.add(m);
+        const dist = a.distanceTo(b);
+        await clock.tween(0.18 + dist * 0.035, (t) => {
+          m.position.lerpVectors(a, b, t);
+          m.position.y += Math.sin(t * Math.PI) * (0.4 + dist * 0.12);
+          m.rotation.set(t * 9, t * 7, 0);
+        });
+        this.overlay.remove(m);
+        m.geometry.dispose();
+        if (e.kind === 'smoke' || e.kind === 'glue') this.dustPuff(b);
+        if (e.kind === 'firecracker') this.flash(b.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xffe080, 3);
+        return;
+      }
+      case 'cast': {
+        const by = this.units.get(e.by);
+        const at = e.at ?? (e.targetId ? this.units.get(e.targetId)?.at : undefined);
+        const watch = (by?.root.visible ?? false) || (at ? this.canSee(at) && at.level === this.shownLevel : false);
+        if (!watch) return;
+        const color = SPELL_COLOR[e.spell] ?? 0xb48cff;
+        if (by && at) {
+          const w = this.worldOf(at);
+          by.face(w.x - by.root.position.x, w.z - by.root.position.z);
+        }
+        if (by) {
+          by.flash(new THREE.Color(color), 0.6);
+          this.flash(by.root.position.clone().add(new THREE.Vector3(0, by.height, 0)), color, 1.5);
+        }
+        const label = SPELL_LABEL[e.spell];
+        if (label && by) this.floatText(by.root.position.clone().add(new THREE.Vector3(0, by.height + 0.3, 0)), label, 'info', 1.2);
+        // A bolt to the target for ranged spells and shots.
+        if (by && at && !samePos(by.at, at) && e.spell !== 'blink') {
+          const from = by.root.position.clone().add(new THREE.Vector3(0, by.height * 0.7, 0));
+          const to = this.worldOf(at, 0.5);
+          const bolt = new THREE.Mesh(new THREE.SphereGeometry(e.spell === 'fireball' ? 0.2 : 0.1, 8, 6), new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+          this.overlay.add(bolt);
+          await clock.tween(0.12 + from.distanceTo(to) * 0.025, (t) => {
+            bolt.position.lerpVectors(from, to, t);
+            if (e.spell === 'fireball') bolt.position.y += Math.sin(t * Math.PI) * 0.8;
+          });
+          this.overlay.remove(bolt);
+          bolt.geometry.dispose();
+        }
+        if (e.hexes?.length) {
+          const c = e.hexes.reduce((acc, p) => acc.add(this.worldOf(p, 0.4)), new THREE.Vector3()).multiplyScalar(1 / e.hexes.length);
+          this.flash(c, color, e.spell === 'fireball' ? 6 : 3);
+          if (e.spell === 'fireball' && !this.reduceShake) this.rig.addShake(0.2);
+          if (e.spell === 'fireball' || e.spell === 'gust') this.onSpellBurst?.(e.spell);
+          await this.ringPulse(e.hexes, color);
+        } else if (at) {
+          this.flash(this.worldOf(at, 0.6), color, 2.5);
+        }
+        if (by) by.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
+      case 'blinked': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const watch = v.root.visible || this.canSee(e.to);
+        const to = this.worldOf(e.to);
+        if (!watch) {
+          v.at = { ...e.to };
+          v.root.position.copy(to);
+          this.refreshUnits();
+          return;
+        }
+        v.busy++;
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x9a6aff, 3);
+        await clock.tween(0.15, (t) => {
+          v.setOpacity(1 - t);
+          v.fig.scale.set(v.scale * (1 - t * 0.6), v.scale * (1 + t * 0.6), v.scale * (1 - t * 0.6));
+        });
+        v.root.position.copy(to);
+        v.at = { ...e.to };
+        if (v.side === 'hero' && v.id === this.selectedId) this.lookAt(e.to);
+        this.refreshUnits();
+        this.flash(to.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x9a6aff, 3);
+        await clock.tween(0.18, (t) => {
+          v.setOpacity(t);
+          v.fig.scale.set(v.scale * (0.4 + t * 0.6), v.scale * (1.6 - t * 0.6), v.scale * (0.4 + t * 0.6));
+        });
+        v.fig.scale.setScalar(v.scale);
+        v.setOpacity(1);
+        v.busy--;
+        return;
+      }
+      case 'dug': {
+        const lv = this.levels.get(e.at.level);
+        if (lv && this.state?.delve) lv.setBlown(new Set([...this.state.delve.blown, posKey(e.at)]));
+        if (e.at.level === this.shownLevel) {
+          const w = this.worldOf(e.at, 0.2);
+          this.dustPuff(w);
+          if (!this.reduceShake) this.rig.addShake(0.08);
+          await clock.wait(0.2);
+        }
+        return;
+      }
+      case 'caltrops': {
+        const v = this.units.get(e.id);
+        if (e.at.level !== this.shownLevel || !this.canSee(e.at)) return;
+        this.floatText(this.worldOf(e.at, 1), 'Caltrops! −2', 'damage', 1.3);
+        if (v) {
+          v.flash(new THREE.Color(1, 0.2, 0.1), 0.9);
+          await clock.wait(0.2);
+          v.flash(new THREE.Color(0, 0, 0), 0);
+        }
+        return;
+      }
       default:
         return;
     }
   }
 
+  /** Expanding hex rings over an area (fireball, gust, smoke, glue). */
+  private async ringPulse(hexes: Pos[], color: number): Promise<void> {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+    for (const p of hexes) {
+      if (p.level !== this.shownLevel) continue;
+      const m = new THREE.Mesh(hexRing(0.4, 0.86), mat);
+      m.position.copy(this.worldOf(p, 0.05));
+      group.add(m);
+    }
+    this.overlay.add(group);
+    await this.clock.tween(0.4, (t) => {
+      mat.opacity = 0.8 * (1 - t);
+      for (const m of group.children) m.scale.setScalar(0.6 + t * 0.5);
+    });
+    this.overlay.remove(group);
+    mat.dispose();
+  }
+
+  onSpellBurst?: (spell: string) => void;
   onStep?: (side: UnitSide) => void;
   onImpact?: (levels: number) => void;
   onBreath?: () => void;
@@ -1599,6 +1975,34 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   shove: 'shoves',
   breath: 'breathes fire on',
   sweep: 'sweeps its tail at',
+};
+
+/** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
+const BEACON_COLOR: Record<'recover' | 'rescue' | 'slay', number> = { recover: 0xffd36a, rescue: 0x8fe07a, slay: 0xff5a4a };
+
+const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
+const SPELL_COLOR: Partial<Record<string, number>> = {
+  firebolt: 0xff7a20,
+  fireball: 0xff5a10,
+  kindle: 0xffd27a,
+  mend: 0x7fe08a,
+  veil: 0x8a6aff,
+  sleep: 0x9ab0ff,
+  blink: 0x9a6aff,
+  ward: 0x8ad0ff,
+  gust: 0xd0f0ff,
+  overwatch: 0xffd060,
+  knockback: 0xffd060,
+};
+const SPELL_LABEL: Partial<Record<string, string>> = {
+  fireball: 'Fireball!',
+  veil: 'Veil',
+  sleep: 'Sleep',
+  ward: 'Ward',
+  gust: 'Gust',
+  overwatch: 'Overwatch!',
+  knockback: 'Knockback',
+  mend: 'Mend',
 };
 
 function hashStr(s: string): number {

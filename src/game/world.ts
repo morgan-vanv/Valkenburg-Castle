@@ -1,7 +1,7 @@
 // Static castle indexes plus geometry that depends on the delve's runtime
 // state: tiles, doors, line of sight, light, sight and path finding.
 
-import { distance, hexKey, posKey, posNeighbors, line, range, samePos, type Hex, type Pos } from './hex';
+import { distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
 import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { LIGHT_MAX } from './data';
@@ -83,7 +83,7 @@ export class World {
 export function kindAt(w: World, d: DelveX | null, p: Pos): TileKind | undefined {
   const t = w.tile(p);
   if (!t) return undefined;
-  if (t.kind === 'cracked' && d?.blown.includes(posKey(p))) return 'floor';
+  if ((t.kind === 'cracked' || t.kind === 'rubble') && d?.blown.includes(posKey(p))) return 'floor';
   return t.kind;
 }
 
@@ -110,7 +110,8 @@ export function canEnter(w: World, d: DelveX, p: Pos, allowLocked = false): bool
   return true;
 }
 
-export function blocksSight(w: World, d: DelveX, p: Pos): boolean {
+/** Solid for sight by terrain: walls, pillars, cracked walls, tall props, sealed doors, closed doors, void. */
+export function solidForSight(w: World, d: DelveX, p: Pos): boolean {
   const k = kindAt(w, d, p);
   if (k === undefined) return true;
   if (k === 'wall' || k === 'pillar' || k === 'cracked' || k === 'tallprop' || k === 'sealed') return true;
@@ -118,18 +119,99 @@ export function blocksSight(w: World, d: DelveX, p: Pos): boolean {
   return false;
 }
 
-function clearLine(w: World, d: DelveX, a: Pos, b: Pos): boolean {
+/** Smoke on this hex (spec 15.4). */
+export function smoky(d: DelveX, p: Pos): boolean {
+  return (d.smoke?.[posKey(p)] ?? 0) > 0;
+}
+
+export function blocksSight(w: World, d: DelveX, p: Pos, smoke = true): boolean {
+  return solidForSight(w, d, p) || (smoke && smoky(d, p));
+}
+
+/** Target points: the hex center, then its 6 corners pulled 10% toward the center (spec 15.1). */
+const CORNERS = Array.from({ length: 6 }, (_, i) => {
+  const a = (Math.PI / 180) * (60 * i - 30);
+  return { x: 0.9 * Math.cos(a), z: 0.9 * Math.sin(a) };
+});
+const POINTS = [{ x: 0, z: 0 }, ...CORNERS];
+
+/** The integer hex line (cheap): the usual case in open rooms. */
+function clearLine(w: World, d: DelveX, a: Pos, b: Pos, smoke: boolean): boolean {
   const hs = line(a, b);
   for (let i = 1; i < hs.length - 1; i++) {
-    if (blocksSight(w, d, { level: a.level, ...hs[i]! })) return false;
+    if (blocksSight(w, d, { level: a.level, ...hs[i]! }, smoke)) return false;
   }
   return true;
 }
 
-/** Line of sight between two hexes on the same level (ends excluded from blocking). */
-export function los(w: World, d: DelveX, a: Pos, b: Pos): boolean {
+function clearSegment(w: World, d: DelveX, a: Pos, b: Pos, bx: number, bz: number, smoke: boolean): boolean {
+  const A = hexToWorld(a);
+  const n = Math.max(2, Math.ceil(distance(a, b) * 4));
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    const h = worldToHex(A.x + (bx - A.x) * t, A.z + (bz - A.z) * t);
+    if ((h.q === a.q && h.r === a.r) || (h.q === b.q && h.r === b.r)) continue;
+    if (blocksSight(w, d, { level: a.level, q: h.q, r: h.r }, smoke)) return false;
+  }
+  return true;
+}
+
+/**
+ * Permissive line of sight (spec 15.1) from viewer `a` to target `b` on the same level:
+ * clear if the segment from a's center to b's center, or to any of b's corners pulled 10%
+ * toward its center, crosses no blocking hex (the end hexes never block). Pits don't block;
+ * closed doors, tall props and (when `smoke`) smoke do.
+ */
+export function los(w: World, d: DelveX, a: Pos, b: Pos, smoke = true): boolean {
   if (a.level !== b.level) return false;
-  return clearLine(w, d, a, b) || clearLine(w, d, b, a);
+  if (distance(a, b) <= 1) return true;
+  if (clearLine(w, d, a, b, smoke)) return true;
+  const B = hexToWorld(b);
+  for (const c of POINTS) if (clearSegment(w, d, a, b, B.x + c.x, B.z + c.z, smoke)) return true;
+  return false;
+}
+
+/** Light passes smoke (smoke blocks sight, not light). */
+function lightLos(w: World, d: DelveX, a: Pos, b: Pos): boolean {
+  return los(w, d, a, b, false);
+}
+
+/**
+ * Spec 15.1: walls, pillars, tall props (and other solid hexes) next to a seen floor hex
+ * are seen too, so rooms don't show holes in their walls.
+ */
+export function addEdgeWalls(w: World, d: DelveX, seen: Set<string>): void {
+  const add: string[] = [];
+  for (const k of seen) {
+    const p = parsePos(k);
+    if (solidForSight(w, d, p)) continue;
+    for (const n of posNeighbors(p)) {
+      const nk = posKey(n);
+      if (seen.has(nk) || !w.tile(n)) continue;
+      if (solidForSight(w, d, n) || kindAt(w, d, n) === 'brazier' || kindAt(w, d, n) === 'prop') add.push(nk);
+    }
+  }
+  for (const k of add) seen.add(k);
+}
+
+function parsePos(k: string): Pos {
+  const [lv, rest] = k.split(':');
+  const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
+  return { level: Number(lv), q, r };
+}
+
+/**
+ * Can a hero at `from` see hex `p` right now: within 1, or in line of sight and either
+ * within the sight range or lit (up to LIT_SIGHT). A smoked hex is only seen from next to it.
+ */
+export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>): boolean {
+  if (from.level !== p.level) return false;
+  const dist = distance(from, p);
+  if (dist <= 1) return true;
+  if (smoky(d, p)) return false;
+  if (dist > LIT_SIGHT) return false;
+  if (dist > sightRangeOf(d.light, from.level) && !lit.has(posKey(p))) return false;
+  return los(w, d, from, p);
 }
 
 export function brightnessOf(light: number): Brightness {
@@ -155,7 +237,7 @@ export function litSet(w: World, d: DelveX): Set<string> {
     for (const h of range(src, r)) {
       const p = { level: src.level, ...h };
       if (!w.tile(p)) continue;
-      if (los(w, d, src, p)) out.add(posKey(p));
+      if (lightLos(w, d, src, p)) out.add(posKey(p));
     }
   };
   const lp = lanternPos(d);
@@ -169,6 +251,8 @@ export function litSet(w: World, d: DelveX): Set<string> {
     shine({ level: Number(lv), q, r }, 3);
   }
   for (const k of fixedLit(w, d)) out.add(k);
+  // Burning hexes (fireball) light themselves.
+  for (const [k, n] of Object.entries(d.burning ?? {})) if (n > 0) out.add(k);
   return out;
 }
 
@@ -183,7 +267,7 @@ export function fixedLit(w: World, d: DelveX): Set<string> {
     for (const h of range(L.at, L.radius)) {
       const p = { level: L.at.level, ...h };
       if (!w.tile(p)) continue;
-      if (los(w, d, L.at, p)) out.add(posKey(p));
+      if (lightLos(w, d, L.at, p)) out.add(posKey(p));
     }
   }
   w.fixedCache = { key, lit: out };
@@ -203,12 +287,13 @@ export const LIT_SIGHT = 14;
  * sight within the sight range, lit or not.
  */
 export function glimpseSet(w: World, d: DelveX, from: Pos): Pos[] {
-  const out: Pos[] = [];
+  const seen = new Set<string>();
   for (const h of range(from, sightRangeOf(d.light, from.level))) {
     const p = { level: from.level, ...h };
-    if (w.tile(p) && los(w, d, from, p)) out.push(p);
+    if (w.tile(p) && (distance(from, p) <= 1 || (!smoky(d, from) && los(w, d, from, p)))) seen.add(posKey(p));
   }
-  return out;
+  addEdgeWalls(w, d, seen);
+  return [...seen].map(parsePos);
 }
 
 /**
@@ -233,9 +318,11 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
         continue;
       }
       if (dist > sr && !L.has(k)) continue;
+      if (smoky(d, p) || smoky(d, h.at)) continue; // smoke blocks sight both ways
       if (los(w, d, h.at, p)) out.add(k);
     }
   }
+  addEdgeWalls(w, d, out);
   return out;
 }
 

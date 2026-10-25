@@ -171,7 +171,16 @@ export interface CastleDef {
 
 // ---------------------------------------------------------------- heroes and items
 
-export type HeroClass = 'hobart' | 'sellsword' | 'burglar' | 'mage';
+/** V3.2 (spec 15.3): the mage split into three schools; ranger and sapper added. */
+export type HeroClass =
+  | 'hobart'
+  | 'sellsword'
+  | 'burglar'
+  | 'ranger'
+  | 'sapper'
+  | 'pyromancer'
+  | 'shadowmancer'
+  | 'hedgewitch';
 export type Stat = 'might' | 'finesse' | 'wits' | 'nerve';
 
 export interface Stats {
@@ -190,7 +199,16 @@ export type ItemKind =
   | 'rope'
   | 'charge' // blasting charge
   | 'heirloom' // contract item, takes 2 slots
-  | 'hoard'; // a piece of the Dragon's hoard: valuable, takes 2 slots
+  | 'hoard' // a piece of the Dragon's hoard: valuable, takes 2 slots
+  // V3.2 quartermaster (spec 15.4); each takes 1 slot
+  | 'smoke' // smoke bomb: throw 4, smoke on the hex and its neighbours for 2 rounds
+  | 'glue' // glue bomb: throw 4, monsters within 1 are stuck for 2 rounds
+  | 'dart' // sleep dart: throw 5, 1 Finesse slot, a hit puts a monster to sleep
+  | 'caltrops' // scatter on an adjacent hex
+  | 'hook' // grappling hook: reusable, climb up out of a pit landing
+  | 'key' // skeleton key: opens one locked door or chest, silently
+  | 'oil' // oil flask: +10 light
+  | 'firecracker'; // throw 6: noise 6 at the target hex
 
 export interface Item {
   id: string;
@@ -238,8 +256,12 @@ export interface Contract {
   warnings: string[];
 }
 
+export type ShopKind =
+  | 'torch' | 'potion' | 'rope' | 'charge'
+  | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker';
+
 export interface ShopOffer {
-  kind: 'torch' | 'potion' | 'rope' | 'charge';
+  kind: ShopKind;
   name: string;
   price: number;
   text: string;
@@ -299,7 +321,7 @@ export interface HeroInDelve {
   acted: boolean;
   /** Rooted by a web: can't move this turn. */
   webbed: boolean;
-  /** Mage only: mana left. */
+  /** Pyromancer, Shadowmancer, Hedgewitch: mana left. */
   mana: number;
   /** Hobart only: rounds until Rally is ready (0 = ready). */
   rallyCooldown: number;
@@ -309,6 +331,14 @@ export interface HeroInDelve {
   escorting?: string;
   /** Was revived this delve: leaves Wounded. */
   revived: boolean;
+  /** Moved a second time this turn (a dash, spec 15.2); the action is spent. */
+  dashed: boolean;
+  /** Ranger: on overwatch until the end of the next world phase. Draw the eye icon and a 6-hex cone. */
+  overwatch: boolean;
+  /** Veiled (Shadowmancer): rounds left; monsters can't see this hero while > 0. Draw translucent. */
+  veil: number;
+  /** Warded (Hedgewitch): rounds left; takes 1 less per hit while > 0. Draw a shield glint. */
+  ward: number;
 }
 
 export interface Intent {
@@ -340,8 +370,9 @@ export interface Monster {
   intent?: Intent;
   /** Cutpurse only: the stolen item. */
   stolen?: Item;
-  /** Rounds rooted (not used by monsters yet). */
   spawnedAt: Pos;
+  /** Glued: rounds left stuck in place (can still attack adjacent). Absent = 0. */
+  stuck?: number;
 }
 
 export interface Rival {
@@ -419,12 +450,20 @@ export interface Delve {
   traps: Record<string, { spotted: boolean }>;
   /** Braziers lit, by posKey (includes campaign.litBraziers). */
   lit: string[];
-  /** Cracked walls blown open, by posKey. */
+  /** Cracked walls blown open and rubble/cracked walls dug out, by posKey. Engine kindAt treats these as floor. */
   blown: string[];
   /** Ropes anchored at the pit, by posKey of the edge hex. */
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
   liftWorking: boolean;
+  /** Smoke clouds: rounds left by posKey. Smoke blocks sight (not light). */
+  smoke: Record<string, number>;
+  /** Glue puddles: rounds left by posKey (drawing only; the stuck state is Monster.stuck). */
+  glue: Record<string, number>;
+  /** Burning hexes (fireball): rounds left by posKey. Anyone on one at the world phase takes 1; they light themselves. */
+  burning: Record<string, number>;
+  /** Caltrops scattered, by posKey. The first monster to step on one takes 2 and stops. */
+  caltrops: string[];
   prisoner: Prisoner | null;
   /** Hexes ever seen, by posKey. */
   explored: string[];
@@ -491,7 +530,27 @@ export type ActionKind =
   | 'mend' // Mage spell: heal 4 on an ally within 3
   | 'passLantern' // give the lantern to an adjacent hero
   | 'winch' // next to the winch: work it so the lift runs (loud)
-  | 'leave'; // on an exit: leave the castle
+  | 'leave' // on an exit: leave the castle
+  // ---- V3.2 class abilities (target kind in brackets: self / ally id / enemy id / hex at)
+  | 'overwatch' // Ranger [self]: shoot the first enemy that moves or acts in sight within 6 next world phase
+  | 'knockback' // Ranger [enemy]: 2 Finesse slots, range 5, 2 hits push it 1 hex away from the Ranger
+  | 'throwCharge' // Sapper [hex, itemId = the charge]: throw a charge up to 3; blows at the end of the turn
+  | 'dig' // Sapper [hex]: clear adjacent rubble or a cracked wall, noise 4
+  | 'fireball' // Pyromancer [hex]: 2 mana, radius 1 at range 5, 3 Wits slots, 2 dmg per hit, burning 2 rounds, noise 6
+  | 'veil' // Shadowmancer [ally id, self included]: 1 mana, within 3, unseen by monsters 2 rounds
+  | 'sleep' // Shadowmancer [enemy]: 1 mana, 2 Wits slots at range 5, 1+ hits = asleep
+  | 'blink' // Shadowmancer [hex]: 1 mana, teleport up to 4 to a free hex in sight, same level, silent
+  | 'ward' // Hedgewitch [ally id, self included]: 1 mana, within 3, 1 less per hit for 2 rounds
+  | 'gust' // Hedgewitch [hex]: 1 mana, range 4, every figure within 1 of the hex pushed 1 away from it, noise 2
+  // ---- V3.2 items (target carries itemId)
+  | 'smoke' // [hex] throw 4
+  | 'glue' // [hex] throw 4
+  | 'dart' // [enemy] throw 5, 1 Finesse slot
+  | 'caltrops' // [hex] adjacent free hex
+  | 'firecracker' // [hex] throw 6, noise 6 there
+  | 'key' // [hex] adjacent (or own hex) locked door or chest, silent
+  | 'oil' // [self] +10 light
+  | 'grapple'; // [hex on the level above] uses move and action; the hook is kept
 
 export interface ActionTarget {
   /** Monster, rival, hero or prisoner id. */
@@ -564,6 +623,16 @@ export type GameEvent =
   | { type: 'fell'; id: string; from: Pos; to: Pos; levels: number; damage: number }
   | { type: 'breath'; by: string; hexes: Pos[] }
   | { type: 'liftWorking' }
+  /** An item thrown (smoke, glue, dart, firecracker, caltrops, a Sapper's charge): animate from -> to. */
+  | { type: 'thrown'; by: string; kind: ItemKind; from: Pos; to: Pos }
+  /** A spell or ability went off. `hexes` = the area (fireball, gust, smoke, glue). Overwatch firing = spell 'overwatch'. */
+  | { type: 'cast'; by: string; spell: ActionKind; at?: Pos; targetId?: string; hexes?: Pos[] }
+  /** Blink: teleport, no path. */
+  | { type: 'blinked'; id: string; from: Pos; to: Pos }
+  /** Dig: rubble or a cracked wall at `at` is now floor (it's in Delve.blown). */
+  | { type: 'dug'; at: Pos }
+  /** A monster stepped on caltrops (they're gone). */
+  | { type: 'caltrops'; id: string; at: Pos }
   | { type: 'say'; text: string };
 
 export interface ApplyResult {

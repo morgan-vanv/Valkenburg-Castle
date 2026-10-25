@@ -4,15 +4,15 @@
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent, Item } from './types';
-import { MONSTERS, ORC_SHOVE_CHANCE, SISTER } from './data';
+import { BURN_DMG, CALTROPS_DMG, CLASSES, MONSTERS, ORC_SHOVE_CHANCE, OVERWATCH_RANGE, SISTER } from './data';
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  armorOf, chestLoot, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, makeNoise, nameOf, noteOnce, occupant,
+  armorOf, brightnessAt, chestLoot, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, LIGHT_PENALTY, makeNoise, nameOf, noteOnce, occupant,
   putOnGround, rivalsOnMap, roll, valueOf,
 } from './common';
 import {
-  canEnter, dijkstra, distField, doorAt, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within,
+  canEnter, dijkstra, distField, doorAt, isFloorish, kindAt, lanternPos, litSet, los, pathTo, seesHex, smoky, visibleSet, within,
 } from './world';
 import { checkDelveEnd, refreshSight, setLight } from './delve';
 import { behind, fallInfo, figure, push, pushOutcome, railed } from './falls';
@@ -30,7 +30,7 @@ interface Target {
 function targets(c: Ctx): Target[] {
   const out: Target[] = [];
   for (const h of c.d.heroes) {
-    if (h.status !== 'active') continue;
+    if (h.status !== 'active' || h.veil > 0) continue; // veiled heroes are unseen (spec 15.3)
     out.push({ id: h.heroId, at: h.at, armor: armorOf(heroDef(c, h.heroId)!), hero: h });
   }
   const pr = c.d.prisoner;
@@ -42,8 +42,48 @@ function sees(c: Ctx, from: Pos, t: Pos, lit: Set<string>): boolean {
   if (from.level !== t.level) return false;
   const d = distance(from, t);
   if (d > 6) return false;
+  if (d > 1 && (smoky(c.d, t) || smoky(c.d, from))) return false;
   if (d > 2 && !lit.has(posKey(t))) return false;
   return los(c.w, c.d, from, t);
+}
+
+/** Ward: 1 less per hit, to a minimum of 0 (spec 15.3). */
+function wardOf(h: HeroInDelve | undefined): number {
+  return h && h.ward > 0 ? 1 : 0;
+}
+
+// ---------------------------------------------------------------- overwatch (Ranger, spec 15.3)
+
+/**
+ * An enemy `id` at `at` moves or acts: the first Ranger on overwatch who can see it within 6 shoots
+ * (full bow roll). Returns true if the enemy died.
+ */
+function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
+  const lit = litSet(c.w, c.d);
+  for (const h of c.d.heroes) {
+    if (h.status !== 'active' || !h.overwatch) continue;
+    const def = heroDef(c, h.heroId)!;
+    if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit)) continue;
+    h.overwatch = false;
+    const cls = CLASSES[def.cls];
+    let slots = cls.weapon.slots;
+    if (distance(h.at, at) <= 1) slots -= 1;
+    let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + LIGHT_PENALTY[brightnessAt(c.w, c, h.at, lit)];
+    const m = c.d.monsters.find((x) => x.id === id);
+    if (m?.awareness === 'asleep') p += 20;
+    say(c, `${heroName(c, h.heroId)} looses an arrow at ${nameOf(c, id)}.`);
+    c.ev.push({ type: 'cast', by: h.heroId, spell: 'overwatch', targetId: id, at });
+    const r = roll(c, h.heroId, 'Overwatch', slots, p);
+    makeNoise(c, h.at, cls.weapon.noise ?? 1);
+    if (!r.hits) {
+      c.ev.push({ type: 'miss', attacker: h.heroId, target: id });
+      return false;
+    }
+    const armor = m ? (MONSTERS[m.kind].armor ?? 0) : 0;
+    hurtAny(c, id, r.hits * Math.max(1, cls.weapon.dmg - armor) + (r.perfect ? 1 : 0), h.heroId, { crit: r.perfect });
+    return !figure(c, id);
+  }
+  return false;
 }
 
 function byDist(from: Pos) {
@@ -65,6 +105,7 @@ const WAIT: Plan = { intent: { kind: 'wait' }, path: [] };
 
 function blocked(c: Ctx, p: Pos, self: string): boolean {
   const o = occupant(c, p);
+  if ((c.d.burning?.[posKey(p)] ?? 0) > 0) return true; // nothing walks into fire
   return !!o && o.id !== self;
 }
 
@@ -136,7 +177,7 @@ function orcShove(c: Ctx, m: MonsterX, from: Pos, t: Target, path: Pos[]): Plan 
 export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>): Plan {
   if (m.kind === 'gloam') return planGloam(c, m);
   if (m.kind === 'dragon') return planDragon(c, m);
-  const def = MONSTERS[m.kind];
+  const def = { ...MONSTERS[m.kind], move: (m.stuck ?? 0) > 0 ? 0 : MONSTERS[m.kind].move };
   if (m.awareness === 'asleep') return WAIT;
   // Cutpurse with loot: run for the farthest exit.
   if (m.kind === 'cutpurse' && m.stolen) {
@@ -226,11 +267,26 @@ export function computeIntents(c: Ctx): void {
 
 // ---------------------------------------------------------------- acting
 
-function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): void {
-  if (!path.length) return;
+/** Walk a figure along `path`. Returns true if caltrops stopped it short (monsters only). */
+function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): boolean {
+  if (!path.length) return false;
   const seg: Pos[] = [];
   let from = at.at;
+  const isMonster = c.d.monsters.some((m) => m.id === id);
+  let stopped = false;
   for (const p of path) {
+    if (isMonster && c.d.caltrops.includes(posKey(p))) {
+      // Caltrops: 2 damage, the walk ends here (spec 15.4).
+      c.d.caltrops = c.d.caltrops.filter((k) => k !== posKey(p));
+      seg.push(p);
+      c.ev.push({ type: 'moved', id, path: [...seg] });
+      seg.length = 0;
+      at.at = { ...p };
+      c.ev.push({ type: 'caltrops', id, at: p });
+      say(c, `${nameOf(c, id)} treads on caltrops.`);
+      hurtAny(c, id, CALTROPS_DMG, null, { noise: false });
+      return true;
+    }
     if (kindAt(c.w, c.d, p) === 'door') {
       const door = doorAt(c.d, p);
       if (door && !door.open) {
@@ -249,6 +305,7 @@ function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): void {
   }
   if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
   at.at = { ...path[path.length - 1]! };
+  return stopped;
 }
 
 /** Sellsword guarding the target takes the hit instead. */
@@ -271,7 +328,7 @@ function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: nu
   }
   const h = hd(c, tid);
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
-  const total = r.hits * Math.max(1, dmg - armor) + (r.perfect ? 1 : 0);
+  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h)) + (r.perfect ? 1 : 0);
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
   return tid;
@@ -345,13 +402,17 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   perceive(c, m, lit);
   if (!c.d.monsters.includes(m) || m.awareness === 'asleep') return;
   const def = MONSTERS[m.kind];
-  let plan = honored(c, m, def.move) ?? planMonster(c, m, lit);
+  let plan = honored(c, m, (m.stuck ?? 0) > 0 ? 0 : def.move) ?? planMonster(c, m, lit);
   // The Dragon never breathes without showing it first.
   if (m.kind === 'dragon' && plan.intent.kind === 'breath' && m.intent?.kind !== 'breath') plan = planDragon(c, m, true);
   m.intent = plan.intent;
   const startAt = m.at;
-  walk(c, m.id, m, plan.path);
-  const charged = plan.path.length >= 2 && startAt.level === m.at.level;
+  // Overwatch: moving or acting in a Ranger's sight draws the shot first.
+  if ((plan.path.length || plan.intent.kind !== 'wait') && overwatchCheck(c, m.id, m.at)) return;
+  if (!c.d.monsters.includes(m)) return;
+  const stopped = walk(c, m.id, m, plan.path);
+  if (!c.d.monsters.includes(m)) return;
+  const charged = !stopped && plan.path.length >= 2 && startAt.level === m.at.level;
   const it = plan.intent;
   if (m.focusAt && samePos(m.focusAt, m.at)) m.focusAt = undefined;
   if (m.kind === 'dragon' && dragonSpecial(c, m, it)) return;
@@ -374,7 +435,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
       if (m.kind === 'gloam') {
         const h = hd(c, t.id);
         say(c, 'The Gloam touches ' + nameOf(c, t.id) + '.');
-        if (h) hurtHero(c, h, 4, m.id);
+        if (h) hurtHero(c, h, 4 - wardOf(h), m.id);
         else hurtPrisoner(c, 4, m.id);
         break;
       }
@@ -484,6 +545,7 @@ function rivalsAct(c: Ctx): void {
       ts.sort((a, b) => (field.get(posKey(a.at)) ?? 999) - (field.get(posKey(b.at)) ?? 999));
       const t = ts[0];
       if (!t) continue;
+      if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) continue;
       if (!(t.at.level === r.at.level && distance(t.at, r.at) === 1)) {
         const path = approach(c, r.id, r.at, attackSpots(c, t.at, r.id), SISTER.move, true) ?? [];
         walk(c, r.id, r, path);
@@ -658,6 +720,31 @@ export function blowCharges(c: Ctx): void {
 
 // ---------------------------------------------------------------- the phase
 
+function tick(rec: Record<string, number> | undefined): void {
+  if (!rec) return;
+  for (const k of Object.keys(rec)) {
+    rec[k]! -= 1;
+    if (rec[k]! <= 0) delete rec[k];
+  }
+}
+
+/** Everyone standing in fire takes BURN_DMG (armor doesn't help). */
+function burnPhase(c: Ctx): void {
+  const burning = Object.entries(c.d.burning ?? {}).filter(([, n]) => n > 0).map(([k]) => k);
+  if (!burning.length) return;
+  const keys = new Set(burning);
+  const ids: string[] = [];
+  for (const m of c.d.monsters) if (m.kind !== 'gloam' && keys.has(posKey(m.at))) ids.push(m.id);
+  for (const r of rivalsOnMap(c)) if (keys.has(posKey(r.at))) ids.push(r.id);
+  for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at))) ids.push(h.heroId);
+  const pr = c.d.prisoner;
+  if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) ids.push(pr.id);
+  for (const id of ids) {
+    say(c, `${nameOf(c, id)} burns.`);
+    hurtAny(c, id, BURN_DMG, null, { noise: false });
+  }
+}
+
 export function worldPhase(c: Ctx): void {
   const d = c.d;
   blowCharges(c);
@@ -666,8 +753,9 @@ export function worldPhase(c: Ctx): void {
   d.phase = 'world';
   c.ev.push({ type: 'phase', phase: 'world', round: d.round });
   const webbedBefore = new Set(d.heroes.filter((h) => h.webbed).map((h) => h.heroId));
-  // 1. Light, torches, bleeding.
+  // 1. Light, torches, bleeding, fire.
   setLight(c, d.light - 1);
+  burnPhase(c);
   for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
@@ -687,10 +775,18 @@ export function worldPhase(c: Ctx): void {
   for (const h of d.heroes) {
     h.moved = false;
     h.acted = false;
+    h.dashed = false;
+    h.overwatch = false;
     h.guarding = undefined;
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
+    if (h.veil > 0) h.veil -= 1;
+    if (h.ward > 0) h.ward -= 1;
     if (webbedBefore.has(h.heroId)) h.webbed = false;
   }
+  for (const m of d.monsters) if ((m.stuck ?? 0) > 0) m.stuck! -= 1;
+  tick(d.smoke);
+  tick(d.glue);
+  tick(d.burning);
   refreshSight(c);
   if (checkDelveEnd(c)) return;
   d.round += 1;

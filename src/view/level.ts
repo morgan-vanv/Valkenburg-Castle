@@ -143,6 +143,8 @@ export class LevelView {
   readonly drums: THREE.Object3D[] = [];
   /** Cracked walls by posKey, so a blast can hide them. */
   readonly cracked = new Map<string, Extra>();
+  /** Rubble heaps by posKey (hidden once dug out, V3.2). */
+  readonly rubble = new Map<string, THREE.Object3D>();
   /** Hexes that can be clicked (walkable-ish), by hexKey. */
   readonly walkable = new Set<string>();
   /** Pit hexes by hexKey. */
@@ -710,6 +712,7 @@ export class LevelView {
     }
     this.place(h, g);
     this.extra(h, g, [rock]);
+    this.rubble.set(this.pk(h), g);
   }
 
   private addRailing(h: Hex): void {
@@ -829,10 +832,22 @@ export class LevelView {
       const other = link.a.level === this.level && link.a.q === h.q && link.a.r === h.r ? link.b : link.a;
       upper = other.level > this.level;
     }
+    // Spec 15.7: the lift reads as a cage on a chain. Plank deck, an iron cage of bars on three
+    // sides with an open front (toward the most open neighbour), a roof ring, and a chain
+    // rising from the roof: to a beam and pulley on the upper end, up into the dark on the lower.
+    let front = 0;
+    let bestOpen = -1;
+    for (let i = 0; i < 6; i++) {
+      const open = (isSolid(this.tile(add(h, DIRS[i]!))) ? 0 : 2) + (isSolid(this.tile(add(h, DIRS[(i + 1) % 6]!))) ? 0 : 1) + (isSolid(this.tile(add(h, DIRS[(i + 5) % 6]!))) ? 0 : 1);
+      if (open > bestOpen) {
+        bestOpen = open;
+        front = i;
+      }
+    }
     const wood = fogMaterial({ color: COLORS.wood, litFloor: 0.2 });
     const dark = fogMaterial({ color: COLORS.woodDark, litFloor: 0.14 });
-    const rope = fogMaterial({ color: 0xb08a50, litFloor: 0.22 });
-    const iron = fogMaterial({ color: COLORS.iron, litFloor: 0.12 });
+    const iron = fogMaterial({ color: 0x3c3a3a, litFloor: 0.14 });
+    const chainMat = fogMaterial({ color: 0x8a8580, litFloor: 0.22 });
     const g = new THREE.Group();
     const deck = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 1.3), wood);
     deck.position.y = FLOOR_TOP + 0.06;
@@ -842,31 +857,79 @@ export class LevelView {
       seam.position.set(0, FLOOR_TOP + 0.065, i * 0.26);
       g.add(seam);
     }
+    const CAGE_H = 1.5;
+    // Corner posts.
     for (const sx of [-1, 1])
       for (const sz of [-1, 1]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, upper ? 2.4 : 1.4, 0.1), dark);
-        post.position.set(sx * 0.62, FLOOR_TOP + (upper ? 1.2 : 0.7), sz * 0.62);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, CAGE_H, 0.08), iron);
+        post.position.set(sx * 0.62, FLOOR_TOP + CAGE_H / 2, sz * 0.62);
         g.add(post);
-        const line = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, upper ? 2.3 : 1.3, 4), rope);
-        line.position.set(sx * 0.5, FLOOR_TOP + (upper ? 1.25 : 0.75), sz * 0.5);
-        g.add(line);
       }
-    if (upper) {
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.14, 0.14), dark);
-      beam.position.y = FLOOR_TOP + 2.4;
-      const pulley = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.05, 5, 10), iron);
-      pulley.position.y = FLOOR_TOP + 2.25;
-      g.add(beam, pulley);
-    } else {
-      // A cage gate on the lower end.
-      for (let i = 0; i < 5; i++) {
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.0, 0.03), iron);
-        bar.position.set(-0.5 + i * 0.25, FLOOR_TOP + 0.55, 0.64);
-        g.add(bar);
+    // Bars on the back and both sides (the front, local +z, stays open).
+    const barGeo = new THREE.BoxGeometry(0.03, CAGE_H - 0.1, 0.03);
+    for (let i = 1; i < 5; i++) {
+      const t = -0.62 + i * 0.248;
+      const back = new THREE.Mesh(barGeo, iron);
+      back.position.set(t, FLOOR_TOP + CAGE_H / 2, -0.62);
+      const left = new THREE.Mesh(barGeo, iron);
+      left.position.set(-0.62, FLOOR_TOP + CAGE_H / 2, t);
+      const right = new THREE.Mesh(barGeo, iron);
+      right.position.set(0.62, FLOOR_TOP + CAGE_H / 2, t);
+      g.add(back, left, right);
+    }
+    // Roof frame and a waist rail.
+    for (const y of [FLOOR_TOP + CAGE_H, FLOOR_TOP + 0.7]) {
+      for (const sz of [-0.62, 0.62]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.06, 0.06), iron);
+        rail.position.set(0, y, sz);
+        if (sz > 0 && y < FLOOR_TOP + CAGE_H) continue; // open front: no waist rail
+        g.add(rail);
+      }
+      for (const sx of [-0.62, 0.62]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.32), iron);
+        rail.position.set(sx, y, 0);
+        g.add(rail);
       }
     }
+    // Roof cross-braces meeting at the chain ring.
+    for (const a of [Math.PI / 4, -Math.PI / 4]) {
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 1.7), iron);
+      brace.position.y = FLOOR_TOP + CAGE_H;
+      brace.rotation.y = a;
+      g.add(brace);
+    }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 6, 12), chainMat);
+    ring.position.y = FLOOR_TOP + CAGE_H + 0.12;
+    g.add(ring);
+    // The chain: alternating links up from the ring.
+    const chainTop = upper ? 2.5 : 3.6;
+    const linkGeo = new THREE.TorusGeometry(0.07, 0.022, 5, 8);
+    for (let i = 0, y = FLOOR_TOP + CAGE_H + 0.26; y < FLOOR_TOP + chainTop; i++, y += 0.11) {
+      const link = new THREE.Mesh(linkGeo, chainMat);
+      link.position.y = y;
+      link.rotation.y = i % 2 ? Math.PI / 2 : 0;
+      g.add(link);
+    }
+    if (upper) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.16), dark);
+      beam.position.y = FLOOR_TOP + chainTop + 0.2;
+      const pulley = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.05, 6, 12), iron);
+      pulley.position.y = FLOOR_TOP + chainTop + 0.02;
+      g.add(beam, pulley);
+      for (const sx of [-0.72, 0.72]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12, chainTop + 0.2, 0.12), dark);
+        leg.position.set(sx, FLOOR_TOP + (chainTop + 0.2) / 2, -0.72);
+        g.add(leg);
+      }
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.12, 0.12), dark);
+      brace.position.set(0, FLOOR_TOP + chainTop + 0.2, -0.72);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.8), dark);
+      arm.position.set(0, FLOOR_TOP + chainTop + 0.2, -0.36);
+      g.add(brace, arm);
+    }
+    g.rotation.y = this.dirAngle(front);
     this.place(h, g);
-    this.extra(h, g, [wood, dark, rope, iron], this.withNeighbours(h));
+    this.extra(h, g, [wood, dark, iron, chainMat], this.withNeighbours(h));
   }
 
   /** Swing a door; returns the target angle. */
@@ -881,32 +944,74 @@ export class LevelView {
       const other = link.a.level === this.level && link.a.q === h.q && link.a.r === h.r ? link.b : link.a;
       down = other.level > this.level;
     }
+    // Face the steps toward a solid neighbour (the stairwell goes into the wall); prefer one
+    // with solid hexes either side so the opening sits in a wall face.
     let dir = 0;
-    for (let i = 0; i < 6; i++) if (isSolid(this.tile(add(h, DIRS[i]!)))) dir = i;
-    const stone = fogMaterial({ color: 0xa89c8a, litFloor: 0.18 });
-    const dark = fogMaterial({ color: 0x050403, litFloor: 0 });
+    let bestScore = -1;
+    for (let i = 0; i < 6; i++) {
+      if (!isSolid(this.tile(add(h, DIRS[i]!)))) continue;
+      const score = 1 + (isSolid(this.tile(add(h, DIRS[(i + 1) % 6]!))) ? 1 : 0) + (isSolid(this.tile(add(h, DIRS[(i + 5) % 6]!))) ? 1 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        dir = i;
+      }
+    }
+    // Spec 15.7: stairs read as what they are. Down: a flight of pale treads sinking into a
+    // dark opening between two parapets. Up: a rising flight with a dark doorway at its head.
+    const stone = fogMaterial({ color: 0xb3a692, litFloor: 0.2 });
+    const riser = fogMaterial({ color: 0x5c5247, litFloor: 0.08 });
+    const dark = fogMaterial({ color: 0x030202, litFloor: 0 });
     const g = new THREE.Group();
-    const steps = 5;
+    const steps = 6;
+    const W = 1.0;
+    const D = 0.2;
     if (down) {
-      const well = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.86, R * 0.86, 0.02, 6), dark);
-      well.position.y = FLOOR_TOP + 0.01;
+      // The opening: a dark slab the size of the flight, sunk a hair below the floor.
+      const well = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.04, steps * D + 0.3), dark);
+      well.position.set(0, FLOOR_TOP - 0.01, -0.1 + (steps * D) / 2 - 0.5);
       g.add(well);
       for (let i = 0; i < steps; i++) {
-        const s = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.26), stone);
-        s.position.set(0, FLOOR_TOP - (i + 1) * 0.14, -0.5 + i * 0.24);
-        g.add(s);
+        const drop = (i + 1) * 0.13;
+        const tread = new THREE.Mesh(new THREE.BoxGeometry(W, 0.06, D), stone);
+        tread.position.set(0, FLOOR_TOP - drop, -0.5 + i * D);
+        const face = new THREE.Mesh(new THREE.BoxGeometry(W, 0.13, 0.03), riser);
+        face.position.set(0, FLOOR_TOP - drop + 0.065, -0.5 + i * D - D / 2);
+        g.add(tread, face);
       }
+      // Parapets either side, stepping down with the flight.
+      for (const sx of [-1, 1]) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, steps * D + 0.2), stone);
+        wall.position.set(sx * (W / 2 + 0.08), FLOOR_TOP + 0.16, -0.5 + (steps * D) / 2 - 0.1);
+        g.add(wall);
+      }
+      // The black mouth at the bottom, standing up so it reads from the camera.
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(W + 0.1, 0.9, 0.06), dark);
+      mouth.position.set(0, FLOOR_TOP - 0.3, -0.5 + steps * D + 0.02);
+      g.add(mouth);
     } else {
       for (let i = 0; i < steps; i++) {
-        const hgt = (i + 1) * 0.22;
-        const s = new THREE.Mesh(new THREE.BoxGeometry(0.9, hgt, 0.24), stone);
-        s.position.set(0, FLOOR_TOP + hgt / 2, -0.5 + i * 0.24);
-        g.add(s);
+        const hgt = (i + 1) * 0.16;
+        const s = new THREE.Mesh(new THREE.BoxGeometry(W, hgt, D), stone);
+        s.position.set(0, FLOOR_TOP + hgt / 2, -0.5 + i * D);
+        const face = new THREE.Mesh(new THREE.BoxGeometry(W, 0.16, 0.03), riser);
+        face.position.set(0, FLOOR_TOP + hgt - 0.08, -0.5 + i * D - D / 2);
+        g.add(s, face);
       }
+      for (const sx of [-1, 1]) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.1, steps * D + 0.2), stone);
+        wall.position.set(sx * (W / 2 + 0.08), FLOOR_TOP + 0.55, -0.5 + (steps * D) / 2 - 0.1);
+        g.add(wall);
+      }
+      // The doorway at the head of the flight: dark, with a lintel.
+      const door = new THREE.Mesh(new THREE.BoxGeometry(W + 0.1, 1.3, 0.06), dark);
+      door.position.set(0, FLOOR_TOP + steps * 0.16 + 0.55, -0.5 + steps * D + 0.02);
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(W + 0.4, 0.14, 0.2), stone);
+      lintel.position.set(0, FLOOR_TOP + steps * 0.16 + 1.25, -0.5 + steps * D);
+      g.add(door, lintel);
     }
     g.rotation.y = this.dirAngle(dir);
     this.place(h, g);
-    this.extra(h, g, [stone, dark]);
+    this.extra(h, g, [stone, riser, dark]);
   }
 
   private addExit(h: Hex): void {
@@ -994,6 +1099,7 @@ export class LevelView {
       for (const c of e.obj.children) c.visible = c.name === 'floor' ? blown : !blown;
       if (blown) this.walkable.add(k.split(':')[1] ?? '');
     }
+    for (const [k, g] of this.rubble) for (const c of g.children) c.visible = !keys.has(k);
   }
 
   // ------------------------------------------------------------ room labels

@@ -82,7 +82,7 @@ interface HumanOpts {
   legs: number;
   helm?: 'kettle' | 'great' | 'hood' | 'hat' | 'crown' | 'horned' | 'none';
   helmColor?: number;
-  weapon?: 'sword' | 'spear' | 'mace' | 'dagger' | 'staff' | 'blade' | 'none';
+  weapon?: 'sword' | 'spear' | 'mace' | 'dagger' | 'staff' | 'blade' | 'bow' | 'hammer' | 'none';
   shield?: number;
   hunch?: number;
   eyes?: number;
@@ -175,6 +175,22 @@ function humanoid(k: Kit, o: HumanOpts): void {
     case 'blade':
       k.box(0.05, 0.26, 0.012, 0x6d6a66, [hx, 0.36, 0.13], [0.6, 0, 0.1]);
       break;
+    case 'bow': {
+      // A tall longbow held upright in the left hand, its string pale; a quiver on the back.
+      const bx = -0.16 * w;
+      for (let i = 0; i < 5; i++) {
+        const t = (i - 2) / 2;
+        k.box(0.02, 0.16, 0.02, 0x7a4a22, [bx, 0.38 + t * 0.3, 0.1 + (1 - t * t) * 0.07], [-t * 0.55, 0, 0]);
+      }
+      k.box(0.004, 0.62, 0.004, 0xe8e0c8, [bx, 0.38, 0.1]);
+      k.cyl(0.035, 0.03, 0.26, 5, 0x5a3a1c, [0.05, 0.42, -0.1], [-0.35, 0, 0.3]);
+      for (const dx of [-0.02, 0.0, 0.02]) k.box(0.012, 0.05, 0.012, 0xd8d0b8, [0.1 + dx, 0.57, -0.15]);
+      break;
+    }
+    case 'hammer':
+      k.cyl(0.016, 0.016, 0.36, 4, COLORS.woodDark, [hx, 0.38, 0.1], [0.45, 0, 0]);
+      k.box(0.15, 0.08, 0.08, 0x7a7670, [hx, 0.54, 0.18], [0.45, 0, 0]);
+      break;
   }
   if (o.shield !== undefined) {
     k.cyl(0.1, 0.1, 0.025, 6, o.shield, [-0.15 * w, 0.33, 0.06], [0, 0, Math.PI / 2], [1, 1, 1.15]);
@@ -189,6 +205,11 @@ export type ModelKey =
   | 'sellsword'
   | 'burglar'
   | 'mage'
+  | 'ranger'
+  | 'sapper'
+  | 'pyromancer'
+  | 'shadowmancer'
+  | 'hedgewitch'
   | 'rats'
   | 'orc'
   | 'spider'
@@ -229,6 +250,39 @@ function buildModel(key: ModelKey): FigureModel {
       humanoid(k, { skin: SKIN, tunic: 0x3b2659, legs: 0x3b2659, helm: 'hat', helmColor: 0x2d1d45, weapon: 'staff', beard: 0xd6d0c4, staffGlow: 0xffb35c });
       k.cone(0.15, 0.28, 6, 0x3b2659, [0, 0.14, 0]);
       banner(k, 0x8a4cc9, 1.0);
+      return k.build(1.0, 0.14);
+    case 'ranger':
+      // Green hood and cloak, longbow: reads from far by the tall bow arc.
+      humanoid(k, { skin: SKIN, tunic: 0x4a5a2a, legs: 0x3a3424, helm: 'hood', helmColor: 0x3f5a26, weapon: 'bow', cape: 0x33461c });
+      banner(k, 0x8fbf3a, 0.85);
+      return k.build(0.85, 0.14);
+    case 'sapper':
+      // Stocky, leather apron, hammer, a big pack of charges with a fuse.
+      humanoid(k, { skin: SKIN, tunic: 0x8a5a2a, legs: 0x3a2e24, helm: 'kettle', helmColor: 0x6a5a3a, weapon: 'hammer', wide: 1.2, beard: 0x7a4a22 });
+      k.box(0.2, 0.22, 0.12, 0x5a4024, [0, 0.38, -0.13]);
+      k.cyl(0.04, 0.04, 0.12, 6, 0xb03a2e, [-0.06, 0.52, -0.13]);
+      k.cyl(0.04, 0.04, 0.12, 6, 0xb03a2e, [0.06, 0.52, -0.13]);
+      k.box(0.008, 0.06, 0.008, 0xffc860, [0.06, 0.6, -0.13], undefined, true);
+      banner(k, 0xe08a2a, 0.82);
+      return k.build(0.82, 0.16);
+    case 'pyromancer':
+      humanoid(k, { skin: SKIN, tunic: 0x8a2416, legs: 0x5a160e, helm: 'hat', helmColor: 0x5a160e, weapon: 'staff', staffGlow: 0xff6a1a });
+      k.cone(0.15, 0.28, 6, 0x8a2416, [0, 0.14, 0]);
+      k.ball(0.03, 0xffa040, [-0.16, 0.36, 0.08], undefined, true);
+      banner(k, 0xff5a1a, 1.0);
+      return k.build(1.0, 0.14);
+    case 'shadowmancer':
+      humanoid(k, { skin: 0xa89aa8, tunic: 0x241a3a, legs: 0x1a1428, helm: 'hood', helmColor: 0x1a1428, weapon: 'staff', staffGlow: 0x9a6aff, cape: 0x120c1e, eyes: 0xb08aff });
+      k.cone(0.16, 0.3, 6, 0x241a3a, [0, 0.15, 0]);
+      banner(k, 0x7a4cff, 0.95);
+      return k.build(0.95, 0.14);
+    case 'hedgewitch':
+      humanoid(k, { skin: SKIN, tunic: 0x2e5a3e, legs: 0x22402c, helm: 'hat', helmColor: 0x5a4a2a, weapon: 'staff', staffGlow: 0x8affb0 });
+      k.cone(0.15, 0.28, 6, 0x2e5a3e, [0, 0.14, 0]);
+      // Herb pouch and a sprig on the hat.
+      k.ball(0.045, 0x8a7350, [0.1, 0.24, 0.08]);
+      k.cone(0.02, 0.08, 4, 0x7fd06a, [0.05, 0.72, 0.02], [0.3, 0, -0.4]);
+      banner(k, 0x5ad08a, 1.0);
       return k.build(1.0, 0.14);
     case 'sister':
       // Lantern Sisters: pale hooded robes, a lantern held out front.

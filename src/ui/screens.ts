@@ -1,10 +1,10 @@
 // Full-screen pages: title, camp (stations), prepare delve, summary, game over.
 
 import type { Engine } from '../game/api';
-import type { Command, Contract, GameState, Hero, HeroClass, Item } from '../game/types';
+import type { Command, Contract, GameState, Hero, Item } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
-import { CLASS_BLURB, CLASS_GLYPH, CLASS_NAME, ITEM_GLYPH, itemLabel } from './names';
+import { ITEM_EFFECT, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel } from './names';
 
 export interface ScreenHost {
   engine: Engine;
@@ -93,7 +93,7 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
     nav.append(
       h(
         'button',
-        { class: `station ${host.station === st.id ? 'on' : ''}`, onclick: () => host.setStation(st.id) },
+        { class: `station ${host.station === st.id ? 'on' : ''} ${st.id === 'tavern' && needsHire(s) ? 'call' : ''}`, onclick: () => host.setStation(st.id) },
         h('span', { class: 'st-glyph' }, st.glyph),
         h('span', { class: 'st-text' }, h('b', null, st.name), h('span', { class: 'dim small' }, st.blurb)),
         badge ? h('span', { class: 'st-badge num' }, `${badge}`) : '',
@@ -141,8 +141,13 @@ function stat(label: string, value: string, cls = ''): HTMLElement {
   return h('div', { class: `stat ${cls}` }, h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value num' }, value));
 }
 
-function classBadge(cls: HeroClass): HTMLElement {
-  return h('span', { class: `cbadge cls-${cls}`, title: CLASS_NAME[cls] }, CLASS_GLYPH[cls]);
+function classBadge(cls: string): HTMLElement {
+  return h('span', { class: `cbadge cls-${cls}`, title: className(cls) }, classGlyph(cls));
+}
+
+/** Hobart alone: the squad needs hiring before the first delve. */
+function needsHire(s: GameState): boolean {
+  return !s.campaign.roster.some((x) => x.cls !== 'hobart' && x.wounded === 0);
 }
 
 function heroChip(hr: Hero): HTMLElement {
@@ -151,7 +156,7 @@ function heroChip(hr: Hero): HTMLElement {
     'div',
     { class: `hchip ${hr.wounded ? 'wounded' : ''}` },
     classBadge(hr.cls),
-    h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${CLASS_NAME[hr.cls]} · ${hr.maxHp} HP${next ? ` · XP ${hr.xp}/${next}` : ''}`), hr.wounded ? h('div', { class: 'neg small' }, `Wounded: sits out ${hr.wounded}`) : ''),
+    h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP${next ? ` · XP ${hr.xp}/${next}` : ''}`), hr.wounded ? h('div', { class: 'neg small' }, `Wounded: sits out ${hr.wounded}`) : ''),
   );
 }
 
@@ -163,8 +168,19 @@ function stationHead(title: string, text: string): HTMLElement {
 
 function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   el.append(stationHead('Bounty board', 'Three jobs nailed to the post. Bounties pay only if the prize comes out with you.'));
+  const hire = needsHire(s);
+  if (hire)
+    el.append(
+      h(
+        'div',
+        { class: 'hire-first' },
+        h('b', null, 'Hire at least one hero'),
+        h('span', null, ' Lord Hobart will not go in alone. Visit the tavern first.'),
+        h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, 'Go to the tavern'),
+      ),
+    );
   const grid = h('div', { class: 'contracts' });
-  for (const k of s.campaign.board) grid.append(contractCard(k, host));
+  for (const k of s.campaign.board) grid.append(contractCard(k, host, hire));
   el.append(grid);
   if (host.lastLoadout && s.campaign.board.length) {
     el.append(
@@ -188,7 +204,7 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
 
-function contractCard(k: Contract, host: ScreenHost): HTMLElement {
+function contractCard(k: Contract, host: ScreenHost, locked = false): HTMLElement {
   return h(
     'article',
     { class: `contract kind-${k.kind}` },
@@ -200,6 +216,8 @@ function contractCard(k: Contract, host: ScreenHost): HTMLElement {
       'button',
       {
         class: 'btn btn-primary',
+        disabled: locked,
+        title: locked ? 'Hire at least one hero first' : '',
         onclick: () => {
           const l = host.lastLoadout ?? { heroIds: [], packs: {}, entrance: 0 };
           host.saveLoadout({ ...l, contractId: k.id });
@@ -222,8 +240,8 @@ function shopStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
       h(
         'div',
         { class: 'shop-row' },
-        h('span', { class: 'shop-glyph' }, ITEM_GLYPH[o.kind]),
-        h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, o.text)),
+        h('span', { class: 'shop-glyph' }, itemGlyph(o.kind)),
+        h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, ITEM_EFFECT[itemBase(o.kind)] ?? o.text)),
         h('span', { class: 'dim small' }, `In stash: ${have}`),
         h(
           'button',
@@ -279,33 +297,54 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 // ---- tavern
 
 function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  el.append(stationHead('Tavern', 'Sellswords, sneaks and hedge mages, for a price. Offers change after every delve.'));
+  const hire = needsHire(s);
+  el.append(stationHead('Tavern', hire ? `Lord Hobart can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.` : 'Blades, bows, sneaks and spellcasters, for a price. Offers change after every delve.'));
   const grid = h('div', { class: 'recruits' });
   if (!s.campaign.recruits.length) grid.append(h('p', { class: 'dim' }, 'Nobody looking for work. Come back after the next delve.'));
-  for (const r of s.campaign.recruits) {
-    const hr = r.hero;
-    grid.append(
-      h(
-        'div',
-        { class: 'recruit' },
-        h('div', { class: 'rc-head' }, classBadge(hr.cls), h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `Level ${hr.level} ${CLASS_NAME[hr.cls]}`))),
-        h('p', { class: 'small' }, CLASS_BLURB[hr.cls]),
-        h('div', { class: 'rc-stats small num' }, `HP ${hr.maxHp} · Might ${hr.stats.might} · Finesse ${hr.stats.finesse} · Wits ${hr.stats.wits}`),
-        h(
-          'button',
-          {
-            class: 'btn btn-small btn-primary',
-            disabled: s.campaign.gold < r.price,
-            onclick: async () => {
-              if (await host.send({ type: 'hire', heroId: hr.id })) sfx.play('coin');
-            },
-          },
-          `Hire · ${r.price}`,
-        ),
-      ),
-    );
-  }
+  for (const r of s.campaign.recruits) grid.append(recruitCard(r.hero, r.price, s, host));
   el.append(grid);
+  if (!hire)
+    el.append(h('div', { class: 'screen-actions' }, h('button', { class: 'btn', onclick: () => host.setStation('board') }, 'To the bounty board')));
+}
+
+function recruitCard(hr: Hero, price: number, s: GameState, host: ScreenHost): HTMLElement {
+  const st = hr.stats;
+  const bar = (label: string, v: number) => h('div', { class: 'rc-stat' }, h('span', { class: 'dim' }, label), h('span', { class: 'rc-bar' }, h('i', { style: `width:${Math.min(100, v)}%` })), h('b', { class: 'num' }, `${v}`));
+  // The engine's class text first; the UI's own tables as fallback.
+  let info: ReturnType<Engine['classInfo']> | null = null;
+  try {
+    info = host.engine.classInfo(hr.cls);
+  } catch {
+    info = null;
+  }
+  const role = info?.role || CLASS_ROLE[hr.cls as keyof typeof CLASS_ROLE] || '';
+  const gear = info ? `${info.weapon} · Armor ${info.armor}${info.mana ? ` · Mana ${info.mana}` : ''}` : (CLASS_GEAR[hr.cls as keyof typeof CLASS_GEAR] ?? '');
+  const kit: HTMLElement[] = info?.abilities.length
+    ? info.abilities.map((line) => {
+        const m = /^([^:(]+)(\([^)]*\))?:?\s*(.*)$/.exec(line);
+        return m ? h('li', null, h('b', null, m[1]!.trim()), m[2] ? h('span', { class: 'rc-cost' }, m[2].slice(1, -1)) : '', h('span', null, m[3] ?? '')) : h('li', null, h('span', null, line));
+      })
+    : (CLASS_KIT[hr.cls as keyof typeof CLASS_KIT] ?? []).map(([name, cost, text]) => h('li', null, h('b', null, name), h('span', { class: 'rc-cost' }, cost), h('span', null, text)));
+  return h(
+    'div',
+    { class: `recruit cls-${hr.cls}` },
+    h('div', { class: 'rc-head' }, classBadge(hr.cls), h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, `Level ${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP`))),
+    h('p', { class: 'rc-role' }, role),
+    h('div', { class: 'rc-stats small' }, bar('Might', st.might), bar('Finesse', st.finesse), bar('Wits', st.wits), bar('Nerve', st.nerve)),
+    h('div', { class: 'rc-gear small dim' }, gear),
+    kit.length ? h('ul', { class: 'rc-kit small' }, ...kit) : '',
+    h(
+      'button',
+      {
+        class: 'btn btn-small btn-primary',
+        disabled: s.campaign.gold < price,
+        onclick: async () => {
+          if (await host.send({ type: 'hire', heroId: hr.id })) sfx.play('coin');
+        },
+      },
+      `Hire · ${price}`,
+    ),
+  );
 }
 
 // ---- infirmary
@@ -350,7 +389,7 @@ function stashStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   const worth = host.engine.value(valuables);
   el.append(stationHead('Stash', `${gold(c.gold)} gold in the chest.`));
   if (!c.stash.length) el.append(h('p', { class: 'dim' }, 'Nothing but dust.'));
-  else el.append(h('ul', { class: 'stash-list' }, ...groupItems(c.stash).map(([it, n]) => h('li', null, h('span', { class: 'shop-glyph' }, ITEM_GLYPH[it.kind]), itemLabel(it), n > 1 ? h('span', { class: 'dim' }, ` ×${n}`) : ''))));
+  else el.append(h('ul', { class: 'stash-list' }, ...groupItems(c.stash).map(([it, n]) => h('li', null, h('span', { class: 'shop-glyph' }, itemGlyph(it.kind)), itemLabel(it), n > 1 ? h('span', { class: 'dim' }, ` ×${n}`) : ''))));
   el.append(
     h(
       'div',
@@ -389,7 +428,7 @@ function memorialStation(el: HTMLElement, s: GameState): void {
     el.append(h('p', { class: 'dim' }, 'No names yet. Keep it that way.'));
     return;
   }
-  el.append(h('ul', { class: 'memorial' }, ...s.campaign.fallen.map((f) => h('li', null, classBadge(f.cls), h('b', null, f.name), h('span', { class: 'dim small' }, ` L${f.level} ${CLASS_NAME[f.cls]} · ${f.where} · delve ${f.delve}`)))));
+  el.append(h('ul', { class: 'memorial' }, ...s.campaign.fallen.map((f) => h('li', null, classBadge(f.cls), h('b', null, f.name), h('span', { class: 'dim small' }, ` L${f.level} ${className(f.cls)} · ${f.where} · delve ${f.delve}`)))));
 }
 
 // ---- prepare
@@ -456,7 +495,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         },
         h('span', { class: 'tick' }, on ? '✔' : ''),
         classBadge(hr.cls),
-        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, hr.wounded ? `Wounded (${hr.wounded})` : `L${hr.level} ${CLASS_NAME[hr.cls]} · ${hr.maxHp} HP`)),
+        h('div', null, h('b', null, hr.name), h('div', { class: 'dim small' }, hr.wounded ? `Wounded (${hr.wounded})` : `L${hr.level} ${className(hr.cls)} · ${hr.maxHp} HP`)),
       ),
     );
   }
@@ -487,7 +526,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
               save();
             },
           },
-          ITEM_GLYPH[it.kind],
+          itemGlyph(it.kind),
           ' ',
           itemLabel(it),
           ' ×',
@@ -511,7 +550,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
               save();
             },
           },
-          `+ ${ITEM_GLYPH[it.kind]} ${it.name}`,
+          `+ ${itemGlyph(it.kind)} ${it.name}`,
         ),
       );
     }
@@ -529,17 +568,24 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   });
   el.append(h('h3', { class: 'prep-h' }, 'Entrance'), h('div', { class: 'prep-contracts' }, ...ents));
 
+  let problem: string | null = null;
+  try {
+    problem = host.engine.partyProblem(s, l.heroIds);
+  } catch {
+    problem = null;
+  }
   el.append(
     h(
       'div',
       { class: 'screen-actions sticky-actions' },
-      h('span', { class: 'dim prep-sum' }, `${l.heroIds.length} hero${l.heroIds.length === 1 ? '' : 'es'} · ${contract.bounty} gold bounty`),
+      problem ? h('span', { class: 'neg prep-sum' }, problem) : h('span', { class: 'dim prep-sum' }, `${l.heroIds.length} hero${l.heroIds.length === 1 ? '' : 'es'} · ${contract.bounty} gold bounty`),
       h('button', { class: 'btn btn-ghost', onclick: () => host.setStation('board') }, 'Back to the board'),
       h(
         'button',
         {
           class: 'btn btn-primary btn-big btn-delve',
-          disabled: !l.heroIds.length,
+          disabled: !l.heroIds.length || !!problem,
+          title: problem ?? '',
           onclick: async () => {
             host.saveLoadout(l);
             const packsOut: Record<string, string[]> = {};

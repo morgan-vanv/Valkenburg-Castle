@@ -5,3 +5,4 @@
 - **Hiring or allying with rival crews** (from the V3 GDD).
 
 Castle redesign pitch: https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd
+- **Thin walls (visual only):** done in V3.2 style pass (spec 15.8). Walls along hex edges as a *gameplay* model (tiles between edges) remains deferred.

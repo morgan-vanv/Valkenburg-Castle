@@ -99,6 +99,8 @@ export function roll(c: Ctx, who: string, what: string, slots: number, p: number
 const SINGLE: Record<ItemKind, string> = {
   gold: 'Gold', gem: 'Gem', jewelry: 'Jewelry', torch: 'Torch', potion: 'Potion', rope: 'Rope',
   charge: 'Blasting charge', heirloom: 'Heirloom', hoard: 'Hoard',
+  smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', hook: 'Grappling hook',
+  key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
 };
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {

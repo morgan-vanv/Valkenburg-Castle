@@ -21,3 +21,13 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-24** Exploration reveals layout by line of sight from every step, lit or not; units still need light. The owner found long moves left the map full of holes.
 - **2026-10-24** V3.1: three-level castle from the approved map proposal (pass 2); falls go straight down pit columns; the Dragon is the demo's final boss. The owner wanted verticality, asymmetry and terrain tactics.
 - **2026-10-24** The Hollow's cave mouth is open from the start. Carrying the hoard the length of the Hollow is the cost; a locked-until-found shortcut wasn't worth the extra rules for the demo.
+- **2026-10-24** Design pillar: visual clarity, with intention. Once seen, important things (stairs, objectives, interactables, edges) announce themselves and what you can do with them; markers never appear for unexplored hexes. Driven by play-test: the player couldn't find how to take stairs or why the heirloom wouldn't pick up.
+- **2026-10-24** V3.2 line of sight is permissive: a hex is seen if a line to its center or to any corner (pulled 10% in) is clear, and solid hexes next to seen floor are seen too. The strict center-to-center line left holes beside pillars and walls (owner's screenshot).
+- **2026-10-24** V3.2 dash: a hero who has moved and not acted may move again for their action. Acting first keeps a plain move; climb, jump and grapple still take the whole turn.
+- **2026-10-24** V3.2 a Veil breaks on any attack or push the hero makes (including fireball and gust) or any action of noise 4+; Sleep and the sleep dart are silent and don't break it. Ward reduces monster and Gloam hits only, never falls, fire or breath.
+- **2026-10-24** V3.2 `take` is never silent: an option that can't be done now is returned with a plain-words reason (`ActionOption.blocked`), the contract item is taken first, and the preview names exactly what will be taken.
+- **2026-10-24** V3.2 the Burglar opens chests without spending the action. The spec's "takes and opens chests silently" added nothing to a take that was already free and silent, so the class got a real perk instead.
+- **2026-10-24** Take stairs/lift is hotkey T and wins over Torch's T on that hex (no free letter left; torch is rare while standing on stairs).
+- **2026-10-24** End turn asks once when any hero still has a move or action; a settings checkbox turns it off. Scripts turn it off through `vc.settings.noEndTurnAsk`.
+- **2026-10-24** Interactable hover = ember ring; hazard (pit, trap) = red ring; floor = parchment. Tooltip form is "Thing · what you can do".
+- **2026-10-24** Beacon colours by contract: recover gold, rescue green, slay red (diorama BEACON_COLOR and .beacon-tag CSS).

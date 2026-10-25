@@ -24,3 +24,7 @@ You are one of three agents building V3 of Valkenburg Castle ("Hobart's Revenge"
 ## Final report
 
 When done, reply with: what works, what's stubbed or missing, contract requests, and how to run/test your part. Keep it short.
+
+## Testing cost (owner, 2026-10-24 evening)
+
+Be sparing and deliberate with screenshot-based testing; it's expensive. Prefer, in order: typecheck, unit tests, the sim, headless scripts that assert state or DOM text without images, the stress bot for console errors. Take screenshots only when the look itself is the question, at most a handful per task, reduced scale where possible, and one before/after pair for a report.

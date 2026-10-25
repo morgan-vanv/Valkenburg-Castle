@@ -56,6 +56,8 @@ if (tour === 'full') {
   await snap('02-quartermaster');
   await click('.station:has-text("Tavern")');
   await snap('03-tavern');
+  // V3.2: Hobart starts alone; hire the first two recruits we can afford.
+  for (let i = 0; i < 2; i++) await click('.recruit button:not([disabled]) >> nth=0');
   await click('.station:has-text("Bounty board")');
 }
 await click('.contract >> nth=0 >> text=Take the job');

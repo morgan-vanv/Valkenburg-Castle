@@ -12,7 +12,7 @@ import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v31';
+export const SAVE_KEY = 'vc.save.v32';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -33,8 +33,26 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   charge: 'click',
   guard: 'sword',
   winch: 'winch',
+  overwatch: 'click',
+  knockback: 'arrow',
+  throwCharge: 'whoosh',
+  dig: 'chop',
+  fireball: 'fire',
+  veil: 'spell',
+  sleep: 'spell',
+  blink: 'whoosh',
+  ward: 'spell',
+  gust: 'whoosh',
+  smoke: 'whoosh',
+  glue: 'whoosh',
+  dart: 'arrow',
+  caltrops: 'coin',
+  firecracker: 'whoosh',
+  key: 'pick',
+  oil: 'torch',
+  grapple: 'creak',
 };
-const LOADOUT_KEY = 'vc.loadout.v31';
+const LOADOUT_KEY = 'vc.loadout.v32';
 
 export class App {
   private state: GameState | null = null;
@@ -189,7 +207,7 @@ export class App {
     const res = this.engine.apply(this.engine.newGame(seed), { type: 'newCampaign', seed });
     const s = res.error ? this.engine.newGame(seed) : res.state;
     this.state = s;
-    this.station = 'board';
+    this.station = this.needsHire(s) ? 'tavern' : 'board';
     this.loadout = null;
     sfx.play('horn', { pitch: 0.8, gain: 0.5 });
     this.save();
@@ -239,7 +257,7 @@ export class App {
     const host = this.host();
     switch (s.stage) {
       case 'camp':
-        if (stageChanged) this.station = 'board';
+        if (stageChanged) this.station = this.needsHire(s) ? 'tavern' : 'board';
         host.station = this.station;
         return campScreen(this.screen, s, host);
       case 'summary':
@@ -309,8 +327,27 @@ export class App {
     const wait = (s: number) => clock.wait(s);
     const instant = () => this.settings.speed === 0 && !this.hurry;
     void before;
+    let world = false;
+    let panned = false;
     for (const e of events) {
       if (!this.root.isConnected) return;
+      // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
+      if (world && !instant()) {
+        const at = this.enemyFocus(e);
+        if (at) {
+          await this.dio.panTo(at);
+          panned = true;
+        }
+      }
+      if (e.type === 'phase') {
+        if (e.phase === 'world') world = true;
+        else {
+          world = false;
+          if (panned) this.returnToSelected();
+          panned = false;
+        }
+      }
+      if (e.type === 'moved' && world && !this.isHero(e.id) && !instant() && this.enemyFocus(e)) this.dio.setFollow(e.id);
       switch (e.type) {
         case 'say':
           this.hud.log(e.text);
@@ -472,6 +509,33 @@ export class App {
           this.hud.log('The winch groans. The lift runs.');
           await this.dio.playEvent(e);
           continue;
+        case 'thrown':
+          await this.dio.playEvent(e);
+          if (e.kind === 'firecracker') sfx.play('explosion', { pitch: 2.2, gain: 0.5 });
+          else if (e.kind === 'smoke' || e.kind === 'glue') sfx.play('whoosh', { pitch: 0.7, gain: 0.5 });
+          else if (e.kind === 'caltrops') sfx.play('coin', { pitch: 0.6, gain: 0.5 });
+          continue;
+        case 'cast': {
+          const shot = e.spell === 'overwatch' || e.spell === 'knockback';
+          sfx.play(e.spell === 'fireball' ? 'fire' : shot ? 'arrow' : 'spell', { pitch: e.spell === 'fireball' ? 0.7 : 1 });
+          if (e.spell === 'overwatch') this.hud.log(`${this.hud.nameOf(e.by)} fires from overwatch!`, this.isHero(e.by) ? 'log-roll' : 'log-enemy');
+          await this.dio.playEvent(e);
+          if (e.spell === 'fireball') sfx.play('explosion', { pitch: 1.3, gain: 0.6 });
+          continue;
+        }
+        case 'blinked':
+          sfx.play('whoosh', { pitch: 1.6, gain: 0.5 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'dug':
+          sfx.play('chop', { pitch: 0.7 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'caltrops':
+          sfx.play('hurt', { pitch: 1.4, gain: 0.5 });
+          this.hud.log(`${this.hud.nameOf(e.id)} steps on caltrops.`);
+          await this.dio.playEvent(e);
+          continue;
         case 'out':
           this.hud.log(`${this.hud.nameOf(e.id)} is out.`);
           await this.dio.playEvent(e);
@@ -480,6 +544,64 @@ export class App {
           await this.dio.playEvent(e);
       }
     }
+    if (panned) this.returnToSelected();
+  }
+
+  /** Hobart alone (15.3): the camp opens on the tavern. */
+  private needsHire(s: GameState): boolean {
+    return !s.campaign.roster.some((x) => x.cls !== 'hobart' && x.wounded === 0);
+  }
+
+  /** Where the camera should go for a world-phase event, or null when nobody can see it. */
+  private enemyFocus(e: GameEvent): import('../game/hex').Pos | null {
+    const d = this.dio;
+    const enemy = (id: string) => !this.isHero(id);
+    switch (e.type) {
+      case 'moved': {
+        if (!enemy(e.id)) return null;
+        const from = d.unitPos(e.id);
+        const seen = [from, ...e.path].find((p) => d.canSee(p));
+        return seen ?? null;
+      }
+      case 'roll':
+        return enemy(e.who) && d.canSee(d.unitPos(e.who)) ? d.unitPos(e.who) : null;
+      case 'hit':
+      case 'miss': {
+        if (!enemy(e.attacker)) return null;
+        const t = d.unitPos(e.target);
+        if (this.isHero(e.target)) return t;
+        const a = d.unitPos(e.attacker);
+        return d.canSee(a) ? a : d.canSee(t) ? t : null;
+      }
+      case 'stolen':
+        return d.unitPos(e.from);
+      case 'shoved':
+      case 'fell':
+        return this.isHero(e.id) || d.canSee(e.from) ? e.from : null;
+      case 'breath':
+        return e.hexes.find((p) => d.canSee(p)) ?? (d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null);
+      case 'awake':
+        return d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
+      case 'spawned':
+        return d.canSee(e.at) ? e.at : null;
+      case 'caltrops':
+        return d.canSee(e.at) ? e.at : null;
+      case 'cast':
+        // Overwatch shots fire in the world phase: show them.
+        return d.canSee(e.at) ? (e.at ?? null) : d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null;
+      case 'chestOpened':
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  /** End of the world phase: back to the selected hero. */
+  private returnToSelected(): void {
+    const s = this.state;
+    const id = this.hud.selectedId;
+    const h = s?.delve?.heroes.find((x) => x.heroId === id && x.status === 'active') ?? s?.delve?.heroes.find((x) => x.status === 'active');
+    if (h) this.dio.lookAt(h.at);
   }
 
   /** Debug and scripting hooks for screenshots. */

@@ -12,10 +12,24 @@ import type {
   Command,
   GameState,
   Hero,
+  HeroClass,
   Intent,
   ShopOffer,
   Stat,
 } from './types';
+
+/** Recruit card text for a class (V3.2). */
+export interface ClassInfo {
+  name: string;
+  /** e.g. "Quiet: picks locks, sneaks fast." */
+  role: string;
+  weapon: string;
+  armor: number;
+  /** Mana per delve (0 = none). */
+  mana: number;
+  /** One line per ability or spell, e.g. "Fireball (2 mana): radius 1 at range 5, 3 Wits slots, 2 dmg per hit, sets hexes burning." */
+  abilities: string[];
+}
 
 /** One reachable hex for a hero this turn. */
 export interface Reach {
@@ -24,6 +38,12 @@ export interface Reach {
   cost: number;
   /** Hexes walked, start excluded, destination last. May cross stairs (level changes mid-path). */
   path: Pos[];
+  /**
+   * True when this is a dash (spec 15.2): the hero has already moved and not acted, so this
+   * second move spends their action. reachable() returns only dash entries then; draw them in
+   * the second colour. Send it as a normal 'move' command.
+   */
+  dash?: boolean;
 }
 
 /** What a risky action will look like before the player commits. */
@@ -49,6 +69,10 @@ export interface RollPreview {
   warning?: string;
   /** The UI must ask the player to confirm before sending this action (drops of more than one level). */
   confirm?: boolean;
+  /** Area actions (fireball, gust, smoke, glue): the hexes affected, for the preview overlay. */
+  hexes?: Pos[];
+  /** Figures (ids) the action will hit or move, e.g. everyone in the fireball, allies included. */
+  affects?: string[];
 }
 
 /** Where a fall from a pit hex ends up. */
@@ -70,6 +94,22 @@ export interface ActionOption {
   targets: ActionTarget[];
   /** True when the action rolls (show a RollPreview per target). */
   rolls: boolean;
+  /**
+   * How the UI picks a target (V3.2): 'self' = no pick (one target), 'ally' = click a hero,
+   * 'enemy' = click a monster/rival, 'hex' = click a hex (throws, fireball, gust, blink, dig...),
+   * 'item' = pick from the pack (drop/give/torch), 'other' = pick from `targets` as before.
+   */
+  pick: 'self' | 'ally' | 'enemy' | 'hex' | 'item' | 'other';
+  /** Hex-target area actions: radius of the area around the picked hex to highlight (fireball/gust/smoke/glue 1). */
+  area?: number;
+  /** Mana it costs (spells). */
+  mana?: number;
+  /**
+   * Spec 15.7: the option applies here but can't be done right now; this is the reason in plain
+   * words ("Heirloom needs 2 pack slots. Drop something first."). Show it greyed with the reason
+   * on hover and as a flash on click. `targets` still lists what it would apply to.
+   */
+  blocked?: string;
 }
 
 export interface Visibility {
@@ -110,6 +150,10 @@ export interface Engine {
 
   // camp queries
   shop(): ShopOffer[];
+  /** V3.2: one-line role and the ability/spell lines for a class, for recruit cards. */
+  classInfo(cls: HeroClass): ClassInfo;
+  /** V3.2: why startDelve would refuse this party now (e.g. "Hire at least one hero at the tavern."), or null. */
+  partyProblem(state: GameState, heroIds: string[]): string | null;
   heroById(state: GameState, id: string): Hero | undefined;
   /** Gold value of a list of items (gold + valuables). */
   value(items: { kind: string; amount: number }[]): number;
