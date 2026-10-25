@@ -731,6 +731,11 @@ export function worldPhase(c: Ctx): void {
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;
+    // V3.6 (spec 19.3): the night-eye draught wears off.
+    if ((h.nightEyes ?? 0) > 0) {
+      h.nightEyes! -= 1;
+      if (h.nightEyes === 0) say(c, `${heroName(c, h.heroId)}'s night-eye fades.`);
+    }
     if (webbedBefore.has(h.heroId)) {
       h.webbed = false;
       h.dozing = undefined;

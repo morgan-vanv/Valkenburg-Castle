@@ -6,7 +6,7 @@ import type { HeroInDelve } from './types';
 import { CALTROPS_DMG, CLASSES, OVERWATCH_RANGE } from './data';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  armorOf, brightnessAt, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, LIGHT_PENALTY, makeNoise, monsterArmor, nameOf, occupant,
+  armorOf, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
   roll,
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, monsterSees, pathTo, seesHex, within } from './world';
@@ -191,7 +191,7 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     const cls = CLASSES[def.cls];
     let slots = cls.weapon.slots;
     if (distance(h.at, at) <= 1) slots -= 1;
-    let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + LIGHT_PENALTY[brightnessAt(c.w, c, h.at, lit)];
+    let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + lightPenaltyFor(c.w, c, h, lit);
     const m = c.d.monsters.find((x) => x.id === id);
     if (m?.awareness === 'asleep') p += 20;
     say(c, `${heroName(c, h.heroId)} looses an arrow at ${nameOf(c, id)}.`);

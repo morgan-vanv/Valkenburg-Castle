@@ -274,7 +274,16 @@ export const SHOP: ShopOffer[] = [
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
   { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
+  // V3.6 (spec 19.2, 19.3).
+  { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Anyone picks locks: 2 Finesse slots. Reusable.', needs: 'smith' },
+  { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink (an action): 8 rounds of full sight and no dark penalty to rolls. The dark still hunts.' },
 ];
+
+// V3.6 (spec 19.2, 19.3).
+/** Lockpicks: a non-Burglar picks with this many Finesse slots (the Burglar's table on 2 slots). */
+export const LOCKPICK_SLOTS = 2;
+/** Night-eye draught: rounds without dark penalties to sight and rolls. */
+export const NIGHTSIGHT_ROUNDS = 8;
 
 // Section 15 numbers.
 /** Spec 17.1: enough for two level-1 hires and nothing else, or one hire and a few cheap items. */
@@ -363,28 +372,28 @@ export interface StoryDef {
 
 export const STORIES: StoryDef[] = [
   {
-    id: 'surgeon', kind: 'rescue', siteId: 'l1-rescue-library', subject: 'Brother Aldric', who: 'Brother Aldric',
-    brief: 'Brother Aldric, the old castle surgeon, is held in the library.', unlocks: 'Unlocks the infirmary',
+    id: 'surgeon', kind: 'rescue', siteId: 'l1-story-chapel', subject: 'Brother Aldric', who: 'Brother Aldric',
+    brief: 'Brother Aldric slipped back in for herbs from the physic garden and was taken; the orcs keep him in the chapel to patch up their wounded.', unlocks: 'Unlocks the infirmary',
     line: 'Brother Aldric sets up in the old chapel. The infirmary is open.',
   },
   {
-    id: 'innkeeper', kind: 'rescue', siteId: 'l1-rescue-library', subject: 'Old Wim', who: 'Old Wim',
-    brief: 'Old Wim, who kept the Gilded Flagon, is held in the library.', unlocks: 'Unlocks the Gilded Flagon',
+    id: 'innkeeper', kind: 'rescue', siteId: 'l1-story-kitchens', subject: 'Old Wim', who: 'Old Wim',
+    brief: 'Old Wim never got out: the orcs keep him at the spit in the kitchens, cooking for the warband.', unlocks: 'Unlocks the Gilded Flagon',
     line: 'Old Wim lights the hearth of the Gilded Flagon. Better blades drink there now.',
   },
   {
-    id: 'smith', kind: 'rescue', siteId: 'l2-rescue-cell-west', subject: 'Gerda the smith', who: 'Gerda the smith',
-    brief: 'Gerda the smith is chained in the cellblock.', unlocks: 'Unlocks the forge and metalwork',
+    id: 'smith', kind: 'rescue', siteId: 'l2-story-forge', subject: 'Gerda the smith', who: 'Gerda the smith',
+    brief: 'Gerda barred the forge the night the castle fell and has held it since, trading mended blades for food.', unlocks: 'Unlocks the forge and metalwork',
     line: 'Gerda rekindles the forge. Steel and metalwork are for sale again.',
   },
   {
-    id: 'copper', kind: 'recover', siteId: 'l2-recover-forge', subject: 'the brewing copper', who: 'the brewing copper',
-    brief: 'Wim\'s brewing copper lies in the forge. It is heavy: its carrier moves 3.', unlocks: 'Wim brews the first ales',
+    id: 'copper', kind: 'recover', siteId: 'l2-story-barracks', subject: 'the brewing copper', who: 'the brewing copper',
+    brief: 'The orcs dragged Wim\'s brewing copper to the barracks to brew their own swill; it sits among the sleeping squad. It is heavy: its carrier moves 3.', unlocks: 'Wim brews the first ales',
     line: 'The brewing copper is back at the Flagon. Wim starts brewing.', slots: 2, heavy: true,
   },
   {
     id: 'caskbook', kind: 'recover', siteId: 'l3-recover-drain', subject: 'Wim\'s cask book', who: 'Wim\'s cask book',
-    brief: 'Wim\'s cask book was lost in the Drain.', unlocks: 'The strong ales and seasoned recruits',
+    brief: 'Wim\'s cask book was lost in the Drain when the cellars flooded.', unlocks: 'The strong ales and seasoned recruits',
     line: 'Wim pores over his cask book by the fire. The strong ales are back.', slots: 1,
   },
 ];

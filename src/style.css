@@ -3254,3 +3254,60 @@ input.seed {
 .pl-foot .dim { margin-right: auto; }
 .pl-fight { min-width: 96px; }
 .contract.story .ct-top { padding-right: 34px; }
+
+/* ================================================================ V3.6 play-test fixes (spec 19) */
+
+/* 19.5: "Way out" markers over explored exits; the entrance says you came in here */
+.link-tag.exit-tag {
+  border-color: #cfe6ff;
+  color: #f2f8ff;
+  background: rgba(10, 18, 26, 0.86);
+  padding-left: 18px;
+  animation-duration: 2.8s;
+}
+.link-tag.exit-tag::before {
+  content: '⇱';
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  color: #cfe6ff;
+}
+.link-tag.exit-tag.entrance { border-style: double; border-left-width: 4px; }
+.link-tag.exit-tag.go {
+  border-color: #ffd36a;
+  color: #fff6d8;
+  box-shadow: 0 0 14px rgba(255, 211, 106, 0.35);
+  animation: link-bob 1.6s ease-in-out infinite, exit-go 1.6s ease-in-out infinite;
+}
+.link-tag.exit-tag.go::before { color: #ffd36a; }
+@keyframes exit-go {
+  50% { box-shadow: 0 0 22px rgba(255, 211, 106, 0.6); }
+}
+
+/* 19.5: the Leave button: the one prominent thing when standing on a way out */
+.act.act-leave {
+  min-width: 150px;
+  background: linear-gradient(180deg, #2a2616, #15130a);
+  border-color: #ffd36a;
+  color: #fff3d0;
+  box-shadow: 0 0 0 1px rgba(255, 211, 106, 0.25), 0 0 18px rgba(255, 211, 106, 0.2);
+  animation: leaveglow 1.8s ease-in-out infinite;
+}
+.act.act-leave:hover:not(:disabled) { border-color: #ffe9a8; color: #fff; }
+.act.act-leave .act-glyph { color: #ffd36a; }
+.act.act-leave .act-label { white-space: normal; text-align: center; line-height: 1.1; max-width: 120px; }
+.act.act-leave.blocked { animation: none; box-shadow: none; }
+@keyframes leaveglow {
+  50% { box-shadow: 0 0 0 1px rgba(255, 233, 168, 0.5), 0 0 24px rgba(255, 211, 106, 0.45); }
+}
+
+/* 19.5: the goal box once the prize is in hand */
+.goal-where.goal-out, .goal-where.goal-out .goal-diamond { color: #fff3d0; }
+.goal-where.goal-out .goal-diamond { color: #ffd36a; font-size: 0.85rem; }
+.hud-goal.goal-go b { color: var(--parch-dim); }
+.hud-goal.goal-go .goal-where { font-size: 0.9rem; }
+
+/* 19.3: the night-eye badge */
+.chip.night { border-color: #6a7fa0; color: #cfe0ff; }

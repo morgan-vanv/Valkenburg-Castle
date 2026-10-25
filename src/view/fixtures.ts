@@ -44,11 +44,11 @@ export function fixtureCampaign(): GameState['campaign'] {
 
 /** V3.5 (18.3): the story contracts the fixture pins, by what is home. */
 const STORY_CONTRACTS: { story: StoryId; kind: 'rescue' | 'recover'; title: string; brief: string; siteId: string; level: number; bounty: number; needs: (v: GameState['campaign']['village'], rep: number) => boolean }[] = [
-  { story: 'surgeon', kind: 'rescue', title: 'Rescue Brother Aldric', brief: 'The old surgeon is held in the library.', siteId: 'l1-rescue-library', level: 1, bounty: 50, needs: () => true },
-  { story: 'innkeeper', kind: 'rescue', title: 'Rescue Old Wim', brief: 'The innkeeper of the Gilded Flagon was taken to the library.', siteId: 'l1-rescue-library', level: 1, bounty: 50, needs: (_v, rep) => rep >= 1 },
-  { story: 'smith', kind: 'rescue', title: 'Rescue Gerda the smith', brief: 'Gerda is chained in the cellblock on Level 2.', siteId: 'l2-rescue-cell-west', level: 2, bounty: 75, needs: (_v, rep) => rep >= 1 },
-  { story: 'copper', kind: 'recover', title: 'Recover the brewing copper', brief: "Wim's copper sits in the forge on Level 2. It is heavy.", siteId: 'l2-recover-forge', level: 2, bounty: 75, needs: (v) => v.innkeeper },
-  { story: 'caskbook', kind: 'recover', title: "Recover Wim's cask book", brief: 'The cask book was lost in the Drain on Level 3.', siteId: 'l3-recover-drain', level: 3, bounty: 100, needs: (v) => v.copper },
+  { story: 'surgeon', kind: 'rescue', title: 'Rescue Brother Aldric', brief: 'Brother Aldric slipped back into the castle to pick herbs from the physic garden and was taken. The orcs keep him in the chapel to patch up their wounded.', siteId: 'l1-story-chapel', level: 1, bounty: 50, needs: () => true },
+  { story: 'innkeeper', kind: 'rescue', title: 'Rescue Old Wim', brief: 'Old Wim never got out. The orcs keep him at the spit in the kitchens, cooking for the warband.', siteId: 'l1-story-kitchens', level: 1, bounty: 50, needs: (_v, rep) => rep >= 1 },
+  { story: 'smith', kind: 'rescue', title: 'Rescue Gerda the smith', brief: 'Gerda barred the forge door the night the castle fell and has held it since, trading mended blades for food.', siteId: 'l2-story-forge', level: 2, bounty: 75, needs: (_v, rep) => rep >= 1 },
+  { story: 'copper', kind: 'recover', title: 'Recover the brewing copper', brief: "The orcs dragged Wim's brewing copper to the barracks to brew their own swill. It sits among the sleeping squad.", siteId: 'l2-story-barracks', level: 2, bounty: 75, needs: (v) => v.innkeeper },
+  { story: 'caskbook', kind: 'recover', title: "Recover Wim's cask book", brief: "Wim's cask book was lost in the Drain when the cellars flooded.", siteId: 'l3-recover-drain', level: 3, bounty: 100, needs: (v) => v.copper },
 ];
 
 /** Pin the story contracts whose prerequisites are met and that aren't done. */
@@ -99,7 +99,8 @@ export function fixtureDelve(castle: CastleDef): GameState {
     at: spots[i]!,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
-    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }] : id === 'keven' ? [item('i11', 'potion', 'Potion')] : [],
+    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i14', 'lockpicks', 'Lockpicks')] : [],
+    nightEyes: id === 'brann' ? 5 : undefined,
     ale: id === 'keven' ? ('reserve' as const) : id === 'pim' ? ('smuggler' as const) : undefined,
     status: 'active' as const,
     bleed: 0,
@@ -186,8 +187,10 @@ export function fixtureEngine(castle: CastleDef): Engine {
     { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
     { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
     { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
+    { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots.', needs: 'smith' },
+    { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink: 8 rounds without dark penalties.' },
   ];
-  const shopFor = (s?: GameState): ShopOffer[] => shop.map((o) => (o.needs === 'smith' && !s?.campaign.village?.smith ? { ...o, locked: 'Needs a smith: rescue Gerda (Level 2, the cellblock).' } : o));
+  const shopFor = (s?: GameState): ShopOffer[] => shop.map((o) => (o.needs === 'smith' && !s?.campaign.village?.smith ? { ...o, locked: 'Needs a smith: rescue Gerda (Level 2, the forge).' } : o));
   const ALES: Omit<AleOffer, 'locked'>[] = [
     { kind: 'glowworm', name: 'Glowworm Pale', price: 15, text: 'Shed light radius 1 for the delve.', needs: 'copper' },
     { kind: 'featherfoot', name: 'Featherfoot', price: 15, text: 'Your first fall deals no damage.', needs: 'copper' },
@@ -281,7 +284,7 @@ export function fixtureEngine(castle: CastleDef): Engine {
         return { state: s, events: [] };
       }
       if (cmd.type === 'heal') {
-        if (!s.campaign.village.surgeon) return { state, events: [], error: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the library).' };
+        if (!s.campaign.village.surgeon) return { state, events: [], error: 'No surgeon in Lowgate. Rescue Brother Aldric (Level 1, the chapel).' };
         const r = s.campaign.roster.find((x) => x.id === cmd.heroId)!;
         const hp = Math.min(r.maxHp - r.hp, Math.floor(s.campaign.gold / 3));
         r.hp += hp;
@@ -289,7 +292,7 @@ export function fixtureEngine(castle: CastleDef): Engine {
         return { state: s, events: [] };
       }
       if (cmd.type === 'upgrade') {
-        if (!s.campaign.village.smith) return { state, events: [], error: 'The forge is cold. Rescue Gerda the smith (Level 2, the cellblock).' };
+        if (!s.campaign.village.smith) return { state, events: [], error: 'The forge is cold. Rescue Gerda the smith (Level 2, the forge).' };
         const r = s.campaign.roster.find((x) => x.id === cmd.heroId)!;
         if (cmd.part === 'weapon') r.weaponTier++;
         else r.armorTier++;
@@ -378,7 +381,10 @@ export function fixtureEngine(castle: CastleDef): Engine {
       if (cmd.type === 'endTurn' && s.delve) {
         s.delve.round++;
         s.delve.light = Math.max(0, s.delve.light - 1);
-        for (const h of s.delve.heroes) h.moved = h.acted = false;
+        for (const h of s.delve.heroes) {
+          h.moved = h.acted = false;
+          if (h.nightEyes) h.nightEyes--;
+        }
         return { state: s, events: [{ type: 'phase', phase: 'world', round: s.delve.round - 1 }, { type: 'light', light: s.delve.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: s.delve.round }] };
       }
       if (cmd.type === 'act' && s.delve) {
@@ -388,6 +394,21 @@ export function fixtureEngine(castle: CastleDef): Engine {
           h.acted = false;
           s.delve.lanternOpen = !s.delve.lanternOpen;
           return { state: s, events: [{ type: 'shutter', open: s.delve.lanternOpen }] };
+        }
+        if (cmd.action === 'leave') {
+          h.acted = false;
+          h.status = 'out';
+          const left = s.delve.heroes.filter((x) => x.status === 'active');
+          if (!left.length) {
+            s.stage = 'summary';
+            s.summary = { contractDone: s.delve.heroes.some((x) => x.pack.some((i) => i.kind === 'heirloom')), bounty: 0, lootValue: 0, survivors: s.delve.heroes.map((x) => x.heroId), wounded: [], dead: [], xp: {}, levelUps: [], notes: [] };
+          }
+          return { state: s, events: [{ type: 'say', text: `${h.heroId} leaves the castle.` }] };
+        }
+        if (cmd.action === 'nightsight') {
+          h.nightEyes = 8;
+          h.pack = h.pack.filter((i) => i.kind !== 'nightsight');
+          return { state: s, events: [{ type: 'say', text: 'The draught goes down. The dark thins.' }] };
         }
         if (cmd.action === 'attack' && cmd.target.id) {
           const m = s.delve.monsters.find((x) => x.id === cmd.target.id)!;
@@ -446,6 +467,8 @@ export function fixtureEngine(castle: CastleDef): Engine {
       const d = state.delve!;
       const h = d.heroes.find((x) => x.heroId === heroId)!;
       const out: ActionOption[] = [];
+      // Leaving is free (V3.6 19.5): offered on an exit whatever else is spent.
+      if (tile(h.at)?.kind === 'exit') out.push({ action: 'leave', label: 'Leave castle', targets: [{ at: h.at }], rolls: false, pick: 'self' });
       if (h.acted) {
         const crew = d.rivals?.members.filter((m) => m.hp > 0 && !m.goneOut && m.at.level === h.at.level && distance(m.at, h.at) <= 4) ?? [];
         if (crew.length) out.push({ action: 'parley', label: 'Parley', targets: crew.map((m) => ({ id: m.id, at: m.at })), rolls: false, pick: 'enemy' });
@@ -459,6 +482,7 @@ export function fixtureEngine(castle: CastleDef): Engine {
         out.push({ action: 'kindle', label: 'Kindle', targets: [{}], rolls: false, pick: 'self', mana: 1 });
       }
       if (h.pack.some((i) => i.kind === 'torch')) out.push({ action: 'torch', label: 'Light torch', targets: [{}], rolls: false, pick: 'self' });
+      if (h.pack.some((i) => i.kind === 'nightsight')) out.push({ action: 'nightsight', label: 'Night-eye draught', targets: [{ id: h.heroId }], rolls: false, pick: 'self' });
       const crew = d.rivals?.members.filter((m) => m.hp > 0 && !m.goneOut && m.at.level === h.at.level && distance(m.at, h.at) <= 4) ?? [];
       if (crew.length) out.push({ action: 'parley', label: 'Parley', targets: crew.map((m) => ({ id: m.id, at: m.at })), rolls: false, pick: 'enemy' });
       return out;

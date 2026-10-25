@@ -17,7 +17,7 @@ import { UnitView, type UnitSide } from './unit';
 import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
-import { linkEnds, linkMarker } from './links';
+import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
 
 const MAX_LIGHTS = 12;
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
@@ -134,7 +134,13 @@ export class Diorama {
   /** 15.7: pulsing ring on the stairs/lift hex the selected hero stands on. */
   private linkPulse: THREE.Mesh;
   /** 15.7: floating level markers over explored stairs and lift ends ("↓ L2"). */
-  private linkTags: { el: HTMLElement; pos: Pos; at: THREE.Vector3; key: string; level: number; lift: boolean }[] = [];
+  private linkTags: { el: HTMLElement; pos: Pos; at: THREE.Vector3; key: string; level: number; lift: boolean; exit?: boolean }[] = [];
+  /** V3.6 (19.5): the exit the party came in by; its marker says so. */
+  private entrance: Pos | null = null;
+  /** V3.6 (19.5): the pulse under a hero standing on an exit, and the soft rings on known exits once the prize is in hand. */
+  private exitPulse: THREE.Mesh;
+  private exitRings = new THREE.Group();
+  private exitRingsKey = '';
   /** 15.7: the contract objective's beacon (light pillar + DOM diamond) once its hex is explored. */
   private beacon = new THREE.Group();
   private beaconTag: HTMLElement;
@@ -232,6 +238,9 @@ export class Diorama {
     this.linkPulse = new THREE.Mesh(hexRing(0.62, 0.94), new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.linkPulse.visible = false;
     this.linkPulse.renderOrder = 4;
+    this.exitPulse = new THREE.Mesh(hexRing(0.62, 0.94), new THREE.MeshBasicMaterial({ color: 0xd8ecff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.exitPulse.visible = false;
+    this.exitPulse.renderOrder = 4;
     // 16.2: creeping darkness tiles (Gloam) and dark rings under unlit heroes.
     this.gloamEdge = new THREE.InstancedMesh(new THREE.CircleGeometry(0.9, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x04030a, transparent: true, opacity: 0.5, depthWrite: false }), 400);
     this.gloamEdge.count = 0;
@@ -241,7 +250,7 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -327,6 +336,15 @@ export class Diorama {
       this.fx.appendChild(el);
       this.linkTags.push({ el, pos: l.at, at: this.worldOf(l.at, 1.3), key: posKey(l.at), level: l.at.level, lift: l.kind === 'lift' });
     }
+    // V3.6 (19.5): a "Way out" marker over every exit hex, shown once explored (the entrance always is).
+    for (const e of exitList(def, this.entrance)) {
+      const el = document.createElement('div');
+      el.className = `link-tag exit-tag ${e.entrance ? 'entrance' : ''}`;
+      el.textContent = exitMarker(e);
+      el.title = e.name;
+      this.fx.appendChild(el);
+      this.linkTags.push({ el, pos: e.at, at: this.worldOf(e.at, 1.9), key: posKey(e.at), level: e.at.level, lift: false, exit: true });
+    }
     this.showLevel(def.levels[0]?.level ?? 1, true);
   }
 
@@ -338,6 +356,30 @@ export class Diorama {
     }
     this.linkPulse.visible = true;
     this.linkPulse.position.copy(this.worldOf(at, 0.06));
+  }
+
+  /** V3.6 (19.5): which exit the party came in by; its marker reads "Way out · you came in here". */
+  setEntrance(p: Pos | null): void {
+    if ((p && this.entrance && samePos(p, this.entrance)) || (!p && !this.entrance)) return;
+    this.entrance = p;
+    if (!this.castle) return;
+    for (const t of this.linkTags) {
+      if (!t.exit) continue;
+      const e = exitList(this.castle, p, t.level).find((x) => samePos(x.at, t.pos));
+      if (!e) continue;
+      t.el.classList.toggle('entrance', e.entrance);
+      t.el.textContent = exitMarker(e);
+    }
+  }
+
+  /** V3.6 (19.5): pulse the exit hex the selected hero stands on (same pattern as the stairs). */
+  showExitPulse(at: Pos | null): void {
+    if (!at || at.level !== this.shownLevel) {
+      this.exitPulse.visible = false;
+      return;
+    }
+    this.exitPulse.visible = true;
+    this.exitPulse.position.copy(this.worldOf(at, 0.06));
   }
 
   /** 15.7: the hover ring says whether the hex is something you can use (ember), a hazard (red) or floor. */
@@ -625,6 +667,17 @@ export class Diorama {
       this.linkPulse.scale.setScalar(1 + k * 0.22);
       (this.linkPulse.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.55 * (1 - k);
     }
+    if (this.exitPulse.visible) {
+      const k = 0.5 + 0.5 * Math.sin(t * 3.2);
+      this.exitPulse.scale.setScalar(1 + k * 0.22);
+      (this.exitPulse.material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.55 * (1 - k);
+    }
+    // 19.5: known exits breathe softly once the prize is in hand.
+    for (const r of this.exitRings.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 1.6 + (r.userData.phase as number));
+      r.scale.setScalar(1 + k * 0.1);
+      ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.32 * k;
+    }
     for (const b of this.beacon.children) {
       const k = 0.5 + 0.5 * Math.sin(t * 1.8 + (b.userData.phase as number));
       if (b.userData.pillar) ((b as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.1 * k;
@@ -854,7 +907,7 @@ export class Diorama {
       for (const v of this.units.values()) if (v.shown && samePos(v.at, l.pos)) occupied = Math.max(occupied, v.height + 0.9);
       const p = this.project(occupied ? l.at.clone().setY(l.at.y + occupied - 1.5) : l.at);
       l.el.style.display = p.behind ? 'none' : '';
-      l.el.classList.toggle('dead', l.lift && !this.liftWorking);
+      if (l.lift) l.el.classList.toggle('dead', !this.liftWorking);
       l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
     if (this.beaconAt) {
@@ -1202,9 +1255,33 @@ export class Diorama {
     this.beaconTag.classList.remove('hidden');
   }
 
+  /**
+   * V3.6 (19.5): once the prize is in hand, every known exit on the shown level gets a soft
+   * pulsing ring (the entrance always counts as known).
+   */
+  private refreshExitRings(): void {
+    const d = this.state?.delve;
+    const go = !!d && !!this.castle && prizeInHand(d);
+    const list = go ? exitList(this.castle!, this.entrance, this.shownLevel).filter((e) => e.entrance || this.vis.explored.has(posKey(e.at))) : [];
+    const key = list.map((e) => posKey(e.at)).join('|');
+    if (key === this.exitRingsKey) return;
+    this.exitRingsKey = key;
+    this.exitRings.clear();
+    for (const t of this.linkTags) if (t.exit) t.el.classList.toggle('go', go);
+    let i = 0;
+    for (const e of list) {
+      const ring = new THREE.Mesh(hexRing(0.58, 0.96), new THREE.MeshBasicMaterial({ color: 0xd8ecff, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending }));
+      ring.position.copy(this.worldOf(e.at, 0.05));
+      ring.userData = { phase: i++ * 1.1 };
+      ring.renderOrder = 3;
+      this.exitRings.add(ring);
+    }
+  }
+
   private refreshProps(): void {
     this.refreshLootGlow();
     this.refreshBeacon();
+    this.refreshExitRings();
     this.refreshRoutes();
     this.refreshGloamEdge();
     this.effects.set(effectsFromState(this.state));
@@ -1276,6 +1353,7 @@ export class Diorama {
     this.showPath(null);
     this.showRipple(null, 0);
     this.linkPulse.visible = false;
+    this.exitPulse.visible = false;
   }
 
   showPath(path: Pos[] | null): void {

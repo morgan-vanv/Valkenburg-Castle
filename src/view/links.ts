@@ -1,10 +1,10 @@
-// Stairs and the lift, as the UI sees them (spec 15.7). Pure: no DOM, no three.js,
+// Stairs, the lift and (V3.6) the exits, as the UI sees them (spec 15.7, 19.5). Pure: no DOM, no three.js,
 // so the headless stairs walk (scripts/v32-stairs-walk.ts) can test the same logic
 // the action bar uses.
 
 import type { Reach } from '../game/api';
-import { samePos, type Pos } from '../game/hex';
-import type { CastleDef, CastleLink } from '../game/types';
+import { distance, hexKey, samePos, type Pos } from '../game/hex';
+import type { CastleDef, CastleLink, Delve } from '../game/types';
 
 export interface LinkInfo {
   kind: CastleLink['kind'];
@@ -73,4 +73,90 @@ export function linkTooltip(castle: CastleDef, l: LinkInfo, liftWorking: boolean
   const where = levelPhrase(castle, l.to.level);
   if (l.kind === 'lift') return liftWorking ? `Lift ${dir} to ${where}. Stand on it, then Take lift.` : `Lift ${dir} to ${where}. Dead until someone works the winch beside it.`;
   return `Stairs ${dir} to ${where}. Stand on them, then Take stairs.`;
+}
+
+// ------------------------------------------------------------ V3.6 (spec 19.5): exits as the way out
+
+
+export interface ExitInfo {
+  at: Pos;
+  /** "the main gate", "the sally port", "the east breach", "the cave mouth". */
+  name: string;
+  /** The party came in by this one. */
+  entrance: boolean;
+}
+
+/** Exit names from the castle data: by room id where the castle names them, else the room, else the level. */
+export function exitName(castle: CastleDef, at: Pos): string {
+  const lv = castle.levels.find((l) => l.level === at.level);
+  const t = lv?.tiles[hexKey(at)];
+  const room = lv?.rooms.find((r) => r.id === t?.room);
+  const id = t?.room ?? '';
+  if (id === 'gate' || id === 'gate-pass') return 'the main gate';
+  if (id === 'sally') return 'the sally port';
+  if (id === 'breach') return 'the east breach';
+  if (at.level === 3) return 'the cave mouth';
+  if (room) return /^the /i.test(room.name) ? room.name.replace(/^The /, 'the ') : `the ${room.name.charAt(0).toLowerCase()}${room.name.slice(1)}`;
+  return 'a way out';
+}
+
+/** Every exit hex (on one level, or all), with the entrance marked. */
+export function exitList(castle: CastleDef, entrance: Pos | null, level?: number): ExitInfo[] {
+  const out: ExitInfo[] = [];
+  for (const lv of castle.levels) {
+    if (level !== undefined && lv.level !== level) continue;
+    for (const [k, t] of Object.entries(lv.tiles)) {
+      if (t.kind !== 'exit') continue;
+      const [q, r] = k.split(',').map(Number);
+      const at: Pos = { level: lv.level, q: q!, r: r! };
+      out.push({ at, name: exitName(castle, at), entrance: !!entrance && samePos(entrance, at) });
+    }
+  }
+  return out;
+}
+
+/** The exit on `at`, if any. */
+export function exitAt(castle: CastleDef, at: Pos, entrance: Pos | null): ExitInfo | null {
+  const lv = castle.levels.find((l) => l.level === at.level);
+  if (lv?.tiles[hexKey(at)]?.kind !== 'exit') return null;
+  return { at, name: exitName(castle, at), entrance: !!entrance && samePos(entrance, at) };
+}
+
+/** Floating marker text. */
+export function exitMarker(e: ExitInfo): string {
+  return e.entrance ? 'Way out · you came in here' : 'Way out';
+}
+
+/** Hover tooltip for an exit hex. */
+export function exitTooltip(e: ExitInfo): string {
+  return `stand here, then Leave the castle${e.entrance ? ' (you came in here)' : ''}`;
+}
+
+/** Spec 19.5: the contract's prize is in hand: heirloom in a pack, the prisoner freed and following, or the Dragon dead. */
+export function prizeInHand(d: Delve): boolean {
+  const k = d.contract;
+  if (k.kind === 'recover') return d.heroes.some((h) => h.status === 'active' && h.pack.some((i) => i.contractId === k.id || i.kind === 'heirloom' || (!!k.story && i.story === k.story)));
+  if (k.kind === 'rescue') return !!d.prisoner && d.prisoner.freed && !d.prisoner.out && !d.prisoner.dead;
+  return !d.monsters.some((m) => m.kind === 'dragon' && m.hp > 0);
+}
+
+/**
+ * The nearest known exit to `from`: on the same level by hex distance, else the entrance or any
+ * known exit on another level (no distance then). `known` says whether a hex has been explored;
+ * the entrance always counts as known.
+ */
+export function nearestExit(castle: CastleDef, from: Pos, known: (p: Pos) => boolean, entrance: Pos | null): { exit: ExitInfo; dist: number | null } | null {
+  const all = exitList(castle, entrance).filter((e) => e.entrance || known(e.at));
+  if (!all.length) return null;
+  const same = all.filter((e) => e.at.level === from.level).map((e) => ({ exit: e, dist: distance(e.at, from) as number | null })).sort((a, b) => a.dist! - b.dist!);
+  if (same.length) return same[0]!;
+  const other = [...all].sort((a, b) => Math.abs(a.at.level - from.level) - Math.abs(b.at.level - from.level) || (a.entrance ? -1 : 1));
+  return { exit: other[0]!, dist: null };
+}
+
+/** "the main gate, 14 hexes" / "the main gate, here" / "the main gate (Level 1)". */
+export function exitWhere(n: { exit: ExitInfo; dist: number | null }, from: Pos): string {
+  if (n.dist === null) return `${n.exit.name} (Level ${n.exit.at.level}${n.exit.at.level < from.level ? ', up' : ', down'})`;
+  if (n.dist === 0) return `${n.exit.name}, here`;
+  return `${n.exit.name}, ${n.dist} hex${n.dist === 1 ? '' : 'es'}`;
 }

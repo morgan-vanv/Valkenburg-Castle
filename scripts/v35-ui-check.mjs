@@ -175,6 +175,9 @@ async function crewScene(stance) {
     const d = s.delve;
     const E = window.vcEngine;
     const k = d.heroes[0];
+    for (const h of d.heroes) Object.assign(h, { moved: false, acted: false, dashed: false });
+    d.phase = 'player';
+    d.rivals = null;
     const spots = E.reachable(s, k.heroId, false).filter((r) => r.to.level === k.at.level && r.path.length >= 2 && r.path.length <= 3).map((r) => r.to);
     const taken = new Set(d.heroes.map((h) => `${h.at.q},${h.at.r}`));
     const free = spots.filter((p) => !taken.has(`${p.q},${p.r}`)).slice(0, 3);

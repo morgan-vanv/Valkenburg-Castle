@@ -6,13 +6,13 @@ import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } fro
 import type { ActionOption } from './api';
 import {
   HEAVY_MOVE, SMUGGLER_SNEAK, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
-  GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
+  GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE,
 } from './data';
 import { say, type Ctx, type HeroX, type MonsterX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
-  LIGHT_PENALTY, makeHostile, makeNoise, monsterArmor, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
+  LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
   releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent,
 } from './common';
 import {
@@ -100,9 +100,16 @@ export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   return b;
 }
 
-function blocksHero(c: Ctx, p: Pos): boolean {
+/**
+ * Who a hero can't walk through (spec 19.4): monsters and rivals, except the members of a crew
+ * the party has hired. Heroes, the prisoner and hired crew are passed through (never ended on).
+ */
+export function blocksHero(c: Ctx, p: Pos): boolean {
   const o = occupant(c, p);
-  return !!o && (o.kind === 'monster' || o.kind === 'rival');
+  if (!o) return false;
+  if (o.kind === 'monster') return true;
+  if (o.kind === 'rival') return c.d.rivals?.stance !== 'hired';
+  return false;
 }
 
 function trapPenalty(c: Ctx, p: Pos): number {
@@ -239,7 +246,7 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false): void {
     const at = { level: Number(lv), q, r };
     if (!within(at, h.at, 1)) continue;
     const def = heroDef(c, h.heroId)!;
-    const p = def.stats.wits + LIGHT_PENALTY[brightnessAt(c.w, c, h.at)];
+    const p = def.stats.wits + lightPenaltyFor(c.w, c, h);
     const r1 = roll(c, h.heroId, 'Spot trap', 1, p);
     if (r1.hits) {
       t.spotted = true;
@@ -423,6 +430,14 @@ function nextToWinch(c: Ctx, at: Pos): Pos | undefined {
 }
 
 
+/** Locked doors and chests on or next to the hero that a pick could still work (not jammed). */
+function pickableAround(c: Ctx, h: HeroInDelve): ActionTarget[] {
+  return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed; }).map((at) => ({ at }));
+}
+
+/** Spec 19.2: the reason a non-Burglar without lockpicks can't pick. */
+export const NO_PICK = 'Locked · Smash it, or a Burglar or lockpicks could pick it.';
+
 /** Every valid target for an action right now (ignores move/act flags). */
 export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTarget[] {
   const def = heroDef(c, h.heroId)!;
@@ -515,8 +530,9 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (!mage('pyromancer', 1)) return [];
       return enemiesInSight(c, h, 5);
     case 'pick':
-      if (cls !== 'burglar') return [];
-      return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed; }).map((at) => ({ at }));
+      // Spec 19.2: the Burglar's alone, unless the hero carries lockpicks.
+      if (cls !== 'burglar' && !itemOf(h, 'lockpicks')) return [];
+      return pickableAround(c, h);
     case 'smash':
       return aroundAndSelf(h.at).filter((p) => lockedThingAt(c, p)).map((at) => ({ at }));
     case 'open': {
@@ -554,6 +570,10 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'torch': {
       const t = h.pack.find((i) => i.kind === 'torch');
       return t ? [{ itemId: t.id }] : [];
+    }
+    case 'nightsight': {
+      const it = itemOf(h, 'nightsight');
+      return it ? [{ id: h.heroId, itemId: it.id }] : [];
     }
     case 'potion': {
       const pot = h.pack.find((i) => i.kind === 'potion');
@@ -643,13 +663,13 @@ const LABELS: Record<ActionKind, string> = {
   overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', dig: 'Dig', fireball: 'Fireball',
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
-  key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up',
+  key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught',
 };
 
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
-  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'disarm', 'charge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
+  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
@@ -661,7 +681,7 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
-  key: 'hex', oil: 'self', grapple: 'self',
+  key: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2 };
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1 };
@@ -681,10 +701,18 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
   const h = hd(c, heroId);
   if (!h || h.status !== 'active' || c.d.phase !== 'player' || c.s.stage !== 'delve') return [];
   const out: ActionOption[] = [];
+  const def = heroDef(c, heroId);
   for (const a of ORDER) {
     if (!canDo(h, a)) continue;
     const t = targetsFor(c, h, a);
-    if (!t.length) continue;
+    if (!t.length) {
+      // Spec 19.2: a locked thing in reach, and no way to pick it: the option says what would.
+      if (a === 'pick' && def?.cls !== 'burglar' && !itemOf(h, 'lockpicks')) {
+        const locked = pickableAround(c, h);
+        if (locked.length) out.push({ action: a, label: LABELS[a], targets: locked, rolls: true, pick: PICK[a], blocked: NO_PICK });
+      }
+      continue;
+    }
     const opt: ActionOption = { action: a, label: LABELS[a], targets: t, rolls: ROLLS.includes(a), pick: PICK[a] };
     if (a === 'shutter' && !c.d.lanternOpen) opt.label = 'Open lantern';
     if (AREA[a]) opt.area = AREA[a];
@@ -785,9 +813,11 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   const cls = CLASSES[def.cls];
   const mods: string[] = [];
   const bright = brightnessAt(c.w, c, h.at);
-  const lightMod = LIGHT_PENALTY[bright];
+  const night = nightEyed(h);
+  const lightMod = night ? 0 : LIGHT_PENALTY[bright];
   const withLight = (p: number) => {
     if (lightMod) mods.push(`${bright[0]!.toUpperCase()}${bright.slice(1)} ${sign(lightMod)}`);
+    else if (night && LIGHT_PENALTY[bright]) mods.push('Night-eye: no dark penalty');
     return p + lightMod;
   };
   const base = (stat: Stat, slots: number, p: number, outcomes: string[], noise: number, dmg?: number): Spec => ({
@@ -909,8 +939,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       s.modifiers.push('1 mana');
       return s;
     }
-    case 'pick':
-      return base('finesse', 3, withLight(def.stats.finesse), ['Lock jams', 'Fails', 'Opens, noise 2', 'Opens silently'], 2);
+    case 'pick': {
+      if (def.cls === 'burglar') return base('finesse', 3, withLight(def.stats.finesse), ['Lock jams', 'Fails', 'Opens, noise 2', 'Opens silently'], 2);
+      // Spec 19.2: lockpicks: the Burglar's table on 2 slots.
+      mods.push(`Lockpicks: ${LOCKPICK_SLOTS} slots`);
+      return base('finesse', LOCKPICK_SLOTS, withLight(def.stats.finesse), ['Lock jams', 'Opens, noise 2', 'Opens silently'], 2);
+    }
     case 'smash': {
       const l = lockedThingAt(c, t.at!)!;
       const outcomes = l.chest ? ['Holds, noise 4', 'Opens, noise 4', 'Opens, noise 4'] : ['Holds, noise 4', 'Holds, noise 4', 'Opens, noise 4'];
@@ -942,6 +976,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'give': return simple(`Hand to ${heroName(c, t.id!)}`);
     case 'light': return simple(`+${BRAZIER_LIGHT} light, lit for good`, 0, BRAZIER_LIGHT);
     case 'torch': return simple(`Torchlight for ${TORCH_ROUNDS} rounds`);
+    case 'nightsight': return simple(`Night-eye for ${NIGHTSIGHT_ROUNDS} rounds: full sight, no dark penalty. Silent. The dark still hunts`);
     case 'potion': {
       const o = hd(c, t.id!)!;
       return simple(o.status === 'downed' ? 'Back up with 5 HP' : 'Heal 5');
@@ -1290,10 +1325,11 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const r = doRoll();
       const at = t.at!;
       const l = lockedThingAt(c, at)!;
-      if (r.hits >= 2) {
+      // All slots: silent; one short: open with noise 2; one hit on 3 slots: holds; none: jams (spec 19.2 on 2 slots).
+      if (r.hits >= sp.slots - 1) {
         unlockAt(c, at, heroId);
-        if (r.hits === 2) makeNoise(c, at, 2);
-        say(c, r.hits === 3 ? `${name} slips the lock.` : `${name} forces the lock. Clunk.`);
+        if (r.hits < sp.slots) makeNoise(c, at, 2);
+        say(c, r.hits === sp.slots ? `${name} slips the lock.` : `${name} forces the lock. Clunk.`);
       } else if (r.hits === 1) {
         say(c, `The lock holds.`);
       } else {
@@ -1401,6 +1437,12 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       useItem(h, t.itemId);
       h.torch = TORCH_ROUNDS;
       say(c, `${name} lights a torch.`);
+      break;
+    case 'nightsight':
+      useItem(h, t.itemId);
+      h.nightEyes = NIGHTSIGHT_ROUNDS;
+      c.visCache = undefined;
+      say(c, `${name} drinks the night-eye draught. The dark thins.`);
       break;
     case 'potion': {
       useItem(h, t.itemId);

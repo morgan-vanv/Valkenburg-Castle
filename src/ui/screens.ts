@@ -180,7 +180,7 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       prepareStation(body, s, host);
       break;
   }
-  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)), villagePanel(v));
+  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)), villagePanel(v, c.board));
   el.append(h('div', { class: 'camp' }, head, h('div', { class: 'camp-grid' }, nav, body, rosterStrip)));
 }
 
@@ -217,8 +217,10 @@ function introCard(): HTMLElement {
 }
 
 /** What Lowgate has won back, under the roster: each villager or thing, home or still in the castle. */
-function villagePanel(v: Village): HTMLElement {
+function villagePanel(v: Village, board: Contract[] = []): HTMLElement {
   const order: StoryId[] = ['surgeon', 'innkeeper', 'smith', 'copper', 'caskbook'];
+  // 19.1: the one-line reason comes from the engine's story contract when it's on the post.
+  const why = (id: StoryId) => board.find((k) => k.story === id)?.brief;
   return h(
     'div',
     { class: 'village-panel' },
@@ -226,7 +228,7 @@ function villagePanel(v: Village): HTMLElement {
     ...order.map((id) =>
       h(
         'div',
-        { class: `vp-row ${v[id] ? 'home' : ''}`, title: v[id] ? `${cap(STORY[id].who)} · home. ${STORY[id].unlocks}.` : `${cap(STORY[id].who)} · still in the castle (${STORY[id].where}). On the post ${STORY[id].when}. Wins back: ${STORY[id].unlocks.toLowerCase()}.` },
+        { class: `vp-row ${v[id] ? 'home' : ''}`, 'data-story': id, title: v[id] ? `${cap(STORY[id].who)} · home. ${STORY[id].unlocks}.` : `${cap(STORY[id].who)} · still in the castle (${STORY[id].where}). ${why(id) ? `${why(id)} ` : ''}On the post ${STORY[id].when}. Wins back: ${STORY[id].unlocks.toLowerCase()}.` },
         h('span', { class: 'vp-mark' }, v[id] ? '✦' : '·'),
         h('span', null, cap(STORY[id].who)),
         h('span', { class: 'vp-state small' }, v[id] ? 'home' : STORY[id].where.replace(/^Level (\d), (the )?/, 'L$1 ')),

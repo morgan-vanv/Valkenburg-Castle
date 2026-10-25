@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { distance, hexKey, posKey, posNeighbors, samePos, type Pos } from '../../game/hex';
 import type { LevelDef, TileDef } from '../../game/types';
 import { castle } from './index';
+import { STORIES } from '../../game/data';
 
 function level(n: number): LevelDef {
   const lv = castle.levels.find((l) => l.level === n);
@@ -311,11 +312,85 @@ describe('castle', () => {
     expect(castle.chests.filter(on(1)).every((c) => c.tier <= 2)).toBe(true);
     expect(castle.chests.filter(on(3)).every((c) => c.tier === 3)).toBe(true);
     const sites = castle.contractSites;
-    const count = (kind: string, lv: number) => sites.filter((s) => s.kind === kind && s.at.level === lv).length;
+    const count = (kind: string, lv: number) => sites.filter((s) => s.kind === kind && !s.story && s.at.level === lv).length;
     expect([count('rescue', 1), count('rescue', 2), count('rescue', 3)]).toEqual([1, 2, 1]);
     expect([count('recover', 1), count('recover', 2), count('recover', 3)]).toEqual([2, 2, 2]);
     const ids = [...castle.chests.map((c) => c.id), ...sites.map((s) => s.id)];
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// ---------------------------------------------------------------- V3.6 (spec 19.1): story sites
+
+describe('story sites (19.1)', () => {
+  const story = castle.contractSites.filter((s) => s.story);
+
+  it('has one site per story villager in the named room, on floor, clear of spawns, chests, coins, traps and other sites', () => {
+    const want: Record<string, [number, string, string]> = {
+      surgeon: [1, 'chapel', 'l1-story-chapel'],
+      innkeeper: [1, 'kitchen', 'l1-story-kitchens'],
+      smith: [2, 'forge', 'l2-story-forge'],
+      copper: [2, 'barracks', 'l2-story-barracks'],
+    };
+    expect(story.map((s) => s.story).sort()).toEqual(Object.keys(want).sort());
+    const taken = new Set([
+      ...castle.spawns.map((s) => s.at),
+      ...castle.chests.map((c) => c.at),
+      ...castle.coins.map((c) => c.at),
+      ...castle.traps.map((t) => t.at),
+      ...castle.contractSites.filter((s) => !s.story).map((s) => s.at),
+    ].map(posKey));
+    for (const s of story) {
+      const [lv, room, id] = want[s.story!]!;
+      expect(s.id).toBe(id);
+      expect(s.at.level, s.id).toBe(lv);
+      expect(tile(s.at)?.kind, s.id).toBe('floor');
+      expect(tile(s.at)?.room, s.id).toBe(room);
+      expect(taken.has(posKey(s.at)), `${s.id} shares a hex`).toBe(false);
+      // Not next to a sleeping spawn either: the hero should get a step in before the room wakes.
+      // (The copper sits among the squad by design; it is a thing, not a villager to wake them.)
+      if (s.kind === 'rescue') {
+        for (const sp of castle.spawns) expect(samePos(sp.at, s.at), `${s.id} on a spawn`).toBe(false);
+      }
+    }
+    // Away from the room's regular site (the chapel altar, the forge's recover site).
+    for (const s of story) {
+      for (const o of castle.contractSites) {
+        if (o.story || o.at.level !== s.at.level || tile(o.at)?.room !== tile(s.at)?.room) continue;
+        expect(distance(o.at, s.at), `${s.id} next to ${o.id}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // The cask book keeps the Drain's regular site (18.3): not a story-only site.
+    expect(castle.contractSites.find((s) => s.id === 'l3-recover-drain')?.story).toBeUndefined();
+    // Every story points at a site that exists, and a story site at its own story.
+    for (const st of STORIES) {
+      const site = castle.contractSites.find((s) => s.id === st.siteId);
+      expect(site, st.id).toBeTruthy();
+      if (site?.story) expect(site.story).toBe(st.id);
+    }
+  });
+
+  it('is reachable on foot from an entrance, Gerda without passing the locked doors', () => {
+    const walk = (allowLocked: boolean) => {
+      const seen = new Set<string>();
+      const queue: Pos[] = [...castle.entrances];
+      while (queue.length) {
+        const p = queue.pop()!;
+        const k = posKey(p);
+        if (seen.has(k) || !passable(p)) continue;
+        if (!allowLocked && tile(p)?.kind === 'door' && tile(p)?.locked) continue;
+        seen.add(k);
+        queue.push(...posNeighbors(p));
+        for (const link of castle.links) {
+          if (link.kind !== 'stairs') continue;
+          if (samePos(link.a, p)) queue.push(link.b);
+          if (samePos(link.b, p)) queue.push(link.a);
+        }
+      }
+      return seen;
+    };
+    const open = walk(false);
+    for (const s of story) expect(open.has(posKey(s.at)), `${s.id} reachable past unlocked doors only`).toBe(true);
   });
 });
 

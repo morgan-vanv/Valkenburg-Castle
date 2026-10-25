@@ -83,7 +83,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Shove', 'ability', '+1 slot: push an enemy 1 hex (into a pit, it falls).'],
   ],
   burglar: [
-    ['Pick', 'ability', 'Pick locks on doors and chests.'],
+    ['Pick', 'ability', 'Pick locks on doors and chests. Anyone else needs lockpicks.'],
     ['Sneak 4', 'passive', 'Sneaks further than anyone.'],
     ['Backstab', 'passive', 'Extra damage on unaware monsters.'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
@@ -235,6 +235,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   grapple: '⚓',
   shutter: '◑',
   escape: '⛓',
+  nightsight: '◉',
 };
 
 /**
@@ -244,7 +245,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
  */
 export const ACTION_HELP: Record<ActionKind, string> = {
   attack: 'Strike an enemy with your weapon. Each slot that hits deals its damage; all slots hit: +1.',
-  pick: `Burglar. 3 Finesse slots on a locked door or chest next to you: 3 hits opens it silently, 2 opens it (noise 2), 1 fails, 0 jams it for good.`,
+  pick: `Burglar: 3 Finesse slots on a locked door or chest next to you: 3 hits opens it silently, 2 opens it (noise 2), 1 fails, 0 jams it for good. Anyone else needs lockpicks: 2 slots, 2 hits opens silently, 1 opens with noise 2, 0 jams it.`,
   smash: 'Force a locked door or chest next to you: 2 Might slots. A door needs 2 hits, a chest 1. Noise 4 either way.',
   open: 'Open or close a door next to you (free), or open a chest (uses the action; free for the Burglar). Chest loot lands on the floor: Take it.',
   take: `Pick up loot next to you or underfoot. Free. Each item fills a pack slot (${PACK_SLOTS} per hero); heirlooms and hoard pieces fill 2.`,
@@ -291,6 +292,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   key: 'Open a locked door or chest next to you, silently. One use.',
   oil: `Pour a flask into the lantern: +${OIL_LIGHT} light, ${OIL_LIGHT} more rounds. Silent.`,
   grapple: 'From a pit landing, climb straight up to the level above. The hook is kept. Takes the whole turn.',
+  nightsight: 'Drink the night-eye draught: 8 rounds without dark penalties to your sight or rolls. Silent. The dark still hides you from nothing, and the Gloam still comes.',
 };
 
 /** Attack help with the hero's own weapon numbers. Everything else: ACTION_HELP. */
@@ -354,6 +356,8 @@ export const ITEM_HELP: Record<string, string> = {
   key: 'Opens one locked door or chest, silently.\nUse: next to the lock, Items › Skeleton key',
   oil: `+${OIL_LIGHT} lantern light (${OIL_LIGHT} more rounds).\nUse: Items › Oil flask`,
   firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.\nUse: Items › Firecracker, then click a hex within ${THROW_RANGE.firecracker}`,
+  lockpicks: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots. Burglars don\'t need them.\nUse: next to a locked door or chest, Interact › Pick lock',
+  nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.\nUse: Items › Night-eye draught',
 };
 
 /** Tooltip for one pack socket. */
@@ -420,6 +424,7 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   grapple: 'y',
   shutter: 'l',
   escape: 'x',
+  nightsight: 'n',
 };
 
 export const ITEM_GLYPH: Record<string, string> = {
@@ -440,6 +445,8 @@ export const ITEM_GLYPH: Record<string, string> = {
   key: '⚷',
   oil: '♁',
   firecracker: '✺',
+  lockpicks: '⚲',
+  nightsight: '◉',
 };
 
 /** Glyph for any item kind, tolerant of names the engine picks (smokeBomb, sleepDart, skeletonKey...). */
@@ -455,6 +462,8 @@ export function itemBase(kind: string): string {
   if (k.includes('dart')) return 'dart';
   if (k.includes('caltrop')) return 'caltrops';
   if (k.includes('grappl') || k === 'hook') return 'grapple';
+  if (k.includes('lockpick') || k.includes('picks')) return 'lockpicks';
+  if (k.includes('night')) return 'nightsight';
   if (k.includes('key')) return 'key';
   if (k.includes('oil')) return 'oil';
   if (k.includes('firecracker') || k.includes('cracker')) return 'firecracker';
@@ -475,6 +484,8 @@ export const ITEM_EFFECT: Record<string, string> = {
   key: 'Opens one locked door or chest, silently, for anyone. One use.',
   oil: `+${OIL_LIGHT} lantern light. The lantern burns 1 per round while open.`,
   firecracker: 'Throw 6: noise 6 at the target hex. Lure monsters away.',
+  lockpicks: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots. Burglars don\'t need them.',
+  nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
 };
 
 export function itemLabel(i: Item): string {
@@ -506,7 +517,7 @@ export const STORY: Record<StoryId, {
 }> = {
   surgeon: {
     who: 'Brother Aldric',
-    where: 'Level 1, the library',
+    where: 'Level 1, the chapel',
     verb: 'Rescue',
     unlocks: 'The infirmary: heal for gold',
     station: 'infirmary',
@@ -516,7 +527,7 @@ export const STORY: Record<StoryId, {
   },
   innkeeper: {
     who: 'Old Wim',
-    where: 'Level 1, the library',
+    where: 'Level 1, the kitchens',
     verb: 'Rescue',
     unlocks: 'The Gilded Flagon: four recruits, some seasoned',
     station: 'tavern',
@@ -526,7 +537,7 @@ export const STORY: Record<StoryId, {
   },
   smith: {
     who: 'Gerda the smith',
-    where: 'Level 2, the cellblock',
+    where: 'Level 2, the forge',
     verb: 'Rescue',
     unlocks: 'The forge, and metalwork at the peddler',
     station: 'smithy',
@@ -536,7 +547,7 @@ export const STORY: Record<StoryId, {
   },
   copper: {
     who: 'the brewing copper',
-    where: 'Level 2, the forge',
+    where: 'Level 2, the barracks',
     verb: 'Recover',
     unlocks: 'The first four ales at the Flagon',
     station: 'tavern',
@@ -587,7 +598,7 @@ export const ALE_EFFECT: Record<AleEffect, { name: string; glyph: string; text: 
 
 /** Where an ale's brewing gear comes from (locked ales say this). */
 export function aleNeeds(needs: 'copper' | 'caskbook'): string {
-  return needs === 'copper' ? 'Needs the brewing copper: recover it from the forge (Level 2).' : "Needs Wim's cask book: recover it from the Drain (Level 3).";
+  return needs === 'copper' ? 'Needs the brewing copper: recover it from the barracks (Level 2).' : "Needs Wim's cask book: recover it from the Drain (Level 3).";
 }
 
 /** Rival crews (16.5, 18.5). */

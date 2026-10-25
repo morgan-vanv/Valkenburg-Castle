@@ -139,6 +139,14 @@ export const castle: CastleDef = {
     { id: 'l3-recover-grove', kind: 'recover', at: L3(11, 14), where: 'the Fungus Grove' },
     { id: 'l3-recover-drain', kind: 'recover', at: L3(3, 27), where: 'the Drain' },
     { id: 'l3-slay-dragon', kind: 'slay', at: L3(39, 11), where: 'the Lair' },
+    // V3.6 (spec 19.1): story sites, used only by their story contract. Each villager in a place
+    // that makes sense: Aldric patching orcs in the chapel's south aisle, Wim at the kitchens'
+    // spit between the work tables, Gerda by the forge fire behind Ugluk, the copper among the
+    // sleeping barracks squad. (The cask book stays at the Drain's regular site.)
+    { id: 'l1-story-chapel', kind: 'rescue', at: L1(40, 24), where: 'the chapel', story: 'surgeon' },
+    { id: 'l1-story-kitchens', kind: 'rescue', at: L1(9, 14), where: 'the kitchens', story: 'innkeeper' },
+    { id: 'l2-story-forge', kind: 'rescue', at: L2(38, 26), where: 'the forge', story: 'smith' },
+    { id: 'l2-story-barracks', kind: 'recover', at: L2(28, 3), where: 'the barracks', story: 'copper' },
   ],
   lights: [...b1.lights, ...b2.lights, ...b3.lights],
 };

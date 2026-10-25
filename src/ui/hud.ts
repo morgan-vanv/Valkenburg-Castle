@@ -9,7 +9,7 @@ import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
-import { linkAt, linkButton, linkReach, linkTooltip, type LinkInfo } from '../view/links';
+import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, STANCE, TEMPERAMENT, actionCost, actionHelp, classGlyph, className, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
@@ -24,6 +24,8 @@ export interface HudHost {
   applySettings(): void;
   abandonDelve(): void;
   toTitle(): void;
+  /** V3.6 (19.5): the exit the party came in by, if known. */
+  entrance(): Pos | null;
 }
 
 interface PreviewState {
@@ -33,7 +35,7 @@ interface PreviewState {
   focus: number;
 }
 
-const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge', 'nightsight']);
 const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust']);
 /** Class abilities that aren't spells (the Abilities group of the bar). */
 const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig']);
@@ -263,6 +265,37 @@ export class Hud {
     void this.host.send({ type: 'move', heroId: sel.heroId, path: l.reach.path, sneak: this.sneak });
   }
 
+  /** V3.6 (19.5): the exit the selected hero stands on, with the engine's `leave` option if it offers one. */
+  private exitHere(): { info: ExitInfo; option: ActionOption | undefined } | null {
+    const sel = this.selected();
+    if (!sel || sel.status !== 'active') return null;
+    const info = exitAt(this.engine.castle(), sel.at, this.host.entrance());
+    if (!info) return null;
+    return { info, option: this.options.find((o) => o.action === 'leave') };
+  }
+
+  private leaveHere(): void {
+    const e = this.exitHere();
+    const sel = this.selected();
+    if (!e || !sel || this.busy) return;
+    if (!e.option) {
+      this.toast('Nobody can leave right now.');
+      return;
+    }
+    if (e.option.blocked) {
+      this.flashBlocked(e.option, e.option.targets[0]);
+      return;
+    }
+    this.cancel();
+    this.choose(e.option, e.option.targets[0] ?? { at: sel.at });
+  }
+
+  /** V3.6 (19.5): the exit hex is known (explored) or the one the party came in by. */
+  private exitKnown(p: Pos): boolean {
+    const k = posKey(p);
+    return !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
+  }
+
   /** Recompute reach and options and redraw panels and highlights. */
   refresh(): void {
     const s = this.state;
@@ -317,6 +350,9 @@ export class Hud {
     // Standing on stairs or a working lift: the hex pulses (15.7).
     const link = this.linkHere();
     this.dio.showLinkPulse(link ? this.selected()!.at : null);
+    // Standing on an exit: the hex pulses too (19.5).
+    const exit = this.exitHere();
+    this.dio.showExitPulse(exit?.option && !exit.option.blocked ? this.selected()!.at : null);
     // Attackable enemies get a red ring.
     const atk = this.options.filter((o) => o.action === 'attack' || o.action === 'firebolt');
     const ats = atk.flatMap((o) => o.targets.map((t) => this.targetPos(t))).filter((p): p is Pos => !!p);
@@ -446,7 +482,9 @@ export class Hud {
       else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
       const act = this.bestActionFor(unitId, at);
       const link = unitId === this.selectedId ? this.linkHere() : null;
+      const exit = unitId === this.selectedId ? this.exitHere() : null;
       if (link) lines.push(`<span class="tip-act">Click: ${linkButton(link.info)}</span>`);
+      else if (exit?.option && !exit.option.blocked) lines.push('<span class="tip-act">Click: Leave the castle</span>');
       else if (act) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
       this.dio.setHoverStyle('plain');
     } else if (at) {
@@ -454,8 +492,10 @@ export class Hud {
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
       const link = sel && samePos(sel.at, at) ? this.linkHere() : null;
+      const exit = sel && samePos(sel.at, at) ? this.exitHere() : null;
       const act = this.bestActionFor(null, at);
       if (link) lines.push(`<span class="tip-act">Click: ${linkButton(link.info)}</span>`);
+      else if (exit?.option && !exit.option.blocked) lines.push('<span class="tip-act">Click: Leave the castle</span>');
       else if (act && !r) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
       this.dio.setHoverStyle(this.hoverKind(at));
     }
@@ -503,10 +543,15 @@ export class Hud {
     const act = (name: string, what: string) => parts.push(`<b>${name}</b> <span class="tip-how">· ${what}</span>`);
     const door = d.doors[k];
     const castle = this.engine.castle();
+    // 19.2: Pick is the Burglar's, or anyone's with lockpicks in the pack.
+    const sel = this.selected();
+    const selDef = sel ? this.heroDef(sel.heroId) : undefined;
+    const canPick = !!sel && (selDef?.cls === 'burglar' || sel.pack.some((i) => itemBase(i.kind) === 'lockpicks'));
+    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : `Smash it${more}, or a Burglar or lockpicks could pick it`);
     if (t.kind === 'door' && door) {
       if (door.open) act('Open door', 'walk through');
       else if (door.jammed) act('Jammed door', 'Smash or Charge');
-      else if (door.locked) act('Locked door', 'Pick, Smash or Charge');
+      else if (door.locked) act('Locked door', lockedHow(' or Charge'));
       else act('Door', 'Open, then walk through');
     } else if (t.kind === 'brazier') {
       if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
@@ -518,7 +563,10 @@ export class Hud {
       const l = linkAt(castle, at);
       if (l) parts.push(`<b>${l.kind === 'lift' ? 'Lift' : 'Stairs'}</b> <span class="tip-how">· ${linkTooltip(castle, l, !!d.liftWorking).replace(/^(Lift|Stairs) /, '')}</span>`);
       else parts.push(TILE_NAME[t.kind] ?? t.kind);
-    } else if (t.kind === 'exit') act('Way out', 'Leave the castle');
+    } else if (t.kind === 'exit') {
+      const e = exitAt(castle, at, this.host.entrance());
+      act('Way out', e ? exitTooltip(e) : 'stand here, then Leave the castle');
+    }
     else if (t.kind === 'pit') {
       const f = this.fallWords(at);
       parts.push(`<b class="neg">Pit</b> <span class="tip-how">· Jump or Rope</span>${f ? `<br><span class="neg">${f.text}</span>` : ''}`);
@@ -534,7 +582,7 @@ export class Hud {
     if (chest) {
       if (chest.opened) parts.push('<b>Chest</b>, empty');
       else if (chest.jammed) act('Jammed chest', 'Smash');
-      else if (chest.locked) act('Locked chest', 'Pick, Smash or Skeleton key');
+      else if (chest.locked) act('Locked chest', lockedHow(' or Skeleton key'));
       else act('Chest', 'Open');
     }
     const g = d.ground.find((x) => samePos(x.at, at));
@@ -595,6 +643,11 @@ export class Hud {
     const sel = this.selected();
     if (!this.pending && sel && ((unitId && unitId === this.selectedId) || (!unitId && at && samePos(at, sel.at))) && this.linkHere()) {
       this.takeLink();
+      return;
+    }
+    // Or leaves by the exit they stand on (19.5).
+    if (!this.pending && sel && ((unitId && unitId === this.selectedId) || (!unitId && at && samePos(at, sel.at))) && this.exitHere()?.option) {
+      this.leaveHere();
       return;
     }
     const best = this.bestActionFor(unitId, at);
@@ -1074,10 +1127,25 @@ export class Hud {
       const rival = d.rivals?.members.find((r) => r.loot.some((i) => i.kind === 'heirloom'));
       status = carrier ? `${this.heroDef(carrier.heroId)?.name ?? ''} carries it. Get out.` : rival ? `${d.rivals?.name ?? 'A rival crew'} have it!` : 'Find it and carry it out.';
     }
+    // 19.5: the prize is in hand: the goal is the way out now.
+    const go = prizeInHand(d);
     // 15.7: where it is. Before its hex is explored, only the brief's room; after, level + room + a click to pan there.
     const obj = this.dio.objectiveAt();
     let where: HTMLElement | string = '';
-    if (obj) {
+    if (go) {
+      const sel = this.selected() ?? d.heroes.find((x) => x.status === 'active');
+      const from = sel?.at;
+      const near = from ? nearestExit(this.engine.castle(), from, (p) => this.exitKnown(p), this.host.entrance()) : null;
+      where = near
+        ? h(
+            'button',
+            { class: 'goal-where goal-out', title: `Look there: ${near.exit.name}${near.exit.entrance ? ' (you came in here)' : ''}`, 'data-exit': posKey(near.exit.at), onclick: () => this.dio.lookAt(near.exit.at) },
+            h('span', { class: 'goal-diamond' }, '⇱'),
+            ` Get out: nearest way out is ${exitWhere(near, from!)}`,
+          )
+        : h('span', { class: 'goal-where goal-out' }, h('span', { class: 'goal-diamond' }, '⇱'), ' Get out: find a way out');
+      status = k.kind === 'rescue' ? status : k.kind === 'slay' ? 'The Dragon is dead.' : status.replace(/ Get out\.$/, '');
+    } else if (obj) {
       const lv = this.engine.castle().levels.find((l) => l.level === obj.at.level);
       const room = lv?.rooms.find((r) => r.id === lv.tiles[hexKey(obj.at)]?.room)?.name;
       const seen = this.vis?.visible.has(posKey(obj.at)) ? 'in sight' : 'seen';
@@ -1088,7 +1156,7 @@ export class Hud {
         ` ${obj.label} · Level ${obj.at.level}${room ? `, ${room.startsWith('the ') || room.startsWith('The ') ? room : `the ${room}`}` : ''} · ${seen}`,
       );
     } else if (!status.startsWith('Out') && !/carries it|is dead|Get out/.test(status)) where = h('span', { class: 'dim small goal-brief' }, k.brief);
-    return h('div', { class: `hud-goal goal-kind-${k.kind}` }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : k.kind === 'slay' ? 'Slay' : 'Recover'} · ${k.bounty} gold`), h('b', null, k.title), where, h('span', { class: 'dim small goal-status' }, status));
+    return h('div', { class: `hud-goal goal-kind-${k.kind} ${go ? 'goal-go' : ''}` }, h('span', { class: 'kicker' }, `${k.kind === 'rescue' ? 'Rescue' : k.kind === 'slay' ? 'Slay' : 'Recover'} · ${k.bounty} gold`), h('b', null, k.title), where, h('span', { class: 'dim small goal-status' }, status));
   }
 
   private renderCards(): void {
@@ -1173,8 +1241,10 @@ export class Hud {
       const open = this.lanternOpen();
       chip(`lantern ${open ? '' : 'shut'}`, open ? '◆ Lantern' : '◇ Lantern', `${name} carries the lantern${open ? '' : ' (shuttered)'}.\nIts light goes where ${name} goes. Shutter or open it with L (free); Pass lantern hands it to a hero next to you.`);
     }
-    if (hd.status === 'active' && darkSight !== null)
-      chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}\nStep into the lantern's light, a brazier's or a torch's.`);
+    if (hd.status === 'active' && darkSight !== null) {
+      if (hd.nightEyes && hd.nightEyes > 0) chip('dark', 'In the dark · night-eye', `${name} stands outside all light, but the night-eye draught keeps sight (${darkSight}) and rolls whole.${hd.at.level === 3 ? '\nIn the Hollow the dark itself still hunts anyone standing unlit.' : `\nMonsters still notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}`);
+      else chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero only within ${MONSTER_DARK_SIGHT}.`}\nStep into the lantern's light, a brazier's or a torch's.`);
+    }
     if (hd.grabbedBy) {
       const by = d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul';
       chip('bad grab', '⛓ Held', `Held by ${by}: can't move or dash.\nBreak free (2 Might slots, 1 hit frees you) or kill it.`);
@@ -1184,6 +1254,7 @@ export class Hud {
     if (hd.veil > 0) chip('veil', `Veiled · ${hd.veil}`, `Veiled for ${hd.veil} more round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}.\nAttacking or making noise ${VEIL_BREAK_NOISE}+ breaks it.`);
     if (hd.ward > 0) chip('ward', `Warded · ${hd.ward}`, `Warded for ${hd.ward} more round${hd.ward === 1 ? '' : 's'}: takes 1 less damage per hit.`);
     if (hd.overwatch) chip('ow', 'Overwatch', `On overwatch: in the castle's turn, shoots the first enemy that moves or acts in sight within ${OVERWATCH_RANGE}.`);
+    if (hd.nightEyes && hd.nightEyes > 0) chip('night', `◉ Night-eye · ${hd.nightEyes}`, `Night-eye draught: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties to ${name}'s sight or rolls.\nThe dark still hides ${name} from nothing, and the Gloam still comes.`);
     if (hd.torch > 0) chip('warm', `Torch · ${hd.torch}`, `Torch lit: light around ${name} (radius 2) for ${hd.torch} more round${hd.torch === 1 ? '' : 's'}, whatever the lantern does.`);
     if (hd.guarding) chip('', 'Guarding', `Guarding ${this.nameOf(hd.guarding)}: until your next turn, attacks aimed at them hit ${name} instead.`);
     if (hd.escorting) chip('good', 'Escorting', `Escorting ${this.nameOf(hd.escorting)}: they follow ${name}, who moves 3 at most.\nReach an exit to bring them out.`);
@@ -1246,6 +1317,30 @@ export class Hud {
         ),
       );
     }
+    // 19.5: standing on an exit: the one prominent thing is "Leave the castle" (hotkey Q).
+    const exit = this.exitHere();
+    if (exit?.option) {
+      usedKeys.add('q');
+      const o = exit.option;
+      move.append(
+        h(
+          'button',
+          {
+            class: `act act-leave ${o.blocked ? 'blocked' : ''}`,
+            onclick: () => this.leaveHere(),
+            disabled: this.busy,
+            'data-key': 'q',
+            'data-action': 'leave',
+            'aria-disabled': o.blocked ? 'true' : 'false',
+            title: `Leave the castle by ${exit.info.name} · free · key Q${o.blocked ? `\nCan't now: ${o.blocked}` : ''}\n${ACTION_HELP.leave}`,
+          },
+          h('span', { class: 'act-glyph' }, '⇱'),
+          h('span', { class: 'act-label' }, 'Leave the castle'),
+          h('kbd', null, 'Q'),
+          o.blocked ? h('span', { class: 'act-why' }, o.blocked) : h('span', { class: 'act-count' }, 'free'),
+        ),
+      );
+    }
     const groupEls: HTMLElement[] = [move];
     // 16.2: the lantern bearer gets a Lantern group with the free shutter toggle (hotkey L, wins over Light/Oil's L).
     if (sel && sel.heroId === d.lanternBearer) {
@@ -1274,6 +1369,7 @@ export class Hud {
     if (sel && !opts.some((o) => o.action === 'parley') && this.dealsFor(sel.heroId).length) opts.push({ action: 'parley', label: 'Parley', targets: [{}], rolls: false, pick: 'self' });
     for (const o of opts) {
       if (o.action === 'shutter') continue;
+      if (o.action === 'leave' && exit?.option) continue;
       groups[ITEM_ACTIONS.has(o.action) ? 'item' : SPELLS.has(o.action) || ABILITIES.has(o.action) ? 'ability' : 'interact'].push(o);
     }
     for (const [name, list] of [
@@ -1309,7 +1405,7 @@ export class Hud {
       }
       groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
     }
-    if (!opts.some((o) => o.action !== 'shutter') && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
+    if (!opts.some((o) => o.action !== 'shutter' && o.action !== 'leave') && !link && !exit?.option && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
     // End turn: how many heroes still have a move or an action.
     const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
     const end = h(
@@ -1321,6 +1417,9 @@ export class Hud {
     this.bar.append(left, ...groupEls, end);
     this.hint.replaceChildren(...this.contextHint());
     this.hint.classList.toggle('hidden', !this.hint.childNodes.length || this.busy);
+    // The bar grows when a group stacks; keep the hint just above it (V3.6).
+    const barH = this.bar.offsetHeight;
+    if (barH) this.hint.style.bottom = `${barH + 22}px`;
   }
 
   /**
@@ -1355,7 +1454,10 @@ export class Hud {
         if (t.kind === 'stairs' || t.kind === 'lift') {
           const l = linkAt(castle, p);
           text = l ? `${l.kind === 'lift' ? 'Lift' : 'Stairs'} ${l.down ? '↓' : '↑'} L${l.to.level}${l.kind === 'lift' && !d.liftWorking ? ' (dead)' : ''}` : '';
-        } else if (t.kind === 'exit') text = 'Way out';
+        } else if (t.kind === 'exit') {
+          const e = exitAt(castle, p, this.host.entrance());
+          text = e?.entrance ? 'Way out (you came in here)' : 'Way out';
+        }
         else if (t.kind === 'brazier' && !d.lit.includes(k)) text = 'Cold brazier';
         else if (t.prop === 'winch' && !d.liftWorking) text = 'Winch';
         else if (t.kind === 'door' && d.doors[k] && !d.doors[k]!.open) text = d.doors[k]!.locked ? 'Locked door' : 'Door';
@@ -1369,6 +1471,11 @@ export class Hud {
         if (text) found.push({ text, dist, at: p, danger: text === 'Trap' });
       }
     found.sort((a, b) => a.dist - b.dist);
+    // 19.5: with the prize in hand, the nearest known exit leads, however far.
+    if (prizeInHand(d) && !found.some((f) => f.text.startsWith('Way out'))) {
+      const near = nearestExit(castle, sel.at, (p) => this.exitKnown(p), this.host.entrance());
+      if (near && near.dist !== null) found.unshift({ text: 'Way out', dist: near.dist, at: near.exit.at });
+    }
     const out: (HTMLElement | string)[] = [...lead];
     for (const f of found.slice(0, 4)) {
       const where = f.dist === 0 ? 'here' : f.dist === 1 ? 'next to you' : `${f.dist} hexes ${compass(sel.at, f.at)}`;
@@ -1759,7 +1866,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
