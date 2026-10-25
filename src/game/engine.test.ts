@@ -1099,7 +1099,7 @@ describe('sight and fixed light (14.5)', () => {
   it('the glimpse uses the sight range', () => {
     const s = delve();
     put(s, 'brann', at(3, 2, 4));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const far = glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at).length;
     s.delve!.light = 0;
     const near = glimpseSet(w, s.delve as DelveX, hero(s, 'brann').at).length;
@@ -1161,7 +1161,7 @@ describe('15.1 line of sight', () => {
     // Old LOS from (5,1) missed floor (2,3) beside the pillar (3,3), floor (1,4) and the north wall.
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(1, 5, 1));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const vis = e.visibility(s).visible;
     for (const [c, r] of [[2, 3], [1, 4], [4, 2], [2, 2], [6, 4]] as [number, number][]) expect(vis.has(posKey(at(1, c, r))), `floor ${c},${r}`).toBe(true);
     // Every wall bordering a seen pantry floor hex is seen too.
@@ -1192,6 +1192,7 @@ describe('15.1 line of sight', () => {
     // The shelf K at (3,4) blocks (2,4) -> (4,4); the table T (prop) at (3,2) doesn't block (2,2) -> (4,2).
     expect(losOf(w, d, at(1, 2, 4), at(1, 4, 4))).toBe(false);
     expect(losOf(w, d, at(1, 2, 2), at(1, 4, 2))).toBe(true);
+    put(s, 'brann', at(1, 5, 1)); // the lantern bearer stands there: full sight range
     const g = new Set(glimpseSet(w, d, at(1, 5, 1)).map(posKey));
     expect(g.has(posKey(at(1, 5, 0)))).toBe(true);
     expect(g.has(posKey(at(1, 0, 4)))).toBe(true);
@@ -1200,7 +1201,7 @@ describe('15.1 line of sight', () => {
   it('monsters use the same sight: a hero beside the pillar is seen', () => {
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(1, 2, 3));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const m = monster(s, 'orc', at(1, 5, 1), 'alert');
     const r = ok(s, { type: 'endTurn' });
     expect(r.state.delve!.monsters.find((x) => x.id === m.id)!.awareness).toBe('hunting');
@@ -1258,7 +1259,7 @@ describe('15.3 classes', () => {
   it('ranger: overwatch shoots the first enemy that moves in sight within 6, once', () => {
     const s = delve({ heroes: ['rae'], extra: [['rae', 'Rae', 'ranger']] });
     put(s, 'rae', at(3, 1, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const m = monster(s, 'orc', at(3, 5, 5), 'alert');
     m.hp = 20;
     m.focusAt = at(3, 3, 7);
@@ -1279,7 +1280,7 @@ describe('15.3 classes', () => {
     // (8,4) -> away from (8,2) is (8,6)? Use the L2 pit instead: orc at (8,4)=railing. Use (12,4) on L2 railed too.
     // L2 (9..11,5) are pit; orc at (9,6) with rae at (9,8): away = (9,4)? No: (9,6) away from (9,8) heads up a column.
     put(s, 'rae', at(2, 10, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const m = monster(s, 'orc', at(2, 10, 6), 'hunting');
     m.hp = 20;
     const p = e.preview(s, 'rae', 'knockback', { id: m.id });
@@ -1304,7 +1305,7 @@ describe('15.3 classes', () => {
     const s = delve({ heroes: ['sam'], extra: [['sam', 'Sam', 'sapper']] });
     expect(hero(s, 'sam').pack.filter((i) => i.kind === 'charge')).toHaveLength(2);
     put(s, 'sam', at(2, 12, 3));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const o = option(s, 'sam', 'throwCharge')!;
     expect(o.pick).toBe('hex');
     expect(o.area).toBe(2);
@@ -1354,7 +1355,7 @@ describe('15.3 classes', () => {
     const s = v32({ heroes: ['aldous', 'brann'] });
     put(s, 'aldous', at(3, 2, 8));
     put(s, 'brann', at(3, 6, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     expect(option(s, 'aldous', 'firebolt')).toBeUndefined();
     const m = monster(s, 'orc', at(3, 6, 7), 'hunting');
     m.hp = 20;
@@ -1443,7 +1444,7 @@ describe('15.3 classes', () => {
     const s = delve({ heroes: ['hed', 'brann'], extra: [['hed', 'Hed', 'hedgewitch']] });
     put(s, 'hed', at(3, 2, 8));
     put(s, 'brann', at(3, 3, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     hero(s, 'brann').hp = 4;
     const mended = act(s, 'hed', 'mend', { id: 'brann' }).state;
     expect(hero(mended, 'brann').hp).toBe(8);
@@ -1488,7 +1489,7 @@ describe('15.4 quartermaster', () => {
   it('smoke bomb: blocks sight both ways for 2 rounds; monsters inside lose track', () => {
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(3, 2, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const id = give(s, 'brann', 'smoke');
     const m = monster(s, 'orc', at(3, 6, 8), 'hunting');
     const o = option(s, 'brann', 'smoke')!;
@@ -1511,7 +1512,7 @@ describe('15.4 quartermaster', () => {
   it('glue bomb: monsters within 1 are stuck for 2 rounds (they still bite if adjacent)', () => {
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(3, 2, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const id = give(s, 'brann', 'glue');
     const m = monster(s, 'orc', at(3, 6, 8), 'hunting');
     const r = act(s, 'brann', 'glue', { at: at(3, 6, 8), itemId: id });
@@ -1530,7 +1531,7 @@ describe('15.4 quartermaster', () => {
   it('sleep dart: anyone, 1 Finesse slot, silent; a hit sleeps the monster', () => {
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(3, 2, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const id = give(s, 'brann', 'dart');
     const m = monster(s, 'orc', at(3, 7, 8), 'hunting');
     const pv = e.preview(s, 'brann', 'dart', { id: m.id, itemId: id });
@@ -1546,7 +1547,7 @@ describe('15.4 quartermaster', () => {
   it('caltrops: the first monster to step on them takes 2 and stops', () => {
     const s = v32({ heroes: ['brann'] });
     put(s, 'brann', at(3, 2, 8));
-    s.delve!.light = 40;
+    s.delve!.light = 20;
     const id = give(s, 'brann', 'caltrops');
     const r = act(s, 'brann', 'caltrops', { at: at(3, 3, 8), itemId: id });
     expect(r.state.delve!.caltrops).toEqual([posKey(at(3, 3, 8))]);
