@@ -803,7 +803,6 @@ export type GameEvent =
   | { type: 'noise'; at: Pos; radius: number }
   | { type: 'light'; light: number; brightness: Brightness }
   | { type: 'brazierLit'; at: Pos }
-  | { type: 'blast'; at: Pos }
   | { type: 'trap'; at: Pos; id: string; damage: number }
   | { type: 'trapSpotted'; at: Pos }
   | { type: 'awake'; id: string; awareness: Awareness }
