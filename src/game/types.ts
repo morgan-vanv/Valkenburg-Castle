@@ -111,6 +111,8 @@ export interface SpawnDef {
   patrol?: Pos[];
   /** Ghouls: buried until a hero ends a move within 2 (default true for ghouls). */
   buried?: boolean;
+  /** V3.7 (spec 20.1): the direction the monster faces when placed (0..5, hex.ts DIRS). Default 0. */
+  facing?: number;
 }
 
 export interface ChestDef {
@@ -534,6 +536,8 @@ export interface Rival {
   pack?: Item[];
   /** Spec 20.4: the downed hero this member is dragging out. */
   dragging?: string;
+  /** V3.7 (spec 20.1): heroes this member has noticed (sneak attack applies to the others). */
+  noticedIds?: string[];
 }
 
 export interface RivalCrew {
