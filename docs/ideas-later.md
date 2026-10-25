@@ -6,3 +6,4 @@
 
 Castle redesign pitch: https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd
 - **Thin walls (visual only):** done in V3.2 style pass (spec 15.8). Walls along hex edges as a *gameplay* model (tiles between edges) remains deferred.
+- **Scale and proportion, second look** (2026-10-24): option C is in but the owner isn't fully satisfied. The study is parametric (mockup/scale-options.ts, any value on the URL), so new variants are cheap.

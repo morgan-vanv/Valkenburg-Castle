@@ -34,3 +34,4 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-24** Walls are 2.2 high (hero ≈ 2.6) so thin panels still read as walls; the cutaway keeps the party visible.
 - **2026-10-24** Cave = room material rock, earth or bone; those walls stay thick. Water (the Drain) and bone-free built rooms get thin walls.
 - **2026-10-24** Figures start facing the camera.
+- **2026-10-24** Scale: option C (RuneScape) from the three-panel study; hero 2.0 units, natural proportions, walls 2.6. The owner picked it as good enough for now and wants to revisit.

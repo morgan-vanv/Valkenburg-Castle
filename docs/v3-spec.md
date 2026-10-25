@@ -310,3 +310,7 @@ Each sister has a class (`Rival.cls`) and uses the heroes' own rules, intents sh
 ### 16.6 Data defaults
 
 - Monster hit/damage/HP tables stay in src/game/data.ts; tiers in the same file. Patrol routes, sleepers, buried ghouls and lights are castle data (src/data/castle).
+
+### 15.8a Scale decision (owner, 2026-10-24 22:07)
+
+From the three-panel study (mockup/shots/scale-options.png, mockup/scale-options.ts): **option C, "RuneScape"**: hero 2.0 units tall, natural blocky proportions (head 1/5, limb thickness 0.07, shoulders 0.34, legs 0.44 of height), rat 0.35x, spider 0.8x, orc 1.05x, walls 2.6 (thin), Dragon as is. "Good enough for now"; the owner wants to revisit scale and proportion later.
