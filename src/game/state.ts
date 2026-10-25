@@ -20,11 +20,15 @@ export interface MonsterX extends Monster {
   routeAfter?: number;
   /** Lost its quarry and is walking back to its post / route. */
   returning?: boolean;
+  /** V3.7 (spec 20.1): heroes it has noticed (ids); cleared when it loses its quarry or sleeps. A hero not in it is open to a sneak attack. */
+  noticedIds?: string[];
 }
 
 export interface HeroX extends HeroInDelve {
   /** Hit by a sister's sleep dart: loses the next move and action (cleared with webbed). */
   dozing?: boolean;
+  /** V3.7 (spec 20.1): the last move was a sneak (undefined = never moved: counts as walking). Monsters notice by it. */
+  sneaked?: boolean;
 }
 
 export interface RivalX extends Rival {
@@ -60,8 +64,8 @@ export interface DelveX extends Delve {
   heroes: HeroX[];
   monsters: MonsterX[];
   rivals: CrewX | null;
-  /** Blasting charges waiting for the end of the player phase. */
-  charges?: { at: Pos; by: string }[];
+  /** V3.7 (spec 20.3): blast rubble (broken walls in `blown`) dug out to floor, by posKey. */
+  dug?: string[];
   /** XP earned this delve by hero id (kills). */
   xp?: Record<string, number>;
   /** Item ids dropped by heroes who died (become lostGear). */

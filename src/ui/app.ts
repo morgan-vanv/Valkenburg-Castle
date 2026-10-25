@@ -54,6 +54,8 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   grapple: 'creak',
   shutter: 'click',
   escape: 'chop',
+  setCharge: 'click',
+  dread: 'gloam',
 };
 const LOADOUT_KEY = 'vc.loadout.v33';
 /** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
@@ -536,9 +538,48 @@ export class App {
           await this.dio.playEvent(e);
           continue;
         }
-        case 'blast':
+        case 'blast': {
           await this.dio.playEvent(e);
           continue;
+        }
+        // ---- V3.7
+        // The engine's own `say` lines cover fuses, blasts, swings, wakes and Dread; the HUD adds lines only where it doesn't speak.
+        case 'fuseSet':
+          sfx.play('torch', { pitch: 1.4, gain: 0.6 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'swing':
+          sfx.play('whoosh', { pitch: 1.3, gain: 0.5 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'feared':
+          sfx.play('gloam', { pitch: 1.6, gain: 0.5 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'noticed':
+          if (this.dio.isWatchable(e.by)) sfx.play('click', { pitch: 0.55, gain: 0.8 });
+          this.hud.log(`${this.hud.nameOf(e.by)} notices ${this.hud.nameOf(e.hero)}!`, 'log-enemy');
+          await this.dio.playEvent(e);
+          continue;
+        case 'woke':
+          if (this.dio.isWatchable(e.id)) sfx.play('click', { pitch: 0.7 });
+          await this.dio.playEvent(e);
+          continue;
+        case 'robbed':
+          sfx.play('coin', { pitch: 0.6 });
+          this.hud.log(`${this.hud.nameOf(e.by)} robs ${this.hud.nameOf(e.hero)}: ${e.items.length ? e.items.map((i) => (i.kind === 'gold' ? `${i.amount} gold` : i.name)).join(', ') : 'nothing worth taking'}.`, 'log-enemy');
+          this.hud.pulse('hurt');
+          await this.dio.playEvent(e);
+          continue;
+        case 'captured': {
+          sfx.play('death', { pitch: 0.9 });
+          sfx.play('horn', { pitch: 0.6, gain: 0.5 });
+          this.hud.log(`${this.hud.nameOf(e.hero)} is taken: ${this.hud.nameOf(e.by)} drags them out of the castle.`, 'log-enemy');
+          this.hud.pulse('dark');
+          await this.dio.playEvent(e);
+          if (!instant()) await this.hud.capturedBanner(e.hero, e.by, (x) => wait(x * 0.8));
+          continue;
+        }
         case 'trap':
           sfx.play('smash', { pitch: 1.6, gain: 0.6 });
           await this.dio.playEvent(e);
@@ -726,6 +767,17 @@ export class App {
         return d.unitPos(e.id);
       case 'gloam':
         return d.canSee(e.at) ? e.at : null;
+      case 'swing':
+        return this.isHero(e.target) ? d.unitPos(e.target) : d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null;
+      case 'blast':
+        return d.canSee(e.at) ? e.at : null;
+      case 'fuseSet':
+        return d.canSee(e.at) ? e.at : null;
+      case 'noticed':
+        return d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null;
+      case 'robbed':
+      case 'captured':
+        return d.unitPos(e.hero);
       case 'cast':
         // Overwatch shots fire in the world phase: show them.
         return d.canSee(e.at) ? (e.at ?? null) : d.canSee(d.unitPos(e.by)) ? d.unitPos(e.by) : null;

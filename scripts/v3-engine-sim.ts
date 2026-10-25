@@ -24,6 +24,11 @@
 // copper is home, pays a cutthroat toll when it can afford it and otherwise fights. Per delve it
 // prints the crew and how it ended, and the village at the end.
 //
+// V3.7 (spec 20.3): a Sapper in the party sets a charge (fuse 1) on a locked door or a breakable
+// wall next to them when blowing it saves 6+ hexes of walking to the goal; heroes keep out of
+// lit fuses' blast areas. SAPPER=1 hires a Sapper first. The report prints fuses lit, blasts,
+// walls broken and locks blown.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -36,6 +41,8 @@ import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '
 import { World, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
 import { posNeighbors } from '../src/game/hex';
 import type { DelveX } from '../src/game/state';
+import { makeHero } from '../src/game/camp';
+import { breakableWall } from '../src/game/charges';
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -50,6 +57,9 @@ const LOW_LIGHT = 5;
 const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
+const SAPPER = process.env.SAPPER === '1';
+const sap = { fuses: 0, blasts: 0, walls: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
+const sapLog: string[] = [];
 const pits: Pos[] = [];
 for (const l of castle.levels) for (const k of Object.keys(l.tiles)) {
   const [q, r] = k.split(',').map(Number) as [number, number];
@@ -67,6 +77,20 @@ function run(s: GameState, cmd: Command): GameState {
     const key = ev.type === 'hit' ? (ev.target.startsWith('m') || ev.target.startsWith('r') ? 'hit:monster' : 'hit:hero') : ev.type === 'awake' ? `awake:${ev.awareness}` : ev.type;
     evCount[key] = (evCount[key] ?? 0) + 1;
     if (ev.type === 'hit' && (ev.attacker === gloamId || r.state.delve?.monsters.find((m) => m.id === ev.attacker)?.kind === 'gloam')) gloamStrikes++;
+    // V3.7 (spec 20.3): the Sapper's work.
+    if (ev.type === 'fuseSet' && s.delve?.heroes.some((h) => h.heroId === ev.by)) sap.fuses++;
+    if (ev.type === 'blast' && 'by' in ev && s.delve?.heroes.some((h) => h.heroId === ev.by)) {
+      sap.blasts++;
+      sap.walls += ev.broke.length;
+      const doorsOpened = r.events.filter((x) => x.type === 'doorChanged' && x.open && s.delve!.doors[posKey(x.at)]?.locked).length;
+      const chestsOpened = r.events.filter((x) => x.type === 'chestOpened' && s.delve!.chests.find((c) => c.id === x.id)?.locked).length;
+      sap.locks += doorsOpened + chestsOpened;
+      const hits = r.events.filter((x) => x.type === 'hit' && x.attacker === 'blast');
+      sap.friendHits += hits.filter((x) => x.type === 'hit' && s.delve!.heroes.some((h) => h.heroId === x.target)).length;
+      sap.kills += r.events.filter((x) => x.type === 'monsterDied').length;
+      sapLog.push(`L${ev.at.level} ${w.roomName(ev.at)}: ${ev.broke.length} wall(s)${doorsOpened + chestsOpened ? `, ${doorsOpened + chestsOpened} lock(s)` : ''}`);
+      if (VERBOSE) console.log(`  BOOM at L${ev.at.level} ${w.roomName(ev.at)}: broke ${ev.broke.length} wall(s), opened ${doorsOpened + chestsOpened} lock(s)`);
+    }
   }
   if (r.error) {
     errors++;
@@ -86,7 +110,7 @@ function option(s: GameState, heroId: string, a: ActionKind) {
   return o && !o.blocked ? o : undefined;
 }
 
-const FRONT = ['sellsword', 'sapper'];
+const FRONT = SAPPER ? ['sapper', 'sellsword'] : ['sellsword', 'sapper'];
 const QUIET = ['burglar', 'ranger'];
 const MAGES = ['pyromancer', 'hedgewitch', 'shadowmancer'];
 const hired: Record<string, number> = {};
@@ -97,8 +121,12 @@ function recruit(s: GameState, want: number): GameState {
   while (s.campaign.roster.length < want) {
     const have = s.campaign.roster.map((h) => h.cls as string);
     const role = roles.find((r) => !have.some((c) => r.includes(c))) ?? [...FRONT, ...QUIET, ...MAGES];
+    // SAPPER=1: make sure the tavern has a Sapper on offer while the roster has none.
+    if (SAPPER && !have.includes('sapper') && !s.campaign.recruits.some((r) => r.hero.cls === 'sapper')) {
+      s.campaign.recruits.push({ hero: makeHero(`sap${s.campaign.delveCount}`, 'Sam Sapper', 'sapper'), price: 60 });
+    }
     const pool = s.campaign.recruits.filter((r) => r.price <= s.campaign.gold);
-    const pick = pool.find((r) => role.includes(r.hero.cls)) ?? pool.sort((a, b) => a.price - b.price)[0];
+    const pick = role.map((cls) => pool.find((r) => r.hero.cls === cls)).find(Boolean) ?? pool.sort((a, b) => a.price - b.price)[0];
     if (!pick) break;
     const before = s;
     s = run(s, { type: 'hire', heroId: pick.hero.id });
@@ -211,6 +239,91 @@ function parleyCheck(s: GameState, id: string): GameState {
   return s;
 }
 
+/** Hex distance. */
+function hexDistance(a: Pos, b: Pos): number {
+  return Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+}
+
+/** Inside a lit fuse's blast area (same level, within 2)? */
+function inBlast(d: DelveX, p: Pos): boolean {
+  return (d.fuses ?? []).some((f) => f.at.level === p.level && hexDistance(f.at, p) <= 2);
+}
+
+/**
+ * V3.7 (spec 20.3): a Sapper (or anyone carrying a bought charge) looks for a breakable wall or a
+ * locked door within a few hexes whose breaching would save SAPPER_SAVE hexes or more on the walk
+ * to the goal: walks up to it and sets a charge with fuse 1. Two distance fields do the sums:
+ * F (hex -> goal, locks closed) and H (hex -> hero); a breach W between floor hexes a and b
+ * costs H(a) + 2 + F(b).
+ */
+const SAPPER_SAVE = 6;
+const SAPPER_LOOK = 7;
+function sapperCheck(s: GameState, id: string): GameState {
+  const d = s.delve as DelveX;
+  const me = d.heroes.find((x) => x.heroId === id);
+  if (!me || me.acted || me.webbed) return s;
+  const def = e.heroById(s, id);
+  const action: ActionKind = def?.cls === 'sapper' ? 'setCharge' : 'charge';
+  if (!option(s, id, action) && !(action === 'setCharge' && me.pack.some((i) => i.kind === 'charge'))) return s;
+  if (action === 'charge' && !me.pack.some((i) => i.kind === 'charge')) return s;
+  const goals = routeFor(s, me.at).goals;
+  const F = distField(w, d, goals, { stairs: true, allowLocked: false });
+  const H = distField(w, d, [me.at], { stairs: true, allowLocked: false });
+  const here = F.get(posKey(me.at)) ?? 999;
+  let best: { at: Pos; from: Pos; save: number } | undefined;
+  const lv = w.levels.get(me.at.level)!;
+  for (const k of Object.keys(lv.tiles)) {
+    const [q, r] = k.split(',').map(Number) as [number, number];
+    const W = { level: me.at.level, q, r };
+    if (hexDistance(W, me.at) > SAPPER_LOOK) continue;
+    const kind = kindAt(w, d, W);
+    const wall = kind === 'cracked' || breakableWall(w, d, W);
+    const locked = kind === 'door' && !!d.doors[posKey(W)]?.locked && !d.doors[posKey(W)]?.open;
+    if (!wall && !locked) continue;
+    if ((d.fuses ?? []).some((f) => samePos(f.at, W))) continue;
+    const around = posNeighbors(W).filter((p) => H.has(posKey(p)) || F.has(posKey(p)));
+    for (const a of around) {
+      const ha = H.get(posKey(a));
+      if (ha === undefined) continue;
+      for (const b of around) {
+        const fb = F.get(posKey(b));
+        if (fb === undefined || samePos(a, b)) continue;
+        const save = here - (ha + (wall ? 2 : 1) + fb);
+        if (save >= SAPPER_SAVE && (!best || save > best.save)) best = { at: W, from: a, save };
+      }
+    }
+  }
+  if (!best) return s;
+  // Walk up to it if not there yet.
+  if (!posNeighbors(best.at).some((p) => samePos(p, me.at))) {
+    if (me.moved) return s;
+    const tf = distField(w, d, posNeighbors(best.at).filter((p) => H.has(posKey(p))), { stairs: true, allowLocked: false });
+    let pick: ReturnType<typeof e.reachable>[0] | undefined;
+    let pd = tf.get(posKey(me.at)) ?? 999;
+    for (const r of e.reachable(s, id, false)) {
+      const dd = tf.get(posKey(r.to)) ?? 999;
+      if (dd < pd) { pd = dd; pick = r; }
+    }
+    if (!pick) return s;
+    s = run(s, { type: 'move', heroId: id, path: pick.path, sneak: false });
+  }
+  const o = option(s, id, action);
+  const t = o?.targets.find((x) => x.at && samePos(x.at, best!.at) && (x.fuse ?? 1) === 1);
+  if (!t) return s;
+  const before = s;
+  s = act(s, id, action, t);
+  if (s !== before && VERBOSE) console.log(`  ${def?.name} sets a charge on the ${kindAt(w, d, best.at)} at L${best.at.level} ${w.roomName(best.at)} (saves ${best.save} hexes)`);
+  return s;
+}
+
+/** V3.7 (spec 20.1): the bot sneaks when a sleeper lies within 4 of the hero on its level, otherwise walks. */
+function nearSleeper(s: GameState, at: Pos): boolean {
+  return s.delve!.monsters.some((m) => m.awareness === 'asleep' && !m.buried && m.kind !== 'dragon' && m.at.level === at.level
+    && Math.max(Math.abs(m.at.q - at.q), Math.abs(m.at.r - at.r), Math.abs(m.at.q + m.at.r - at.q - at.r)) <= 4);
+}
+let sneakMoves = 0;
+let walkMoves = 0;
+
 function heroTurn(s: GameState, h: HeroInDelve): GameState {
   const id = h.heroId;
   s = parleyCheck(s, id);
@@ -244,6 +357,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     return false;
   };
   tryAct();
+  if (alive()) s = sapperCheck(s, id);
   if (!alive()) return s;
   const me = hero()!;
   if (!me.moved && !me.webbed) {
@@ -257,7 +371,8 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const goals = hunters.length && !me.acted ? hunters.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : routeFor(s, me.at).goals;
       const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
       const here = field.get(posKey(me.at)) ?? 999;
-      const reach = e.reachable(s, id, false);
+      const sneak = nearSleeper(s, me.at);
+      const reach = e.reachable(s, id, sneak);
       // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
       const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
       const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
@@ -267,8 +382,16 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         : [];
       let best: (typeof reach)[0] | undefined;
       let bestD = here;
-      if (!(isBearer && stragglers.length && !hunters.length)) {
+      // A lit fuse nearby: anywhere out of its blast area beats the goal this turn.
+      const ducking = inBlast(d, me.at) && reach.some((r) => !inBlast(d, r.to));
+      if (!(isBearer && stragglers.length && !hunters.length) || ducking) {
         for (const r of reach) {
+          if (inBlast(d, r.to) && !(inBlast(d, me.at) && !ducking)) continue;
+          if (ducking) {
+            const dd = field.get(posKey(r.to)) ?? 999;
+            if (!best || dd < bestD) { bestD = dd; best = r; }
+            continue;
+          }
           if (!isBearer && bearer && r.to.level === bearer.at.level && hexDist(r.to, bearer.at) > COHESION && hexDist(me.at, bearer.at) <= COHESION) continue;
           const dd = field.get(posKey(r.to)) ?? 999;
           if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
@@ -286,7 +409,11 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
           if (dd < bd) { bd = dd; best = r; }
         }
       }
-      if (best) s = run(s, { type: 'move', heroId: id, path: best.path, sneak: false });
+      if (best) {
+        if (sneak) sneakMoves++;
+        else walkMoves++;
+        s = run(s, { type: 'move', heroId: id, path: best.path, sneak });
+      }
     }
   }
   if (alive()) s = lanternCheck(s, id);
@@ -302,7 +429,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const d2 = s.delve as DelveX;
     const bearer2 = d2.heroes.find((h) => h.heroId === d2.lanternBearer && h.status === 'active');
     for (const r of e.reachable(s, id, false)) {
-      if (!r.dash) continue;
+      if (!r.dash || inBlast(d2, r.to)) continue;
       if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
       const dd = field.get(posKey(r.to)) ?? 999;
       if (dd < bestD) { bestD = dd; best = r; }
@@ -509,6 +636,8 @@ for (const lv of [1, 2, 3]) {
   console.log(`  L${lv}    ${String(rs.length).padStart(3)}  ${String(rs.filter((r) => r.done).length).padStart(4)}  ${String(rs.reduce((a, r) => a + r.deaths, 0)).padStart(6)}  ${String(rs.reduce((a, r) => a + r.darkRounds, 0)).padStart(16)}  ${String(rs.reduce((a, r) => a + r.gloamStrikes, 0)).padStart(13)}`);
 }
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
+if (sapLog.length) console.log(`  blasts: ${sapLog.slice(0, 12).join('; ')}${sapLog.length > 12 ? '; ...' : ''}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);
 console.log(`first five L1 delves: done ${first.filter((r) => r.done).length}/${first.length}, deaths ${first.reduce((a, r) => a + r.deaths, 0)}`);
 const avg = (f: (r: Row) => number) => (rows.reduce((a, r) => a + f(r), 0) / Math.max(1, rows.length)).toFixed(1);
@@ -521,6 +650,7 @@ for (const kd of kinds) {
   console.log(`  ${kd.padEnd(16)} ${String(rs.length).padStart(3)} ${String(Math.round((100 * rs.filter((r) => r.done).length) / rs.length)).padStart(5)} ${a((r) => r.rounds).padStart(7)} ${a((r) => r.light).padStart(6)} ${String(rs.reduce((x, r) => x + r.deaths, 0)).padStart(7)}`);
 }
 if (DRAGON) console.log(`dragon: slain ${rows.filter((r) => r.dragonDead).length}/${rows.length}, reached L3 ${rows.filter((r) => r.reachedL3).length}/${rows.length}`);
+console.log(`stealth (spec 20.1, 20.2): moves ${walkMoves} walked / ${sneakMoves} sneaked; sleepers woken by passers-by ${evCount.woke ?? 0}; heroes noticed ${evCount.noticed ?? 0}; free swings ${evCount.swing ?? 0} (awake events: ${Object.entries(evCount).filter(([k]) => k.startsWith('awake:')).map(([k, v]) => `${k.slice(6)} ${v}`).join(', ') || 'none'})`);
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
 if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);

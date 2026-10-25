@@ -142,6 +142,8 @@ export interface ContractSiteDef {
   where: string;
   /** V3.6 (spec 19.1): a story site, used only by its story contract, never by the regular board. */
   story?: StoryId;
+  /** V3.7 (spec 20.4): a crew's hideout, used only by "Bring back <name>" contracts for that crew's captives. */
+  hideout?: CrewId;
 }
 
 /**
@@ -175,7 +177,7 @@ export interface CastleDef {
   contractSites: ContractSiteDef[];
   /** Where rival crews enter (exit tiles). */
   rivalEntrances: Pos[];
-  /** V3.5 (spec 18.5): where a cutthroat crew waits on Level 2 (choke points: bridge ends, the winch room). */
+  /** V3.5 (spec 18.5): where a cutthroat crew waits (choke points on Level 2; V3.7 adds Level 3 posts for the Wake). */
   rivalPosts?: Pos[];
   /** Fixed lights: sconces, daylight, the forge, fungus, the Lair's fires. */
   lights: LightDef[];
@@ -437,7 +439,9 @@ export interface Intent {
    * targetId one hex toward it (`to`). grab: the ghoul holds targetId. Rivals also use
    * overwatch / smoke / veil / dart (spec 16.5): `to` = the hex a bomb lands on.
    */
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'drag' | 'rob' | 'potion' | 'item' | 'flee';
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink';
+  /** V3.7 `item` intents: which item. */
+  item?: ItemKind;
   /** breath: the marked hexes. */
   hexes?: Pos[];
   targetId?: string;
@@ -482,8 +486,8 @@ export interface Monster {
 }
 
 /** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
-export type CrewId = 'lantern-sisters' | 'ferrymen' | 'gallows-choir';
-export type RivalClass = 'ranger' | 'shadowmancer' | 'burglar' | 'sellsword' | 'sapper' | 'pyromancer';
+export type CrewId = 'lantern-sisters' | 'ferrymen' | 'gallows-choir' | 'the-wake';
+export type RivalClass = 'ranger' | 'shadowmancer' | 'burglar' | 'sellsword' | 'sapper' | 'pyromancer' | 'hedgewitch';
 /** Parley deals (spec 18.6). 'truce' is the toll when a cutthroat crew demands one. */
 export type DealKind = 'leave' | 'truce' | 'job' | 'hire' | 'fight';
 export type JobKind = 'winch' | 'open' | 'scout';

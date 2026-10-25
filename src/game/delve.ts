@@ -7,12 +7,12 @@ import type { ActionOption } from './api';
 import {
   HEAVY_MOVE, SMUGGLER_SNEAK, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
   GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
-  THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE,
+  THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
 } from './data';
 import { say, type Ctx, type HeroX, type MonsterX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
-  LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
+  LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
   releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent,
 } from './common';
 import {
@@ -21,9 +21,13 @@ import {
 } from './world';
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
+import { blastableWall, chargeCount, fuseAt, isSatchel, setFuse, spendCharge, wallsBrokenBy } from './charges';
 import { lairCheck } from './dragon';
-import { crewAim, crewNotice, rivalOverwatchFire } from './rivals';
+import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { parleyTargets } from './parley';
+import { fleePlan, forgetHeroes, hasNoticed, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
+import { hitRange } from './ai';
+import { DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS } from './data';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -136,15 +140,19 @@ export function reachable(c: Ctx, heroId: string, sneak: boolean) {
     budget: moveBudget(c, h, sneak),
   });
   const out = [];
+  // V3.7 (spec 20.1, 20.2): what each path risks, for the preview (one lit set for the whole query).
+  const lit = litSet(c.w, c.d);
   for (const n of nodes.values()) {
     if (samePos(n.p, h.at)) continue;
     const o = occupant(c, n.p);
     if (o) continue; // can't end on another hero or the prisoner
-    out.push({ to: n.p, cost: n.cost, path: pathTo(nodes, n.p), ...(mk === 'dash' ? { dash: true } : {}) });
+    const path = pathTo(nodes, n.p);
+    out.push({ to: n.p, cost: n.cost, path, risks: moveRisks(c, h, path, sneak, lit), ...(mk === 'dash' ? { dash: true } : {}) });
   }
   return out;
 }
 
+/** Walking noise per hex (spec 20.1): 1, 2 on rubble; sneaking is silent. */
 export function moveNoise(sneak: boolean): number {
   return sneak ? 0 : 1;
 }
@@ -178,9 +186,13 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     h.dashed = true;
     h.acted = true;
   }
+  (h as HeroX).sneaked = sneak;
   const walked: Pos[] = [];
   let from = h.at;
-  for (const p of path) {
+  const lit = litSet(c.w, c.d);
+  const swung = new Set<string>();
+  let lastNoise = 0;
+  for (const [i, p] of path.entries()) {
     if (kindAt(c.w, c.d, p) === 'door') {
       const door = doorAt(c.d, p);
       if (door && !door.open) {
@@ -188,6 +200,9 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
         c.ev.push({ type: 'doorChanged', at: p, open: true, locked: door.locked });
       }
     }
+    // V3.7 (spec 20.2): stepping out of an enemy's reach gives it a free swing (once per enemy per move).
+    provokeSwings(c, h, from, p, swung);
+    if (h.status !== 'active') break;
     walked.push(p);
     if (p.level !== from.level) {
       c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
@@ -199,6 +214,10 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     h.at = { ...p };
     from = p;
     glimpse(c, p);
+    // V3.7 (spec 20.1): noise at every hex (1, 2 on rubble; sneaking silent), and sleepers within 2 roll to wake.
+    lastNoise = stepNoise(c, p, sneak);
+    if (lastNoise) makeNoise(c, p, lastNoise, { quiet: true });
+    wakeRolls(c, h, p, i === path.length - 1, sneak, lit);
     const trap = c.d.traps[posKey(p)];
     if (trap) {
       c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
@@ -208,9 +227,9 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
     }
   }
   if (walked.length) c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
+  if (lastNoise && h.status === 'active') c.ev.push({ type: 'noise', at: { ...h.at }, radius: lastNoise });
   ventCheck(c, h);
-  afterHeroMove(c, h, sneak);
-  makeNoise(c, h.at, h.status === 'active' ? moveNoise(sneak) : 0);
+  afterHeroMove(c, h, sneak, true);
   checkHolds(c);
   rivalOverwatchFire(c, heroId);
   refreshSight(c);
@@ -226,8 +245,8 @@ function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
   makeNoise(c, at, 2);
 }
 
-/** Prisoner follows, traps get spotted, sleepers next to the hero wake. */
-export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false): void {
+/** Prisoner follows, traps get spotted, sleepers next to the hero wake (`walked`: doMove rolled the wakes per hex already). */
+export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = false): void {
   const pr = c.d.prisoner;
   if (pr && h.escorting === pr.id && !pr.dead && !pr.out && !adjacent(pr.at, h.at)) {
     const spot = posNeighbors(h.at)
@@ -254,7 +273,7 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false): void {
       say(c, `${heroName(c, h.heroId)} spots a trap.`);
     }
   }
-  wakeAdjacent(c, h.at);
+  if (!walked) wakeAdjacent(c, h.at, sneak, h.heroId);
   riseGhouls(c, h);
   lairCheck(c, h, sneak);
 }
@@ -271,6 +290,7 @@ export function riseGhouls(c: Ctx, h: HeroInDelve): void {
     m.awareness = 'hunting';
     m.focusAt = { ...h.at };
     m.intent = undefined;
+    noticeHero(c, m, h.heroId);
     c.ev.push({ type: 'spawned', id: m.id, at: { ...m.at } });
     c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
     say(c, `${m.name} claws its way out of the bones.`);
@@ -291,6 +311,12 @@ function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jamme
   const ch = c.d.chests.find((x) => samePos(x.at, p) && !x.opened && x.locked);
   if (ch) return { chest: true, jammed: ch.jammed };
   return null;
+}
+
+/** V3.7 (spec 20.3): a hex a charge can sit on: floor-like (doors too), a cracked or breakable wall; no fuse there yet. */
+function chargeSpot(c: Ctx, p: Pos): boolean {
+  if (fuseAt(c.d, p)) return false;
+  return isFloorish(c.w, c.d, p) || blastableWall(c.w, c.d, p);
 }
 
 function aroundAndSelf(p: Pos): Pos[] {
@@ -456,13 +482,19 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'knockback':
       if (cls !== 'ranger') return [];
       return enemiesInSight(c, h, KNOCKBACK_RANGE).filter((t) => c.d.monsters.find((m) => m.id === t.id)?.kind !== 'dragon');
+    // ---- V3.7 (spec 20.3): fused charges
     case 'throwCharge': {
-      if (cls !== 'sapper') return [];
-      const ch = itemOf(h, 'charge');
-      if (!ch) return [];
-      const pending = c.d.charges ?? [];
-      return hexesInSight(c, h, THROW_CHARGE_RANGE, (p) => !samePos(p, h.at) && (isFloorish(c.w, c.d, p) || kindAt(c.w, c.d, p) === 'cracked' || kindAt(c.w, c.d, p) === 'pit') && !pending.some((x) => samePos(x.at, p)))
-        .map((t) => ({ ...t, itemId: ch.id }));
+      if (cls !== 'sapper' || !chargeCount(h)) return [];
+      return hexesInSight(c, h, THROW_CHARGE_RANGE, (p) => !samePos(p, h.at) && chargeSpot(c, p));
+    }
+    case 'setCharge': {
+      if (cls !== 'sapper' || !chargeCount(h)) return [];
+      const out: ActionTarget[] = [];
+      for (const p of posNeighbors(h.at)) {
+        if (!chargeSpot(c, p)) continue;
+        for (const fuse of [1, 2] as const) out.push({ at: p, fuse });
+      }
+      return out;
     }
     case 'dig':
       if (cls !== 'sapper' && h.ale !== 'mole') return [];
@@ -476,6 +508,10 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'sleep':
       if (!mage('shadowmancer', 1)) return [];
       return enemiesInSight(c, h, SLEEP_RANGE, { noDragon: true, monstersOnly: true }).filter((t) => c.d.monsters.find((m) => m.id === t.id)?.awareness !== 'asleep');
+    case 'dread':
+      // V3.7 (spec 20.2): a monster or crew member in sight within 5; not the Dragon (nor the Gloam).
+      if (!mage('shadowmancer', DREAD_MANA)) return [];
+      return enemiesInSight(c, h, DREAD_RANGE, { noDragon: true });
     case 'blink':
       if (!mage('shadowmancer', 1)) return [];
       return hexesInSight(c, h, BLINK_RANGE, (p) => !samePos(p, h.at) && standable(c.w, c.d, p) && !occupant(c, p));
@@ -553,13 +589,13 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       // Every pile in reach; a pile nothing can be taken from is a blocked target (spec 15.7).
       return c.d.ground.filter((g) => within(g.at, h.at, 1) && g.items.length).map((g) => ({ at: g.at }));
     case 'drop':
-      return h.pack.map((i) => ({ itemId: i.id }));
+      return h.pack.filter((i) => !isSatchel(i)).map((i) => ({ itemId: i.id }));
     case 'give': {
       const out: ActionTarget[] = [];
       for (const o of others) {
         if (o.status !== 'active' || !adjacent(o.at, h.at)) continue;
         const room = PACK_SLOTS - packUsed(o.pack);
-        for (const i of h.pack) if (i.slots <= room || i.kind === 'gold') out.push({ id: o.heroId, itemId: i.id });
+        for (const i of h.pack) if (!isSatchel(i) && (i.slots <= room || i.kind === 'gold')) out.push({ id: o.heroId, itemId: i.id });
       }
       return out;
     }
@@ -590,12 +626,13 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'revive':
       return others.filter((o) => o.status === 'downed' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId, at: o.at }));
     case 'charge': {
+      // V3.7 (spec 20.3): a bought charge, set with fuse 1 on an adjacent locked thing or wall. Sappers use setCharge.
+      if (cls === 'sapper') return [];
       const ch = h.pack.find((i) => i.kind === 'charge');
       if (!ch) return [];
-      const pending = c.d.charges ?? [];
       return posNeighbors(h.at)
-        .filter((p) => (lockedThingAt(c, p) || (kindAt(c.w, c.d, p) === 'cracked')) && !pending.some((x) => samePos(x.at, p)))
-        .map((at) => ({ at, itemId: ch.id }));
+        .filter((p) => (lockedThingAt(c, p) || blastableWall(c.w, c.d, p)) && chargeSpot(c, p))
+        .map((at) => ({ at, itemId: ch.id, fuse: 1 as const }));
     }
     case 'rope': {
       const r = h.pack.find((i) => i.kind === 'rope');
@@ -660,16 +697,16 @@ const LABELS: Record<ActionKind, string> = {
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
   bribe: 'Bribe', parley: 'Parley', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
   passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
-  overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', dig: 'Dig', fireball: 'Fireball',
-  veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust',
+  overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', setCharge: 'Set charge', dig: 'Dig', fireball: 'Fireball',
+  veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust', dread: 'Dread',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught',
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread'];
 const ORDER: ActionKind[] = [
-  'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
-  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
+  'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'dread', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
+  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
@@ -679,12 +716,12 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   light: 'hex', torch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
   shove: 'enemy', free: 'other', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
-  overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
-  blink: 'hex', ward: 'ally', gust: 'hex', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
+  overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
+  blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
 };
-const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2 };
-const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1 };
+const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2 };
+const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA };
 /** Attacks break a Veil (spec 15.3). */
 const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash'];
 /** Whole-turn actions: need both move and action. */
@@ -732,6 +769,7 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
 
 function sameTarget(a: ActionTarget, b: ActionTarget): boolean {
   if (a.id !== undefined && b.id !== undefined && a.id !== b.id) return false;
+  if (a.fuse !== undefined && b.fuse !== undefined && a.fuse !== b.fuse) return false;
   if (a.itemId !== undefined && b.itemId !== undefined && a.itemId !== b.itemId) return false;
   if (a.at && b.at && !samePos(a.at, b.at)) return false;
   return a.id !== undefined || a.itemId !== undefined || !!a.at || (b.id === undefined && b.itemId === undefined && !b.at);
@@ -783,8 +821,19 @@ function foe(c: Ctx, id?: string) {
   const m = c.d.monsters.find((x) => x.id === id);
   if (m) return { at: m.at, asleep: m.awareness === 'asleep', hunting: m.awareness === 'hunting', monster: m };
   const r = rivalsOnMap(c).find((x) => x.id === id);
-  if (r) return { at: r.at, asleep: false, hunting: c.d.rivals?.stance === 'hostile', monster: undefined };
+  if (r) return { at: r.at, asleep: false, hunting: c.d.rivals?.stance === 'hostile', monster: undefined, rival: r };
   return undefined;
+}
+
+/**
+ * V3.7 (spec 20.1): has this enemy noticed the hero? A monster by its `noticedIds` (asleep never has);
+ * a crew member when the crew is hostile or demanding (they're all watching the party by then).
+ */
+export function unnoticedBy(c: Ctx, id: string, heroId: string): boolean {
+  const m = c.d.monsters.find((x) => x.id === id);
+  if (m) return m.awareness === 'asleep' || !hasNoticed(m, heroId);
+  const st = c.d.rivals?.stance;
+  return st !== 'hostile' && st !== 'demanding';
 }
 
 function sign(n: number): string {
@@ -797,6 +846,20 @@ function armorMods(c: Ctx, m: MonsterX, mods: string[]): number {
   if (base) mods.push(`Armor −${base} dmg per hit`);
   if (shieldWalled(c, m)) mods.push('Shield wall −1 dmg per hit');
   return monsterArmor(c, m);
+}
+
+/** V3.7 (spec 20.3): what a charge at `at` with this fuse will do, for the preview. */
+function blastSpec(c: Ctx, h: HeroInDelve, at: Pos, fuse: number): Spec {
+  const when = fuse === 1 ? 'at the end of this world phase' : `in ${fuse} world phases`;
+  const text = `Fuse ${fuse}: blows ${when}. ${BLAST_INNER_DMG} dmg within 1 and thrown back, ${BLAST_OUTER_DMG} within 2. ${heroName(c, h.heroId)} takes 0, friends half`;
+  const sp: Spec = { ok: true, slots: 0, chance: 0, modifiers: [], outcomes: [text], noise: BLAST_NOISE, light: 0 };
+  sp.hexes = areaOf(c, at, 2);
+  sp.affects = figuresOn(c, sp.hexes);
+  const broke = wallsBrokenBy(c.w, c.d, at);
+  if (broke.length) sp.modifiers.push(broke.length === 1 ? 'Breaks the wall' : `Breaks ${broke.length} walls`);
+  const friends = c.d.heroes.filter((o) => o.heroId !== h.heroId && (o.status === 'active' || o.status === 'downed') && sp.affects!.includes(o.heroId));
+  if (friends.length) sp.warning = `${friends.map((o) => heroName(c, o.heroId)).join(' and ')} ${friends.length === 1 ? 'stands' : 'stand'} in the blast.`;
+  return sp;
 }
 
 export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionTarget): Spec {
@@ -833,6 +896,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       let p = withLight(def.stats[cls.weapon.stat]);
       if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
+      // V3.7 (spec 20.1): the first blow on an enemy that hasn't noticed you; the Burglar's backstab stacks.
+      if (unnoticedBy(c, t.id!, heroId)) { slots += SNEAK_ATTACK_SLOTS; mods.push('Sneak attack +1 slot'); }
       if (def.cls === 'burglar' && f.monster && !f.hunting) { slots += 1; mods.push('Backstab +1 slot'); }
       const ranged = !!cls.weapon.range;
       if (ranged && c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
@@ -858,12 +923,10 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'overwatch':
       return simple('Shoot the first enemy that moves or acts in sight within 6', cls.weapon.noise ?? 1);
-    case 'throwCharge': {
-      const sp = simple('Blows at end of turn: 4 dmg within 1, 2 within 2', 8);
-      sp.hexes = areaOf(c, t.at!, 2);
-      sp.affects = figuresOn(c, sp.hexes);
-      return sp;
-    }
+    case 'throwCharge':
+      return blastSpec(c, h, t.at!, 1);
+    case 'setCharge':
+      return blastSpec(c, h, t.at!, t.fuse ?? 1);
     case 'dig':
       return simple(kindAt(c.w, c.d, t.at!) === 'rubble' ? 'Clears the rubble' : 'Breaks through the cracked wall', DIG_NOISE);
     case 'fireball': {
@@ -883,6 +946,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'sleep': {
       const p = withLight(def.stats.wits);
       return withMana(base('wits', 2, p, ['No effect', 'Asleep', 'Asleep'], 0), 1);
+    }
+    case 'dread': {
+      const f = foe(c, t.id)!;
+      const p = withLight(def.stats.wits);
+      const who = f.monster?.name ?? f.rival?.name ?? 'It';
+      return withMana(base('wits', DREAD_SLOTS, p, ['No effect', `${who} flees for ${DREAD_ROUNDS} rounds`, `${who} flees for ${DREAD_ROUNDS} rounds`], 0), DREAD_MANA);
     }
     case 'blink':
       return withMana(simple(`Teleport to ${c.w.roomName(t.at!).toLowerCase()}. Silent`), 1);
@@ -982,7 +1051,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return simple(o.status === 'downed' ? 'Back up with 5 HP' : 'Heal 5');
     }
     case 'revive': return simple('Back up with 3 HP');
-    case 'charge': return simple('Blows at end of turn: 4 dmg within 1, 2 within 2', 8);
+    case 'charge': return blastSpec(c, h, t.at!, 1);
     case 'rope': return simple('Rope anchored here');
     case 'climb': return simple(t.at!.level < h.at.level ? 'Climb up the rope' : 'Climb down the rope, no damage');
     case 'jump': {
@@ -993,6 +1062,9 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const s = simple(`Falls ${lv}: ${dmg} dmg${soft ? ' (Featherfoot)' : ''}`);
       let warn = `Falls ${lv} into ${f.levelName}: ${dmg} damage${soft ? ' (Featherfoot: the first fall is free)' : ''}.`;
       if (h.hp <= dmg) warn += ` This will down ${def.name}.`;
+      // V3.7 (spec 20.2): jumping away from an enemy's side provokes.
+      const sw = swingersFor(c, heroId, h.at, t.at!);
+      if (sw.length) warn += ` ${sw.map((x) => `${x.name} gets a free swing: ${hitRange(x.slots, x.dmg, armorOf(def)).join('–')}`).join('. ')}.`;
       s.warning = warn;
       if (f.levels > 1) s.confirm = true;
       return s;
@@ -1043,6 +1115,7 @@ export function putToSleep(c: Ctx, m: MonsterX): void {
   m.intent = undefined;
   m.focusAt = undefined;
   m.shoveFrom = undefined;
+  forgetHeroes(m);
   c.ev.push({ type: 'awake', id: m.id, awareness: 'asleep' });
   say(c, `${m.name} slumps, asleep.`);
 }
@@ -1060,6 +1133,7 @@ export function smokeOut(c: Ctx, at: Pos): Pos[] {
     if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness !== 'hunting') continue;
     if (hexes.some((p) => samePos(p, m.at))) {
       m.awareness = 'alert';
+      forgetHeroes(m);
       c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
     }
   }
@@ -1119,7 +1193,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
       if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
-      wakeTarget(c, tid, h.at);
+      wakeTarget(c, tid, h.at, heroId);
       if (r.hits < 2) {
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
         break;
@@ -1135,14 +1209,24 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       say(c, `${name} nocks an arrow and waits.`);
       break;
     case 'throwCharge':
-      useItem(h, t.itemId);
+      spendCharge(h);
       throwEv('charge', t.at!);
-      (c.d.charges ??= []).push({ at: t.at!, by: heroId });
-      say(c, `${name} lobs a charge. Stand clear.`);
+      setFuse(c, t.at!, 1, heroId);
+      say(c, `${name} lobs a charge. Fuse 1. Stand clear.`);
       break;
+    case 'setCharge': {
+      spendCharge(h);
+      const fuse = t.fuse ?? 1;
+      setFuse(c, t.at!, fuse, heroId);
+      say(c, `${name} sets a charge. Fuse ${fuse}. Stand clear.`);
+      break;
+    }
     case 'dig': {
       const k = kindAt(c.w, c.d, t.at!);
-      c.d.blown.push(posKey(t.at!));
+      const key = posKey(t.at!);
+      // V3.7 (spec 20.3): blast rubble (a broken wall already in `blown`) is dug to floor.
+      if (c.w.tile(t.at!)?.kind === 'wall') (c.d.dug ??= []).push(key);
+      else c.d.blown.push(key);
       c.ev.push({ type: 'dug', at: t.at! });
       say(c, k === 'rubble' ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
       makeNoise(c, t.at!, DIG_NOISE);
@@ -1178,6 +1262,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         m.awareness = 'alert';
         m.focusAt = { ...o.at };
         m.intent = undefined;
+        forgetHeroes(m);
         c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
       }
       break;
@@ -1188,6 +1273,35 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'cast', by: heroId, spell: 'sleep', targetId: m.id, at: m.at });
       if (r.hits) putToSleep(c, m);
       else c.ev.push({ type: 'miss', attacker: heroId, target: m.id });
+      break;
+    }
+    case 'dread': {
+      const r = doRoll();
+      const tid = t.id!;
+      c.ev.push({ type: 'cast', by: heroId, spell: 'dread', targetId: tid, at: figurePos(c, tid) });
+      if (!r.hits) {
+        c.ev.push({ type: 'miss', attacker: heroId, target: tid });
+        say(c, `${nameOfAny(c, tid)} shrugs off the dread.`);
+        break;
+      }
+      const m = c.d.monsters.find((x) => x.id === tid);
+      const rv = rivalsOnMap(c).find((x) => x.id === tid);
+      const who = m ?? rv;
+      if (!who) break;
+      who.feared = DREAD_ROUNDS;
+      who.fearOf = heroId;
+      if (m) {
+        if (m.holding) releaseHold(c, m);
+        if (m.awareness !== 'hunting') goHunting(c, m, h.at);
+        noticeHero(c, m, heroId);
+        const f = fleePlan(c, m, (m.stuck ?? 0) > 0 ? 0 : monsterStats(m).move);
+        m.intent = { kind: 'flee', to: f.to };
+      } else if (rv) {
+        if (c.d.rivals) makeHostile(c);
+        rv.intent = { kind: 'flee', to: fleePlan(c, rv, rivalStats(rv).move).to };
+      }
+      c.ev.push({ type: 'feared', id: tid, by: heroId });
+      say(c, `${nameOfAny(c, tid)} is seized by dread and turns to run.`);
       break;
     }
     case 'blink': {
@@ -1218,7 +1332,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         if (!figurePos(c, id)) continue;
         const isHero = !!hd(c, id);
         if (c.d.rivals?.members.some((x) => x.id === id)) makeHostile(c);
-        if (!isHero) wakeTarget(c, id, h.at);
+        if (!isHero) wakeTarget(c, id, h.at, heroId);
         push(c, id, at, isHero ? null : heroId);
       }
       break;
@@ -1298,7 +1412,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
       if (r.hits === 0) {
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
-        wakeTarget(c, tid, h.at);
+        wakeTarget(c, tid, h.at, heroId);
       } else {
         const dmg = r.hits * (sp.dmg ?? 1) + (r.perfect ? 1 : 0);
         hurtAny(c, tid, dmg, heroId, { crit: r.perfect });
@@ -1312,10 +1426,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
       if (r.hits < 2) {
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
-        wakeTarget(c, tid, h.at);
+        wakeTarget(c, tid, h.at, heroId);
         break;
       }
-      wakeTarget(c, tid, h.at);
+      wakeTarget(c, tid, h.at, heroId);
       push(c, tid, h.at, heroId);
       // Perfect: 1 more damage on top of whatever the push did.
       if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
@@ -1470,8 +1584,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     }
     case 'charge':
       useItem(h, t.itemId);
-      (c.d.charges ??= []).push({ at: t.at!, by: heroId });
-      say(c, `${name} sets a charge. Stand clear.`);
+      setFuse(c, t.at!, 1, heroId);
+      say(c, `${name} sets a charge. Fuse 1. Stand clear.`);
       break;
     case 'rope':
       useItem(h, t.itemId);
@@ -1492,6 +1606,9 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'jump': {
+      // V3.7 (spec 20.2): leaving an enemy's side by jumping provokes its free swing first.
+      provokeSwings(c, h, h.at, t.at!, new Set());
+      if (h.status !== 'active') break;
       say(c, `${name} jumps.`);
       c.ev.push({ type: 'moved', id: heroId, path: [{ ...t.at! }] });
       fall(c, heroId, t.at!, null);
@@ -1555,9 +1672,11 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
 }
 
 
-function wakeTarget(c: Ctx, id: string, from: Pos): void {
+function wakeTarget(c: Ctx, id: string, from: Pos, by?: string): void {
   const m = c.d.monsters.find((x) => x.id === id);
-  if (m && m.awareness !== 'hunting') goHunting(c, m, from);
+  if (!m) return;
+  if (m.awareness !== 'hunting') goHunting(c, m, from);
+  if (by) noticeHero(c, m, by);
 }
 
 export function leaveCastle(c: Ctx, h: HeroInDelve): void {

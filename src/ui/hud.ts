@@ -2,15 +2,16 @@
 // roll preview, roll animation, event log, tooltips, banners. Drives the
 // diorama's highlights from hover and click. Commands go through host.send.
 
-import type { ActionOption, Engine, Reach, RollPreview, Visibility } from '../game/api';
-import { add, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
+import type { ActionOption, Engine, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
+import { DIRS, add, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, Brightness, DealOption, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, JobKind, Monster, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
-import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, STANCE, TEMPERAMENT, actionCost, actionHelp, classGlyph, className, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
+import { backDirs, breakableWall, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords, wallsBlastWouldBreak } from '../view/stealth';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, MONSTER_DARK_SIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
@@ -35,10 +36,10 @@ interface PreviewState {
   focus: number;
 }
 
-const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'throwCharge', 'nightsight']);
-const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust']);
-/** Class abilities that aren't spells (the Abilities group of the bar). */
-const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'nightsight']);
+const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust', 'dread']);
+/** Class abilities that aren't spells (the Abilities group of the bar). V3.7: the Sapper's charges live here. */
+const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'throwCharge']);
 
 const SPEEDS: { label: string; value: number }[] = [
   { label: '½×', value: 0.5 },
@@ -322,11 +323,18 @@ export class Hud {
     this.dio.clearHighlights();
     if (this.busy || !this.state?.delve) return;
     this.dio.showLanding(null, null, '', false);
+    this.dio.showBlindArcs(!this.pending && !this.pv && this.sneak && !!this.selected());
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
       const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
       const hexPick = this.pending.pick === 'hex' && !['jump', 'dig', 'key'].includes(this.pending.action);
-      this.dio.highlight(ats, this.pending.action === 'jump' ? 'danger' : friendly ? 'ally' : hexPick ? 'dash' : 'target');
+      // V3.7 (20.3): while setting a charge, breakable walls among the targets are outlined on top.
+      if (this.pending.action === 'setCharge' || this.pending.action === 'charge') {
+        const castle = this.engine.castle();
+        const walls = ats.filter((p) => breakableWall(castle, p));
+        this.dio.highlight(walls, 'breakable');
+        this.dio.highlight(ats.filter((p) => !walls.some((w) => samePos(w, p))), 'dash');
+      } else this.dio.highlight(ats, this.pending.action === 'jump' ? 'danger' : friendly ? 'ally' : hexPick ? 'dash' : 'target');
       this.applyHover();
       return;
     }
@@ -355,6 +363,9 @@ export class Hud {
     this.dio.showExitPulse(exit?.option && !exit.option.blocked ? this.selected()!.at : null);
     // Attackable enemies get a red ring.
     const atk = this.options.filter((o) => o.action === 'attack' || o.action === 'firebolt');
+    // V3.7: a Sapper with charges sees the breakable walls next to them outlined faintly even before choosing.
+    const sc = this.options.find((o) => o.action === 'setCharge');
+    if (sc) this.dio.highlight(sc.targets.map((t) => t.at).filter((p): p is Pos => !!p && breakableWall(this.engine.castle(), p)), 'breakable');
     const ats = atk.flatMap((o) => o.targets.map((t) => this.targetPos(t))).filter((p): p is Pos => !!p);
     this.dio.highlight(ats, 'target');
     this.applyHover();
@@ -452,9 +463,12 @@ export class Hud {
       this.dio.showPath(r.path);
       const noise = this.engine.moveNoise(this.state, sel.heroId, this.sneak);
       this.dio.showRipple(r.to, noise);
+      // V3.7 (20.1, 20.2): what the move risks, on the monsters.
+      this.dio.showRisks(r.risks ?? null);
     } else if (!this.pending) {
       this.dio.showPath(null);
       this.dio.showRipple(null, 0);
+      this.dio.showRisks(null);
     }
     // Tooltip.
     const lines: string[] = [];
@@ -468,12 +482,23 @@ export class Hud {
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
       } else if (rival && d.rivals) {
         const st = STANCE[d.rivals.stance];
+        const line = crewMemberLine(rival);
         lines.push(
-          `<b>${rival.name}</b> <span class="dim">${d.rivals.name}${rival.cls ? ` · ${className(rival.cls)}` : ''}</span>`,
+          `<b>${rival.name}</b> <span class="dim">${d.rivals.name}${rival.cls ? ` · ${className(rival.cls)}` : ''}${rival.level ? ` L${rival.level}` : ''}</span>`,
           `HP ${rival.hp}/${rival.maxHp} · <span class="st-word st-${st.cls}">${st.name}</span>${d.rivals.stance === 'hired' && d.rivals.hiredRounds ? ` · ${d.rivals.hiredRounds} round${d.rivals.hiredRounds === 1 ? '' : 's'} left` : ''}`,
-          `<span class="dim">${RIVAL_KIT[rival.cls] ?? ''}</span>`,
+          line ? `<span class="dim">${line}</span>` : '',
+          `<span class="dim">${CREW_KIT[rival.cls] ?? RIVAL_KIT[rival.cls] ?? ''}</span>`,
           d.rivals.spotted && d.rivals.stance !== 'hired' ? `Goal: ${GOAL_TEXT[d.rivals.goal]}${d.rivals.aim ? ` · after ${d.rivals.aim.what}` : ''}` : '',
         );
+        // V3.7: facing and blind arc, fear, dragging.
+        const rf = facingOf(rival);
+        if (rf !== undefined && d.rivals.stance !== 'hired') {
+          const selH = this.selected();
+          const behind = selH && this.inBlindArc(rival.at, rf, selH.at);
+          lines.push(`<span class="dim">Faces ${this.facingWords(rival.at, rf)}.${behind ? ' <span class="pos">You are behind them.</span>' : ''}</span>`);
+        }
+        if ((rival.feared ?? 0) > 0) lines.push(`<span class="fear-word">Feared · ${rival.feared} turn${rival.feared === 1 ? '' : 's'}: runs from ${this.nameOf(rival.fearOf ?? '')}, drops any hold.</span>`);
+        if (rival.dragging) lines.push(`<span class="neg">Dragging ${this.nameOf(rival.dragging)} toward the way out (3 a round). Kill, down or fear them to free ${this.nameOf(rival.dragging)}.</span>`);
         const rit = this.intents[rival.id] ?? rival.intent;
         if (rit && rit.kind !== 'wait') lines.push(`<span class="${d.rivals.stance === 'hired' ? 'pos' : 'neg'}">Next: ${intentText(this.state, rit)}</span>`);
         const sel = this.selected();
@@ -488,7 +513,10 @@ export class Hud {
       else if (act) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
       this.dio.setHoverStyle('plain');
     } else if (at) {
-      if (r) lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
+      if (r) {
+        lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${this.sneak ? '' : ' per hex'}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
+        lines.push(...this.riskLines(r.risks));
+      }
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
       const link = sel && samePos(sel.at, at) ? this.linkHere() : null;
@@ -524,8 +552,39 @@ export class Hud {
     const aw = AWARENESS_TEXT[m.awareness];
     if (aw && m.kind !== 'gloam') out.push(`<span class="dim">${aw}${m.awareness === 'patrol' && this.state?.delve?.knownRoutes.includes(m.id) ? ' Route known (drawn on the map).' : ''}</span>`);
     if (m.holding) out.push(`<span class="neg">Holding ${this.nameOf(m.holding)}</span>`);
+    // V3.7 (20.1, 20.2): facing and the blind arc, fear.
+    const mf = facingOf(m);
+    if (m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' && mf !== undefined) {
+      const sel = this.selected();
+      const behind = sel && this.inBlindArc(m.at, mf, sel.at);
+      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}.${behind ? ` <span class="pos">You are behind it${this.sneak ? ': sneak up unseen' : ' (sneak to stay unseen)'}.</span>` : ' The dim hexes behind it are its blind arc.'}</span>`);
+    }
+    if ((m.feared ?? 0) > 0) out.push(`<span class="fear-word">Feared · ${m.feared} turn${m.feared === 1 ? '' : 's'}: flees from ${this.nameOf(m.fearOf ?? '')}, attacks nobody, and your heroes swing free as it leaves them.</span>`);
     if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
     return out;
+  }
+
+  /** V3.7 (20.1, 20.2): the risks of a move, one line each, for the hover tip and the swing confirm. */
+  private riskLines(risks: MoveRisks | undefined): string[] {
+    if (!risks) return [];
+    const out: string[] = [];
+    for (const w of risks.wake) out.push(`<span class="risk-line risk-wake">☾ ${this.nameOf(w.id)} may wake · ${Math.round(w.chance)}%</span>`);
+    for (const n of risks.notice) out.push(`<span class="risk-line risk-notice">👁 ${this.nameOf(n.id)} notices you</span>`);
+    for (const sw of risks.swings) out.push(`<span class="risk-line risk-swing">⚔ ${this.nameOf(sw.id)}: free swing ${sw.damage[0]}–${sw.damage[1]}</span>`);
+    if (!out.length && this.sneak) out.push('<span class="dim">Nobody stirs.</span>');
+    return out;
+  }
+
+  /** "faces north-east" for a figure with a facing. */
+  private facingWords(at: Pos, facing: number): string {
+    const d = DIRS[facing]!;
+    return compass(at, { level: at.level, q: at.q + d.q, r: at.r + d.r });
+  }
+
+  /** Is `p` in the blind arc of a figure at `at` facing `facing` (the three back directions, as the engine's dirIndex)? */
+  private inBlindArc(at: Pos, facing: number | undefined, p: Pos): boolean {
+    if (facing === undefined || samePos(at, p) || at.level !== p.level) return false;
+    return backDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
   }
 
   private describeHex(at: Pos): string {
@@ -570,10 +629,19 @@ export class Hud {
     else if (t.kind === 'pit') {
       const f = this.fallWords(at);
       parts.push(`<b class="neg">Pit</b> <span class="tip-how">· Jump or Rope</span>${f ? `<br><span class="neg">${f.text}</span>` : ''}`);
-    } else if (t.kind === 'cracked') act('Cracked wall', "Charge or Sapper's Dig");
+    } else if (t.kind === 'cracked') act('Cracked wall', d.blown.includes(k) ? 'blown open' : "a charge breaks it, or a Sapper's Dig");
     else if (t.kind === 'rubble') act('Rubble', "costs 2 to cross, or Sapper's Dig");
     else if (t.kind === 'sealed') parts.push('<b>Sealed.</b> Nothing opens it yet.');
+    else if (t.kind === 'wall' && d.blown.includes(k)) act('Blast rubble', "a wall a charge broke · costs 2 to cross, or Sapper's Dig");
+    else if (t.kind === 'wall' && breakableWall(castle, at)) act('Wall', `a Sapper's charge could break it${selDef?.cls === 'sapper' ? ' (Set charge next to it)' : ''}`);
     else if (t.kind !== 'floor') parts.push(TILE_NAME[t.kind] ?? t.kind);
+    // V3.7 (20.3): a charge on this hex.
+    const fuse = fuseAt(d, at);
+    if (fuse) {
+      const side = fuseSide(s, fuse.by);
+      const breaks = wallsBlastWouldBreak(castle, at).filter((p) => !d.blown.includes(posKey(p))).length;
+      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="tip-how">· set by ${this.nameOf(fuse.by)}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${breaks ? `, breaks ${breaks} wall${breaks === 1 ? '' : 's'}` : ''}</span>`);
+    }
     if (t.railing) parts.push('Railing');
     const vent = castle.lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
     if (vent) parts.push('<span class="neg">Fire vent: 3 damage</span>');
@@ -601,8 +669,9 @@ export class Hud {
     if (!d || !t) return 'plain';
     const k = posKey(at);
     if (!this.vis || !(this.vis.explored.has(k) || this.vis.visible.has(k))) return 'plain';
-    if (t.kind === 'pit' || d.traps[k]?.spotted) return 'danger';
+    if (t.kind === 'pit' || d.traps[k]?.spotted || fuseAt(d, at)) return 'danger';
     if (['door', 'brazier', 'lift', 'stairs', 'exit', 'cracked', 'rubble'].includes(t.kind)) return 'interact';
+    if (t.kind === 'wall' && this.options.some((o) => o.action === 'setCharge' && o.targets.some((x) => x.at && samePos(x.at, at)))) return 'interact';
     if (t.prop === 'winch') return 'interact';
     if (d.chests.some((c) => samePos(c.at, at) && !c.opened)) return 'interact';
     if (d.ground.some((g) => samePos(g.at, at) && g.items.length)) return 'interact';
@@ -667,14 +736,28 @@ export class Hud {
     if (at) {
       const r = this.reach.find((x) => samePos(x.to, at));
       if (r && this.selectedId) {
-        void this.host.send({ type: 'move', heroId: this.selectedId, path: r.path, sneak: this.sneak });
+        this.moveAlong(r);
         return;
       }
       if (best) this.choose(best.option, best.target);
     }
   }
 
+  /** V3.7 (20.2): a move that provokes free swings asks once, with the damage ranges (like the two-level jump). */
+  private moveAlong(r: Reach): void {
+    const sel = this.selected();
+    if (!sel) return;
+    const swings = r.risks?.swings ?? [];
+    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak });
+    if (!swings.length) return go();
+    const name = this.heroDef(sel.heroId)?.name ?? sel.heroId;
+    const list = swings.map((sw) => `${this.nameOf(sw.id)} gets a free swing: ${sw.damage[0]}–${sw.damage[1]}`).join('; ');
+    this.dio.showRisks(r.risks ?? null);
+    this.confirm(`${list}. ${swings.length === 1 ? 'It strikes' : 'They strike'} as ${name} leaves reach${this.sneak ? ' (sneaking does not avoid it)' : ''}. Move anyway?`, 'Move', go, { title: `${name} takes a swing?`, cancel: 'Stay', danger: true });
+  }
+
   private cancel(): void {
+    this.fusePicked = false;
     if (this.confirmBox) {
       this.closeConfirm();
       return;
@@ -737,7 +820,8 @@ export class Hud {
     clear(this.picker);
     const what = o.pick === 'hex' ? (o.area ? 'a hex (the orange area is hit)' : 'a highlighted hex') : o.pick === 'ally' ? 'an ally' : 'an enemy';
     const list = o.targets.length <= 6 && o.pick !== 'hex' ? o.targets.map((t) => h('button', { class: 'btn btn-small picker-row', onclick: () => this.choose(o, t) }, this.targetLabel(t))) : [];
-    this.picker.append(h('div', { class: 'kicker' }, `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}`), h('div', { class: 'small' }, `Click ${what}.`), ...list, h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')));
+    const note = o.action === 'setCharge' ? h('div', { class: 'small dim' }, 'Outlined walls can be broken. You pick the fuse next.') : '';
+    this.picker.append(h('div', { class: 'kicker' }, `${o.label}${o.mana ? ` · ${o.mana} mana` : ''}`), h('div', { class: 'small' }, `Click ${what}.`), note, ...list, h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')));
     this.picker.classList.remove('hidden');
   }
 
@@ -764,12 +848,46 @@ export class Hud {
       this.flashBlocked(o, t);
       return;
     }
+    // V3.7 (20.3): set-charge: the hex is picked; now the fuse, when the engine offers more than one.
+    if (o.action === 'setCharge' && t.at && !this.fusePicked) {
+      const fuses = [...new Set(o.targets.filter((x) => x.at && samePos(x.at, t.at!)).map((x) => x.fuse ?? 1))].sort();
+      if (fuses.length > 1) {
+        this.showFusePicker(o, t, fuses as (1 | 2)[]);
+        return;
+      }
+    }
+    this.fusePicked = false;
     if (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink') {
       const p = this.engine.preview(this.state, sel.heroId, o.action, t);
       this.openPreview({ option: o, target: t, preview: p, focus: 0 });
       return;
     }
     void this.act(o.action, t, 0);
+  }
+
+  private fusePicked = false;
+
+  /** 20.3: "Fuse 1 or 2": a small picker over the bar; the blast rings stay on the chosen hex meanwhile. */
+  private showFusePicker(o: ActionOption, t: ActionTarget, fuses: (1 | 2)[]): void {
+    const at = t.at!;
+    this.pending = o;
+    clear(this.picker);
+    const castle = this.engine.castle();
+    const d = this.state!.delve!;
+    const breaks = wallsBlastWouldBreak(castle, at).filter((p) => !d.blown.includes(posKey(p)));
+    const where = this.targetLabel({ at });
+    this.dio.clearHighlights();
+    this.dio.highlight([at], 'target');
+    this.dio.highlight(breaks, 'breakable');
+    this.dio.highlight(this.areaAround(at, 1), 'danger');
+    this.dio.highlight(this.areaAround(at, 2).filter((p) => !this.areaAround(at, 1).some((q) => samePos(p, q))), 'area');
+    this.picker.append(
+      h('div', { class: 'kicker' }, `Set charge · ${where}`),
+      h('div', { class: 'small' }, `${V37.blastInner} damage within 1 (red, and a shove), ${V37.blastOuter} within 2 (orange).${breaks.length ? ` Breaks ${breaks.length} wall${breaks.length === 1 ? '' : 's'}.` : ''} Pick the fuse:`),
+      h('div', { class: 'fuse-pick' }, ...fuses.map((f) => h('button', { class: `btn btn-small fuse-btn fuse-${f}`, 'data-fuse': `${f}`, title: f === 1 ? 'Fuse 1 · goes off at the end of the coming castle turn. Step out of the rings first.' : 'Fuse 2 · goes off at the end of the castle turn after next: time to walk clear, or to lure something onto it.', onclick: () => { this.fusePicked = true; this.choose(o, { ...t, fuse: f }); } }, h('span', { class: 'fuse-big num' }, `${f}`), h('span', { class: 'small' }, f === 1 ? 'end of this castle turn' : 'the turn after next')))),
+      h('button', { class: 'btn btn-small btn-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
+    );
+    this.picker.classList.remove('hidden');
   }
 
   private async act(action: ActionKind, target: ActionTarget, focus: number): Promise<void> {
@@ -797,7 +915,7 @@ export class Hud {
       const tile = lv?.tiles[hexKey(t.at)];
       const chest = d.chests.find((c) => samePos(c.at, t.at!));
       const g = d.ground.find((x) => samePos(x.at, t.at!));
-      parts.push(chest ? 'Chest' : tile?.kind === 'door' ? 'Door' : g?.items.length ? g.items.map(itemLabel).join(', ') : (TILE_NAME[tile?.kind ?? 'floor'] ?? 'There'));
+      parts.push(chest ? 'Chest' : tile?.kind === 'door' ? 'Door' : g?.items.length ? g.items.map(itemLabel).join(', ') : tile?.kind === 'wall' ? (breakableWall(this.engine.castle(), t.at) ? 'Wall (breakable)' : 'Wall') : (TILE_NAME[tile?.kind ?? 'floor'] ?? 'There'));
     }
     return parts.join(' → ') || 'Self';
   }
@@ -1221,6 +1339,7 @@ export class Hud {
     if (hd.status === 'downed') return h('span', { class: 'hc-fate bad', title: `Downed: bleeding out, dies after ${hd.bleed} more castle turn${hd.bleed === 1 ? '' : 's'}.\nA hero next to them can Revive (up with 3 HP) or give a Potion (up with 5).` }, `Downed · ${hd.bleed}`);
     if (hd.status === 'dead') return h('span', { class: 'hc-fate dead', title: 'Dead. Gone for good.' }, 'Dead');
     if (hd.status === 'out') return h('span', { class: 'hc-fate good', title: 'Out of the castle: safe, with everything in the pack.' }, 'Out');
+    if (hd.status === 'captured') return h('span', { class: 'hc-fate bad', title: 'Taken: a crew dragged them out of the castle. Back at camp a "Bring back" contract goes up on the notice post.' }, 'Taken');
     const held = !!hd.grabbedBy;
     const mv = held ? 'Held: can\'t move' : hd.webbed ? 'Webbed: can\'t move' : hd.moved ? 'Moved this round' : 'Move ready';
     const ac = hd.dashed ? 'Dashed: the action went on a second move' : hd.acted ? 'Acted this round' : 'Action ready';
@@ -1249,6 +1368,9 @@ export class Hud {
       const by = d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul';
       chip('bad grab', '⛓ Held', `Held by ${by}: can't move or dash.\nBreak free (2 Might slots, 1 hit frees you) or kill it.`);
     }
+    // V3.7 (20.4): hauled toward the way out by a crew member.
+    const dragger = hd.status === 'captured' ? undefined : d.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut);
+    if (dragger) chip('bad dragged', '⇜ Dragged', `${dragger.name} is dragging ${name} toward the way out, 3 hexes a round. If they reach it, ${name} is taken.\nKill, down or fear ${dragger.name} to free ${name} (they stay downed where dropped).`);
     if (risk) chip('edge', `Edge · ${risk.damage}`, `On the edge: a shove would drop ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
     if (hd.webbed) chip('bad', 'Webbed', 'Stuck in a web: can\'t move this turn, can still act. It clears next round.');
     if (hd.veil > 0) chip('veil', `Veiled · ${hd.veil}`, `Veiled for ${hd.veil} more round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}.\nAttacking or making noise ${VEIL_BREAK_NOISE}+ breaks it.`);
@@ -1299,8 +1421,8 @@ export class Hud {
     const modes = h(
       'div',
       { class: 'bar-modes' },
-      h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: 'Walk: up to 4 hexes, noise 1 where you stop. Click a blue hex to move.\nAfter moving, a second move (a dash) spends the action.' }, 'Walk'),
-      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: 'Sneak (S): up to 2 hexes (Burglar 4), silent. Sleeping monsters stay asleep.' }, 'Sneak ', h('kbd', null, 'S')),
+      h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: `Walk · noise 1 per hex\n${MOVE_HELP.walk}` }, 'Walk'),
+      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}` }, 'Sneak ', h('kbd', null, 'S')),
     );
     const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
     if (link) {
@@ -1468,7 +1590,9 @@ export class Hud {
         if (g) text = g.items.some((i) => i.contractId === d.contract.id) ? 'The objective' : 'Loot';
         if (d.prisoner && !d.prisoner.freed && samePos(d.prisoner.at, p)) text = d.prisoner.name;
         if (d.traps[k]?.spotted) text = 'Trap';
-        if (text) found.push({ text, dist, at: p, danger: text === 'Trap' });
+        const fz = fuseAt(d, p);
+        if (fz) text = `Charge · fuse ${fz.rounds}`;
+        if (text) found.push({ text, dist, at: p, danger: text === 'Trap' || !!fz });
       }
     found.sort((a, b) => a.dist - b.dist);
     // 19.5: with the prize in hand, the nearest known exit leads, however far.
@@ -1522,7 +1646,8 @@ export class Hud {
       h('div', { class: `rv-stance st-${r.stance}`, title: `${st.name} · ${st.text}` }, st.name, r.stance === 'hired' && r.hiredRounds ? ` · ${r.hiredRounds} round${r.hiredRounds === 1 ? '' : 's'}` : ''),
       r.stance === 'demanding' ? h('div', { class: 'rv-toll', title: `The toll · Pay ${r.toll ?? 50} (gold first, then gems and jewelry) or they attack in the next castle turn. Parley to pay.` }, h('b', null, `Pay ${r.toll ?? 50}`), ' or they attack next turn') : '',
       r.stance !== 'hired' ? h('div', { class: 'small' }, `Goal: ${GOAL_TEXT[r.goal]}`, r.aim ? h('span', { class: 'dim' }, ` · ${r.aim.what}`) : '') : h('div', { class: 'small pos' }, 'Fighting beside you'),
-      h('div', { class: 'dim small' }, `${alive} on the map`),
+      h('div', { class: 'dim small' }, `${alive} on the map${r.members.some((m) => m.level) ? ` · level ${Math.max(...r.members.map((m) => m.level ?? 1))}, ${CREW[r.crew]?.tiers ?? ''}` : ''}`),
+      r.members.some((m) => m.dragging) ? h('div', { class: 'small neg rv-drag' }, `Dragging ${r.members.filter((m) => m.dragging).map((m) => this.nameOf(m.dragging!)).join(', ')} toward the way out!`) : '',
       canDeal ? h('button', { class: 'btn btn-small rv-parley', title: 'Parley · free · key B\nOpen the deal card: pay, hire, give a job, or fight.', onclick: () => this.openParley() }, '⚖ Parley ', h('kbd', null, 'B')) : '',
     );
     this.rivalEl.classList.remove('hidden');
@@ -1630,9 +1755,9 @@ export class Hud {
           .map((m) =>
             h(
               'div',
-              { class: `pl-mem ${m.hp <= 0 ? 'dead' : ''}`, title: `${m.name} · ${className(m.cls)}, HP ${m.hp}/${m.maxHp}\n${RIVAL_KIT[m.cls] ?? ''}` },
+              { class: `pl-mem ${m.hp <= 0 ? 'dead' : ''}`, title: `${m.name} · ${className(m.cls)}${m.level ? ` level ${m.level}` : ''}, HP ${m.hp}/${m.maxHp}\n${crewMemberLine(m)}\n${CREW_KIT[m.cls] ?? RIVAL_KIT[m.cls] ?? ''}` },
               h('span', { class: `cbadge cls-${m.cls}` }, classGlyph(m.cls)),
-              h('span', null, h('b', null, m.name), h('span', { class: 'dim small' }, ` ${className(m.cls)} · `), h('span', { class: 'num small' }, m.hp > 0 ? `${m.hp}/${m.maxHp}` : 'dead')),
+              h('span', { class: 'pl-mem-body' }, h('b', null, m.name), h('span', { class: 'dim small' }, ` ${className(m.cls)}${m.level ? ` L${m.level}` : ''}${m.weaponTier || m.armorTier ? ` · ${[m.weaponTier ? `W+${m.weaponTier}` : '', m.armorTier ? `A+${m.armorTier}` : ''].filter(Boolean).join(' ')}` : ''} · `), h('span', { class: 'num small' }, m.hp > 0 ? `${m.hp}/${m.maxHp}` : 'dead'), m.pack?.length ? h('span', { class: 'pl-pack' }, ...m.pack.map((i) => h('span', { class: `pk-sock pk-${itemBase(i.kind)}`, title: `${i.name}${i.kind === 'charge' && i.slots === 0 ? ` (${i.amount})` : ''}` }, h('span', { class: 'pk-g' }, itemGlyph(i.kind)), i.kind === 'charge' && i.slots === 0 ? h('small', { class: 'num' }, `${i.amount}`) : ''))) : ''),
             ),
           ),
       ),
@@ -1735,6 +1860,16 @@ export class Hud {
 
   private hideTip(): void {
     this.tip.classList.add('hidden');
+  }
+
+  /** V3.7 (20.4): "Taken!" when a crew drags a hero out of the castle. */
+  async capturedBanner(heroId: string, by: string, wait: (s: number) => Promise<void>): Promise<void> {
+    const crew = this.state?.delve?.rivals?.name ?? 'A crew';
+    clear(this.bannerEl);
+    this.bannerEl.className = 'hud-banner world taken';
+    this.bannerEl.append(h('div', { class: 'bn-title' }, `${this.nameOf(heroId)} is taken!`), h('div', { class: 'bn-sub' }, `${this.nameOf(by)} of ${crew} dragged them out. A "Bring back" contract will go up at camp.`));
+    await wait(0.9);
+    this.bannerEl.classList.add('hidden');
   }
 
   async banner(title: string, sub: string, wait: (s: number) => Promise<void>, world = false): Promise<void> {
@@ -1866,7 +2001,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (shows blind arcs; hover a hex for wake, notice and swing risks) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
@@ -2052,7 +2187,7 @@ const RIVAL_KIT: Record<string, string> = {
   shadowmancer: 'Veils herself; hard to see.',
   burglar: 'Sleep darts. Picks locks.',
   sellsword: 'Shield and sword: 3 slots, 2 damage, armor 1. Shoves a hero off an unrailed edge.',
-  sapper: 'Hammer, and one charge: marks the hexes a round ahead, then 3 damage to everyone there. Noise 8.',
+  sapper: 'Hammer, and charges on fuses: the rings show a turn ahead, then 4 damage within 1 and 2 within 2. Noise 8.',
   pyromancer: 'Firebolts: marks a hero in range 5 a round ahead, then 3 Wits slots, 2 damage per hit.',
 };
 
@@ -2070,7 +2205,7 @@ export function intentText(s: GameState, it: Intent): string {
     case 'steal':
       return `steals from ${name(it.targetId)}`;
     case 'flee':
-      return 'flees';
+      return it.targetId ? `flees from ${name(it.targetId)} (feared)` : 'flees';
     case 'shove':
       return `shoves ${name(it.targetId)}`;
     case 'breath':
@@ -2097,6 +2232,16 @@ export function intentText(s: GameState, it: Intent): string {
       return `hurls a firebolt at ${name(it.targetId)} (3 Wits slots at 60%, 2 per hit)`;
     case 'charge':
       return `lights a charge: next turn 3 damage to everyone on the marked hexes`;
+    case 'fuse':
+      return 'sets a charge with a 1-turn fuse on the marked hex: 4 within 1, 2 within 2, breaks walls';
+    case 'rob':
+      return `robs ${name(it.targetId)} and drags them toward the way out`;
+    case 'potion':
+      return 'backs off a hex and drinks a potion';
+    case 'item': {
+      const what = (it as { item?: string }).item;
+      return `uses ${what ? `a ${what}` : 'an item'}${it.targetId ? ` on ${name(it.targetId)}` : ''}`;
+    }
     default:
       return 'waits';
   }
@@ -2134,6 +2279,12 @@ function packRow(pack: Item[]): HTMLElement {
   for (const it of pack) {
     const span = Math.max(1, Math.min(it.slots, PACK_SLOTS - used));
     const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
+    // V3.7 (20.3): the Sapper's satchel takes no slot and shows its charge count.
+    const satchel = it.kind === 'charge' && it.slots === 0;
+    if (satchel) {
+      socks.push(h('span', { class: 'pk-sock pk-charge pk-satchel', 'data-span': '0', title: `Satchel · ${it.amount} charge${it.amount === 1 ? '' : 's'} left, no pack slot. ${PACK_SLOTS} slots stay free for loot.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge.` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), h('small', { class: 'num' }, `${it.amount}`)));
+      continue;
+    }
     socks.push(h('span', { class: `pk-sock pk-${itemBase(it.kind)} ${span > 1 ? 'wide' : ''}`, 'data-span': `${span}`, title: itemTip(it) }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), val ? h('small', { class: 'num' }, `${it.amount}`) : ''));
     used += it.slots;
   }

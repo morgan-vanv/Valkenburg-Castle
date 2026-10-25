@@ -5,8 +5,47 @@ import {
   BLINK_RANGE, BRAZIER_LIGHT, BREATH_DMG, BURN_ROUNDS, CALTROPS_DMG, CLASSES, DIG_NOISE, DRAGON_WAKE_NOISE, FIREBALL_NOISE, FIREBALL_RANGE,
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
-  VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE,
+  VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, SAPPER_CHARGES,
 } from '../game/data';
+import * as DATA from '../game/data';
+
+/**
+ * V3.7 (spec 20): the stealth, swing, Dread and blast numbers, read live from data.ts once the
+ * engine exports them (any of the listed names), with the spec's number until then.
+ */
+function liveNum(fallback: number, ...names: string[]): number {
+  const d = DATA as unknown as Record<string, unknown>;
+  for (const n of names) if (typeof d[n] === 'number') return d[n] as number;
+  return fallback;
+}
+function liveNotice(key: string, fallback: number): number {
+  const n = (DATA as unknown as { NOTICE?: Record<string, number> }).NOTICE;
+  return n && typeof n[key] === 'number' ? n[key] : fallback;
+}
+export const V37 = {
+  /** Sleeper wake roll per hex passed within 2 (spec 20.1). */
+  wakeRange: liveNum(2, 'WAKE_RANGE'),
+  wakeWalk: liveNum(50, 'WAKE_WALK', 'WAKE_CHANCE_WALK'),
+  wakeSneak: liveNum(10, 'WAKE_SNEAK', 'WAKE_CHANCE_SNEAK'),
+  wakeEndSneak: liveNum(25, 'WAKE_END_SNEAK', 'WAKE_ADJACENT_SNEAK'),
+  /** Notice ranges: lit walking / lit sneaking / unlit walking / unlit sneaking; the Hollow walking / sneaking. */
+  noticeLitWalk: liveNotice('litWalk', 6),
+  noticeLitSneak: liveNotice('litSneak', 4),
+  noticeDarkWalk: liveNotice('unlitWalk', 3),
+  noticeDarkSneak: liveNotice('unlitSneak', 1),
+  noticeHollowSneak: liveNotice('hollowSneak', 3),
+  sneakSlots: liveNum(1, 'SNEAK_ATTACK_SLOTS'),
+  /** Dread (spec 20.2). */
+  dreadRange: liveNum(5, 'DREAD_RANGE'),
+  dreadSlots: liveNum(2, 'DREAD_SLOTS'),
+  fearRounds: liveNum(2, 'DREAD_ROUNDS', 'FEAR_ROUNDS'),
+  dreadMana: liveNum(1, 'DREAD_MANA'),
+  /** Blasts (spec 20.3). */
+  blastInner: liveNum(4, 'BLAST_DMG_INNER', 'BLAST_INNER_DMG', 'CHARGE_DMG'),
+  blastOuter: liveNum(2, 'BLAST_DMG_OUTER', 'BLAST_OUTER_DMG'),
+  blastNoise: liveNum(8, 'BLAST_NOISE', 'CHARGE_NOISE'),
+  charges: SAPPER_CHARGES,
+};
 
 /** Every class the UI knows (V3.1 'mage' kept so old data still renders). */
 export type AnyClass = HeroClass | 'mage' | 'sellsword' | 'burglar' | 'ranger' | 'sapper' | 'pyromancer' | 'shadowmancer' | 'hedgewitch';
@@ -43,9 +82,9 @@ export const CLASS_ROLE: Record<AnyClass, string> = {
   burglar: 'Quiet: picks locks, sneaks fast, backstabs.',
   mage: 'Spells: firebolt, kindle, mend. Fragile.',
   ranger: 'Ranged: longbow, overwatch, knockback shots into pits.',
-  sapper: 'Breacher: throws charges, digs through rubble and cracked walls.',
+  sapper: 'Breacher: sets charges on a fuse, blows walls open, digs through rubble.',
   pyromancer: 'Fire: firebolt, fireball (burns allies too), kindle the lantern.',
-  shadowmancer: 'Shadow: veil allies, put monsters to sleep, blink across gaps.',
+  shadowmancer: 'Shadow: veil allies, sleep or terrify monsters, blink across gaps.',
   hedgewitch: 'Support: mend wounds, ward allies, gust enemies off ledges.',
 };
 
@@ -56,7 +95,7 @@ export const CLASS_BLURB: Record<AnyClass, string> = {
   burglar: 'Picks locks, sneaks fast, backstabs the unwary.',
   mage: 'Firebolt, Kindle the lantern, Mend wounds. Fragile.',
   ranger: 'Longbow at range 6.',
-  sapper: 'Hammer and a pack of charges.',
+  sapper: 'Hammer and a satchel of charges on fuses.',
   pyromancer: 'Staff, mana 3.',
   shadowmancer: 'Staff, mana 3.',
   hedgewitch: 'Staff, mana 3.',
@@ -85,7 +124,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   burglar: [
     ['Pick', 'ability', 'Pick locks on doors and chests. Anyone else needs lockpicks.'],
     ['Sneak 4', 'passive', 'Sneaks further than anyone.'],
-    ['Backstab', 'passive', 'Extra damage on unaware monsters.'],
+    ['Backstab', 'passive', '+1 slot on a monster that has not noticed you, on top of the sneak attack everyone gets (+2 in all).'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
   ],
   mage: [
@@ -99,9 +138,10 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Close quarters', 'passive', 'Adjacent bow shots lose 1 slot.'],
   ],
   sapper: [
-    ['2 free charges', 'passive', 'Starts every delve with 2 blasting charges.'],
-    ['Throw charge', 'ability', 'Throw a charge up to 3 hexes (in sight).'],
-    ['Dig', 'action', 'Clear adjacent rubble or a cracked wall, no charge. Noise 4.'],
+    [`${SAPPER_CHARGES} free charges`, 'passive', `Starts every delve with ${SAPPER_CHARGES} blasting charges; bought ones add to them.`],
+    ['Set charge', 'action', `On a hex, wall, door or chest next to you, fuse 1 or 2 turns: ${V37.blastInner} damage within 1, ${V37.blastOuter} within 2, breaks built walls on Levels 1 and 2. The Sapper takes nothing from their own blast.`],
+    ['Throw charge', 'action', `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1.`],
+    ['Dig', 'action', `Clear adjacent rubble, a cracked wall or blast rubble, no charge. Noise ${DIG_NOISE}.`],
   ],
   pyromancer: [
     ['Firebolt', '1 mana', 'Fire at range.'],
@@ -111,6 +151,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   shadowmancer: [
     ['Veil', '1 mana', 'An ally within 3 is unseen by monsters for 2 rounds (until they attack or make noise ≥ 4).'],
     ['Sleep', '1 mana', '2 Wits slots, range ≤ 5: 1+ hits puts a monster to sleep (not the Dragon or the Gloam).'],
+    ['Dread', '1 mana', `${V37.dreadSlots} Wits slots, range ≤ ${V37.dreadRange}: 1+ hits and the monster flees from you for ${V37.fearRounds} turns, taking free swings as it goes. Not the Dragon or the Gloam.`],
     ['Blink', '1 mana', 'Teleport up to 4 hexes in sight, across pits and gaps. Silent.'],
   ],
   hedgewitch: [
@@ -236,6 +277,8 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   shutter: '◑',
   escape: '⛓',
   nightsight: '◉',
+  setCharge: '✹',
+  dread: '☠',
 };
 
 /**
@@ -244,7 +287,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
  * "Label · cost". Attack is per class: see actionHelp().
  */
 export const ACTION_HELP: Record<ActionKind, string> = {
-  attack: 'Strike an enemy with your weapon. Each slot that hits deals its damage; all slots hit: +1.',
+  attack: 'Strike an enemy with your weapon. Each slot that hits deals its damage; all slots hit: +1. Your first strike on a monster that has not noticed you: +1 slot (the Burglar +2).',
   pick: `Burglar: 3 Finesse slots on a locked door or chest next to you: 3 hits opens it silently, 2 opens it (noise 2), 1 fails, 0 jams it for good. Anyone else needs lockpicks: 2 slots, 2 hits opens silently, 1 opens with noise 2, 0 jams it.`,
   smash: 'Force a locked door or chest next to you: 2 Might slots. A door needs 2 hits, a chest 1. Noise 4 either way.',
   open: 'Open or close a door next to you (free), or open a chest (uses the action; free for the Burglar). Chest loot lands on the floor: Take it.',
@@ -256,7 +299,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   torch: `Light a torch from the pack: ${TORCH_ROUNDS} rounds of light around this hero (radius 2), whatever the lantern does.`,
   potion: 'Drink it, or give it to a hero next to you: heals 5. Gets a downed hero back up.',
   revive: 'Get a downed hero next to you back up with 3 HP. They come home wounded.',
-  charge: 'Set a blasting charge on a door, chest or cracked wall next to you. It blows at the end of the turn: 4 damage within 1, 2 within 2. Noise 8, heard a level up and down.',
+  charge: `Set a bought charge on a door, chest or cracked wall next to you, fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; opens locks, breaks cracked walls and built walls on Levels 1 and 2. Noise ${V37.blastNoise}, heard a level up and down.`,
   rope: 'Anchor a rope at this pit edge. From then on anyone here can Climb down and back up.',
   climb: 'Climb the rope to the other level, no damage. Takes the whole turn (move and action).',
   jump: 'Drop into the pit to the level below. The fall hurts, more for each level. Takes the whole turn.',
@@ -276,8 +319,10 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   escape: '2 Might slots: 1 hit breaks the ghoul\'s grip. Killing the ghoul frees you too.',
   overwatch: `Spend the action: in the next world phase, shoot the first enemy that moves or acts in sight within ${OVERWATCH_RANGE} (a full roll).`,
   knockback: `2 Finesse slots at range ${KNOCKBACK_RANGE} or less: 2 hits push the target 1 hex away from you (into pits!).`,
-  throwCharge: `Throw a blasting charge up to ${THROW_CHARGE_RANGE} hexes (in sight). It blows at the end of the turn: 4 damage within 1, 2 within 2. Noise 8.`,
-  dig: `Clear rubble or a cracked wall next to you, no charge needed. Noise ${DIG_NOISE}.`,
+  throwCharge: `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; breaks walls within 1 on Levels 1 and 2. Noise ${V37.blastNoise}. You take nothing from your own blast; other heroes take half.`,
+  setCharge: `Sapper. Set a charge on a hex, a breakable wall, a door or a chest next to you, then pick the fuse: 1 blows at the end of the coming castle turn, 2 the turn after. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away: pits count), ${V37.blastOuter} within 2. Opens locks, breaks built walls on Levels 1 and 2 into rubble. Noise ${V37.blastNoise}, heard a level up and down. You take nothing from your own blast; other heroes take half. The fuse and the blast area show to everyone.`,
+  dread: `1 mana. ${V37.dreadSlots} Wits slots at range ${V37.dreadRange} in sight: 1 hit and the monster or crew member is feared for ${V37.fearRounds} castle turns: it runs its full move away from you, attacks nobody, drops any hold, and every hero it leaves gets a free swing at it. Not the Dragon or the Gloam. Silent.`,
+  dig: `Clear rubble, a cracked wall or blast rubble next to you, no charge needed. Noise ${DIG_NOISE}.`,
   fireball: `2 mana. Radius 1 at range ${FIREBALL_RANGE} or less: 3 Wits slots, 2 damage per hit to everyone there, allies too. Burns ${BURN_ROUNDS} rounds. Noise ${FIREBALL_NOISE}.`,
   veil: `1 mana. A hero within ${SPELL_RANGE} is unseen by monsters for ${VEIL_ROUNDS} rounds. Attacking or noise ${VEIL_BREAK_NOISE}+ breaks it. Silent.`,
   sleep: `1 mana. 2 Wits slots at range ${SLEEP_RANGE} or less: 1 hit and the monster sleeps (not the Dragon or the Gloam). Silent.`,
@@ -300,7 +345,7 @@ export function actionHelp(action: ActionKind, cls?: string): string {
   if (action === 'attack' && cls && cls in CLASSES) {
     const w = CLASSES[cls as HeroClass].weapon;
     const stat = `${w.stat[0]!.toUpperCase()}${w.stat.slice(1)}`;
-    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}.`;
+    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}. Sneak attack: +1 slot on a monster that has not noticed you${cls === 'burglar' ? ' (Backstab: +2)' : ''}.`;
   }
   return ACTION_HELP[action] ?? '';
 }
@@ -323,7 +368,9 @@ export function modifierHelp(m: string): string {
   if (/^(Bright|Dim|Dark|Pitch)/.test(m)) return 'how much light you stand in';
   if (/^Weapon/.test(m)) return 'smithy upgrade';
   if (/^Asleep/.test(m)) return 'the target is asleep';
-  if (/^Backstab/.test(m)) return 'it isn\'t hunting you';
+  if (/^Backstab/.test(m)) return 'the Burglar\'s knife in an unwary back';
+  if (/^Sneak attack|^Unnoticed|^Unaware/.test(m)) return 'it has not noticed you yet';
+  if (/^Free swing/.test(m)) return 'a swing as it leaves your reach: 1 slot fewer';
   if (/^Raised/.test(m)) return 'shooting from raised floor';
   if (/^Adjacent/.test(m)) return 'bows are clumsy point-blank';
   if (/^Flanked/.test(m)) return 'an ally stands across from it';
@@ -336,10 +383,19 @@ export function modifierHelp(m: string): string {
 
 /** Awareness in words, for monster tooltips. */
 export const AWARENESS_TEXT: Record<string, string> = {
-  asleep: 'Asleep: won\'t act until a noise wakes it or a hero ends next to it.',
-  alert: 'Alert: heard something; searching for you.',
-  hunting: 'Hunting: it has seen you and comes for you.',
-  patrol: 'On patrol: walks its route; sees you if you\'re lit, or within 3.',
+  asleep: `Asleep: every hex you pass within 2 of it rolls to wake it (walking ${V37.wakeWalk}%, sneaking ${V37.wakeSneak}%, half that unlit). Ending next to it: walking wakes it, sneaking ${V37.wakeEndSneak}%.`,
+  alert: `Alert: heard something; searching. Notices you in sight within ${V37.noticeLitWalk} lit (${V37.noticeLitSneak} sneaking), ${V37.noticeDarkWalk} unlit (${V37.noticeDarkSneak} sneaking). Sneak up behind it: it does not see its back.`,
+  hunting: 'Hunting: it has seen you and comes for you. Leave its reach and it gets a free swing.',
+  patrol: `On patrol: walks its route. Notices you in sight within ${V37.noticeLitWalk} lit (${V37.noticeLitSneak} sneaking), ${V37.noticeDarkWalk} unlit (${V37.noticeDarkSneak} sneaking); not behind it.`,
+};
+
+/** V3.7 (spec 20.1): the move modes explained with the live numbers. */
+export const MOVE_HELP = {
+  walk: `Walk: up to 4 hexes, noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you in sight within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (half that in their blind arc). Hovering a hex shows what the move risks.
+After moving, a second move (a dash) spends the action.`,
+  sneak: `Sneak (S): up to 2 hexes (Burglar 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (half unlit; ending next to one ${V37.wakeEndSneak}%). Awake monsters notice you within ${V37.noticeLitSneak} lit, ${V37.noticeDarkSneak} unlit, and never from behind: the dim hexes behind each enemy are its blind arc, the marked hex right behind it is safe. Your first strike on a monster that has not noticed you gets +1 slot.`,
+  swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once as you leave its reach, with 1 slot fewer. Sneaking does not avoid it. Your heroes swing the same way at enemies that leave their reach while their action is still ready.',
+  blind: 'Blind arc: the three directions behind an enemy. A sneaking hero there is noticed only when adjacent and walking in; the hex directly behind is never seen. Walking heroes are noticed there at half range.',
 };
 
 /** Pack: what each item kind does and how to use it ("Use: Items › Torch"). */
@@ -347,7 +403,7 @@ export const ITEM_HELP: Record<string, string> = {
   torch: `${TORCH_ROUNDS} rounds of light around the bearer (radius 2).\nUse: Items › Light torch`,
   potion: 'Heals 5, or gets a downed hero back up.\nUse: Items › Potion (yourself or a hero next to you)',
   rope: 'Anchor it at a pit edge to climb down and back up.\nUse: stand at a pit edge, Items › Anchor rope',
-  charge: 'Blasts open a lock or a cracked wall: 4 damage within 1. Noise 8.\nUse: next to the target, Items › Place charge (Sapper: Throw charge)',
+  charge: `A blasting charge on a fuse: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}.\nUse: next to the target, Items › Charge (Sapper: Set charge with a fuse of 1 or 2, or Throw charge)`,
   smoke: `Smoke for ${SMOKE_ROUNDS} rounds; blocks sight both ways.\nUse: Items › Smoke bomb, then click a hex within ${THROW_RANGE.smoke}`,
   glue: `Monsters within 1 are stuck for ${GLUE_ROUNDS} rounds.\nUse: Items › Glue bomb, then click a hex within ${THROW_RANGE.glue}`,
   dart: `1 Finesse slot: a hit puts a monster to sleep. Silent.\nUse: Items › Sleep dart, then click a monster within ${THROW_RANGE.dart}`,
@@ -425,6 +481,8 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   shutter: 'l',
   escape: 'x',
   nightsight: 'n',
+  setCharge: 'w',
+  dread: 'f',
 };
 
 export const ITEM_GLYPH: Record<string, string> = {
@@ -475,7 +533,7 @@ export const ITEM_EFFECT: Record<string, string> = {
   torch: `Light it for your own pool of light, radius 2, for ${TORCH_ROUNDS} rounds.`,
   potion: 'Drink or give: heals 5.',
   rope: 'Anchor at a pit edge to climb between levels.',
-  charge: 'Blast a door, chest or cracked wall open. Loud.',
+  charge: 'On a fuse: blasts open doors, chests and walls, 4 damage within 1. Loud.',
   smoke: 'Throw 4: smoke on the hex and around it for 2 rounds. Blocks sight; monsters lose you.',
   glue: 'Throw 4: monsters within 1 are stuck for 2 rounds.',
   dart: 'Throw 5, 1 Finesse slot: a hit puts a monster to sleep. Silent.',
@@ -602,11 +660,33 @@ export function aleNeeds(needs: 'copper' | 'caskbook'): string {
 }
 
 /** Rival crews (16.5, 18.5). */
-export const CREW: Record<CrewId, { name: string; blurb: string; colour: string }> = {
-  'lantern-sisters': { name: 'The Lantern Sisters', blurb: 'Pale-robed prospectors with lanterns of their own.', colour: '#b8ad98' },
-  ferrymen: { name: 'The Ferrymen', blurb: 'River toughs in blue-grey. They take a toll from anyone who crosses.', colour: '#7f97ad' },
-  'gallows-choir': { name: 'The Gallows Choir', blurb: 'Black and bone. They sing while they rob you.', colour: '#d8cfb8' },
+export const CREW: Record<CrewId | 'the-wake', { name: string; blurb: string; colour: string; level: number; tiers: string; where: string }> = {
+  'lantern-sisters': { name: 'The Lantern Sisters', blurb: 'Pale-robed prospectors with lanterns of their own.', colour: '#b8ad98', level: 2, tiers: 'weapon 1', where: 'Level 1' },
+  ferrymen: { name: 'The Ferrymen', blurb: 'River toughs in blue-grey. They take a toll from anyone who crosses.', colour: '#7f97ad', level: 3, tiers: 'weapon 1, armor 1', where: 'Level 2' },
+  'gallows-choir': { name: 'The Gallows Choir', blurb: 'Black and bone. They sing while they rob you.', colour: '#d8cfb8', level: 3, tiers: 'weapon 1, armor 1', where: 'Level 2' },
+  'the-wake': { name: 'The Wake', blurb: 'Deep green and bone. Grave-robbers who follow the dead down into the Hollow.', colour: '#4f8a5e', level: 4, tiers: 'weapon 2, armor 1', where: 'Level 3' },
 };
+
+/** V3.7 (spec 20.4): what a crew member of each class does with its pack, for hover and the parley card. */
+export const CREW_KIT: Record<string, string> = {
+  ranger: 'Longbow at range 6. Caltrops on the hex you would charge through; overwatch when nobody is in reach.',
+  shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half.',
+  burglar: 'Darts the lantern bearer first; smoke when two of you have a line on a wounded friend. Picks locks.',
+  sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges.',
+  sapper: 'Hammer, and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge.',
+  pyromancer: 'Firebolt at range 5; fireball when three heroes stand within 1 of a hex.',
+  hedgewitch: 'Mends the member below half, wards the striker, gusts a hero standing at an edge.',
+};
+
+/** V3.7 (spec 20.4): a crew member's level, tiers and pack, one line. */
+export function crewMemberLine(m: { level?: number; weaponTier?: number; armorTier?: number; pack?: Item[] }): string {
+  const parts: string[] = [];
+  if (m.level) parts.push(`level ${m.level}`);
+  if (m.weaponTier) parts.push(`weapon +${m.weaponTier}`);
+  if (m.armorTier) parts.push(`armor +${m.armorTier}`);
+  if (m.pack?.length) parts.push(`carries ${m.pack.map((i) => itemLabel(i)).join(', ')}`);
+  return parts.join(' · ');
+}
 
 export const TEMPERAMENT: Record<RivalCrew['temperament'], { name: string; text: string }> = {
   prospector: { name: 'Prospectors', text: 'They race you for loot, then leave. They fight only if attacked or blocked.' },

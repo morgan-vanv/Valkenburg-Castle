@@ -79,11 +79,13 @@ export class World {
   }
 }
 
-/** Tile kind at p with runtime changes (blown cracked walls are floor). */
+/** Tile kind at p with runtime changes (blown cracked walls are floor; a blasted built wall is rubble until dug, spec 20.3). */
 export function kindAt(w: World, d: DelveX | null, p: Pos): TileKind | undefined {
   const t = w.tile(p);
   if (!t) return undefined;
-  if ((t.kind === 'cracked' || t.kind === 'rubble') && d?.blown.includes(posKey(p))) return 'floor';
+  if (!d) return t.kind;
+  if ((t.kind === 'cracked' || t.kind === 'rubble') && d.blown.includes(posKey(p))) return 'floor';
+  if (t.kind === 'wall' && d.blown.includes(posKey(p))) return d.dug?.includes(posKey(p)) ? 'floor' : 'rubble';
   return t.kind;
 }
 

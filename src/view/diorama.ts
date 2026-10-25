@@ -4,9 +4,9 @@
 // Knows nothing about the HUD panels; the UI layer drives it.
 
 import * as THREE from 'three';
-import type { Visibility } from '../game/api';
+import type { MoveRisks, Visibility } from '../game/api';
 import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
-import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, Monster, Rival, RivalCrew } from '../game/types';
+import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, LevelDef, Monster, Rival, RivalCrew } from '../game/types';
 import { AnimClock } from './anim';
 import { CameraRig } from './camera';
 import type { ModelKey } from './figures';
@@ -14,7 +14,8 @@ import { LevelView } from './level';
 import { makeBook, makeChest, makeCoins, makeCopper, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
 import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
-import { COLORS, FLOOR_TOP, HEX, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
+import { COLORS, FLOOR_TOP, HEX, WALL_HEIGHT, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
+import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, fuseSide } from './stealth';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
@@ -31,7 +32,7 @@ export interface DioramaHooks {
   levelChanged(level: number): void;
 }
 
-export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area';
+export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area' | 'breakable';
 
 export type FloatKind = 'damage' | 'heal' | 'info' | 'warn' | 'gold' | 'miss';
 
@@ -61,6 +62,7 @@ const HIGHLIGHT_COLORS: Record<HighlightStyle, number> = {
   target: COLORS.danger,
   ally: 0x7fbf5a,
   danger: COLORS.danger,
+  breakable: 0xff9a40,
 };
 
 export class Diorama {
@@ -164,6 +166,27 @@ export class Diorama {
   /** 16.2: the Gloam's creeping darkness at the edge of the party's light (Level 3). */
   private gloamEdge: THREE.InstancedMesh;
   private gloamEdgeKey = '';
+  /** V3.7 (20.1): facing wedges on awake monsters and crew members; blind arcs when a sneaking hero is selected. */
+  private facingMarks = new THREE.Group();
+  private facingKey = '';
+  private blindOn = false;
+  private blindFill: THREE.InstancedMesh;
+  private blindMarks = new THREE.Group();
+  private blindTags: { el: HTMLElement; at: THREE.Vector3 }[] = [];
+  private blindKey = '';
+  /** V3.7 (20.1, 20.2): move-preview risks: rings on the monsters and a tag each. */
+  private riskRings = new THREE.Group();
+  private riskTags = new Map<string, HTMLElement>();
+  /** V3.7 (20.3): fuses: blast rings on the map and a countdown tag per charge. */
+  private fuseMarks = new THREE.Group();
+  private fuseTags: { el: HTMLElement; at: THREE.Vector3; level: number }[] = [];
+  private fuseKey = '';
+  /** V3.7 (20.3): built walls broken by blasts, per level (the level is rebuilt with rubble there). */
+  private brokenKey = new Map<number, string>();
+  /** The state a playback is heading to (beginPlayback), for drags and fuses mid-animation. */
+  private nextState: GameState | null = null;
+  /** Blast rubble dug back to floor (`dug` events; the engine keeps this privately: contract request). */
+  private dugWalls = new Set<string>();
 
   constructor(
     private readonly container: HTMLElement,
@@ -246,11 +269,22 @@ export class Diorama {
     this.gloamEdge.count = 0;
     this.gloamEdge.renderOrder = 1;
     this.gloamEdge.frustumCulled = false;
+    // V3.7 (20.1): blind-arc tiles: a dark, slightly blue wash on the hexes an enemy can't see.
+    this.blindFill = new THREE.InstancedMesh(new THREE.CircleGeometry(0.88, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0a1028, transparent: true, opacity: 0.42, depthWrite: false }), 600);
+    this.blindFill.count = 0;
+    this.blindFill.renderOrder = 1;
+    this.blindFill.frustumCulled = false;
+    // Breakable-wall outlines sit on top of the wall and draw over it.
+    {
+      const bm = this.highlights.get('breakable')!.material as THREE.MeshBasicMaterial;
+      bm.depthTest = false;
+      this.highlights.get('breakable')!.renderOrder = 8;
+    }
     // V3.4: walls stand at full height, so the hover, path-end and selection rings get a faint
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -406,6 +440,12 @@ export class Diorama {
     this.refreshProps();
     this.refreshIntentVisibility();
     for (const l of this.lips.children) l.visible = l.userData.level === level;
+    this.facingKey = '';
+    this.blindKey = '';
+    this.fuseKey = '';
+    this.refreshFacing();
+    this.refreshBlindArcs();
+    this.refreshFuses();
     if (changed) this.hooks.levelChanged(level);
   }
 
@@ -702,6 +742,32 @@ export class Diorama {
         ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.45 + 0.2 * k;
       }
     }
+    // V3.7 (20.1): facing wedges follow their figure and face where it turns.
+    for (const g of this.facingMarks.children) {
+      const u = this.units.get(g.userData.unit as string);
+      g.visible = !!u && u.shown && u.root.visible && !u.dead;
+      if (u) g.position.set(u.root.position.x, u.root.position.y + 0.045, u.root.position.z);
+    }
+    for (const r of this.riskRings.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 6 + (r.userData.phase as number));
+      r.scale.setScalar(1 + k * 0.14);
+      ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.5 * k;
+    }
+    for (const r of this.blindMarks.children) {
+      const k = 0.5 + 0.5 * Math.sin(t * 2.4 + (r.userData.phase as number));
+      r.scale.setScalar(1 + k * 0.12);
+      ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.45 * k;
+    }
+    for (const g of this.fuseMarks.children) {
+      if (g.userData.spark) {
+        const k = 0.5 + 0.5 * Math.sin(t * 11 + (g.userData.phase as number));
+        g.scale.setScalar(0.5 + k * 0.5);
+        ((g as THREE.Sprite).material as THREE.SpriteMaterial).opacity = 0.6 + 0.4 * k;
+      } else if (g.userData.inner) {
+        const k = 0.5 + 0.5 * Math.sin(t * 4 + g.position.x);
+        ((g.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.22 + 0.25 * k;
+      }
+    }
     // 18.7: crew rings follow their rival.
     for (const r of this.crewRings.children) {
       const u = this.units.get(r.userData.unit as string);
@@ -881,6 +947,28 @@ export class Diorama {
       t.el.style.display = p.behind ? 'none' : '';
       t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
+    // V3.7: move-risk tags sit above the intent tag (if any) over the enemy.
+    for (const [id, el] of this.riskTags) {
+      const v = this.units.get(id);
+      if (!v || !v.root.visible || v.dead) {
+        el.style.display = 'none';
+        continue;
+      }
+      const stack = this.intentTags.has(id) ? 46 : 22;
+      const p = this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0)));
+      el.style.display = p.behind ? 'none' : '';
+      el.style.transform = `translate(${p.x}px, ${p.y - stack}px) translate(-50%, -100%)`;
+    }
+    for (const t of this.blindTags) {
+      const p = this.project(t.at);
+      t.el.style.display = p.behind ? 'none' : '';
+      t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+    }
+    for (const t of this.fuseTags) {
+      const p = this.project(t.at);
+      t.el.style.display = p.behind || t.level !== this.shownLevel ? 'none' : '';
+      t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
+    }
     if (this.landingAt) {
       const p = this.project(this.landingAt);
       this.landingTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
@@ -947,6 +1035,8 @@ export class Diorama {
       for (const id of [...this.props.keys()]) this.removeProp(id);
       this.clearIntents();
       this.refreshLootGlow();
+      this.dugWalls.clear();
+      this.applyBrokenWalls([]);
       return;
     }
     this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
@@ -958,6 +1048,11 @@ export class Diorama {
     this.syncWorld(state);
     this.refreshUnits();
     this.refreshProps();
+    this.facingKey = '';
+    this.refreshFacing();
+    this.blindKey = '';
+    this.refreshBlindArcs();
+    this.refreshFuses();
   }
 
   /** Visible-but-unlit hexes look darker than lit ones. */
@@ -978,7 +1073,8 @@ export class Diorama {
 
   /** 16.5: a sister's model by her class; 18.5: cutthroats by crew and class. */
   private rivalModel(r: Rival): ModelKey {
-    if (r.crew === 'ferrymen' || r.crew === 'gallows-choir') return `rival-${r.crew}-${r.cls}` as ModelKey;
+    const crew = r.crew as string;
+    if (crew === 'ferrymen' || crew === 'gallows-choir' || crew === 'the-wake') return `rival-${crew}-${r.cls}` as ModelKey;
     const cls = r.cls;
     return cls === 'ranger' ? 'sisterRanger' : cls === 'shadowmancer' ? 'sisterShadow' : cls === 'burglar' ? 'sisterBurglar' : 'sister';
   }
@@ -1039,8 +1135,10 @@ export class Diorama {
       v.at = { ...at };
       v.root.position.copy(this.worldOf(at)).add(v.offset);
     };
+    const draggers = new Map<string, string>();
+    for (const r of d.rivals?.members ?? []) if (r.dragging && r.hp > 0 && !r.goneOut) draggers.set(r.dragging, r.name);
     for (const h of d.heroes) {
-      if (h.status === 'out' || h.status === 'dead') continue;
+      if (h.status === 'out' || h.status === 'dead' || h.status === 'captured') continue;
       const hero = state.campaign.roster.find((r) => r.id === h.heroId);
       const v = this.ensureUnit(h.heroId, (hero?.cls ?? 'sellsword') as ModelKey, 'hero', h.at, hero?.name ?? h.heroId);
       keep.add(h.heroId);
@@ -1048,8 +1146,14 @@ export class Diorama {
       v.lieDown(h.status === 'downed');
       v.dead = false;
       v.setOpacity(1);
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen));
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId)));
     }
+    // V3.7 (20.1): figures turn to their engine facing when it is known (and they aren't mid-animation).
+    const turn = (v: UnitView, u: { facing?: number }) => {
+      if (u.facing === undefined || v.busy) return;
+      const a = facingAngle(u.facing);
+      v.face(Math.sin(a), Math.cos(a));
+    };
     for (const m of d.monsters) {
       if (m.hp <= 0 || m.buried) continue;
       const want = this.modelFor(m.kind, m.awareness);
@@ -1058,6 +1162,7 @@ export class Diorama {
       const v = this.ensureUnit(m.id, want, 'monster', m.at, m.name);
       keep.add(m.id);
       place(v, m.at);
+      turn(v, m);
       v.dead = false;
       v.setOpacity(1);
       v.fig.rotation.z = 0;
@@ -1076,10 +1181,14 @@ export class Diorama {
         const v = this.ensureUnit(r.id, want, 'rival', r.at, r.name);
         keep.add(r.id);
         place(v, r.at);
+        turn(v, r);
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
         const tagEl = this.tags.get(r.id)?.el;
-        if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st}`;
-        this.setTag(r.id, pipsHtml(r.hp, r.maxHp, pip) + flag + ((r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : ''));
+        if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st} crew-${r.crew}`;
+        // V3.7 (20.4): level badge, feared and dragging marks.
+        const lvl = r.level && r.level > 1 ? `<b class="tag-lvl" title="Level ${r.level}${r.weaponTier ? `, weapon +${r.weaponTier}` : ''}${r.armorTier ? `, armor +${r.armorTier}` : ''}">L${r.level}</b>` : '';
+        const marks = (r.feared ?? 0) > 0 ? '<b class="tag-fear">feared</b>' : r.dragging ? `<b class="tag-dragging">dragging ${state.campaign.roster.find((x) => x.id === r.dragging)?.name ?? ''}</b>` : (r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : '';
+        this.setTag(r.id, lvl + pipsHtml(r.hp, r.maxHp, pip) + flag + marks);
       }
     }
     if (d.prisoner && !d.prisoner.out && !d.prisoner.dead) {
@@ -1129,6 +1238,8 @@ export class Diorama {
       door.hinge.rotation.y = ds.open ? -Math.PI * 0.55 : 0;
       door.padlock.visible = ds.locked && !ds.open;
     }
+    // V3.7 (20.3): built walls a blast broke are rubble now: rebuild those levels.
+    this.applyBrokenWalls(d.blown);
     // Braziers.
     this.litBraziers = new Set(d.lit);
     for (const lv of this.levels.values()) {
@@ -1136,7 +1247,7 @@ export class Diorama {
         b.lit = this.litBraziers.has(b.key);
         b.fire.visible = b.lit;
       }
-      lv.setBlown(new Set(d.blown));
+      lv.setBlown(this.blownForView(d.blown));
     }
     // Chests.
     for (const c of d.chests) {
@@ -1339,9 +1450,11 @@ export class Diorama {
     const mesh = this.highlights.get(style)!;
     const m = new THREE.Matrix4();
     let n = 0;
+    // V3.7: a breakable wall's outline sits on the wall's top, not under it.
+    const lift = style === 'breakable' ? WALL_HEIGHT + 0.06 : 0.025;
     for (const p of hexes) {
       if (p.level !== this.shownLevel || n >= 600) continue;
-      m.makeTranslation(this.worldOf(p, 0.025));
+      m.makeTranslation(this.worldOf(p, lift));
       mesh.setMatrixAt(n++, m);
     }
     mesh.count = n;
@@ -1486,6 +1599,37 @@ export class Diorama {
         this.markRadius(at, 1, id, 0xffb35c, 'ring');
         continue;
       }
+      // 20.3: a rival Sapper sets a fused charge: the two blast rings in the enemy colour and the fuse number.
+      if (it.kind === 'fuse') {
+        const centre = it.to ?? at;
+        if (this.castle) {
+          const rings = blastRings(this.castle, centre);
+          this.markBreath(rings.inner, id);
+          for (const p of rings.outer) {
+            const ring = new THREE.Mesh(hexRing(0.66, 0.78), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.6, depthWrite: false }));
+            ring.position.copy(this.worldOf(p, 0.04));
+            ring.userData = { monster: id, level: p.level };
+            this.intentLines.add(ring);
+          }
+        }
+        el.innerHTML = `<span class="intent-icon">✹</span><span class="intent-dmg">4</span><span class="intent-fuse">1</span>`;
+        el.title = `${name}: sets a charge on the marked hex with a 1-turn fuse. When it blows: 4 damage within 1 (and a shove), 2 within 2; it breaks walls within 1. Get out of the rings.`;
+        continue;
+      }
+      if (it.kind === 'rob') {
+        el.title = `${name}: robs ${target || 'a downed hero'} of their gold and gems, then drags them toward the way out.`;
+      }
+      if (it.kind === 'potion') {
+        el.title = `${name}: backs off a hex and drinks a potion (heals 5).`;
+        continue;
+      }
+      if (it.kind === 'item') {
+        const what = (it as { item?: string }).item;
+        el.title = `${name}: uses ${what ? `a ${what}` : 'an item from the pack'}${target ? ` on ${target}` : ''} next turn.`;
+      }
+      if (it.kind === 'flee') {
+        el.title = `${name}: feared: runs its full move away${target ? ` from ${target}` : ''}, attacks nobody. Every hero it leaves gets a free swing.`;
+      }
       // 18.5: the Sapper's charge: the blast hexes, 3 damage to everyone within 1 of the mark.
       if (it.kind === 'charge') {
         const centre = it.to ?? (it.targetId ? targetPos(state, it.targetId) : null);
@@ -1517,7 +1661,7 @@ export class Diorama {
         if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
       } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
       if (to && at.level === this.shownLevel) {
-        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
+        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' || it.kind === 'rob' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
         const g = new THREE.BufferGeometry().setFromPoints([from, to]);
         const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: col, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.85, depthTest: false }));
         line.computeLineDistances();
@@ -1623,6 +1767,315 @@ export class Diorama {
     this.intentLines.add(ring);
   }
 
+  // ------------------------------------------------------------ V3.7: facing, blind arcs, move risks, fuses
+
+  /**
+   * 20.1: a facing wedge on the floor in front of every awake monster and crew member on the shown
+   * level: a translucent eye-cone the way it looks plus a small arrow at the hex edge. Crew members
+   * take their ring colour (stance); monsters a hot amber; feared figures a cold violet.
+   */
+  private refreshFacing(): void {
+    const d = this.state?.delve;
+    if (!d) {
+      this.facingMarks.clear();
+      this.facingKey = '';
+      return;
+    }
+    const list = facedUnits(d).filter((u) => u.at.level === this.shownLevel);
+    const key = `#${this.shownLevel}|${d.rivals?.stance ?? ''}|` + list.map((u) => `${u.id}:${u.facing}:${u.feared ? 'f' : ''}`).join('|');
+    if (key === this.facingKey) return;
+    this.facingKey = key;
+    this.facingMarks.clear();
+    const st = d.rivals?.stance;
+    for (const u of list) {
+      const col = u.feared ? 0x9a6aff : u.crew ? (st === 'hired' ? 0x7fe07a : st === 'hostile' ? COLORS.danger : st === 'demanding' ? 0xffb35c : 0xb8ad98) : 0xffa040;
+      const g = new THREE.Group();
+      // The eye cone: a 120° sector, apex at the figure, reaching a hex and a half.
+      const R = Math.sqrt(3) * HEX * 1.45;
+      const cone = new THREE.Mesh(new THREE.CircleGeometry(R, 14, -Math.PI / 3, (Math.PI * 2) / 3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+      // CircleGeometry's arc starts on +x; rotate so the sector's middle points down +z (our forward), then by the facing.
+      cone.rotation.y = -Math.PI / 2;
+      g.add(cone);
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.4, 3), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthWrite: false }));
+      arrow.rotation.x = Math.PI / 2;
+      arrow.position.z = Math.sqrt(3) * HEX * 0.62;
+      g.add(arrow);
+      g.rotation.y = facingAngle(u.facing);
+      g.userData = { unit: u.id, level: u.at.level };
+      g.renderOrder = 2;
+      this.facingMarks.add(g);
+    }
+  }
+
+  /** 20.1: on while a sneaking hero is selected: the blind arcs behind every awake enemy are shaded. */
+  showBlindArcs(on: boolean): void {
+    if (on === this.blindOn) return;
+    this.blindOn = on;
+    this.blindKey = '';
+    this.refreshBlindArcs();
+  }
+
+  private refreshBlindArcs(): void {
+    const d = this.state?.delve;
+    const lv = this.levels.get(this.shownLevel)?.def as LevelDef | undefined;
+    const list = this.blindOn && d ? facedUnits(d).filter((u) => u.at.level === this.shownLevel && !u.feared && this.vis.visible.has(posKey(u.at))) : [];
+    const key = `#${this.blindOn ? 1 : 0}|${this.shownLevel}|` + list.map((u) => `${u.id}:${posKey(u.at)}:${u.facing}`).join('|');
+    if (key === this.blindKey) return;
+    this.blindKey = key;
+    this.blindFill.count = 0;
+    this.blindMarks.clear();
+    for (const t of this.blindTags) t.el.remove();
+    this.blindTags = [];
+    if (!list.length || !lv) {
+      this.blindFill.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    const m = new THREE.Matrix4();
+    let n = 0;
+    const done = new Set<string>();
+    const occupied = new Set<string>([...this.units.values()].filter((v) => v.shown).map((v) => posKey(v.at)));
+    for (const u of list) {
+      const arc = blindArc(lv, u.at, u.facing, 4);
+      for (const p of arc.hexes) {
+        const k = posKey(p);
+        if (done.has(k) || n >= 600) continue;
+        done.add(k);
+        m.makeTranslation(this.worldOf(p, 0.028));
+        this.blindFill.setMatrixAt(n++, m);
+      }
+      if (arc.behind && !occupied.has(posKey(arc.behind))) {
+        const ring = new THREE.Mesh(hexRing(0.58, 0.8), new THREE.MeshBasicMaterial({ color: 0x9ec0ff, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
+        ring.position.copy(this.worldOf(arc.behind, 0.045));
+        ring.userData = { unit: u.id, phase: n * 0.7 };
+        ring.renderOrder = 3;
+        this.blindMarks.add(ring);
+        const el = document.createElement('div');
+        el.className = 'blind-tag';
+        el.textContent = 'sneak up here';
+        el.title = 'The hex directly behind it: a sneaking hero here is never noticed by it. Your first strike on a monster that has not noticed you gets +1 slot.';
+        this.fx.appendChild(el);
+        this.blindTags.push({ el, at: this.worldOf(arc.behind, 0.5) });
+      }
+    }
+    this.blindFill.count = n;
+    this.blindFill.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * 20.1, 20.2: what the hovered move risks: sleepers that may wake (yellow ring, the chance), awake
+   * enemies that would notice the hero at the end (red eye), enemies that get a free swing (red sword
+   * with the damage). Null clears.
+   */
+  showRisks(risks: MoveRisks | null): void {
+    this.riskRings.clear();
+    for (const el of this.riskTags.values()) el.remove();
+    this.riskTags.clear();
+    if (!risks) return;
+    const mk = (id: string, cls: string, html: string, title: string, color: number) => {
+      const v = this.units.get(id);
+      const pos = v?.at;
+      if (!pos || pos.level !== this.shownLevel) return;
+      const ring = new THREE.Mesh(hexRing(0.6, 0.9), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, depthTest: false }));
+      ring.position.copy(this.worldOf(pos, 0.05));
+      ring.userData = { phase: Math.random() * 3 };
+      ring.renderOrder = 8;
+      this.riskRings.add(ring);
+      if (this.riskTags.has(id)) return;
+      const el = document.createElement('div');
+      el.className = `risk ${cls}`;
+      el.innerHTML = html;
+      el.title = title;
+      this.fx.appendChild(el);
+      this.riskTags.set(id, el);
+    };
+    for (const w of risks.wake) mk(w.id, 'risk-wake', `<span class="risk-icon">☾</span><span class="risk-num">${Math.round(w.chance)}%</span>`, `${this.nameOf(w.id)} may wake as you pass (${Math.round(w.chance)}%).`, 0xffd040);
+    for (const n of risks.notice) mk(n.id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(n.id)} would notice you where this move ends.`, COLORS.danger);
+    for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">⚔</span><span class="risk-num">${sw.damage[0]}–${sw.damage[1]}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
+  }
+
+  private nameOf(id: string): string {
+    const d = this.state?.delve;
+    return d?.monsters.find((m) => m.id === id)?.name ?? d?.rivals?.members.find((r) => r.id === id)?.name ?? this.state?.campaign.roster.find((h) => h.id === id)?.name ?? id;
+  }
+
+  /** 20.3: the fuses on the shown level: blast rings (inner red, outer orange) and a countdown tag; rival fuses in the enemy colour. */
+  private refreshFuses(): void {
+    const s = this.state;
+    const d = s?.delve;
+    const fuses = (d?.fuses ?? []).filter((f) => f.at.level === this.shownLevel && (this.vis.visible.has(posKey(f.at)) || this.vis.explored.has(posKey(f.at)) || s?.campaign.roster.some((h) => h.id === f.by)));
+    const key = `#${this.shownLevel}|` + fuses.map((f) => `${posKey(f.at)}:${f.rounds}:${f.by}`).join('|');
+    if (key === this.fuseKey) return;
+    this.fuseKey = key;
+    this.fuseMarks.clear();
+    for (const t of this.fuseTags) t.el.remove();
+    this.fuseTags = [];
+    if (!fuses.length || !this.castle || !s) return;
+    for (const f of fuses) {
+      const side = fuseSide(s, f.by);
+      const rings = blastRings(this.castle, f.at);
+      const innerMat = new THREE.MeshBasicMaterial({ color: side === 'rival' ? 0xff3a30 : 0xff4a10, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
+      const innerEdge = new THREE.MeshBasicMaterial({ color: side === 'rival' ? 0xff6a60 : 0xff8a40, transparent: true, opacity: 0.9, depthWrite: false });
+      const outerMat = new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.7, depthWrite: false });
+      for (const p of rings.inner) {
+        const g = new THREE.Group();
+        const wall = this.levels.get(p.level)?.def.tiles[hexKey(p)]?.kind === 'wall';
+        const lift = wall ? WALL_HEIGHT + 0.06 : 0.042;
+        g.add(new THREE.Mesh(new THREE.CircleGeometry(0.86, 6).rotateX(-Math.PI / 2).rotateY(Math.PI / 6), innerMat), new THREE.Mesh(hexRing(0.74, 0.9), innerEdge));
+        g.position.copy(this.worldOf(p, lift));
+        g.userData = { level: p.level, inner: true };
+        g.renderOrder = 5;
+        this.fuseMarks.add(g);
+      }
+      for (const p of rings.outer) {
+        const ring = new THREE.Mesh(hexRing(0.66, 0.78), outerMat);
+        ring.position.copy(this.worldOf(p, 0.04));
+        ring.userData = { level: p.level };
+        ring.renderOrder = 5;
+        this.fuseMarks.add(ring);
+      }
+      // The charge itself: a small keg with a spark.
+      const keg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.3, 8), new THREE.MeshLambertMaterial({ color: 0x4a2a1a, flatShading: true }));
+      keg.position.copy(this.worldOf(f.at, 0.15));
+      keg.userData = { level: f.at.level };
+      const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffd060, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+      spark.scale.setScalar(0.7);
+      spark.position.copy(this.worldOf(f.at, 0.48));
+      spark.userData = { spark: true, phase: Math.random() * 6, level: f.at.level };
+      this.fuseMarks.add(keg, spark);
+      const el = document.createElement('div');
+      el.className = `fuse-tag fuse-${side} ${f.rounds <= 1 ? 'soon' : ''}`;
+      el.innerHTML = `<span class="fuse-icon">✹</span><span class="fuse-n">${f.rounds}</span>`;
+      el.title = `Charge set by ${this.nameOf(f.by)} · ${f.rounds <= 1 ? 'goes off at the end of the coming castle turn' : `goes off in ${f.rounds} castle turns`}. 4 damage within 1 (everyone there pushed a hex away), 2 within 2; breaks walls within 1. ${side === 'hero' ? 'The setter takes nothing; other heroes take half.' : 'Get out of the rings.'}`;
+      this.fx.appendChild(el);
+      this.fuseTags.push({ el, at: this.worldOf(f.at, 1.1), level: f.at.level });
+    }
+  }
+
+  /** 20.3: what the levels hide: blown cracked walls and dug rubble, but not blast-broken walls (they show as rubble until dug). */
+  private blownForView(blown: string[]): Set<string> {
+    if (!this.castle) return new Set(blown);
+    const walls = blownWalls(this.castle, blown);
+    return new Set(blown.filter((k) => !walls.has(k) || this.dugWalls.has(k)));
+  }
+
+  /** 20.3: rebuild a level with its blast-broken walls as rubble (walls are batched, so the level is remade). */
+  private applyBrokenWalls(blown: string[]): void {
+    if (!this.castle) return;
+    const broken = blownWalls(this.castle, blown);
+    for (const ld of this.castle.levels) {
+      const mine = [...broken].filter((k) => k.startsWith(`${ld.level}:`)).sort();
+      const key = mine.join('|');
+      if ((this.brokenKey.get(ld.level) ?? '') === key) continue;
+      this.brokenKey.set(ld.level, key);
+      const old = this.levels.get(ld.level);
+      if (old) this.scene.remove(old.group);
+      const tiles = { ...ld.tiles };
+      for (const k of mine) {
+        const hk = k.slice(k.indexOf(':') + 1);
+        const t = tiles[hk];
+        if (!t) continue;
+        // Rubble takes the room of a floor neighbour so it is lit and tinted like the room it opens into.
+        const h = parseHexKey(hk);
+        const room = DIRS.map((dd) => tiles[hexKey(add(h, dd))]).find((n) => n && n.kind !== 'wall' && n.room)?.room;
+        tiles[hk] = { kind: 'rubble', room: room ?? t.room };
+      }
+      const def: LevelDef = { ...ld, tiles };
+      const lv = new LevelView(def, this.castle);
+      this.levels.set(ld.level, lv);
+      this.scene.add(lv.group);
+      lv.group.visible = old?.group.visible ?? ld.level === this.shownLevel;
+      // Doors, braziers and the blown set are re-applied by the sync that follows; here the rubble shows at once.
+      if (this.state?.delve) lv.setBlown(this.blownForView(this.state.delve.blown));
+    }
+    this.applyBelow();
+  }
+
+  /** 20.3: a blast: flash, shake, dust and debris flying out, the broken walls crumbling into rubble. */
+  private async playBlast(ev: Extract<GameEvent, { type: 'blast' }>): Promise<void> {
+    // The contract still carries the old `{ type: 'blast', at }` shape beside the V3.7 one.
+    const e = { at: ev.at, by: 'by' in ev ? ev.by : '', broke: 'broke' in ev ? ev.broke : [] };
+    const clock = this.clock;
+    const watch = e.at.level === this.shownLevel;
+    const at = this.worldOf(e.at, 0.6);
+    this.flash(at, 0xffc070, 30);
+    if (!this.reduceShake) this.rig.addShake(0.55);
+    clock.hitStop(160);
+    this.onExplosion?.();
+    // The fuse is spent: drop its marker now.
+    if (this.state?.delve?.fuses) this.state.delve.fuses = this.state.delve.fuses.filter((f) => !samePos(f.at, e.at));
+    this.fuseKey = '';
+    this.refreshFuses();
+    const breakNow = () => {
+      if (!e.broke.length || !this.state?.delve) return;
+      const blown = this.state.delve.blown;
+      const more = e.broke.map((p) => posKey(p)).filter((k) => !blown.includes(k));
+      if (more.length) this.state.delve.blown = [...blown, ...more];
+      this.applyBrokenWalls(this.state.delve.blown);
+      this.levels.get(e.at.level)?.setBlown(this.blownForView(this.state.delve.blown));
+      this.levels.get(e.at.level)?.applyFogLit(this.fogLit, this.fogUnlit, this.vis.explored);
+    };
+    if (!watch) {
+      breakNow();
+      return;
+    }
+    // Fire over the inner ring, a shock ring over the outer, then debris.
+    if (this.castle) {
+      const rings = blastRings(this.castle, e.at);
+      void this.ringPulse(rings.inner, 0xff5a10);
+      void this.ringPulse(rings.outer, 0xffa040);
+    }
+    this.dustPuff(this.worldOf(e.at, 0.1));
+    const bits: { m: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3 }[] = [];
+    const group = new THREE.Group();
+    const stone = new THREE.MeshLambertMaterial({ color: 0x8a8076, flatShading: true });
+    const ember = new THREE.MeshBasicMaterial({ color: 0xff8a30 });
+    for (const o of [e.at, ...e.broke]) {
+      const base = this.worldOf(o, 0.3);
+      const n = samePos(o, e.at) ? 14 : 10;
+      for (let i = 0; i < n; i++) {
+        const sz = 0.08 + Math.random() * 0.14;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(sz, sz * 0.8, sz * 1.2), Math.random() < 0.3 ? ember : stone);
+        m.position.copy(base);
+        const a = Math.random() * Math.PI * 2;
+        const sp = 2 + Math.random() * 4;
+        bits.push({ m, v: new THREE.Vector3(Math.cos(a) * sp, 3 + Math.random() * 4, Math.sin(a) * sp), spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
+        group.add(m);
+      }
+    }
+    this.overlay.add(group);
+    for (const b of e.broke) this.dustPuff(this.worldOf(b, 0.2));
+    const floorY = this.worldOf(e.at, 0.05).y;
+    let last = 0;
+    let broke = false;
+    await clock.tween(0.9, (t) => {
+      const time = t * 0.9;
+      const dt = time - last;
+      last = time;
+      for (const b of bits) {
+        b.v.y -= 14 * dt;
+        b.m.position.addScaledVector(b.v, dt);
+        if (b.m.position.y < floorY) {
+          b.m.position.y = floorY;
+          b.v.set(b.v.x * 0.4, Math.abs(b.v.y) * 0.3, b.v.z * 0.4);
+        }
+        b.m.rotation.x += b.spin.x * dt;
+        b.m.rotation.y += b.spin.y * dt;
+        b.m.rotation.z += b.spin.z * dt;
+      }
+      this.flash(at, 0xffb060, 30 * (1 - t));
+      // The wall comes down a third of the way in.
+      if (!broke && t > 0.3) {
+        broke = true;
+        breakNow();
+      }
+    });
+    if (!broke) breakNow();
+    this.overlay.remove(group);
+    stone.dispose();
+    ember.dispose();
+    for (const b of e.broke) if (b.level === this.shownLevel) this.floatText(this.worldOf(b, 0.9), 'Wall broken', 'warn', 1.4);
+  }
+
   // ------------------------------------------------------------ edge risk and landing previews
 
   /** Red lips on the pit side of each given hero's hex. */
@@ -1692,6 +2145,8 @@ export class Diorama {
   /** Before playing a batch: show units from the next state too, and widen sight to what either state saw. */
   beginPlayback(next: GameState, nextVis: Visibility): void {
     this.extraVisible = nextVis.visible;
+    this.nextState = next;
+    this.showRisks(null);
     const d = next.delve;
     if (d) {
       for (const m of d.monsters) {
@@ -1721,6 +2176,7 @@ export class Diorama {
 
   endPlayback(): void {
     this.extraVisible = null;
+    this.nextState = null;
     this.moving.clear();
     this.followId = null;
   }
@@ -1770,6 +2226,15 @@ export class Diorama {
         }
         v.busy++;
         this.moving.add(v.id);
+        // 20.4: a crew member hauling a downed hero drags the figure along behind.
+        const dragId = v.side === 'rival' ? (this.nextState?.delve?.rivals?.members.find((r) => r.id === v.id)?.dragging ?? this.state?.delve?.rivals?.members.find((r) => r.id === v.id)?.dragging) : undefined;
+        const dragged = dragId ? this.units.get(dragId) : undefined;
+        if (dragged) {
+          dragged.busy++;
+          dragged.lieDown(true);
+          this.floatText(dragged.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 'Dragged!', 'warn', 1.2);
+        }
+        let prev = v.root.position.clone();
         for (const step of e.path) {
           if (step.level !== v.at.level) {
             // Stairs: fade out, jump, fade in.
@@ -1784,18 +2249,40 @@ export class Diorama {
           const from = v.root.position.clone();
           const to = this.worldOf(step);
           v.face(to.x - from.x, to.z - from.z);
+          const dFrom = dragged?.root.position.clone();
           await clock.tween(0.14, (t) => {
             const k = easeInOut(t);
             v.root.position.lerpVectors(from, to, k);
             v.root.position.y = from.y + (to.y - from.y) * k;
+            if (dragged && dFrom) {
+              // The hauled hero trails one hex behind, bumping along the floor.
+              dragged.root.position.lerpVectors(dFrom, prev, k);
+              dragged.root.position.y += Math.abs(Math.sin(t * Math.PI * 2)) * 0.05;
+            }
           });
+          if (dragged) {
+            dragged.at = { ...v.at };
+            dragged.root.position.copy(prev);
+          }
+          prev = to.clone();
           v.at = { ...step };
           this.refreshUnits();
           this.onStep?.(v.side);
         }
+        if (dragged) {
+          const where = this.nextState?.delve?.heroes.find((h) => h.heroId === dragged.id)?.at;
+          if (where) {
+            dragged.at = { ...where };
+            dragged.root.position.copy(this.worldOf(where));
+          }
+          dragged.busy--;
+          this.refreshUnits();
+        }
         this.moving.delete(v.id);
         v.busy--;
         this.refreshIntentVisibility();
+        this.facingKey = '';
+        this.refreshFacing();
         return;
       }
       case 'levelChanged': {
@@ -1890,13 +2377,109 @@ export class Diorama {
         await clock.tween(0.4, (t) => b.fire.scale.setScalar(easeOutBack(t)));
         return;
       }
-      case 'blast': {
-        const at = this.worldOf(e.at, 0.6);
-        this.flash(at, 0xffc070, 30);
-        if (!this.reduceShake) this.rig.addShake(0.5);
-        clock.hitStop(160);
-        this.onExplosion?.();
-        await clock.wait(0.35);
+      case 'blast':
+        await this.playBlast(e);
+        return;
+      case 'fuseSet': {
+        // 20.3: the charge is set: the rings appear at once, the fuse tag counts from `rounds`.
+        if (this.state?.delve) {
+          const list = (this.state.delve.fuses ?? []).filter((f) => !samePos(f.at, e.at));
+          this.state.delve.fuses = [...list, { at: e.at, rounds: e.rounds, by: e.by }];
+        }
+        this.fuseKey = '';
+        this.refreshFuses();
+        if (e.at.level !== this.shownLevel) return;
+        const by = this.units.get(e.by);
+        if (by) {
+          const w = this.worldOf(e.at);
+          by.face(w.x - by.root.position.x, w.z - by.root.position.z);
+        }
+        this.flash(this.worldOf(e.at, 0.5), 0xffd060, 2);
+        this.floatText(this.worldOf(e.at, 0.9), `Fuse ${e.rounds}`, 'warn', 1.3);
+        if (this.castle) await this.ringPulse(blastRings(this.castle, e.at).inner, 0xff6a20);
+        return;
+      }
+      case 'swing': {
+        // 20.2: a free swing: the attacker turns and a "Free swing" label pops; the strike itself
+        // (lunge, damage or miss) comes with the roll/hit/miss events the engine sends around it.
+        const a = this.units.get(e.by);
+        const t = this.units.get(e.target);
+        if (!t || !((a?.root.visible ?? false) || t.root.visible)) return;
+        if (a && a.id !== t.id) a.face(t.root.position.x - a.root.position.x, t.root.position.z - a.root.position.z);
+        this.floatText((a ?? t).root.position.clone().add(new THREE.Vector3(0, (a ?? t).height + 0.55, 0)), 'Free swing', 'warn', 1.0);
+        await clock.wait(0.1);
+        return;
+      }
+      case 'feared': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const m = this.state?.delve?.monsters.find((x) => x.id === e.id) ?? this.state?.delve?.rivals?.members.find((x) => x.id === e.id);
+        if (m) {
+          m.feared = Math.max(m.feared ?? 0, 1);
+          m.fearOf = e.by;
+        }
+        this.facingKey = '';
+        this.refreshFacing();
+        if (!v.root.visible) return;
+        v.flash(new THREE.Color(0.35, 0.1, 0.6), 0.8);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), 'Feared!', 'warn', 1.5);
+        // A shiver: the figure shrinks back and quakes.
+        const by = this.units.get(e.by);
+        if (by) {
+          const dir = v.root.position.clone().sub(by.root.position);
+          v.face(-dir.x, -dir.z);
+        }
+        await clock.tween(0.35, (t) => {
+          v.rig.position.x = Math.sin(t * 40) * 0.05 * (1 - t);
+          v.fig.scale.setScalar(v.scale * (1 - Math.sin(t * Math.PI) * 0.12));
+        });
+        v.rig.position.set(0, 0, 0);
+        v.fig.scale.setScalar(v.scale);
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
+      case 'noticed': {
+        const v = this.units.get(e.by);
+        const hero = this.units.get(e.hero);
+        if (!v || !v.root.visible) return;
+        if (hero) v.face(hero.root.position.x - v.root.position.x, hero.root.position.z - v.root.position.z);
+        this.facingKey = '';
+        this.refreshFacing();
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), '👁 Noticed!', 'warn', 1.3);
+        await clock.wait(0.15);
+        return;
+      }
+      case 'woke': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        const hero = this.units.get(e.by);
+        if (hero) v.face(hero.root.position.x - v.root.position.x, hero.root.position.z - v.root.position.z);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), '! Awake', 'warn', 1.2);
+        await clock.tween(0.25, (t) => (v.fig.position.y = Math.sin(t * Math.PI) * 0.15));
+        v.fig.position.y = 0;
+        return;
+      }
+      case 'robbed': {
+        const v = this.units.get(e.hero);
+        if (!v) return;
+        const by = this.units.get(e.by);
+        if (by) await this.lunge(by, v);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), `Robbed: ${itemsText(e.items)}`, 'warn', 1.6);
+        await clock.wait(0.2);
+        return;
+      }
+      case 'captured': {
+        // 20.4: dragged out of the castle: the hero fades at the exit.
+        const v = this.units.get(e.hero);
+        if (!v) return;
+        v.busy++;
+        if (v.root.visible) {
+          this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.6, 0)), 'Taken!', 'warn', 2);
+          if (!this.reduceShake) this.rig.addShake(0.12);
+          await clock.tween(0.5, (t) => v.setOpacity(1 - t));
+        }
+        v.busy--;
+        this.removeUnit(e.hero);
         return;
       }
       case 'trap': {
@@ -1985,8 +2568,29 @@ export class Diorama {
       }
       case 'dragged': {
         // 16.4: the webbed hero is hauled one hex toward the spider on a strand of web.
+        // 20.4: a crew member hauling a downed hero: same pull, no strand, lying down.
         const v = this.units.get(e.id);
         if (!v) return;
+        const crewDrag = !!(this.nextState ?? this.state)?.delve?.rivals?.members.some((r) => r.dragging === e.id);
+        if (crewDrag) {
+          const to2 = this.worldOf(e.to);
+          if (!(v.root.visible || e.from.level === this.shownLevel)) {
+            v.at = { ...e.to };
+            v.root.position.copy(to2);
+            return;
+          }
+          v.busy++;
+          v.lieDown(true);
+          const from2 = v.root.position.clone();
+          this.floatText(from2.clone().add(new THREE.Vector3(0, 1.2, 0)), 'Dragged!', 'warn', 1.2);
+          await clock.tween(0.3, (t) => {
+            v.root.position.lerpVectors(from2, to2, easeInOut(t));
+            v.root.position.y += Math.abs(Math.sin(t * Math.PI * 2)) * 0.05;
+          });
+          v.at = { ...e.to };
+          v.busy--;
+          return;
+        }
         const to = this.worldOf(e.to);
         const watch = v.root.visible || e.from.level === this.shownLevel;
         if (this.levels.get(e.to.level)?.pits.has(hexKey(e.to))) to.y = levelY(e.to.level) + FLOOR_TOP;
@@ -2237,6 +2841,12 @@ export class Diorama {
         }
         const label = SPELL_LABEL[e.spell];
         if (label && by) this.floatText(by.root.position.clone().add(new THREE.Vector3(0, by.height + 0.3, 0)), label, 'info', 1.2);
+        // 20.2: Dread: a dark ripple rolls out from the caster to the target, no bolt.
+        if (e.spell === 'dread') {
+          await this.darkRipple(by ? by.root.position.clone() : at ? this.worldOf(at) : null, at ? this.worldOf(at) : null);
+          if (by) by.flash(new THREE.Color(0, 0, 0), 0);
+          return;
+        }
         // A bolt to the target for ranged spells and shots.
         if (by && at && !samePos(by.at, at) && e.spell !== 'blink') {
           const from = by.root.position.clone().add(new THREE.Vector3(0, by.height * 0.7, 0));
@@ -2295,7 +2905,8 @@ export class Diorama {
       }
       case 'dug': {
         const lv = this.levels.get(e.at.level);
-        if (lv && this.state?.delve) lv.setBlown(new Set([...this.state.delve.blown, posKey(e.at)]));
+        this.dugWalls.add(posKey(e.at));
+        if (lv && this.state?.delve) lv.setBlown(new Set([...this.blownForView(this.state.delve.blown), posKey(e.at)]));
         if (e.at.level === this.shownLevel) {
           const w = this.worldOf(e.at, 0.2);
           this.dustPuff(w);
@@ -2446,6 +3057,36 @@ export class Diorama {
     this.overlay.remove(ring);
   }
 
+  /** 20.2: Dread's cast: a near-black ring swells from the caster, and a second one closes on the target. */
+  private async darkRipple(from: THREE.Vector3 | null, to: THREE.Vector3 | null): Promise<void> {
+    if (!from) return;
+    const mk = (at: THREE.Vector3) => {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 1.0, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x050108, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+      ring.position.copy(at).add(new THREE.Vector3(0, 0.06, 0));
+      ring.renderOrder = 6;
+      this.overlay.add(ring);
+      return ring;
+    };
+    const a = mk(from);
+    const b = to ? mk(to) : null;
+    const R = Math.sqrt(3) * HEX * 3;
+    await this.clock.tween(0.55, (t) => {
+      const k = easeOutCubic(t);
+      a.scale.setScalar(Math.max(0.01, R * k));
+      (a.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - t);
+      if (b) {
+        b.scale.setScalar(Math.max(0.01, 2.2 * (1 - k) + 0.3));
+        (b.material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.min(1, t * 2);
+      }
+    });
+    this.overlay.remove(a);
+    if (b) {
+      this.flash(b.position, 0x6a30a0, 3);
+      await this.clock.tween(0.2, (t) => ((b.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t)));
+      this.overlay.remove(b);
+    }
+  }
+
   // ------------------------------------------------------------ picking
 
   private bindPointer(canvas: HTMLCanvasElement): void {
@@ -2540,6 +3181,10 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   toll: '¤',
   firebolt: '☄',
   charge: '✹',
+  fuse: '✹',
+  rob: '✋',
+  potion: '⚱',
+  item: '⚒',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -2561,6 +3206,10 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   toll: 'demands a toll from',
   firebolt: 'hurls a firebolt at',
   charge: 'lights a charge near',
+  fuse: 'sets a charge on a fuse at',
+  rob: 'robs',
+  potion: 'backs off and drinks a potion',
+  item: 'uses an item on',
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
@@ -2579,6 +3228,7 @@ const SPELL_COLOR: Partial<Record<string, number>> = {
   gust: 0xd0f0ff,
   overwatch: 0xffd060,
   knockback: 0xffd060,
+  dread: 0x2a1040,
 };
 const SPELL_LABEL: Partial<Record<string, string>> = {
   fireball: 'Fireball!',
@@ -2589,6 +3239,7 @@ const SPELL_LABEL: Partial<Record<string, string>> = {
   overwatch: 'Overwatch!',
   knockback: 'Knockback',
   mend: 'Mend',
+  dread: 'Dread',
 };
 
 function hashStr(s: string): number {
@@ -2626,15 +3277,16 @@ function pipsHtml(hp: number, max: number, cls: string): string {
   return s + '</span>';
 }
 
-function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true): string {
-  const status = h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : '';
+function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, draggedBy?: string): string {
+  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : '';
   return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${pipsHtml(h.hp, max, 'hero')}${status}`;
 }
 
 function monsterTag(m: Monster): string {
   const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
   const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
-  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}`;
+  const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
+  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}`;
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

@@ -149,8 +149,12 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   afterLanding?.(c, f.kind === 'hero' ? f.h : null);
 }
 
-/** Hook set by delve.ts: lair checks after a hero lands somewhere new. */
-export let afterLanding: ((c: Ctx, h: HeroInDelve | null) => void) | undefined;
+/**
+ * Hook set by delve.ts: lair checks after a hero lands somewhere new. A `var`, not a `let`,
+ * so the registration works even when an import cycle evaluates delve.ts before this module.
+ */
+// eslint-disable-next-line no-var
+export var afterLanding: ((c: Ctx, h: HeroInDelve | null) => void) | undefined;
 export function setAfterLanding(fn: (c: Ctx, h: HeroInDelve | null) => void): void {
   afterLanding = fn;
 }

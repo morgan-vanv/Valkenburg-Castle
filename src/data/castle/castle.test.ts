@@ -3,6 +3,8 @@ import { distance, hexKey, posKey, posNeighbors, samePos, type Pos } from '../..
 import type { LevelDef, TileDef } from '../../game/types';
 import { castle } from './index';
 import { STORIES } from '../../game/data';
+import { World } from '../../game/world';
+import { breakableWall } from '../../game/charges';
 
 function level(n: number): LevelDef {
   const lv = castle.levels.find((l) => l.level === n);
@@ -574,5 +576,87 @@ describe('castle V3.3: light by depth', () => {
   it('gets darker with depth', () => {
     expect(lights(1).length).toBeGreaterThan(lights(2).length);
     expect(lights(2).length).toBeLessThanOrEqual(lights(3).length + 2);
+  });
+});
+
+// ---------------------------------------------------------------- V3.7 (spec 20.3): breakable walls
+
+describe('castle V3.7: breakable walls (20.3)', () => {
+  const w = new World(castle);
+  const walls = allTiles().filter(([, t]) => t.kind === 'wall');
+  const breakable = walls.filter(([p]) => breakableWall(w, null, p)).map(([p]) => p);
+  const roomsBeside = (p: Pos) => new Set(posNeighbors(p).map((n) => tile(n)?.room).filter((r): r is string => !!r));
+
+  it('marks unbreakable only on walls: the outer curtain, the tower stair shaft, the guard post landing and the lift shaft', () => {
+    for (const [p, t] of allTiles()) if (t.unbreakable) expect(t.kind, show(p)).toBe('wall');
+    for (const [p, t] of walls) {
+      const rooms = roomsBeside(p);
+      // Outer: nothing behind it and one room before it (a wall between two rooms that touches void is interior).
+      const outer = posNeighbors(p).some((n) => !tile(n)) && rooms.size <= 1;
+      const shaft = rooms.has('tower') || (p.level === 2 && (rooms.has('guard') || rooms.has('winch')));
+      if (outer || shaft) expect(t.unbreakable, show(p)).toBe(true);
+    }
+    expect(breakable.some((p) => roomsBeside(p).has('tower'))).toBe(false);
+    expect(breakable.some((p) => p.level === 2 && (roomsBeside(p).has('guard') || roomsBeside(p).has('winch')))).toBe(false);
+  });
+
+  it('leaves plenty of walls between rooms to blow on Levels 1 and 2, none on Level 3', () => {
+    expect(breakable.filter((p) => p.level === 1).length).toBeGreaterThanOrEqual(20);
+    expect(breakable.filter((p) => p.level === 2).length).toBeGreaterThanOrEqual(20);
+    expect(breakable.filter((p) => p.level === 3).length).toBe(0);
+    // Each one stands between two floor hexes that aren't next to each other.
+    for (const p of breakable) {
+      const fl = posNeighbors(p).filter(passable);
+      expect(fl.some((a) => fl.some((b) => distance(a, b) > 1)), show(p)).toBe(true);
+    }
+    // A sapper can breach the armory beside its locked door (L1) and the cells (L2).
+    expect(breakable.some((p) => p.level === 1 && roomsBeside(p).has('armory'))).toBe(true);
+    expect(breakable.some((p) => p.level === 2 && roomsBeside(p).has('cells'))).toBe(true);
+  });
+
+  /** Shortest walking cost from `from` (doors open, stairs and the lift as links, rubble 2); `broken` walls count as rubble. */
+  function walkCost(from: Pos, broken: Set<string>): Map<string, number> {
+    const best = new Map<string, number>([[posKey(from), 0]]);
+    const open: [number, Pos][] = [[0, from]];
+    while (open.length) {
+      open.sort((a, b) => a[0] - b[0]);
+      const [d, p] = open.shift()!;
+      if (best.get(posKey(p))! < d) continue;
+      const nexts: [Pos, number][] = [];
+      for (const n of posNeighbors(p)) {
+        const t = tile(n);
+        if (!t) continue;
+        if (passable(n)) nexts.push([n, t.kind === 'rubble' ? 2 : 1]);
+        else if (broken.has(posKey(n))) nexts.push([n, 2]);
+      }
+      for (const l of castle.links) {
+        if (samePos(l.a, p)) nexts.push([l.b, 1]);
+        if (samePos(l.b, p)) nexts.push([l.a, 1]);
+      }
+      for (const [n, c] of nexts) {
+        const k = posKey(n);
+        if ((best.get(k) ?? Infinity) > d + c) {
+          best.set(k, d + c);
+          open.push([d + c, n]);
+        }
+      }
+    }
+    return best;
+  }
+
+  it('with every breakable wall broken, the shortest path from each entrance to each site is at least 60% of the normal one', () => {
+    const cracked = allTiles().filter(([, t]) => t.kind === 'cracked').map(([p]) => p);
+    const broken = new Set([...breakable, ...cracked].map(posKey));
+    for (const en of castle.entrances) {
+      const normal = walkCost(en, new Set());
+      const blown = walkCost(en, broken);
+      for (const site of castle.contractSites) {
+        const a = normal.get(posKey(site.at));
+        const b = blown.get(posKey(site.at));
+        expect(a, `${show(en)} -> ${site.id}`).toBeDefined();
+        expect(b, `${show(en)} -> ${site.id}`).toBeDefined();
+        expect(b! / a!, `${show(en)} -> ${site.id}: ${b} of ${a}`).toBeGreaterThanOrEqual(0.6);
+      }
+    }
   });
 });

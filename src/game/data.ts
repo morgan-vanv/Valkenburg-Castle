@@ -130,7 +130,12 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
   },
   sapper: {
     role: 'Breacher: blows walls, digs through.',
-    abilities: ['Starts each delve with 2 free charges.', 'Throw a charge up to 3 hexes.', 'Dig: clear adjacent rubble or a cracked wall. Noise 4.'],
+    abilities: [
+      'Satchel: 3 charges each delve; bought charges add to them.',
+      'Set a charge (fuse 1 or 2) on an adjacent hex, door, chest or wall; throw one up to 3 hexes (fuse 1).',
+      'Blast: 4 dmg within 1 and thrown back, 2 within 2; opens locks and breaks walls on Levels 1 and 2. Noise 8. The Sapper takes 0, friends half.',
+      'Dig: clear adjacent rubble or a cracked wall. Noise 4.',
+    ],
   },
   pyromancer: {
     role: 'Fire: burns crowds, lights the way.',
@@ -146,6 +151,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Veil (1 mana): an ally within 3 is unseen by monsters for 2 rounds, until they attack or make noise 4+.',
       'Sleep (1 mana): 2 Wits slots at range 5; a hit puts a monster to sleep.',
       'Blink (1 mana): teleport up to 4 to a free hex in sight, over pits. Silent.',
+      'Dread (1 mana): 2 Wits slots at range 5; a hit sends a monster or crew member fleeing from you for 2 rounds, taking free swings as it goes.',
     ],
   },
   hedgewitch: {
@@ -226,6 +232,30 @@ export const GLOAM_RISE_MAX = 6;
 export const GLOAM_CALM_FADE = 2;
 export const BRAZIER_LIGHT = 4;
 export const KINDLE_LIGHT = 6;
+// ---------------------------------------------------------------- V3.7 stealth and swings (spec 20.1, 20.2)
+
+/** Walking noise per hex passed (2 on rubble); sneaking is silent. */
+export const STEP_NOISE = 1;
+export const RUBBLE_STEP_NOISE = 2;
+/** A hero passing within this many hexes of a sleeper rolls to wake it. */
+export const WAKE_RANGE = 2;
+export const WAKE_WALK = 50;
+export const WAKE_SNEAK = 10;
+/** Ending the move adjacent to a sleeper: walking wakes it for sure, sneaking this often. */
+export const WAKE_END_SNEAK = 25;
+/** Noticing ranges by light and move mode; in the Hollow light doesn't matter. The blind arc halves the walking range. */
+export const NOTICE = { litWalk: 6, litSneak: 4, unlitWalk: 3, unlitSneak: 1, hollowWalk: 6, hollowSneak: 3 } as const;
+/** Sneak attack: +1 slot on a monster that hasn't noticed the attacker. */
+export const SNEAK_ATTACK_SLOTS = 1;
+/** Free swings: the usual attack with one slot fewer (min 1); a bow swings with 1 slot. */
+export const SWING_SLOT_PENALTY = 1;
+export const SWING_BOW_SLOTS = 1;
+/** Dread (Shadowmancer): 1 mana, 2 Wits slots at range 5; 1+ hits = feared for 2 world phases. */
+export const DREAD_MANA = 1;
+export const DREAD_SLOTS = 2;
+export const DREAD_RANGE = 5;
+export const DREAD_ROUNDS = 2;
+
 /** The Lantern Sisters' kit (16.5). */
 export const SISTER_CLASSES: ('ranger' | 'shadowmancer' | 'burglar')[] = ['ranger', 'shadowmancer', 'burglar'];
 export const SISTER_DARTS = 2;
@@ -265,7 +295,7 @@ export const SHOP: ShopOffer[] = [
   { kind: 'torch', name: 'Torch', price: 10, text: '12 rounds of light around the bearer.' },
   { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
   { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
-  { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Opens locks and cracked walls. Very loud.' },
+  { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Set it with a fuse: opens locks, breaks walls on Levels 1 and 2. Very loud.' },
   { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
   { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
   { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
@@ -292,7 +322,11 @@ export const START_GOLD = 120;
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
 export const TAVERN_SIZE = 4;
-export const SAPPER_CHARGES = 2;
+/** V3.7 (spec 20.3): the satchel. */
+export const SAPPER_CHARGES = 3;
+export const BLAST_INNER_DMG = 4;
+export const BLAST_OUTER_DMG = 2;
+export const BLAST_NOISE = 8;
 export const BOW_RANGE = 6;
 export const OVERWATCH_RANGE = 6;
 export const KNOCKBACK_RANGE = 5;

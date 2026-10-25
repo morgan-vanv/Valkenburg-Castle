@@ -9,7 +9,7 @@ import type { Intent, Item, RivalClass } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_PURSE, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
   HIRE_KEEP, KNOCKBACK_RANGE, PROSPECTOR_CHANCE, PYRO_BOLT_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS,
-  PYRO_BOLTS, RIVAL_CLASSES, SAPPER_CHARGE_DMG, SAPPER_CHARGE_NOISE, SAPPER_CHARGE_RANGE, SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE,
+  PYRO_BOLTS, RIVAL_CLASSES, BLAST_INNER_DMG, BLAST_OUTER_DMG, SAPPER_CHARGE_RANGE, SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE,
   SISTER_DARTS, SISTER_SMOKE, SISTERS_LEAVE_LIGHT, THROW_RANGE, VEIL_ROUNDS, WINCH_NOISE, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
@@ -21,7 +21,10 @@ import {
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
 import { approach, attackSpots, blocked, exitsBy, hitRange, overwatchCheck, strike, targets, walk, type Target } from './ai';
 import { push, pushOutcome } from './falls';
+import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
+import { faceToward, fleePlan, isSneaking, wouldNotice } from './stealth';
+import { litSet } from './world';
 
 // ---------------------------------------------------------------- making a crew
 
@@ -193,7 +196,17 @@ function nearestHero(c: Ctx, r: RivalX): Target | undefined {
 export function crewNotice(c: Ctx): void {
   const cr = c.d.rivals;
   if (!cr || cr.temperament !== 'cutthroat' || cr.stance !== 'waiting') return;
-  const seen = rivalsOnMap(c).some((r) => heroesInSight(c, r, CUTTHROAT_SIGHT).length > 0);
+  // V3.7 (spec 20.1): a waiting crew notices like an awake monster: by light, sneaking and facing, never beyond 6.
+  const lit = litSet(c.w, c.d);
+  const ts = targets(c).filter((t) => t.hero);
+  let seen = false;
+  for (const r of rivalsOnMap(c)) {
+    const t = ts.find((x) => within(x.at, r.at, CUTTHROAT_SIGHT) && wouldNotice(c, r, x.at, isSneaking(x.hero!), lit));
+    if (!t) continue;
+    seen = true;
+    faceToward(r, t.at);
+    c.ev.push({ type: 'noticed', by: r.id, hero: t.id });
+  }
   if (seen) crewDemand(c);
 }
 
@@ -317,12 +330,13 @@ function kitIntent(c: Ctx, r: RivalX): Intent | null {
       return { kind: 'shove', targetId: t.id, to: o.dest, damage: [0, o.fall.damage] };
     }
     case 'sapper': {
+      // V3.7 (spec 20.3): a fused charge (fuse 1) thrown onto the party's path, with the heroes' blast rules.
       if ((r.charges ?? 0) <= 0) return null;
       if (targets(c).some((t) => t.hero && within(t.at, r.at, 1))) return null; // in their face: the hammer
-      const t = heroesInSight(c, r, SAPPER_CHARGE_RANGE).find((x) => distance(x.at, r.at) >= 2 && noCrewWithin(c, x.at, 1));
+      const t = heroesInSight(c, r, SAPPER_CHARGE_RANGE).find((x) => distance(x.at, r.at) >= 2 && noCrewWithin(c, x.at, 1) && !fuseAt(c.d, x.at));
       if (!t) return null;
-      const hexes = range(t.at, 1).map((h) => ({ level: t.at.level, ...h })).filter((p) => !!c.w.tile(p));
-      return { kind: 'charge', targetId: t.id, to: { ...t.at }, hexes, damage: [SAPPER_CHARGE_DMG, SAPPER_CHARGE_DMG] };
+      const hexes = blastArea(c.w, t.at);
+      return { kind: 'fuse', targetId: t.id, to: { ...t.at }, hexes, damage: [BLAST_OUTER_DMG, BLAST_INNER_DMG] };
     }
     case 'pyromancer': {
       if ((r.charges ?? 0) <= 0) return null;
@@ -409,22 +423,13 @@ function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       }
       return true;
     }
-    case 'charge': {
-      // The sapper's charge goes off on the hex it showed, whoever stands there now.
-      if ((r.charges ?? 0) <= 0 || !it.to) return false;
+    case 'fuse': {
+      // V3.7 (spec 20.3): the charge lands where the intent showed and burns a fuse of 1: it goes off at the end of the next world phase.
+      if ((r.charges ?? 0) <= 0 || !it.to || fuseAt(c.d, it.to)) return false;
       r.charges = (r.charges ?? 1) - 1;
-      const at = it.to;
-      c.ev.push({ type: 'thrown', by: r.id, kind: 'charge', from: { ...r.at }, to: { ...at } });
-      c.ev.push({ type: 'blast', at: { ...at } });
-      say(c, `${r.name}'s charge goes off. BOOM.`);
-      const hit: string[] = [];
-      for (const m of onMap(c)) if (m.kind !== 'gloam' && within(m.at, at, 1)) hit.push(m.id);
-      for (const x of rivalsOnMap(c)) if (within(x.at, at, 1)) hit.push(x.id);
-      for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && within(h.at, at, 1)) hit.push(h.heroId);
-      const pr = c.d.prisoner;
-      if (pr && !pr.dead && !pr.out && within(pr.at, at, 1)) hit.push(pr.id);
-      for (const id of hit) hurtAny(c, id, SAPPER_CHARGE_DMG, r.id, { noise: false });
-      makeNoise(c, at, SAPPER_CHARGE_NOISE, { otherLevels: true });
+      c.ev.push({ type: 'thrown', by: r.id, kind: 'charge', from: { ...r.at }, to: { ...it.to } });
+      setFuse(c, it.to, 1, r.id);
+      say(c, `${r.name} lobs a charge. The fuse is lit.`);
       return true;
     }
     case 'firebolt': {
@@ -440,7 +445,7 @@ function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
   return false;
 }
 
-const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'charge', 'firebolt'];
+const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt'];
 
 /**
  * A hero moved or acted (spec 16.5): a hostile Ranger on overwatch who sees them
@@ -538,6 +543,7 @@ function jobber(c: Ctx): RivalX | undefined {
 export function planRival(c: Ctx, r: RivalX): Intent {
   const cr = c.d.rivals!;
   const st = rivalStats(r);
+  if ((r.feared ?? 0) > 0) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
   const kit = kitIntent(c, r);
   if (kit) return kit;
   if (cr.stance === 'hostile') {
@@ -625,8 +631,16 @@ function hostileAct(c: Ctx, r: RivalX): void {
     walk(c, r.id, r, path);
   }
   if (inRange() && t.hero?.status === 'active') {
+    faceToward(r, t.at);
     strike(c, r.id, t.id, st.slots, st.chance, st.dmg, r.cls === 'ranger' ? 'Shot' : 'Attack');
   }
+}
+
+/** V3.7 (spec 20.2): a feared member runs from the caster with its whole move and does nothing else. */
+function fleeAct(c: Ctx, r: RivalX): void {
+  const f = fleePlan(c, r, rivalStats(r).move);
+  r.intent = { kind: 'flee', to: f.to };
+  walk(c, r.id, r, f.path);
 }
 
 /** A hired member strikes a monster: its own numbers against the monster's armor. */
@@ -799,6 +813,10 @@ export function rivalsAct(c: Ctx): void {
   let jobDone = false;
   for (const r of rivalsOnMap(c)) {
     r.overwatch = false; // an unfired overwatch lapses
+    if ((r.feared ?? 0) > 0) {
+      fleeAct(c, r);
+      continue;
+    }
     // The kit first, as shown.
     const kit = r.intent && KIT.includes(r.intent.kind) ? r.intent : null;
     if (kit) {

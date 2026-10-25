@@ -165,6 +165,26 @@ export class LevelBuilder {
   /** Fixed lights placed while building (offset coords resolved to Pos). */
   readonly lights: LightDef[] = [];
 
+  /** V3.7 (spec 20.3): rooms whose every wall is `unbreakable` (stair shafts, the lift). */
+  private readonly unbreakableRooms = new Set<string>();
+  /** Hand-picked unbreakable wall cells (offset). */
+  private readonly unbreakableCells: Off[] = [];
+
+  /** No charge breaks the walls around these rooms (set in finish, once the walls exist). */
+  unbreakableAround(...rooms: string[]): this {
+    for (const r of rooms) {
+      if (!this.rooms[r]) throw new Error(`L${this.level}: unbreakableAround: unknown room ${r}`);
+      this.unbreakableRooms.add(r);
+    }
+    return this;
+  }
+
+  /** No charge breaks these wall cells. */
+  unbreakable(cells: Off[]): this {
+    this.unbreakableCells.push(...cells);
+    return this;
+  }
+
   /** A sconce on the wall next to floor hex (c, r). */
   sconce(c: number, r: number): this {
     const t = this.get(c, r);
@@ -189,6 +209,29 @@ export class LevelBuilder {
       for (const [nc, nr] of offNeighbors(c, r)) if (!this.tiles.has(ok(nc, nr))) walls.push([nc, nr]);
     }
     for (const [c, r] of walls) this.tiles.set(ok(c, r), { kind: 'wall' });
+    // V3.7 (spec 20.3): the outer curtain (a wall with nothing behind it that faces a single
+    // room) and the walls of the shaft rooms can't be blown; walls between two rooms can.
+    for (const [k, t] of this.tiles) {
+      if (t.kind !== 'wall') continue;
+      const [c, r] = k.split(',').map(Number) as Off;
+      let shaft = false;
+      let voidSide = false;
+      const rooms = new Set<string>();
+      for (const [nc, nr] of offNeighbors(c, r)) {
+        const n = this.tiles.get(ok(nc, nr));
+        if (!n) voidSide = true;
+        else if (n.room && n.kind !== 'pit') {
+          rooms.add(n.room);
+          if (this.unbreakableRooms.has(n.room)) shaft = true;
+        }
+      }
+      if (shaft || (voidSide && rooms.size <= 1)) t.unbreakable = true;
+    }
+    for (const [c, r] of this.unbreakableCells) {
+      const t = this.tiles.get(ok(c, r));
+      if (!t || t.kind !== 'wall') throw new Error(`L${this.level}: unbreakable at ${c},${r} is not a wall (${t?.kind})`);
+      t.unbreakable = true;
+    }
 
     const tiles: Record<string, TileDef> = {};
     for (const [k, t] of this.tiles) {

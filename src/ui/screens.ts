@@ -1,11 +1,11 @@
 // Full-screen pages: title, camp (stations), prepare delve, summary, game over.
 
 import type { Engine } from '../game/api';
-import type { AleKind, Command, Contract, GameState, Hero, Item, StoryId, Village } from '../game/types';
+import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, StoryId, Village } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
 import { HEAL_PER_HP } from '../game/data';
-import { ALE, ITEM_EFFECT, STORY, aleNeeds, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel, storyFix } from './names';
+import { ALE, CREW, ITEM_EFFECT, STORY, aleNeeds, itemBase, CLASS_GEAR, CLASS_KIT, CLASS_ROLE, classGlyph, className, itemGlyph, itemLabel, storyFix } from './names';
 
 export interface ScreenHost {
   engine: Engine;
@@ -180,7 +180,7 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       prepareStation(body, s, host);
       break;
   }
-  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)), villagePanel(v, c.board));
+  const rosterStrip = h('aside', { class: 'camp-roster' }, h('div', { class: 'kicker' }, 'Roster'), ...c.roster.map((hr) => heroChip(hr)), captivesPanel(c, host), villagePanel(v, c.board));
   el.append(h('div', { class: 'camp' }, head, h('div', { class: 'camp-grid' }, nav, body, rosterStrip)));
 }
 
@@ -234,6 +234,52 @@ function villagePanel(v: Village, board: Contract[] = []): HTMLElement {
         h('span', { class: 'vp-state small' }, v[id] ? 'home' : STORY[id].where.replace(/^Level (\d), (the )?/, 'L$1 ')),
       ),
     ),
+  );
+}
+
+/** V3.7 (20.4): the "Bring back" contract for a captive, if it is on the post (by site, else by title). */
+export function captiveContract(c: Campaign, cp: Captive): Contract | undefined {
+  return c.board.find((k) => k.kind === 'rescue' && (k.siteId === cp.siteId || k.title === `Bring back ${cp.hero.name}`));
+}
+
+/** The captive a contract brings back, if any. */
+export function contractCaptive(c: Campaign, k: Contract): Captive | undefined {
+  return (c.captives ?? []).find((cp) => captiveContract(c, cp)?.id === k.id);
+}
+
+/** V3.7 (20.4): heroes a crew carried off, under the roster, each with its "Bring back" job. */
+function captivesPanel(c: Campaign, host: ScreenHost): HTMLElement | '' {
+  const list = c.captives ?? [];
+  if (!list.length) return '';
+  return h(
+    'div',
+    { class: 'captives-panel' },
+    h('div', { class: 'kicker', title: 'Captives · Heroes a rival crew dragged out of the castle. Each is held at that crew\'s hideout at 1 HP, with level and gear but no gold. Take the "Bring back" job to free them; freed and brought out, they rejoin the roster.' }, 'Captives'),
+    ...list.map((cp) => {
+      const k = captiveContract(c, cp);
+      const crew = CREW[cp.crew as keyof typeof CREW];
+      return h(
+        'div',
+        { class: `cap-row crew-${cp.crew}`, 'data-captive': cp.hero.id, title: `${cp.hero.name} · L${cp.hero.level} ${className(cp.hero.cls)}, taken by ${crew?.name ?? 'a crew'} on delve ${cp.delve}.\nHeld at their hideout${crew ? ` (${crew.where})` : ''} at 1 HP. Gold and gems lost; level and gear kept.${k ? `\n"${k.title}" is on the notice post: ${k.bounty} gold.` : ''}` },
+        classBadge(cp.hero.cls),
+        h('div', { class: 'cap-body' }, h('b', null, cp.hero.name), h('div', { class: 'dim small' }, `L${cp.hero.level} ${className(cp.hero.cls)} · held by ${crew?.name ?? 'a crew'}`)),
+        k
+          ? h(
+              'button',
+              {
+                class: 'btn btn-small cap-go',
+                title: `${k.title} · ${k.bounty} gold · Level ${k.level}`,
+                onclick: () => {
+                  const l = host.lastLoadout ?? { heroIds: [], packs: {}, entrance: 0 };
+                  host.saveLoadout({ ...l, contractId: k.id });
+                  host.setStation('prepare');
+                },
+              },
+              'Bring back',
+            )
+          : h('span', { class: 'dim small' }, 'lost'),
+      );
+    }),
   );
 }
 
@@ -331,6 +377,14 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, `Go to the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'}`),
       ),
     );
+  // V3.7 (20.4): "Bring back <name>" jobs for captives come first, with their own seal.
+  const rescues = s.campaign.board.filter((k) => contractCaptive(s.campaign, k));
+  if (rescues.length) {
+    el.append(h('h3', { class: 'board-h captive-h', title: 'Captives · A crew dragged one of yours out. The hideout is theirs; the prisoner is your own hero, at 1 HP. Freed and brought out, they rejoin with their level and gear.' }, h('span', { class: 'seal-mini seal-cap' }, '⛓'), ' Taken by a crew'));
+    const rg = h('div', { class: 'contracts captive-contracts' });
+    for (const k of rescues) rg.append(contractCard(k, host, hire, contractCaptive(s.campaign, k)));
+    el.append(rg);
+  }
   const story = s.campaign.board.filter((k) => k.story);
   if (story.length) {
     el.append(h('h3', { class: 'board-h story-h', title: 'For Lowgate · Pinned by the village. Half the usual bounty, but each one wins back part of Lowgate for good.' }, h('span', { class: 'seal-mini' }, '✦'), ' Pinned by the village'));
@@ -340,7 +394,7 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     el.append(h('h3', { class: 'board-h' }, 'Bounties'));
   }
   const grid = h('div', { class: 'contracts' });
-  for (const k of s.campaign.board.filter((x) => !x.story)) grid.append(contractCard(k, host, hire));
+  for (const k of s.campaign.board.filter((x) => !x.story && !contractCaptive(s.campaign, x))) grid.append(contractCard(k, host, hire));
   el.append(grid);
   if (host.lastLoadout && s.campaign.board.length) {
     el.append(
@@ -364,15 +418,18 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
 
-function contractCard(k: Contract, host: ScreenHost, locked = false): HTMLElement {
+function contractCard(k: Contract, host: ScreenHost, locked = false, captive?: Captive): HTMLElement {
   const st = k.story ? STORY[k.story] : null;
+  const crew = captive ? CREW[captive.crew as keyof typeof CREW] : null;
   return h(
     'article',
-    { class: `contract kind-${k.kind} ${st ? 'story' : ''}`, 'data-story': k.story ?? '' },
+    { class: `contract kind-${k.kind} ${st ? 'story' : ''} ${captive ? `captive crew-${captive.crew}` : ''}`, 'data-story': k.story ?? '', 'data-captive': captive?.hero.id ?? '' },
     st ? h('span', { class: 'ct-seal', title: 'For Lowgate · A story contract. Done, it wins back part of the village for good.' }, '✦') : '',
-    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${st ? 'For Lowgate · ' : ''}${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
+    captive ? h('span', { class: 'ct-seal ct-seal-cap', title: `Taken by ${crew?.name ?? 'a crew'} · ${captive.hero.name} is held at their hideout. Free them and bring them out.` }, '⛓') : '',
+    h('div', { class: 'ct-top' }, h('span', { class: 'kicker' }, `${st ? 'For Lowgate · ' : captive ? `Taken by ${crew?.name ?? 'a crew'} · ` : ''}${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'ct-bounty num' }, `${k.bounty}`, h('small', null, ' gold'))),
     k.kind === 'slay' ? h('h3', null, h('span', { class: 'ct-dragon', 'aria-hidden': 'true' }, '🐉 '), k.title) : h('h3', null, k.title),
     h('p', null, k.brief),
+    captive ? h('div', { class: 'ct-unlock ct-captive', title: `${captive.hero.name} · L${captive.hero.level} ${className(captive.hero.cls)}. Held at 1 HP with level and gear; gold and gems are gone. Freed and extracted, they rejoin the roster with the HP they come out with.` }, classBadge(captive.hero.cls), h('span', null, h('span', { class: 'kicker' }, 'The prisoner is yours'), h('b', null, ` ${captive.hero.name}, L${captive.hero.level} ${className(captive.hero.cls)} · HP 1`))) : '',
     st ? h('div', { class: 'ct-unlock', title: `Wins back · ${st.unlocks}.\n${k.kind === 'rescue' ? `${cap(st.who)} goes home to Lowgate, not into your roster.` : `${cap(st.who)} goes home to Lowgate, not to the cart. It can't be sold.`}` }, h('span', { class: 'kicker' }, 'Wins back'), h('b', null, st.unlocks)) : '',
     st && k.story === 'copper' ? h('p', { class: 'ct-heavy small' }, 'Heavy: whoever carries it moves 3 at most.') : '',
     k.warnings.length ? h('ul', { class: 'ct-warn' }, ...k.warnings.map((w) => h('li', null, w))) : h('p', { class: 'dim small' }, 'No warnings posted.'),
@@ -960,6 +1017,10 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
     return hd ? `${hd.hp}/${max} HP` : 'out';
   };
   const heirDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
+  // V3.7 (20.4): heroes a crew carried off.
+  const taken = (s.delve?.heroes ?? []).filter((x) => x.status === 'captured').map((x) => x.heroId);
+  const heirTaken = taken.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
+  const crewName = s.delve?.rivals?.name ?? 'a crew';
   el.append(
     h(
       'div',
@@ -977,12 +1038,12 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
           h(
             'ul',
             { class: 'hero-list' },
-            ...[...sm.survivors, ...sm.dead.filter((x) => !sm.survivors.includes(x))].map((id) =>
+            ...[...sm.survivors, ...sm.dead.filter((x) => !sm.survivors.includes(x)), ...taken.filter((x) => !sm.survivors.includes(x) && !sm.dead.includes(x))].map((id) =>
               h(
                 'li',
-                { class: sm.dead.includes(id) ? 'dead' : '' },
+                { class: sm.dead.includes(id) ? 'dead' : taken.includes(id) ? 'taken' : '' },
                 h('b', null, name(id)),
-                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : ` out · ${outHp(id)}`),
+                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : taken.includes(id) ? ` taken by ${crewName}` : ` out · ${outHp(id)}`),
                 sm.xp[id] ? h('span', { class: 'small pos' }, ` +${sm.xp[id]} XP`) : '',
                 sm.levelUps.includes(id) ? h('span', { class: 'chip good' }, 'Level up!') : '',
               ),
@@ -992,8 +1053,10 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
         h('div', null, h('h2', null, 'Notes'), sm.notes.length ? h('ul', { class: 'loot-list' }, ...sm.notes.map((n) => h('li', null, n))) : h('p', { class: 'dim' }, 'Nothing worth a song.')),
       ),
       s.delve?.contract.story && sm.contractDone ? h('p', { class: 'prep-story' }, h('span', { class: 'seal-mini' }, '✦'), ` ${cap(STORY[s.delve.contract.story].who)} ${s.delve.contract.kind === 'rescue' ? 'is' : 'goes'} on the way home to Lowgate. Wins back: ${STORY[s.delve.contract.story].unlocks.toLowerCase()}.`) : '',
+      taken.length && !heirTaken ? h('p', { class: 'warn-heir taken-line' }, h('span', { class: 'seal-mini seal-cap' }, '⛓'), ` ${taken.map(name).join(' and ')} ${taken.length === 1 ? 'was' : 'were'} dragged out by ${crewName}. Gold and gems are theirs now; the hero is held at their hideout at 1 HP. A "Bring back" job goes up on the notice post.`) : '',
+      heirTaken ? h('p', { class: 'warn-heir' }, 'The heir is taken. Valkenburg stays dark.') : '',
       heirDead ? h('p', { class: 'warn-heir' }, 'Keven did not come back.') : '',
-      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, heirDead ? 'Continue' : 'Back to camp')),
+      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, heirDead || heirTaken ? 'Continue' : 'Back to camp')),
     ),
   );
   if (sm.levelUps.length) sfx.play('levelup');
@@ -1008,7 +1071,7 @@ export function overScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       { class: 'screen-panel end-panel lost' },
       h('div', { class: 'kicker' }, `After ${c.delveCount} delve${c.delveCount === 1 ? '' : 's'}`),
       h('h1', { class: 'game-title' }, 'The line ends'),
-      h('p', { class: 'lede over-line' }, 'The heir has fallen. Valkenburg stays dark.'),
+      h('p', { class: 'lede over-line' }, s.overReason && /taken/i.test(s.overReason) ? 'The heir is taken. Valkenburg stays dark.' : 'The heir has fallen. Valkenburg stays dark.'),
       s.overReason && !/stays dark/.test(s.overReason) ? h('p', { class: 'dim' }, s.overReason) : '',
       h('div', { class: 'ledger' }, stat('Gold', gold(c.gold), 'stat-gold'), stat('Reputation', `${c.reputation}`), stat('Fallen', `${c.fallen.length}`), stat('Delves', `${c.delveCount}`)),
       c.fallen.length ? h('ul', { class: 'memorial' }, ...c.fallen.map((f) => h('li', null, classBadge(f.cls), h('b', null, f.name), h('span', { class: 'dim small' }, ` ${f.where}`)))) : '',

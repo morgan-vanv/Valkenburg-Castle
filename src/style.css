@@ -3311,3 +3311,172 @@ input.seed {
 
 /* 19.3: the night-eye badge */
 .chip.night { border-color: #6a7fa0; color: #cfe0ff; }
+
+/* ================================================================ V3.7 stealth, swings, the Sapper, crews (spec 20) */
+
+:root {
+  --wake: #4f8a5e;
+  --fear: #9a6aff;
+  --fuse: #ff8a40;
+}
+
+/* 20.1: move-preview risk tags over the monsters */
+.risk {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px 1px 4px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(30, 4, 6, 0.92);
+  border: 1px solid var(--red);
+  white-space: nowrap;
+  animation: risk-pop 0.18s ease-out;
+}
+@keyframes risk-pop { from { transform: translate(-50%, -100%) scale(1.3); } }
+.risk-icon { font-size: 0.9rem; }
+.risk.risk-wake { border-color: #ffd040; background: rgba(40, 30, 4, 0.92); color: #ffe9a0; }
+.risk.risk-wake .risk-num { color: #ffd040; }
+.risk.risk-notice .risk-icon { color: var(--red); font-size: 1rem; }
+.risk.risk-swing .risk-num { color: #ffb4ac; }
+.risk-line { display: inline-block; font-family: var(--mono); font-size: 0.8rem; }
+.risk-line.risk-wake { color: #ffd040; }
+.risk-line.risk-notice, .risk-line.risk-swing { color: var(--red); }
+
+/* 20.1: the hex behind an enemy while sneaking */
+.blind-tag {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #cfe0ff;
+  background: rgba(10, 16, 40, 0.8);
+  border: 1px solid #6a7fa0;
+  padding: 1px 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 20.2: fear */
+.tag-fear { color: var(--fear); }
+.fear-word { color: var(--fear); }
+.intent-flee { border-color: var(--fear); color: #d8c8ff; background: rgba(20, 8, 32, 0.9); }
+
+/* 20.3: fuses */
+.fuse-tag {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px 1px 4px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fff3d0;
+  background: rgba(40, 18, 4, 0.92);
+  border: 1px solid var(--fuse);
+  white-space: nowrap;
+}
+.fuse-tag .fuse-icon { color: var(--fuse); animation: fuse-flicker 0.5s steps(2) infinite; }
+.fuse-tag .fuse-n {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--fuse);
+  color: #1a0e02;
+  font-size: 0.72rem;
+}
+.fuse-tag.fuse-rival { border-color: var(--red); background: rgba(40, 4, 8, 0.92); }
+.fuse-tag.fuse-rival .fuse-n { background: var(--red); color: #fff; }
+.fuse-tag.fuse-rival .fuse-icon { color: var(--red); }
+.fuse-tag.soon { animation: fuse-soon 0.6s ease-in-out infinite; }
+@keyframes fuse-flicker { 50% { opacity: 0.55; } }
+@keyframes fuse-soon { 50% { box-shadow: 0 0 12px rgba(255, 138, 64, 0.7); } }
+.intent-fuse { border-color: var(--fuse); }
+.intent-rob { border-color: var(--red); }
+.intent-potion { border-color: #7fe08a; color: #d8ffd8; background: rgba(6, 24, 8, 0.9); }
+.intent-item { border-color: #c8a070; color: #f0e0c0; background: rgba(24, 16, 6, 0.9); }
+.warn-word { color: var(--fuse); }
+
+/* 20.3: the fuse picker */
+.fuse-pick { display: flex; gap: 8px; }
+.fuse-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-color: var(--fuse);
+}
+.fuse-btn .fuse-big { font-size: 1.5rem; line-height: 1; color: var(--fuse); }
+.fuse-btn.fuse-2 { border-color: #ffb35c; }
+.fuse-btn.fuse-2 .fuse-big { color: #ffb35c; }
+.fuse-btn:hover:not(:disabled) { background: rgba(255, 138, 64, 0.12); }
+
+/* 20.3: the satchel socket takes no slot */
+.pk-sock.pk-satchel { border-style: dashed; border-color: var(--fuse); color: var(--fuse); }
+.pk-sock.pk-satchel small { color: #fff3d0; }
+
+/* 20.4: crews that fight back */
+.tag-lvl {
+  color: #1a0e02;
+  background: var(--parch-dim);
+  padding: 0 3px;
+  margin-right: 3px;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+.tag-dragged { color: #fff; background: var(--red); padding: 0 4px; animation: toll-pulse 0.8s ease-in-out infinite; }
+.tag-dragging { color: #ffb4ac; }
+.chip.dragged { border-color: var(--red); color: #ffb4ac; animation: toll-pulse 0.8s ease-in-out infinite; }
+.rv-drag { margin-top: 3px; }
+.hud-banner.taken {
+  background: linear-gradient(90deg, transparent, rgba(12, 6, 20, 0.92) 25%, rgba(12, 6, 20, 0.92) 75%, transparent);
+}
+.hud-banner.taken .bn-title { color: #ffb4ac; }
+.hud-banner.taken .bn-sub { color: var(--parch-dim); text-transform: none; letter-spacing: 0.04em; font-size: 0.85rem; }
+.pl-mem-body { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.pl-pack { display: inline-flex; gap: 2px; margin-left: 4px; }
+.pl-pack .pk-sock { width: 18px; height: 18px; font-size: 0.7rem; }
+.pl-pack .pk-sock small { font-size: 0.55rem; }
+
+/* the Wake: deep green and bone */
+:root { --wake-crew: #4f8a5e; }
+.hud-rivals.crew-the-wake, .hud-parley.crew-the-wake { border-top-color: var(--wake-crew); }
+.unit-tag.crew-the-wake .hp-pips { box-shadow: 0 0 0 1px var(--wake-crew); }
+.contract.captive.crew-the-wake, .cap-row.crew-the-wake { border-left-color: var(--wake-crew); }
+
+/* camp: captives under the roster, "Bring back" contracts */
+.captives-panel { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red-dim);
+  background: rgba(30, 6, 10, 0.35);
+}
+.cap-row.crew-ferrymen { border-left-color: var(--ferry); }
+.cap-row.crew-gallows-choir { border-left-color: var(--choir); }
+.cap-body { flex: 1; min-width: 0; }
+.cap-go { white-space: nowrap; border-color: var(--red-dim); }
+.board-h.captive-h { color: #ffb4ac; }
+.seal-mini.seal-cap { color: #ffb4ac; }
+.contract.captive {
+  border-color: var(--red-dim);
+  border-left: 4px solid var(--red-dim);
+  background: linear-gradient(180deg, rgba(40, 8, 14, 0.5), var(--panel) 40%);
+}
+.contract.captive.crew-ferrymen { border-left-color: var(--ferry); }
+.contract.captive.crew-gallows-choir { border-left-color: var(--choir); }
+.ct-seal.ct-seal-cap { color: #ffb4ac; }
+.ct-unlock.ct-captive { flex-direction: row; align-items: center; gap: 8px; border-color: var(--red-dim); background: rgba(143, 16, 24, 0.1); }
+.ct-unlock.ct-captive b { color: #ffb4ac; }
+.hero-list li.taken b { color: #ffb4ac; }
+.taken-line { display: flex; gap: 6px; align-items: flex-start; }

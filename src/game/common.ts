@@ -4,10 +4,12 @@ import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
   BLEED_START, CLASSES, CUTTHROAT_HEAR, FIRESIDE_HEAL, FOCUS_MAX, RESERVE_FOCUS, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS, SLAY_XP, TIERS, TOLL_MIN,
+  WAKE_END_SNEAK,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX } from './state';
 import { brightnessOf, litSet, noiseField, within, type World } from './world';
+import { faceToward, forgetHeroes, noticeHero } from './stealth';
 
 // ---------------------------------------------------------------- lookups
 
@@ -370,6 +372,8 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       const src = by ? hd(c, by) : undefined;
       goHunting(c, m, src?.at);
     }
+    // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
+    if (by && hd(c, by)) noticeHero(c, m, by);
     if (m.hp <= 0) {
       killMonster(c, m, by);
       if (opts.noise !== false) makeNoise(c, m.at, 2);
@@ -446,10 +450,13 @@ export function crewDemand(c: Ctx): void {
 
 // ---------------------------------------------------------------- noise
 
-/** A ripple of radius R at `at`. Wakes sleepers, draws alert monsters. */
-export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean } = {}): void {
+/**
+ * A ripple of radius R at `at`. Wakes sleepers, draws alert monsters, turns heads (spec 20.1).
+ * `quiet`: no `noise` event for the view (per-hex walking noise sends one event per move).
+ */
+export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean; quiet?: boolean } = {}): void {
   if (radius <= 0) return;
-  c.ev.push({ type: 'noise', at, radius });
+  if (!opts.quiet) c.ev.push({ type: 'noise', at, radius });
   const heard = noiseField(c.w, c.d, at, radius);
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
   if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
@@ -458,6 +465,7 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;
+    faceToward(m, at);
     if (m.kind === 'dragon') {
       if (m.awareness === 'asleep' && radius >= DRAGON_WAKE_NOISE) {
         m.awareness = 'hunting';
@@ -486,7 +494,10 @@ export function goHunting(c: Ctx, m: MonsterX, at?: Pos): void {
   m.awareness = 'hunting';
   m.searchRounds = undefined;
   m.returning = undefined;
-  if (at) m.focusAt = { ...at };
+  if (at) {
+    m.focusAt = { ...at };
+    faceToward(m, at);
+  }
   if (was !== 'hunting') c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
 }
 
@@ -495,14 +506,33 @@ export function goAlert(c: Ctx, m: MonsterX, at: Pos): void {
   m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
   m.focusAt = { ...at };
   m.returning = undefined;
+  faceToward(m, at);
   if (m.awareness === 'alert') m.searchRounds = SEARCH_ROUNDS;
   c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
 }
 
-export function wakeAdjacent(c: Ctx, at: Pos): void {
+/**
+ * A hero arrives at `at` without walking there (a fall, a climb, a blink): sleepers next to them
+ * wake for sure when the hero came loudly, 25% when quietly (spec 20.1's end-adjacent rule).
+ * Walks use the per-hex wake rolls in doMove instead.
+ */
+export function wakeAdjacent(c: Ctx, at: Pos, sneak = false, by?: string): void {
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' && m.kind !== 'dragon' && !m.buried && within(m.at, at, 1)) goAlert(c, m, at);
+    if (m.awareness !== 'asleep' || m.kind === 'dragon' || m.buried || !within(m.at, at, 1)) continue;
+    if (sneak && !chance(c.s, WAKE_END_SNEAK)) continue;
+    goAlert(c, m, at);
+    if (by) c.ev.push({ type: 'woke', id: m.id, by });
   }
+}
+
+/** A monster loses its quarry: back to alert, and it forgets who it had noticed (sneak attacks are on again). */
+export function loseQuarry(c: Ctx, m: MonsterX, at?: Pos): void {
+  m.awareness = 'alert';
+  m.searchRounds = SEARCH_ROUNDS;
+  m.returning = undefined;
+  if (at) m.focusAt = { ...at };
+  forgetHeroes(m);
+  c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
 }
 
 export { random };

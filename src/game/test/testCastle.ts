@@ -12,7 +12,7 @@
 // through Level 2's pit to the Hollow (2 levels, 7 damage).
 
 import { offsetToAxial, posNeighbors, hexKey, type Pos } from '../hex';
-import type { CastleDef, LevelDef, RoomDef, TileDef, TileKind } from '../types';
+import type { CastleDef, LevelDef, RoomDef, SpawnDef, TileDef, TileKind } from '../types';
 
 const LEGEND: Record<string, TileDef | null> = {
   '.': { kind: 'floor' },
@@ -151,10 +151,11 @@ export const testCastle: CastleDef = {
   // V3.3 (spec 16.1): awake by default; sleepers are marked. The east hall has a patrol, the
   // Crossing an archer on the bridge and a captain with Grub, the Hollow a buried ghoul.
   spawns: [
-    { at: at(1, 4, 2), kind: 'rats', asleep: true },
+    // V3.7 (spec 20.1): sleepers face where they lie (`facing` is a DIRS index: 0 east, 3 west). The rats face the pantry door; the spider the forge wall.
+    { at: at(1, 4, 2), kind: 'rats', asleep: true, facing: 0 } as SpawnDef,
     { at: at(1, 16, 4), kind: 'orc' },
     { at: at(1, 15, 6), kind: 'orc', patrol: [at(1, 15, 6), at(1, 17, 6), at(1, 17, 8), at(1, 15, 8)] },
-    { at: at(2, 16, 2), kind: 'spider', asleep: true },
+    { at: at(2, 16, 2), kind: 'spider', asleep: true, facing: 3 } as SpawnDef,
     { at: at(2, 9, 7), kind: 'orc', name: 'Grub the Jailer' },
     { at: at(2, 10, 7), kind: 'captain' },
     { at: at(2, 12, 3), kind: 'archer' },

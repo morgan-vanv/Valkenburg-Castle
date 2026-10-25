@@ -5,7 +5,9 @@ import { distance, posKey, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, Command, GameEvent, GameState, HeroClass, ItemKind, Monster, MonsterKind, SlotRoll } from './types';
 import { MONSTERS } from './data';
 import { brightnessOf, glimpseSet, noiseField, World } from './world';
-import type { DelveX, GameStateX } from './state';
+import type { DelveX, GameStateX, HeroX, MonsterX } from './state';
+import { wakeChance, wouldNotice } from './stealth';
+import { litSet } from './world';
 import { makeNoise } from './common';
 import { makeHero } from './camp';
 
@@ -45,9 +47,14 @@ function hero(s: GameState, id: string) {
   return s.delve!.heroes.find((h) => h.heroId === id)!;
 }
 
+/**
+ * A hand-placed monster. No facing: it watches all round (V3.7 blind-arc tests set `facing` themselves).
+ * A hunting one has noticed every hero in the delve (V3.7: so the old fights carry no sneak-attack bonus).
+ */
 function monster(s: GameState, kind: MonsterKind, p: Pos, awareness: 'asleep' | 'alert' | 'hunting' = 'asleep', id = `m${s.delve!.monsters.length + 1}`) {
   const def = MONSTERS[kind];
-  const m: Monster = { id, kind, name: def.name, at: { ...p }, hp: def.hp, maxHp: def.hp, awareness, spawnedAt: { ...p } };
+  const m: Monster & { noticedIds?: string[] } = { id, kind, name: def.name, at: { ...p }, hp: def.hp, maxHp: def.hp, awareness, spawnedAt: { ...p } };
+  if (awareness === 'hunting') m.noticedIds = s.delve!.heroes.map((h) => h.heroId);
   s.delve!.monsters.push(m);
   return m;
 }
@@ -187,10 +194,11 @@ describe('slot rolls and Focus', () => {
     const m = monster(s, 'orc', at(1, 5, 7), 'asleep');
     const p = e.preview(s, 'brann', 'attack', { id: m.id });
     expect(p.ok).toBe(true);
-    expect(p.slots).toBe(3);
+    expect(p.slots).toBe(4); // 3, +1 sneak attack on a sleeper (V3.7, spec 20.1)
     expect(p.chance).toBe(90); // 70 + 20 asleep
     expect(p.modifiers).toContain('Asleep +20%');
-    expect(p.outcomes).toEqual(['Miss', '2 dmg', '4 dmg', '7 dmg']);
+    expect(p.modifiers).toContain('Sneak attack +1 slot');
+    expect(p.outcomes).toEqual(['Miss', '2 dmg', '4 dmg', '6 dmg', '9 dmg']);
     expect(p.maxFocus).toBe(3);
   });
 
@@ -553,12 +561,16 @@ describe('monsters', () => {
     st = r.state;
   });
 
-  it('a hero ending a move next to a sleeper wakes it', () => {
+  it('a hero ending a move next to a sleeper wakes it: walking for sure, sneaking 25% (V3.7, spec 20.1)', () => {
     const s = delve();
     put(s, 'brann', at(1, 3, 7));
     const m = monster(s, 'orc', at(1, 6, 7), 'asleep');
-    const r = ok(s, { type: 'move', heroId: 'brann', path: [at(1, 4, 7), at(1, 5, 7)], sneak: true });
+    const r = ok(s, { type: 'move', heroId: 'brann', path: [at(1, 4, 7), at(1, 5, 7)], sneak: false });
     expect(r.state.delve!.monsters.find((x) => x.id === m.id)!.awareness).not.toBe('asleep');
+    const quiet = until(s, { type: 'move', heroId: 'brann', path: [at(1, 4, 7), at(1, 5, 7)], sneak: true }, (_ev, st) => st.delve!.monsters[0]!.awareness === 'asleep');
+    expect(quiet.state.delve!.monsters[0]!.awareness).toBe('asleep');
+    const woke = until(s, { type: 'move', heroId: 'brann', path: [at(1, 4, 7), at(1, 5, 7)], sneak: true }, (ev) => ev.some((x) => x.type === 'woke'));
+    expect(woke.state.delve!.monsters[0]!.awareness).toBe('alert');
   });
 
   it('orcs shout when they first see a hero', () => {
@@ -1285,7 +1297,7 @@ describe('15.3 classes', () => {
     void s;
     put(t, 'rae', at(3, 1, 8));
     t.delve!.light = 40;
-    const m = monster(t, 'orc', at(3, 7, 8), 'alert');
+    const m = monster(t, 'orc', at(3, 7, 8), 'hunting');
     const p = e.preview(t, 'rae', 'attack', { id: m.id });
     expect(p.ok).toBe(true);
     expect(p.slots).toBe(3);
@@ -1347,9 +1359,10 @@ describe('15.3 classes', () => {
     expect(r2.state.delve!.monsters[0]!.at).toEqual(at(2, 10, 6));
   });
 
-  it('sapper: two free charges, throws a charge up to 3, digs rubble and cracked walls (noise 4)', () => {
+  it('sapper: a satchel of 3 charges, throws a charge up to 3, digs rubble and cracked walls (noise 4)', () => {
     const s = delve({ heroes: ['sam'], extra: [['sam', 'Sam', 'sapper']] });
-    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'charge')).toHaveLength(2);
+    // V3.7 (spec 20.3): the satchel is one slotless pack item holding 3 charges.
+    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'charge')).toMatchObject([{ amount: 3, slots: 0 }]);
     put(s, 'sam', at(2, 12, 3));
     s.delve!.light = 20;
     const o = option(s, 'sam', 'throwCharge')!;
@@ -1357,12 +1370,13 @@ describe('15.3 classes', () => {
     expect(o.area).toBe(2);
     expect(o.targets.some((t) => samePos(t.at!, at(2, 15, 3)))).toBe(true);
     expect(o.targets.some((t) => samePos(t.at!, at(2, 16, 3)))).toBe(false);
-    const m = monster(s, 'orc', at(2, 15, 3), 'alert');
+    const m = monster(s, 'orc', at(2, 15, 3)); // asleep: it stays put until the blast at the end of the world phase
     const pv = e.preview(s, 'sam', 'throwCharge', { at: at(2, 15, 3) });
     expect(pv.affects).toContain(m.id);
     const r = act(s, 'sam', 'throwCharge', { at: at(2, 15, 3) });
     expect(r.events.some((x) => x.type === 'thrown' && x.kind === 'charge')).toBe(true);
-    expect(hero(r.state, 'sam').pack.filter((i) => i.kind === 'charge')).toHaveLength(1);
+    expect(r.events).toContainEqual({ type: 'fuseSet', at: at(2, 15, 3), rounds: 1, by: 'sam' });
+    expect(hero(r.state, 'sam').pack.find((i) => i.kind === 'charge')!.amount).toBe(2);
     const r2 = ok(r.state, { type: 'endTurn' });
     expect(r2.events.some((x) => x.type === 'blast')).toBe(true);
     expect(r2.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBe(MONSTERS.orc.hp - 4);
@@ -2647,21 +2661,29 @@ describe('V3.5', () => {
       expect(hero(r.state, 'brann').at.level).toBe(3);
     });
 
-    it('sapper: shows a charge on a hero 2-3 away the round before, then 3 damage to everyone within 1, noise 8', () => {
+    it('sapper: shows a fused charge on a hero 2-3 away the round before, lobs it (fuse 1), and it blows at the end of the next world phase: 4 within 1, noise 8 (spec 20.3)', () => {
       let s = crewDelve('ferrymen', [at(2, 17, 8), at(2, 18, 8), at(2, 16, 4)], 'hostile');
       s.delve!.rivals!.members[0]!.hp = 0;
       s.delve!.rivals!.members[1]!.hp = 0;
       put(s, 'brann', at(2, 16, 1));
       computeIntentsOf(ctx(s));
       const sap = s.delve!.rivals!.members[2]!;
-      expect(sap.intent).toMatchObject({ kind: 'charge', targetId: 'brann', to: at(2, 16, 1) });
+      expect(sap.intent).toMatchObject({ kind: 'fuse', targetId: 'brann', to: at(2, 16, 1) });
       expect(sap.intent!.hexes!.length).toBeGreaterThan(3);
       const hp = hero(s, 'brann').hp;
       const r = ok(s, { type: 'endTurn' });
       s = r.state;
-      expect(r.events).toContainEqual({ type: 'noise', at: at(2, 16, 1), radius: 8 });
-      expect(hero(s, 'brann').hp).toBe(hp - 3);
+      // Lit during the world phase: the marker shows through the player's turn, then it goes off.
+      expect(r.events).toContainEqual({ type: 'fuseSet', at: at(2, 16, 1), rounds: 1, by: sap.id });
+      expect(r.events.some((x) => x.type === 'blast')).toBe(false);
+      expect(s.delve!.fuses).toMatchObject([{ at: at(2, 16, 1), rounds: 1, by: sap.id }]);
+      expect(hero(s, 'brann').hp).toBe(hp);
       expect(s.delve!.rivals!.members[2]!.charges).toBe(0);
+      const r2 = ok(s, { type: 'endTurn' });
+      expect(r2.events).toContainEqual({ type: 'noise', at: at(2, 16, 1), radius: 8 });
+      expect(r2.events.some((x) => x.type === 'blast' && 'by' in x && x.by === sap.id)).toBe(true);
+      expect(hero(r2.state, 'brann').hp).toBeLessThanOrEqual(hp - 4);
+      expect(r2.state.delve!.fuses).toEqual([]);
     });
 
     it('pyromancer: shows a firebolt on a hero in range 5 and sight, then 3 Wits slots at 60%, 2 per hit', () => {
@@ -3014,6 +3036,397 @@ describe('V3.6', () => {
         expect(e.reachable(other, 'brann', false).some((r) => samePos(r.to, at(1, 9, 7))), stance).toBe(false);
         expect(e.apply(other, { type: 'move', heroId: 'brann', path, sneak: false }).error).toBe('Something is in the way.');
       }
+    });
+  });
+});
+
+// ---------------------------------------------------------------- V3.7 (spec 20.1, 20.2)
+
+describe('V3.7 stealth and swings', () => {
+  /** Keven parked on L1 with the lantern; Brann alone on L2 row 1 (unlit west of col 13, the forge lights the east end). */
+  function stealthDelve(opts: { lit?: boolean; extra?: [string, string, HeroClass][]; heroes?: string[] } = {}) {
+    const s = delve({ heroes: opts.heroes ?? ['keven', 'brann'], extra: opts.extra });
+    put(s, 'keven', at(1, 2, 7));
+    s.delve!.light = 20;
+    s.delve!.lanternBearer = opts.lit ? 'brann' : 'keven';
+    return s;
+  }
+  const sneaking = (s: GameState, id: string, on = true) => ((hero(s, id) as HeroX).sneaked = on);
+  const mon = (s: GameState, id: string) => s.delve!.monsters.find((m) => m.id === id) as MonsterX;
+  const noticedBy = (r: { events: GameEvent[] }, by: string, who: string) => r.events.some((x) => x.type === 'noticed' && x.by === by && x.hero === who);
+
+  describe('20.1 walking noise per hex and wake rolls', () => {
+    it('walking makes noise at every hex (2 on rubble) that wakes sleepers it reaches; one noise event per move; sneaking is silent', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 13, 3));
+      const m = monster(s, 'orc', at(2, 16, 3), 'asleep'); // 2 from the rubble at (14,3), 3 from the destination
+      const path = [at(2, 14, 3), at(2, 14, 4)];
+      const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: false });
+      expect(mon(r.state, m.id).awareness).toBe('alert');
+      expect(mon(r.state, m.id).focusAt).toEqual(at(2, 14, 3));
+      expect(r.events.filter((x) => x.type === 'noise')).toHaveLength(1);
+      // Sneaking (2: the rubble alone): no noise; standing 2 from it rolls 10% (lit by the forge). Both outcomes exist, seeded.
+      const creep = [at(2, 14, 3)];
+      const quiet = until(s, { type: 'move', heroId: 'brann', path: creep, sneak: true }, (_ev, st) => st.delve!.monsters[0]!.awareness === 'asleep');
+      expect(quiet.events.some((x) => x.type === 'noise')).toBe(false);
+      const woke = until(s, { type: 'move', heroId: 'brann', path: creep, sneak: true }, (ev) => ev.some((x) => x.type === 'woke'));
+      expect(mon(woke.state, m.id).awareness).toBe('alert');
+      expect(woke.events.find((x) => x.type === 'woke')).toMatchObject({ id: m.id, by: 'brann' });
+    });
+
+    it('wake chances: 50 walking, 10 sneaking within 2, halved unlit; ending adjacent: walking sure, sneaking 25; the Dragon is left out', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 8, 1));
+      const m = monster(s, 'orc', at(2, 10, 1), 'asleep');
+      const lit = litSet(w, s.delve as DelveX);
+      expect(wakeChance(m as MonsterX, at(2, 8, 1), false, false, lit)).toBe(50);
+      expect(wakeChance(m as MonsterX, at(2, 8, 1), false, true, lit)).toBe(10);
+      expect(wakeChance(m as MonsterX, at(2, 9, 1), true, false, lit)).toBe(100);
+      expect(wakeChance(m as MonsterX, at(2, 9, 1), true, true, lit)).toBe(25);
+      const dark = litSet(w, { ...(s.delve as DelveX), lanternBearer: 'keven' });
+      expect(wakeChance(m as MonsterX, at(2, 8, 1), false, false, dark)).toBe(25);
+      expect(wakeChance(m as MonsterX, at(2, 8, 1), false, true, dark)).toBe(5);
+      // The Dragon sleeps through passers-by (14.4 stands); the preview lists no roll for it.
+      const t = delve({ heroes: ['brann'] });
+      put(t, 'brann', at(3, 14, 4));
+      t.delve!.doors[posKey(at(3, 13, 3))]!.open = true;
+      monster(t, 'dragon', at(3, 16, 4), 'asleep');
+      const reach = e.reachable(t, 'brann', true).find((x) => samePos(x.to, at(3, 15, 4)));
+      expect(reach?.risks?.wake).toEqual([]);
+    });
+
+    it('the same seed and path wake the same monsters', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 8, 1));
+      monster(s, 'orc', at(2, 10, 1), 'asleep');
+      monster(s, 'rats', at(2, 10, 2), 'asleep');
+      const cmd: Command = { type: 'move', heroId: 'brann', path: [at(2, 9, 1), at(2, 10, 1 - 1 + 1)].slice(0, 1), sneak: false };
+      const a = e.apply(s, cmd);
+      const b = e.apply(s, cmd);
+      expect(a.events).toEqual(b.events);
+      expect(a.state).toEqual(b.state);
+    });
+  });
+
+  describe('20.1 noticing', () => {
+    it('lit: walking 6, sneaking 4; unlit: walking 3, sneaking 1; a `noticed` event, then hunting', () => {
+      const check = (col: number, lit: boolean, sneak: boolean) => {
+        const s = stealthDelve({ lit });
+        put(s, 'brann', at(2, col, 1));
+        sneaking(s, 'brann', sneak);
+        const m = monster(s, 'orc', at(2, 13, 1), 'alert');
+        const r = ok(s, { type: 'endTurn' });
+        const seen = mon(r.state, m.id).awareness === 'hunting';
+        expect(noticedBy(r, m.id, 'brann')).toBe(seen);
+        if (seen) expect(mon(r.state, m.id).noticedIds).toContain('brann');
+        return seen;
+      };
+      expect(check(7, true, false)).toBe(true); // 6
+      expect(check(8, true, true)).toBe(false); // 5
+      expect(check(9, true, true)).toBe(true); // 4
+      expect(check(9, false, false)).toBe(false); // 4 unlit
+      expect(check(10, false, false)).toBe(true); // 3
+      expect(check(11, false, true)).toBe(false); // 2
+      expect(check(12, false, true)).toBe(true); // 1
+    });
+
+    it('in the Hollow light does not matter: walking 6, sneaking 3', () => {
+      const check = (col: number, sneak: boolean) => {
+        const s = stealthDelve();
+        put(s, 'brann', at(3, col, 4));
+        sneaking(s, 'brann', sneak);
+        const m = monster(s, 'rats', at(3, 2, 4), 'alert');
+        return mon(ok(s, { type: 'endTurn' }).state, m.id).awareness === 'hunting';
+      };
+      expect(check(8, false)).toBe(true);
+      expect(check(9, false)).toBe(false);
+      expect(check(5, true)).toBe(true);
+      expect(check(6, true)).toBe(false);
+    });
+
+    it('the last move sets the mode: a sneak move makes the hero sneaking at the world phase, a walk does not', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 7, 1));
+      const m = monster(s, 'orc', at(2, 13, 1), 'alert');
+      // Sneak 1 east: 5 away, sneaking: unseen.
+      let r = ok(s, { type: 'move', heroId: 'brann', path: [at(2, 8, 1)], sneak: true });
+      expect((hero(r.state, 'brann') as HeroX).sneaked).toBe(true);
+      r = ok(r.state, { type: 'endTurn' });
+      expect(mon(r.state, m.id).awareness).toBe('alert');
+      // Walk 1 east: 4 away, walking: seen.
+      r = ok(r.state, { type: 'move', heroId: 'brann', path: [at(2, 9, 1)], sneak: false });
+      r = ok(r.state, { type: 'endTurn' });
+      expect(mon(r.state, m.id).awareness).toBe('hunting');
+    });
+  });
+
+  describe('20.1 facing and the blind arc', () => {
+    it('spawns face as the map says (default 0); a walk turns them the way they stepped; noise turns heads', () => {
+      const s = castleDelve();
+      const rats = s.delve!.monsters.find((m) => m.kind === 'rats' && m.at.level === 1)!;
+      expect(rats.facing).toBe(0);
+      expect(s.delve!.monsters.find((m) => m.kind === 'spider' && m.at.level === 2)!.facing).toBe(3);
+      expect(s.delve!.monsters.find((m) => m.kind === 'orc' && m.at.level === 1)!.facing).toBe(0);
+      // Noise from the south-west turns the rats that way.
+      const c = ctx(s);
+      makeNoise(c, at(1, 3, 3), 1);
+      expect(rats.facing).toBe(4);
+      // A hunting orc walking east ends facing east.
+      const t = stealthDelve({ lit: true });
+      put(t, 'brann', at(2, 12, 1));
+      const m = monster(t, 'orc', at(2, 8, 1), 'hunting');
+      (m as MonsterX).facing = 3;
+      const r = ok(t, { type: 'endTurn' });
+      expect(mon(r.state, m.id).at).toEqual(at(2, 11, 1));
+      expect(mon(r.state, m.id).facing).toBe(0);
+    });
+
+    it('a walking hero in the blind arc is noticed at half range; a sneaking one only adjacent, never from the hex directly behind', () => {
+      const check = (col: number, row: number, sneak: boolean) => {
+        const s = stealthDelve({ lit: true });
+        put(s, 'brann', at(2, col, row));
+        sneaking(s, 'brann', sneak);
+        const m = monster(s, 'orc', at(2, 13, 1), 'alert');
+        (m as MonsterX).facing = 3; // looking west: the blind arc is the east side (dirs 0, 1, 5)
+        return mon(ok(s, { type: 'endTurn' }).state, m.id).awareness === 'hunting';
+      };
+      expect(check(16, 1, false)).toBe(true); // 3 behind, lit, walking: half of 6
+      expect(check(17, 1, false)).toBe(false); // 4 behind
+      expect(check(15, 2, true)).toBe(false); // 2 behind, sneaking
+      expect(check(14, 2, true)).toBe(true); // adjacent, back-side neighbour, sneaking
+      expect(check(14, 1, true)).toBe(false); // directly behind: never
+      expect(check(14, 1, false)).toBe(true); // ...unless walking in
+      // The same from the front: a sneaking hero 2 away in the light is seen.
+      expect(check(11, 1, true)).toBe(true);
+      // wouldNotice agrees, and a watcher without a facing has no blind arc.
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 14, 1));
+      const lit = litSet(w, s.delve as DelveX);
+      expect(wouldNotice(ctx(s), { at: at(2, 13, 1), facing: 3 }, at(2, 14, 1), true, lit)).toBe(false);
+      expect(wouldNotice(ctx(s), { at: at(2, 13, 1) }, at(2, 14, 1), true, lit)).toBe(true);
+    });
+
+    it('cover: no line of sight, no notice, sneaking or not', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 3, 3)); // the shrine, behind its wall
+      const m = monster(s, 'orc', at(2, 8, 3), 'alert');
+      const r = ok(s, { type: 'endTurn' });
+      expect(mon(r.state, m.id).awareness).toBe('alert');
+    });
+  });
+
+  describe('20.1 sneak attack', () => {
+    it('+1 slot on a monster that has not noticed the attacker; gone once it has; stacks with backstab', () => {
+      const s = delve();
+      put(s, 'brann', GATE);
+      put(s, 'pim', at(1, 5, 8));
+      const m = monster(s, 'orc', at(1, 5, 7), 'alert');
+      m.hp = 30; // it lives through the test
+      let p = e.preview(s, 'brann', 'attack', { id: m.id });
+      expect(p.slots).toBe(4);
+      expect(p.modifiers).toContain('Sneak attack +1 slot');
+      // The Burglar: dagger 2, +1 sneak, +1 backstab (not hunting).
+      p = e.preview(s, 'pim', 'attack', { id: m.id });
+      expect(p.slots).toBe(4);
+      expect(p.modifiers).toEqual(expect.arrayContaining(['Sneak attack +1 slot', 'Backstab +1 slot']));
+      // Brann strikes (hit or miss): the orc knows him now, and hunts.
+      const r = act(s, 'brann', 'attack', { id: m.id });
+      expect(noticedBy(r, m.id, 'brann')).toBe(true);
+      const o = mon(r.state, m.id);
+      expect(o.noticedIds).toEqual(['brann']);
+      expect(o.facing).toBe(3); // turned toward Brann, west of it
+      if (o.hp > 0) {
+        hero(r.state, 'brann').acted = false;
+        expect(e.preview(r.state, 'brann', 'attack', { id: m.id }).slots).toBe(3);
+        // Pim is still unnoticed: sneak attack, but no backstab on a hunter.
+        expect(e.preview(r.state, 'pim', 'attack', { id: m.id }).slots).toBe(3);
+      }
+    });
+
+    it('a monster that loses its quarry forgets who it saw; sleep does too', () => {
+      let s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 9, 1));
+      const m = monster(s, 'orc', at(2, 13, 1), 'alert');
+      s = ok(s, { type: 'endTurn' }).state;
+      expect(mon(s, m.id).noticedIds).toEqual(['brann']);
+      put(s, 'brann', at(1, 3, 7));
+      s = ok(s, { type: 'endTurn' }).state;
+      expect(mon(s, m.id).awareness).toBe('alert');
+      expect(mon(s, m.id).noticedIds).toBeUndefined();
+    });
+  });
+
+  describe('20.2 free swings', () => {
+    it('a hero leaving a hunting enemy that noticed them takes one swing at a slot fewer, no Focus; alert, glued and feared enemies do not swing', () => {
+      const s = delve();
+      put(s, 'brann', GATE);
+      const m = monster(s, 'orc', at(1, 5, 7), 'hunting');
+      const away = [at(1, 3, 7), at(1, 2, 7)];
+      const r = ok(s, { type: 'move', heroId: 'brann', path: away, sneak: true });
+      const sw = r.events.filter((x) => x.type === 'swing');
+      expect(sw).toHaveLength(1);
+      expect(sw[0]).toMatchObject({ by: m.id, target: 'brann' });
+      const roll = rolls(r.events).find((x) => x.slots === 1)!;
+      expect(roll.focus).toBe(0);
+      expect(hero(r.state, 'brann').moved).toBe(true);
+      // Staying adjacent provokes nothing.
+      expect(ok(s, { type: 'move', heroId: 'brann', path: [at(1, 5, 8)], sneak: false }).events.some((x) => x.type === 'swing')).toBe(false);
+      // Exclusions.
+      const alert = delve();
+      put(alert, 'brann', GATE);
+      monster(alert, 'orc', at(1, 5, 7), 'alert');
+      expect(ok(alert, { type: 'move', heroId: 'brann', path: away, sneak: false }).events.some((x) => x.type === 'swing')).toBe(false);
+      const glued = delve();
+      put(glued, 'brann', GATE);
+      monster(glued, 'orc', at(1, 5, 7), 'hunting').stuck = 2;
+      expect(ok(glued, { type: 'move', heroId: 'brann', path: away, sneak: false }).events.some((x) => x.type === 'swing')).toBe(false);
+      const feared = delve();
+      put(feared, 'brann', GATE);
+      monster(feared, 'orc', at(1, 5, 7), 'hunting').feared = 1;
+      expect(ok(feared, { type: 'move', heroId: 'brann', path: away, sneak: false }).events.some((x) => x.type === 'swing')).toBe(false);
+      // The preview says so: Reach.risks.swings with the damage range (orc 2 dmg, Brann armor 1: 0–2 on 1 slot).
+      const reach = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(1, 2, 7)))!;
+      expect(reach.risks?.swings).toEqual([{ id: m.id, damage: [0, 2] }]);
+      expect(e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(1, 5, 8)))!.risks?.swings).toEqual([]);
+    });
+
+    it('jumping into a pit from an enemy\'s side provokes; the preview warns', () => {
+      const s = delve();
+      put(s, 'brann', at(1, 11, 3));
+      const m = monster(s, 'orc', at(1, 12, 3), 'hunting');
+      const pv = e.preview(s, 'brann', 'jump', { at: at(1, 10, 3) });
+      expect(pv.warning).toMatch(/Orc gets a free swing: 0–2/);
+      const r = act(s, 'brann', 'jump', { at: at(1, 10, 3) });
+      expect(r.events.some((x) => x.type === 'swing' && x.by === m.id)).toBe(true);
+      expect(r.events.some((x) => x.type === 'fell')).toBe(true);
+    });
+
+    it('heroes swing too: an enemy leaving a hero whose action is ready takes a swing (sword 2 slots, bow 1); the action is kept', () => {
+      const s = delve({ heroes: ['rae', 'brann'], extra: [['rae', 'Rae', 'ranger']] });
+      put(s, 'brann', at(1, 4, 7));
+      put(s, 'rae', at(1, 5, 6));
+      const m = monster(s, 'cutpurse', at(1, 5, 7), 'hunting');
+      m.stolen = { id: 'x', kind: 'gem', name: 'Garnet', amount: 40, slots: 1 }; // a cutpurse with loot runs for the exit
+      const r = ok(s, { type: 'endTurn' });
+      const sw = r.events.filter((x) => x.type === 'swing');
+      expect(sw.map((x) => x.type === 'swing' && x.by).sort()).toEqual(['brann', 'rae']);
+      const rs = rolls(r.events).filter((x) => x.slots <= 2);
+      expect(rs.some((x) => x.slots === 2)).toBe(true); // Brann's sword, 3 − 1
+      expect(rs.some((x) => x.slots === 1)).toBe(true); // Rae's bow
+      expect(hero(r.state, 'brann').acted).toBe(false);
+      // A hero who has acted does not swing.
+      const t = delve({ heroes: ['brann'] });
+      put(t, 'brann', at(1, 4, 7));
+      const m2 = monster(t, 'rats', at(1, 5, 7), 'hunting');
+      m2.hp = 1;
+      hero(t, 'brann').acted = true;
+      expect(ok(t, { type: 'endTurn' }).events.some((x) => x.type === 'swing')).toBe(false);
+    });
+  });
+
+  describe('20.2 Dread', () => {
+    function dreadDelve() {
+      const s = delve({ heroes: ['brann', 'sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+      put(s, 'sable', at(1, 2, 7));
+      put(s, 'brann', at(1, 4, 7));
+      s.delve!.lanternBearer = 'sable';
+      const m = monster(s, 'orc', at(1, 5, 7), 'hunting');
+      return { s, m };
+    }
+
+    it('1 mana, 2 Wits slots, range 5 in sight; a hit sends the target fleeing for 2 rounds (intent flee), not the Dragon', () => {
+      const { s, m } = dreadDelve();
+      const o = option(s, 'sable', 'dread')!;
+      expect(o.mana).toBe(1);
+      expect(o.targets).toEqual([{ id: m.id, at: m.at }]);
+      const pv = e.preview(s, 'sable', 'dread', { id: m.id });
+      expect(pv).toMatchObject({ slots: 2, stat: 'wits', noise: 0 });
+      expect(pv.modifiers).toContain('1 mana');
+      const miss = until(s, { type: 'act', heroId: 'sable', action: 'dread', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'miss'));
+      expect(mon(miss.state, m.id).feared).toBeUndefined();
+      const r = until(s, { type: 'act', heroId: 'sable', action: 'dread', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'feared'));
+      expect(hero(r.state, 'sable').mana).toBe(2);
+      expect(mon(r.state, m.id)).toMatchObject({ feared: 2, fearOf: 'sable' });
+      expect(e.intents(r.state)[m.id]?.kind).toBe('flee');
+      // Not the Dragon.
+      const t = delve({ heroes: ['sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+      put(t, 'sable', at(3, 15, 4));
+      monster(t, 'dragon', at(3, 16, 4), 'hunting');
+      expect(option(t, 'sable', 'dread')).toBeUndefined();
+    });
+
+    it('a feared monster spends its phases running from the caster, takes free swings as it leaves, does not attack, and recovers after 2', () => {
+      const { s, m } = dreadDelve();
+      const r = until(s, { type: 'act', heroId: 'sable', action: 'dread', target: { id: m.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'feared'));
+      const before = distance(mon(r.state, m.id).at, at(1, 2, 7));
+      const w1 = ok(r.state, { type: 'endTurn' });
+      const after = mon(w1.state, m.id);
+      if (after) {
+        expect(distance(after.at, at(1, 2, 7))).toBeGreaterThan(before);
+        expect(w1.events.some((x) => x.type === 'roll' && x.who === m.id)).toBe(false);
+        expect(after.feared).toBe(1);
+      }
+      // Brann, adjacent with his action ready, swung as it ran.
+      expect(w1.events.some((x) => x.type === 'swing' && x.by === 'brann')).toBe(true);
+      if (!after) return;
+      const w2 = ok(w1.state, { type: 'endTurn' }).state;
+      const m2 = mon(w2, m.id);
+      if (!m2) return;
+      expect(m2.feared).toBe(0);
+      expect(m2.fearOf).toBeUndefined();
+      expect(m2.intent?.kind).not.toBe('flee');
+    });
+
+    it('a feared ghoul drops its hold; a feared crew member runs too', () => {
+      const s = delve({ heroes: ['brann', 'sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+      put(s, 'sable', at(3, 3, 4));
+      put(s, 'brann', at(3, 5, 4));
+      const g = monster(s, 'ghoul', at(3, 6, 4), 'hunting');
+      g.holding = 'brann';
+      hero(s, 'brann').grabbedBy = g.id;
+      const r = until(s, { type: 'act', heroId: 'sable', action: 'dread', target: { id: g.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'feared'));
+      expect(hero(r.state, 'brann').grabbedBy).toBeUndefined();
+      expect(mon(r.state, g.id).holding).toBeUndefined();
+      // The Ferrymen, hostile, next to Sable.
+      const t = delve({ heroes: ['brann', 'sable'], extra: [['sable', 'Sable', 'shadowmancer']] });
+      const cr = buildCrew(t as GameStateX, 'ferrymen', [at(2, 10, 1), at(2, 11, 1), at(2, 12, 1)]);
+      cr.stance = 'hostile';
+      t.delve!.rivals = cr;
+      put(t, 'sable', at(2, 9, 1));
+      put(t, 'brann', at(2, 8, 2));
+      t.delve!.lanternBearer = 'sable';
+      const lead = t.delve!.rivals!.members[0]!;
+      const rr = until(t, { type: 'act', heroId: 'sable', action: 'dread', target: { id: lead.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'feared' && x.id === lead.id));
+      expect(e.intents(rr.state)[lead.id]?.kind).toBe('flee');
+      const w1 = ok(rr.state, { type: 'endTurn' }).state;
+      const fled = w1.delve!.rivals!.members[0]!;
+      expect(distance(fled.at, at(2, 9, 1))).toBeGreaterThan(1);
+      expect(fled.feared).toBe(1);
+    });
+  });
+
+  describe('20.1 move preview risks', () => {
+    it('lists every wake roll on the path with its chance, and the awake enemies that would notice the hero at the destination', () => {
+      const s = stealthDelve({ lit: true });
+      put(s, 'brann', at(2, 7, 1));
+      const sleeper = monster(s, 'orc', at(2, 10, 2), 'asleep');
+      const watcher = monster(s, 'orc', at(2, 13, 1), 'alert');
+      const walk = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(2, 9, 1)))!;
+      expect(walk.path).toEqual([at(2, 8, 1), at(2, 9, 1)]);
+      // (8,1) is 2 from the sleeper: 50; (9,1) is adjacent and the end: sure.
+      expect(walk.risks?.wake).toEqual([
+        { at: at(2, 8, 1), id: sleeper.id, chance: 50 },
+        { at: at(2, 9, 1), id: sleeper.id, chance: 100 },
+      ]);
+      expect(walk.risks?.notice).toEqual([{ id: watcher.id }]); // 4 away, lit, walking
+      const sneak = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 9, 1)))!;
+      expect(sneak.risks?.wake.map((x) => x.chance)).toEqual([10, 25]);
+      expect(sneak.risks?.notice).toEqual([{ id: watcher.id }]); // 4 away, lit, sneaking: still seen
+      const short = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 8, 1)))!;
+      expect(short.risks?.notice).toEqual([]); // 5 away, sneaking
+      // Once it has noticed Brann it is no longer listed.
+      (watcher as MonsterX).noticedIds = ['brann'];
+      expect(e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(2, 9, 1)))!.risks?.notice).toEqual([]);
     });
   });
 });

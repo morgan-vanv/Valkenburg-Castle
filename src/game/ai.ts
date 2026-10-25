@@ -11,6 +11,7 @@ import {
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, monsterSees, pathTo, seesHex, within } from './world';
 import { figure } from './falls';
+import { dirIndex, heroSwings } from './stealth';
 
 // ---------------------------------------------------------------- perception
 
@@ -107,13 +108,23 @@ export function exitsBy(c: Ctx, from: Pos): Pos[] {
   return [...c.w.exits].filter((e) => field.has(posKey(e))).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
 }
 
-/** Walk a figure along `path`. Returns true if caltrops stopped it short (monsters only). */
-export function walk(c: Ctx, id: string, at: { at: Pos }, path: Pos[]): boolean {
+/**
+ * Walk a figure along `path`. Returns true if it was stopped short: caltrops (monsters only), or a
+ * hero's free swing killed it (spec 20.2: leaving a hero's side with their action ready). It faces
+ * the way it last stepped (spec 20.1).
+ */
+export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path: Pos[]): boolean {
   if (!path.length) return false;
   const seg: Pos[] = [];
   let from = at.at;
   const isMonster = c.d.monsters.some((m) => m.id === id);
   for (const p of path) {
+    if (p.level === from.level && !samePos(p, from)) at.facing = dirIndex(from, p);
+    if (heroSwings(c, id, from, p)) {
+      if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
+      at.at = { ...from };
+      return true;
+    }
     if (isMonster && c.d.caltrops.includes(posKey(p))) {
       // Caltrops: 2 damage, the walk ends here (spec 15.4).
       c.d.caltrops = c.d.caltrops.filter((k) => k !== posKey(p));
@@ -156,6 +167,11 @@ export function guardFor(c: Ctx, targetId: string): HeroInDelve | undefined {
 
 /** An attack on a hero or the prisoner. Returns the id that was hit (after guard), or null on a miss. */
 export function strike(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): string | null {
+  return strikeDetailed(c, attacker, targetId, slots, p, dmg, what).hit;
+}
+
+/** `strike` with the roll's hits and the damage dealt (free swings report them, spec 20.2). */
+export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): { hit: string | null; hits: number; damage: number } {
   let tid = targetId;
   const g = guardFor(c, tid);
   if (g) {
@@ -165,14 +181,14 @@ export function strike(c: Ctx, attacker: string, targetId: string, slots: number
   const r = roll(c, attacker, what, slots, p);
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: tid });
-    return null;
+    return { hit: null, hits: 0, damage: 0 };
   }
   const h = hd(c, tid);
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
   const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h)) + (r.perfect ? 1 : 0);
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
-  return tid;
+  return { hit: tid, hits: r.hits, damage: total };
 }
 
 // ---------------------------------------------------------------- overwatch (Ranger, spec 15.3)

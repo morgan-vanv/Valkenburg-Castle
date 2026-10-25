@@ -18,6 +18,7 @@ import { pick, random, shuffle } from './rng';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
+import { isSatchel, satchelName } from './charges';
 import { canEnter, kindAt, type World } from './world';
 
 export interface ContractX extends Contract {
@@ -64,6 +65,7 @@ export function newGame(w: World, seed: number): GameStateX {
       litBraziers: [],
       lostGear: [],
       village: newVillage(),
+      captives: [], // V3.7 (spec 20.4): filled by the crews rework
     },
     delve: null,
     summary: null,
@@ -507,10 +509,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       ward: 0,
       ...(ale ? { ale } : {}),
     };
-    // Sappers bring two free charges (spec 15.3), on top of what fits.
-    if (h.cls === 'sapper') {
-      for (let i = 0; i < SAPPER_CHARGES && packUsed(hid.pack) < PACK_SLOTS; i++) hid.pack.push(makeItem({ s }, 'charge', 1, 'Blasting charge'));
-    }
+    // V3.7 (spec 20.3): the Sapper's satchel: 3 charges in one slotless pack item; bought charges add to them.
+    if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -550,6 +550,8 @@ export function spawnMonster(sp: SpawnDef, id: string): MonsterX {
     maxHp: hp,
     awareness,
     spawnedAt: { ...sp.at },
+    // V3.7 (spec 20.1): sleepers face where the map put them; default 0 (east). `facing` on SpawnDef is a contract request.
+    facing: (sp as SpawnDef & { facing?: number }).facing ?? 0,
   };
   if (tier > 1) m.tier = tier;
   if (patrol) {
@@ -640,6 +642,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
       if (it.story) continue; // spec 18.3: to the village, below
+      if (isSatchel(it)) continue; // spec 20.3: the satchel refills each delve
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
     }
@@ -671,7 +674,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard');
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isSatchel(i));
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;

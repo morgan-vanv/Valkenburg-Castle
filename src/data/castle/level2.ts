@@ -72,6 +72,9 @@ export function buildLevel2(): LevelBuilder {
   b.prop(38, 24, 'rack');
   b.prop(32, 28, 'barrel');
 
+  // V3.7 (spec 20.3): the stair's landing (guard post) and the lift shaft (winch room) can't be blown into.
+  b.unbreakableAround('guard', 'winch');
+
   // Railing: the arcade's pit side, broken at (28, 7) and (15, 14).
   b.railing([[26, 7], [27, 7], [29, 7], [30, 7], [31, 7], [15, 13], [15, 15]]);
 
