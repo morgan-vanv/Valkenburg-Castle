@@ -242,7 +242,7 @@ export class App {
     const res = this.engine.apply(this.engine.newGame(seed), { type: 'newCampaign', seed });
     const s = res.error ? this.engine.newGame(seed) : res.state;
     this.state = s;
-    this.station = this.needsHire(s) ? 'tavern' : 'board';
+    this.station = 'board'; // V3.7.1 (21.1): Keven may go alone; the campfire is a suggestion, not a gate
     this.loadout = null;
     this.wonBack = [];
     sfx.play('horn', { pitch: 0.8, gain: 0.5 });
@@ -294,7 +294,7 @@ export class App {
     const host = this.host();
     switch (s.stage) {
       case 'camp':
-        if (stageChanged && !this.wonBack.length) this.station = this.needsHire(s) ? 'tavern' : 'board';
+        if (stageChanged && !this.wonBack.length) this.station = 'board';
         host.station = this.station;
         return campScreen(this.screen, s, host);
       case 'summary':
@@ -746,11 +746,6 @@ export class App {
       }
     }
     if (panned) this.returnToSelected();
-  }
-
-  /** Keven alone (15.3): the camp opens on the campfire. */
-  private needsHire(s: GameState): boolean {
-    return !s.campaign.roster.some((x) => x.cls !== 'heir' && x.wounded === 0);
   }
 
   /** Where the camera should go for a world-phase event, or null when nobody can see it. */

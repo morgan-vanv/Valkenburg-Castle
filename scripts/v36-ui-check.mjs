@@ -48,8 +48,8 @@ await p.waitForTimeout(120);
 const rows = await p.$$eval('.shop-row', (els) => els.map((e) => ({ kind: e.dataset.kind, text: e.innerText, locked: e.classList.contains('locked') })));
 const picks = rows.find((r) => r.kind === 'lockpicks');
 const night = rows.find((r) => r.kind === 'nightsight');
-check('peddler lists lockpicks with the 19.2 text, needing the smith', !!picks && /Reusable\. Anyone carrying them can Pick a lock: 2 Finesse slots\. Burglars don't need them\./.test(picks.text) && picks.locked, picks?.text.slice(0, 60));
-check('peddler lists the night-eye draught with the 19.3 text', !!night && /Drink: 8 rounds without dark penalties to your sight or rolls\. The dark still hides you from nothing, and the Gloam still comes\./.test(night.text) && !night.locked, night?.text.slice(0, 60));
+check('peddler lists lockpicks with the 21.4 text, needing the smith', !!picks && /Proper picks, never used up\. A Burglar picks at 3 Finesse slots, anyone else at 2\./.test(picks.text) && picks.locked, picks?.text.slice(0, 60));
+check('peddler lists the night-eye draught locked: brewed at the Flagon (21.3)', !!night && /Drink: 8 rounds without dark penalties/.test(night.text) && night.locked && /Brewed at the Gilded Flagon: rescue Old Wim/.test(night.text), night?.text.slice(0, 90));
 
 // ---- into the castle (the real engine starts Keven alone: hire until the party is big enough)
 await p.evaluate(async () => {
@@ -158,12 +158,12 @@ const lockedDoor = await p.evaluate(() => {
 if (lockedDoor) {
   await edit(`s.delve.explored.push(a);`, `${lockedDoor.level}:${lockedDoor.q},${lockedDoor.r}`);
   const classes = await p.evaluate(() => Object.fromEntries(window.vc.state().campaign.roster.map((h) => [h.id, h.cls])));
-  const noPicks = d1.heroes.find((x) => x.status === 'active' && !x.pack.some((i) => i.kind === 'lockpicks') && classes[x.heroId] !== 'burglar');
+  const noPicks = d1.heroes.find((x) => x.status === 'active' && !x.pack.some((i) => i.kind === 'lockpicks' || i.kind === 'improvised') && classes[x.heroId] !== 'burglar');
   if (noPicks) {
     await p.evaluate((id) => window.vc.hud.select(id), noPicks.heroId);
     await p.waitForTimeout(100);
     tip = await hoverTip(lockedDoor);
-    check('locked door hover for a hero without picks: "Smash it ..., or a Burglar or lockpicks could pick it"', /Locked door/.test(tip) && /Smash it.*or a Burglar or lockpicks could pick it/.test(tip), tip.slice(0, 120));
+    check('locked door hover for a hero without picks: "Smash it ..., or pick it with lockpicks"', /Locked door/.test(tip) && /Smash it.*or pick it with lockpicks/.test(tip), tip.slice(0, 120));
   } else console.log('skip: everyone active is a Burglar or carries lockpicks');
   const withPicks = d1.heroes.find((x) => x.pack.some((i) => i.kind === 'lockpicks'));
   if (withPicks) {

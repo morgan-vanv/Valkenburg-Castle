@@ -99,9 +99,9 @@ const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
 
 describe('camp', () => {
-  it('new game: 120 gold, Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
+  it('new game: 90 gold (V3.7.1), Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
     const s = e.newGame(7);
-    expect(s.campaign.gold).toBe(120);
+    expect(s.campaign.gold).toBe(90);
     expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
     expect(s.campaign.roster.map((h) => h.id)).toEqual(['keven']);
     expect(s.campaign.board).toHaveLength(2); // the test castle has only 2 sites
@@ -132,7 +132,7 @@ describe('camp', () => {
   it('buys, hires, refuses when poor', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
-    expect(s.campaign.gold).toBe(100);
+    expect(s.campaign.gold).toBe(70);
     expect(s.campaign.stash.map((i) => i.kind)).toEqual(['potion']);
     s.campaign.gold = 5;
     const r = e.apply(s, { type: 'buy', kind: 'charge' });
@@ -140,13 +140,15 @@ describe('camp', () => {
     expect(r.state).toBe(s);
   });
 
-  it('two level-1 hires spend the starting purse; one leaves room for cheap gear only (17.1)', () => {
+  it('the starting purse buys one level-1 hire and an item or two, not a second hire (21.2)', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
-    expect(s.campaign.gold).toBe(60);
-    s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
-    expect(s.campaign.gold).toBe(0);
-    expect(e.apply(s, { type: 'buy', kind: 'torch' }).error).toBeTruthy();
+    expect(s.campaign.gold).toBe(30);
+    expect(e.apply(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).error).toBe('Not enough gold.');
+    s = ok(s, { type: 'buy', kind: 'torch' }).state;
+    s = ok(s, { type: 'buy', kind: 'rope' }).state;
+    expect(s.campaign.gold).toBe(5);
+    expect(e.apply(s, { type: 'buy', kind: 'firecracker' }).error).toBeTruthy();
   });
 
   it('HP carries over between delves; the infirmary heals 3 gold per HP, as far as the gold goes (17.2)', () => {
@@ -427,6 +429,7 @@ describe('locks', () => {
   function setup() {
     const s = delve();
     put(s, 'pim', at(1, 12, 3));
+    give(s, 'pim', 'lockpicks'); // V3.7.1: 3 slots needs the smith's picks
     return s;
   }
   it('pick, 3 hits: opens silently', () => {
@@ -1548,7 +1551,7 @@ describe('15.4 quartermaster', () => {
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
-    expect(s.campaign.gold).toBe(110);
+    expect(s.campaign.gold).toBe(80);
     expect(s.campaign.stash[0]!.kind).toBe('firecracker');
   });
 
@@ -1699,6 +1702,7 @@ describe('15.7 take never fails silently', () => {
     const s = v32({ heroes: ['pim'], kind: 'recover' });
     const site = at(1, 5, 3);
     put(s, 'pim', site);
+    hero(s, 'pim').pack = hero(s, 'pim').pack.filter((i) => i.kind !== 'improvised');
     for (let i = 0; i < 4; i++) give(s, 'pim', 'torch');
     s.delve!.ground.find((g) => samePos(g.at, site))!.items.push({ id: 'g1', kind: 'gold', name: '30 gold', amount: 30, slots: 1 });
     const o = option(s, 'pim', 'take')!;
@@ -2387,13 +2391,14 @@ describe('V3.5', () => {
       expect(se.apply(s, { type: 'upgrade', heroId: 'brann', part: 'weapon' }).error).toBe('The forge is cold. Rescue Gerda the smith (Level 2, the forge).');
       for (const k of ['caltrops', 'hook', 'key', 'lockpicks'] as const) expect(se.apply(s, { type: 'buy', kind: k }).error).toMatch(/Gerda/);
       expect(se.apply(s, { type: 'buy', kind: 'torch' }).error).toBeUndefined();
-      expect(se.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBeUndefined();
+      expect(se.apply(s, { type: 'buy', kind: 'nightsight' }).error).toMatch(/Gilded Flagon.*Old Wim/);
       const shop = se.shop(s);
-      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['caltrops', 'hook', 'key', 'lockpicks']);
+      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['caltrops', 'hook', 'key', 'lockpicks', 'nightsight']);
       expect(shop.find((o) => o.kind === 'key')!.needs).toBe('smith');
       expect(se.shop().some((o) => o.locked)).toBe(false);
       s.campaign.village.smith = true;
       s.campaign.village.surgeon = true;
+      s.campaign.village.innkeeper = true;
       expect(se.shop(s).some((o) => o.locked)).toBe(false);
       expect(se.apply(s, { type: 'upgrade', heroId: 'brann', part: 'weapon' }).error).toBeUndefined();
       expect(se.apply(s, { type: 'buy', kind: 'key' }).error).toBeUndefined();
@@ -2448,7 +2453,7 @@ describe('V3.5', () => {
       expect(r.events.some((x) => x.type === 'say' && /infirmary is open/.test(x.text))).toBe(true);
       expect(r.state.campaign.board.some((k) => k.story === 'surgeon')).toBe(false);
       expect(r.state.campaign.reputation).toBe(1);
-      expect(r.state.campaign.gold).toBe(120 + 40);
+      expect(r.state.campaign.gold).toBe(90 + 40);
     });
 
     it('the brewing copper: 2 slots, heavy (its carrier moves 3, dash too), value 0; carried out it goes to the village', () => {
@@ -2493,7 +2498,7 @@ describe('V3.5', () => {
       expect(se.ales(s).find((a) => a.kind === 'smuggler')!.locked).toMatch(/cask book/);
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'smuggler' }).error).toMatch(/cask book/);
       s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'reserve' }).state;
-      expect(s.campaign.gold).toBe(100);
+      expect(s.campaign.gold).toBe(70);
       expect(s.campaign.roster.find((h) => h.id === 'brann')!.ale).toBe('reserve');
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'glowworm' }).error).toMatch(/already/);
       s = sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann', 'keven'], entrance: 0, packs: {} }).state;
@@ -2914,7 +2919,7 @@ describe('V3.6', () => {
       const s = delve({ heroes: ['brann'] });
       put(s, 'brann', at(1, 12, 3));
       const o = option(s, 'brann', 'pick')!;
-      expect(o.blocked).toBe('Locked · Smash it, or a Burglar or lockpicks could pick it.');
+      expect(o.blocked).toBe('Locked · Smash it, or pick it with lockpicks');
       expect(o.targets.some((t) => samePos(t.at!, door))).toBe(true);
       expect(e.preview(s, 'brann', 'pick', { at: door }).ok).toBe(false);
       expect(option(s, 'brann', 'smash')).toBeTruthy();
@@ -3127,28 +3132,30 @@ describe('V3.7 stealth and swings', () => {
   });
 
   describe('20.1 noticing', () => {
-    it('lit: walking 6, sneaking 4; unlit: walking 3, sneaking 1; a `noticed` event, then hunting', () => {
-      const check = (col: number, lit: boolean, sneak: boolean) => {
+    it('lit: walking 8 (V3.7.1), sneaking 4; unlit: walking 5 (V3.7.1), sneaking 1; a `noticed` event, then hunting', () => {
+      const check = (col: number, lit: boolean, sneak: boolean, mcol = 13) => {
         const s = stealthDelve({ lit });
         put(s, 'brann', at(2, col, 1));
         sneaking(s, 'brann', sneak);
-        const m = monster(s, 'orc', at(2, 13, 1), 'alert');
+        const m = monster(s, 'orc', at(2, mcol, 1), 'alert');
         const r = ok(s, { type: 'endTurn' });
         const seen = mon(r.state, m.id).awareness === 'hunting';
         expect(noticedBy(r, m.id, 'brann')).toBe(seen);
         if (seen) expect(mon(r.state, m.id).noticedIds).toContain('brann');
         return seen;
       };
-      expect(check(7, true, false)).toBe(true); // 6
+      expect(check(10, true, false, 18)).toBe(true); // 8 (the wall at (6,1) is in the way further west)
+      expect(check(9, true, false, 18)).toBe(false); // 9
       expect(check(8, true, true)).toBe(false); // 5
       expect(check(9, true, true)).toBe(true); // 4
-      expect(check(9, false, false)).toBe(false); // 4 unlit
-      expect(check(10, false, false)).toBe(true); // 3
+      expect(check(7, false, false)).toBe(false); // 6 unlit
+      expect(check(8, false, false)).toBe(true); // 5
+      expect(check(10, false, true)).toBe(false); // 3, sneaking
       expect(check(11, false, true)).toBe(false); // 2
       expect(check(12, false, true)).toBe(true); // 1
     });
 
-    it('in the Hollow light does not matter: walking 6, sneaking 3', () => {
+    it('in the Hollow light does not matter: walking 8 (V3.7.1), sneaking 3', () => {
       const check = (col: number, sneak: boolean) => {
         const s = stealthDelve();
         put(s, 'brann', at(3, col, 4));
@@ -3156,8 +3163,8 @@ describe('V3.7 stealth and swings', () => {
         const m = monster(s, 'rats', at(3, 2, 4), 'alert');
         return mon(ok(s, { type: 'endTurn' }).state, m.id).awareness === 'hunting';
       };
-      expect(check(8, false)).toBe(true);
-      expect(check(9, false)).toBe(false);
+      expect(check(10, false)).toBe(true);
+      expect(check(11, false)).toBe(false);
       expect(check(5, true)).toBe(true);
       expect(check(6, true)).toBe(false);
     });
@@ -3208,8 +3215,8 @@ describe('V3.7 stealth and swings', () => {
         (m as MonsterX).facing = 3; // looking west: the blind arc is the east side (dirs 0, 1, 5)
         return mon(ok(s, { type: 'endTurn' }).state, m.id).awareness === 'hunting';
       };
-      expect(check(16, 1, false)).toBe(true); // 3 behind, lit, walking: half of 6
-      expect(check(17, 1, false)).toBe(false); // 4 behind
+      expect(check(17, 1, false)).toBe(true); // 4 behind, lit, walking: half of 8
+      expect(check(18, 1, false)).toBe(false); // 5 behind
       expect(check(15, 2, true)).toBe(false); // 2 behind, sneaking
       expect(check(14, 2, true)).toBe(true); // adjacent, back-side neighbour, sneaking
       expect(check(14, 1, true)).toBe(false); // directly behind: never
@@ -4257,5 +4264,115 @@ describe('V3.7 kit and calm', () => {
 
   it('CALM_STEPS is 4', () => {
     expect(CALM_STEPS).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------- V3.7.1 (spec section 21)
+
+describe('V3.7.1', () => {
+  it('21.1 Keven alone may start a delve from a new game', () => {
+    const s = e.newGame(4);
+    expect(e.partyProblem(s, ['keven'])).toBeNull();
+    expect(ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['keven'], entrance: 0, packs: {} }).state.stage).toBe('delve');
+  });
+
+  it('21.3 night-eye: locked at the peddler until Old Wim is home, then bought into the stash', () => {
+    const s = e.newGame(4);
+    s.campaign.gold = 100;
+    const o = e.shop(s).find((x) => x.kind === 'nightsight')!;
+    expect(o.needs).toBe('innkeeper');
+    expect(o.locked).toBe('Brewed at the Gilded Flagon: rescue Old Wim (Level 1, the kitchens).');
+    expect(e.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBe(o.locked);
+    s.campaign.village.innkeeper = true;
+    expect(e.shop(s).find((x) => x.kind === 'nightsight')!.locked).toBeUndefined();
+    const r = ok(s, { type: 'buy', kind: 'nightsight' }).state;
+    expect(r.campaign.gold).toBe(70);
+    expect(r.campaign.stash.map((i) => i.kind)).toEqual(['nightsight']);
+  });
+
+  describe('21.4 lockpicks', () => {
+    const door = at(1, 13, 3);
+    const pimAtDoor = () => {
+      const s = delve({ heroes: ['pim', 'brann'] });
+      put(s, 'pim', at(1, 12, 3));
+      return s;
+    };
+
+    it('every Burglar starts with one improvised pick outside the 4 slots; nobody else does', () => {
+      const s = delve();
+      const imp = hero(s, 'pim').pack.filter((i) => i.kind === 'improvised');
+      expect(imp).toHaveLength(1);
+      expect(imp[0]).toMatchObject({ slots: 0, name: 'Improvised pick' });
+      for (const id of ['keven', 'brann', 'aldous']) expect(hero(s, id).pack.some((i) => i.kind === 'improvised')).toBe(false);
+      // Not dropped or given.
+      expect(option(s, 'pim', 'drop')?.targets.some((t) => t.itemId === imp[0]!.id) ?? false).toBe(false);
+    });
+
+    it('the improvised pick: 2 slots, used up whatever the result; then Pick is blocked with the fix', () => {
+      const s = pimAtDoor();
+      const pv = e.preview(s, 'pim', 'pick', { at: door });
+      expect(pv.slots).toBe(2);
+      expect(pv.modifiers).toContain('Improvised pick: 2 slots, used up');
+      expect(pv.outcomes).toEqual(['Lock jams', 'Opens, noise 2', 'Opens silently']);
+      const cmd: Command = { type: 'act', heroId: 'pim', action: 'pick', target: { at: door }, focus: 0 };
+      for (const hits of [0, 1, 2]) {
+        const r = until(s, cmd, (ev) => rolls(ev)[0]!.hits === hits);
+        expect(hero(r.state, 'pim').pack.some((i) => i.kind === 'improvised')).toBe(false);
+        expect(r.events.some((x) => x.type === 'say' && /improvised pick is spent/.test(x.text))).toBe(true);
+        expect(r.state.delve!.doors[posKey(door)]!.open).toBe(hits > 0);
+      }
+      // Spent, next to another lock: blocked with the Burglar's line.
+      const r = until(s, cmd, (ev) => rolls(ev)[0]!.hits === 0);
+      const t = structuredClone(r.state);
+      hero(t, 'pim').acted = false;
+      put(t, 'pim', at(1, 16, 1)); // next to the locked chest
+      const o = option(t, 'pim', 'pick')!;
+      expect(o.blocked).toBe('Your improvised pick is spent. Smash it, or buy lockpicks from Gerda.');
+      expect(e.preview(t, 'pim', 'pick', { at: at(1, 17, 1) }).ok).toBe(false);
+      expect(option(t, 'pim', 'smash')).toBeTruthy();
+    });
+
+    it('a Burglar with proper lockpicks picks at 3 slots and keeps both; anyone else with them at 2', () => {
+      const s = pimAtDoor();
+      give(s, 'pim', 'lockpicks');
+      const pv = e.preview(s, 'pim', 'pick', { at: door });
+      expect(pv.slots).toBe(3);
+      expect(pv.modifiers).toContain('Lockpicks: 3 slots');
+      const r = act(s, 'pim', 'pick', { at: door }, 3);
+      expect(r.state.delve!.doors[posKey(door)]!.open).toBe(true);
+      expect(hero(r.state, 'pim').pack.map((i) => i.kind).sort()).toEqual(['improvised', 'lockpicks']);
+      const b = delve({ heroes: ['brann'] });
+      put(b, 'brann', at(1, 12, 3));
+      give(b, 'brann', 'lockpicks');
+      expect(e.preview(b, 'brann', 'pick', { at: door }).slots).toBe(2);
+    });
+
+    it('the improvised pick is not banked: back in camp it is gone, and the next delve brings a fresh one', () => {
+      let s = delve({ heroes: ['pim'] });
+      put(s, 'pim', at(1, 18, 7));
+      s = act(s, 'pim', 'leave', {}).state;
+      s = ok(s, { type: 'backToCamp' }).state;
+      expect(s.campaign.stash.some((i) => i.kind === 'improvised')).toBe(false);
+      s = ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['pim'], entrance: 0, packs: {} }).state;
+      expect(hero(s, 'pim').pack.filter((i) => i.kind === 'improvised')).toHaveLength(1);
+    });
+
+    it('the smith sells lockpicks for 25', () => {
+      expect(e.shop().find((o) => o.kind === 'lockpicks')).toMatchObject({ price: 25, needs: 'smith' });
+    });
+  });
+
+  it('21.5 walking ranges +2: lit 8, unlit 5, Hollow 8; sneaking unchanged', () => {
+    const s = delve({ heroes: ['brann'] });
+    const c = ctx(s);
+    const lit = new Set<string>([posKey(at(2, 10, 1)), posKey(at(2, 9, 1))]);
+    const f = { at: at(2, 18, 1) };
+    expect(wouldNotice(c, f, at(2, 10, 1), false, lit)).toBe(true); // lit, 8
+    expect(wouldNotice(c, f, at(2, 9, 1), false, lit)).toBe(false); // lit, 9
+    expect(wouldNotice(c, f, at(2, 10, 1), true, lit)).toBe(false); // lit sneaking, 8
+    expect(wouldNotice(c, f, at(2, 13, 1), false, new Set())).toBe(true); // unlit, 5
+    expect(wouldNotice(c, f, at(2, 12, 1), false, new Set())).toBe(false); // unlit, 6
+    expect(wouldNotice(c, f, at(2, 17, 1), true, new Set())).toBe(true); // unlit sneaking, 1
+    expect(wouldNotice(c, f, at(2, 16, 1), true, new Set())).toBe(false); // unlit sneaking, 2
   });
 });

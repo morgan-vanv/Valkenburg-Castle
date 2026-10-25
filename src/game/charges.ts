@@ -26,6 +26,11 @@ export function isSatchel(i: Item): boolean {
   return i.kind === 'charge' && i.slots === 0;
 }
 
+/** Per-delve kit outside the slots: the satchel (20.3) and the Burglar's improvised pick (21.4). Not dropped, given or banked. */
+export function isKit(i: Item): boolean {
+  return isSatchel(i) || i.kind === 'improvised';
+}
+
 export function satchelName(n: number): string {
   return `Satchel: ${n} charge${n === 1 ? '' : 's'}`;
 }

@@ -155,7 +155,7 @@ export function fixtureDelve(castle: CastleDef): GameState {
     at: spots[i]!,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
-    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i15', 'charge', 'Satchel: 3 charges', 3, 0), item('i14', 'lockpicks', 'Lockpicks'), item('i16', 'torch', 'Torch')] : [],
+    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }, item('i17', 'improvised', 'Improvised pick', 1, 0)] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i15', 'charge', 'Satchel: 3 charges', 3, 0), item('i14', 'lockpicks', 'Lockpicks'), item('i16', 'torch', 'Torch')] : [],
     nightEyes: id === 'brann' ? 5 : undefined,
     ale: id === 'keven' ? ('reserve' as const) : id === 'pim' ? ('smuggler' as const) : undefined,
     status: 'active' as const,
@@ -327,10 +327,16 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
     { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
     { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
-    { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Reusable. Anyone carrying them can Pick a lock: 2 Finesse slots.', needs: 'smith' },
-    { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink: 8 rounds without dark penalties.' },
+    { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.', needs: 'smith' },
+    { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink: 8 rounds without dark penalties.', needs: 'innkeeper' },
   ];
-  const shopFor = (s?: GameState): ShopOffer[] => shop.map((o) => (o.needs === 'smith' && !s?.campaign.village?.smith ? { ...o, locked: 'Needs a smith: rescue Gerda (Level 2, the forge).' } : o));
+  const shopFor = (s?: GameState): ShopOffer[] =>
+    shop.map((o) =>
+      !s ? o
+      : o.needs === 'smith' && !s.campaign.village?.smith ? { ...o, locked: 'Needs a smith: rescue Gerda (Level 2, the forge).' }
+      : o.needs === 'innkeeper' && !s.campaign.village?.innkeeper ? { ...o, locked: 'Brewed at the Gilded Flagon: rescue Old Wim (Level 1, the kitchens).' }
+      : o,
+    );
   const ALES: Omit<AleOffer, 'locked'>[] = [
     { kind: 'glowworm', name: 'Glowworm Pale', price: 15, text: 'Shed light radius 1 for the delve.', needs: 'copper' },
     { kind: 'featherfoot', name: 'Featherfoot', price: 15, text: 'Your first fall deals no damage.', needs: 'copper' },

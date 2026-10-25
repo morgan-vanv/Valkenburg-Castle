@@ -1,7 +1,7 @@
 // Full-screen pages: title, camp (stations), prepare delve, summary, game over.
 
 import type { Engine } from '../game/api';
-import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, StoryId, Village } from '../game/types';
+import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
 import { HEAL_PER_HP } from '../game/data';
@@ -134,7 +134,7 @@ export function campScreen(el: HTMLElement, s: GameState, host: ScreenHost): voi
       h(
         'button',
         {
-          class: `station st-${st.id} ${host.station === st.id ? 'on' : ''} ${st.id === 'tavern' && needsHire(s) ? 'call' : ''} ${cold ? 'locked' : st.locked ? 'partial' : ''} ${lit ? 'won' : ''}`,
+          class: `station st-${st.id} ${host.station === st.id ? 'on' : ''} ${st.id === 'tavern' && kevenAlone(s) ? 'call' : ''} ${cold ? 'locked' : st.locked ? 'partial' : ''} ${lit ? 'won' : ''}`,
           'data-station': st.id,
           title: st.locked ? `${st.name} · ${st.locked}` : `${st.name} · ${st.blurb}`,
           onclick: () => host.setStation(st.id),
@@ -322,8 +322,8 @@ function classBadge(cls: string): HTMLElement {
   return h('span', { class: `cbadge cls-${cls}`, title: className(cls) }, classGlyph(cls));
 }
 
-/** Keven alone: the squad needs hiring before the first delve. */
-function needsHire(s: GameState): boolean {
+/** Keven alone: hiring is suggested (the campfire glows), never forced (spec 21.1). */
+function kevenAlone(s: GameState): boolean {
   return !s.campaign.roster.some((x) => x.cls !== 'heir');
 }
 
@@ -366,15 +366,16 @@ function stationHead(title: string, text: string): HTMLElement {
 
 function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   el.append(stationHead('Notice post', 'Jobs nailed to the post. Bounties pay only if the prize comes out with you.'));
-  const hire = needsHire(s);
-  if (hire)
+  // V3.7.1 (21.1): Keven may go alone. A hint, not a gate.
+  const hire = false;
+  if (kevenAlone(s))
     el.append(
       h(
         'div',
-        { class: 'hire-first' },
-        h('b', null, 'Hire at least one hero'),
-        h('span', null, ` Keven will not go in alone. Find hands at the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'} first.`),
-        h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, `Go to the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'}`),
+        { class: 'hire-hint' },
+        h('b', null, 'Keven stands alone'),
+        h('span', null, ` He can go in by himself, but if he falls, it's over. Hands wait at the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'}.`),
+        h('button', { class: 'btn btn-small', onclick: () => host.setStation('tavern') }, `Go to the ${villageOf(s).innkeeper ? 'Flagon' : 'campfire'}`),
       ),
     );
   // V3.7 (20.4): "Bring back <name>" jobs for captives come first, with their own seal.
@@ -452,35 +453,38 @@ function contractCard(k: Contract, host: ScreenHost, locked = false, captive?: C
 
 // ---- quartermaster
 
+/** One row of goods bought into the stash (the peddler's, and Wim's draughts at the Flagon). */
+function shopRow(o: ShopOffer, s: GameState, host: ScreenHost): HTMLElement {
+  const have = s.campaign.stash.filter((i) => i.kind === o.kind).length;
+  return h(
+    'div',
+    { class: `shop-row ${o.locked ? 'locked' : ''}`, 'data-kind': o.kind },
+    h('span', { class: 'shop-glyph' }, itemGlyph(o.kind)),
+    h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, ITEM_EFFECT[itemBase(o.kind)] ?? o.text), o.locked ? h('div', { class: 'lock-why small' }, `⚿ ${o.locked}`) : ''),
+    h('span', { class: 'dim small' }, `On the cart: ${have}`),
+    h(
+      'button',
+      {
+        class: 'btn btn-small',
+        disabled: !!o.locked || s.campaign.gold < o.price,
+        title: o.locked ?? (s.campaign.gold < o.price ? `You have ${s.campaign.gold} gold.` : ''),
+        onclick: async () => {
+          if (await host.send({ type: 'buy', kind: o.kind })) sfx.play('coin');
+        },
+      },
+      `Buy · ${o.price}`,
+    ),
+  );
+}
+
 function shopStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   el.append(stationHead('Peddler', "A pedlar's cart by the gate. Bought goods go on Keven's cart; give them out when you prepare a delve."));
   const offers = host.engine.shop(s);
   if (!villageOf(s).smith) lockNote(el, s, host, 'No metalwork without a smith. Caltrops, hooks and keys wait for Gerda.', 'smith');
   const list = h('div', { class: 'shop' });
-  for (const o of [...offers.filter((x) => !x.locked), ...offers.filter((x) => x.locked)]) {
-    const have = s.campaign.stash.filter((i) => i.kind === o.kind).length;
-    list.append(
-      h(
-        'div',
-        { class: `shop-row ${o.locked ? 'locked' : ''}`, 'data-kind': o.kind },
-        h('span', { class: 'shop-glyph' }, itemGlyph(o.kind)),
-        h('div', null, h('b', null, o.name), h('div', { class: 'dim small' }, ITEM_EFFECT[itemBase(o.kind)] ?? o.text), o.locked ? h('div', { class: 'lock-why small' }, `⚿ ${o.locked}`) : ''),
-        h('span', { class: 'dim small' }, `On the cart: ${have}`),
-        h(
-          'button',
-          {
-            class: 'btn btn-small',
-            disabled: !!o.locked || s.campaign.gold < o.price,
-            title: o.locked ?? (s.campaign.gold < o.price ? `You have ${s.campaign.gold} gold.` : ''),
-            onclick: async () => {
-              if (await host.send({ type: 'buy', kind: o.kind })) sfx.play('coin');
-            },
-          },
-          `Buy · ${o.price}`,
-        ),
-      ),
-    );
-  }
+  // V3.7.1 (21.3): the night-eye draught is Wim's: listed here only while locked, then at the Flagon.
+  const here = offers.filter((x) => x.needs !== 'innkeeper' || x.locked);
+  for (const o of [...here.filter((x) => !x.locked), ...here.filter((x) => x.locked)]) list.append(shopRow(o, s, host));
   el.append(list);
 }
 
@@ -547,11 +551,11 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 // ---- tavern
 
 function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  const hire = needsHire(s);
+  const alone = kevenAlone(s);
   const v = villageOf(s);
   const flagon = v.innkeeper;
-  const sub = hire
-    ? `Keven can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.`
+  const sub = alone
+    ? `Keven can go in alone, but company shares the risk. You have ${gold(s.campaign.gold)} gold.`
     : flagon
       ? `Old Wim's regulars. Some have been inside before.${v.caskbook ? ' The old hands are back too.' : ''} Offers change after every delve.`
       : 'Three drifters warm their hands at the fire. All green, all cheap. Offers change after every delve.';
@@ -561,9 +565,21 @@ function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   if (!s.campaign.recruits.length) grid.append(h('p', { class: 'dim' }, 'Nobody looking for work. Come back after the next delve.'));
   for (const r of s.campaign.recruits) grid.append(recruitCard(r.hero, r.price, s, host));
   if (flagon) aleMenu(el, s, host);
+  if (flagon) draughtMenu(el, s, host);
   el.append(grid);
-  if (!hire)
-    el.append(h('div', { class: 'screen-actions' }, h('button', { class: 'btn', onclick: () => host.setStation('board') }, 'To the notice post')));
+  el.append(h('div', { class: 'screen-actions' }, h('button', { class: 'btn', onclick: () => host.setStation('board') }, 'To the notice post')));
+}
+
+/** V3.7.1 (21.3): Wim's draughts beside the ales: bought into the stash (Keven's cart), carried in a pack. */
+function draughtMenu(el: HTMLElement, s: GameState, host: ScreenHost): void {
+  const offers = host.engine.shop(s).filter((o) => o.needs === 'innkeeper');
+  if (!offers.length) return;
+  const box = h('div', { class: 'ale-menu draughts' });
+  box.append(h('div', { class: 'am-head' }, h('h3', null, 'From the still'), h('span', { class: 'dim small' }, "Bottled to go: it goes on Keven's cart; hand it out when you prepare a delve.")));
+  const list = h('div', { class: 'shop' });
+  for (const o of offers) list.append(shopRow(o, s, host));
+  box.append(list);
+  el.append(box);
 }
 
 /** Whose ale the Flagon pours next (kept between renders). */
@@ -903,7 +919,11 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     );
   }
   el.append(h('h3', { class: 'prep-h' }, `Party `, h('span', { class: 'dim small' }, `${l.heroIds.length}/4`)), party);
-  if (l.heroIds.includes('keven') || l.heroIds.some((id) => c.roster.find((x) => x.id === id)?.cls === 'heir')) {
+  const isHeir = (id: string) => id === 'keven' || c.roster.find((x) => x.id === id)?.cls === 'heir';
+  if (l.heroIds.length === 1 && isHeir(l.heroIds[0]!)) {
+    // V3.7.1 (21.1): a warning, not a block.
+    el.append(h('p', { class: 'warn-heir warn-alone' }, "⚠ Keven goes in alone. If he falls, it's over."));
+  } else if (l.heroIds.some(isHeir)) {
     el.append(h('p', { class: 'warn-heir' }, '⚠ If Keven dies, it is over. The campaign ends with him.'));
   }
 

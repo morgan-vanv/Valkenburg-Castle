@@ -6,7 +6,7 @@ import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } fro
 import type { ActionOption } from './api';
 import {
   HEAVY_MOVE, SMUGGLER_SNEAK, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
-  GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
+  BURGLAR_PICK_SLOTS, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
 } from './data';
 import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
@@ -21,7 +21,7 @@ import {
 } from './world';
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
-import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isSatchel, setFuse, spendCharge } from './charges';
+import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isKit, setFuse, spendCharge } from './charges';
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { capture, rivalCaltropsStep, striker } from './crewai';
@@ -491,8 +491,21 @@ function pickableAround(c: Ctx, h: HeroInDelve): ActionTarget[] {
   return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed; }).map((at) => ({ at }));
 }
 
-/** Spec 19.2: the reason a non-Burglar without lockpicks can't pick. */
-export const NO_PICK = 'Locked · Smash it, or a Burglar or lockpicks could pick it.';
+/** Spec 21.4: the reason a hero with no pick at all can't Pick. */
+export const NO_PICK = 'Locked · Smash it, or pick it with lockpicks';
+/** Spec 21.4: a Burglar whose improvised pick is spent. */
+export const PICK_SPENT = 'Your improvised pick is spent. Smash it, or buy lockpicks from Gerda.';
+
+/**
+ * Spec 21.4: what this hero picks with: the smith's lockpicks first (3 slots for a Burglar, 2 for
+ * anyone else, never used up), else the improvised pick (2 slots, used up); null with neither.
+ */
+export function pickTool(c: Ctx, h: HeroInDelve): { item: Item; slots: number; proper: boolean } | null {
+  const proper = itemOf(h, 'lockpicks');
+  if (proper) return { item: proper, slots: heroDef(c, h.heroId)?.cls === 'burglar' ? BURGLAR_PICK_SLOTS : LOCKPICK_SLOTS, proper: true };
+  const imp = itemOf(h, 'improvised');
+  return imp ? { item: imp, slots: LOCKPICK_SLOTS, proper: false } : null;
+}
 
 /** Every valid target for an action right now (ignores move/act flags). */
 export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTarget[] {
@@ -596,8 +609,8 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (!mage('pyromancer', 1)) return [];
       return enemiesInSight(c, h, 5);
     case 'pick':
-      // Spec 19.2: the Burglar's alone, unless the hero carries lockpicks.
-      if (cls !== 'burglar' && !itemOf(h, 'lockpicks')) return [];
+      // Spec 21.4: no pick, no Pick (the Burglar included).
+      if (!pickTool(c, h)) return [];
       return pickableAround(c, h);
     case 'smash':
       return aroundAndSelf(h.at).filter((p) => lockedThingAt(c, p)).map((at) => ({ at }));
@@ -619,13 +632,13 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       // Every pile in reach; a pile nothing can be taken from is a blocked target (spec 15.7).
       return c.d.ground.filter((g) => within(g.at, h.at, 1) && g.items.length).map((g) => ({ at: g.at }));
     case 'drop':
-      return h.pack.filter((i) => !isSatchel(i)).map((i) => ({ itemId: i.id }));
+      return h.pack.filter((i) => !isKit(i)).map((i) => ({ itemId: i.id }));
     case 'give': {
       const out: ActionTarget[] = [];
       for (const o of others) {
         if (o.status !== 'active' || !adjacent(o.at, h.at)) continue;
         const room = PACK_SLOTS - packUsed(o.pack);
-        for (const i of h.pack) if (!isSatchel(i) && (i.slots <= room || i.kind === 'gold')) out.push({ id: o.heroId, itemId: i.id });
+        for (const i of h.pack) if (!isKit(i) && (i.slots <= room || i.kind === 'gold')) out.push({ id: o.heroId, itemId: i.id });
       }
       return out;
     }
@@ -795,10 +808,10 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
     if (!canDo(h, a)) continue;
     const t = targetsFor(c, h, a);
     if (!t.length) {
-      // Spec 19.2: a locked thing in reach, and no way to pick it: the option says what would.
-      if (a === 'pick' && def?.cls !== 'burglar' && !itemOf(h, 'lockpicks')) {
+      // Spec 21.4: a locked thing in reach, and no pick to work it: the option says what would.
+      if (a === 'pick' && !pickTool(c, h)) {
         const locked = pickableAround(c, h);
-        if (locked.length) out.push({ action: a, label: LABELS[a], targets: locked, rolls: true, pick: PICK[a], blocked: NO_PICK });
+        if (locked.length) out.push({ action: a, label: LABELS[a], targets: locked, rolls: true, pick: PICK[a], blocked: def?.cls === 'burglar' ? PICK_SPENT : NO_PICK });
       }
       continue;
     }
@@ -1082,10 +1095,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return s;
     }
     case 'pick': {
-      if (def.cls === 'burglar') return base('finesse', 3, withLight(def.stats.finesse), ['Lock jams', 'Fails', 'Opens, noise 2', 'Opens silently'], 2);
-      // Spec 19.2: lockpicks: the Burglar's table on 2 slots.
-      mods.push(`Lockpicks: ${LOCKPICK_SLOTS} slots`);
-      return base('finesse', LOCKPICK_SLOTS, withLight(def.stats.finesse), ['Lock jams', 'Opens, noise 2', 'Opens silently'], 2);
+      // Spec 21.4: proper lockpicks (Burglar 3 slots, others 2) or the improvised pick (2, used up).
+      const tool = pickTool(c, h);
+      const slots = tool?.slots ?? LOCKPICK_SLOTS;
+      mods.push(tool && !tool.proper ? `Improvised pick: ${slots} slots, used up` : `Lockpicks: ${slots} slots`);
+      const outcomes = slots >= 3 ? ['Lock jams', 'Fails', 'Opens, noise 2', 'Opens silently'] : ['Lock jams', 'Opens, noise 2', 'Opens silently'];
+      return base('finesse', slots, withLight(def.stats.finesse), outcomes, 2);
     }
     case 'smash': {
       const l = lockedThingAt(c, t.at!)!;
@@ -1538,9 +1553,12 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'pick': {
+      const tool = pickTool(c, h);
       const r = doRoll();
       const at = t.at!;
       const l = lockedThingAt(c, at)!;
+      // Spec 21.4: the improvised pick is used up whatever the result.
+      if (tool && !tool.proper) h.pack.splice(h.pack.indexOf(tool.item), 1);
       // All slots: silent; one short: open with noise 2; one hit on 3 slots: holds; none: jams (spec 19.2 on 2 slots).
       if (r.hits >= sp.slots - 1) {
         unlockAt(c, at, heroId);
@@ -1553,6 +1571,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         else c.d.chests.find((x) => samePos(x.at, at) && !x.opened)!.jammed = true;
         say(c, `The pick snaps in the lock. It's jammed.`);
       }
+      if (tool && !tool.proper) say(c, `${name}'s improvised pick is spent.`);
       break;
     }
     case 'smash': {
