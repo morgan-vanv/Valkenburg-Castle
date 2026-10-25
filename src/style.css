@@ -3320,6 +3320,16 @@ input.seed {
   --fuse: #ff8a40;
 }
 
+/* overlay tags of this version sit in the fx layer like the unit tags */
+.risk,
+.fuse-tag,
+.blind-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
 /* 20.1: move-preview risk tags over the monsters */
 .risk {
   display: flex;

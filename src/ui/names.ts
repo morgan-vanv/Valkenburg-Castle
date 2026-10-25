@@ -660,7 +660,7 @@ export function aleNeeds(needs: 'copper' | 'caskbook'): string {
 }
 
 /** Rival crews (16.5, 18.5). */
-export const CREW: Record<CrewId | 'the-wake', { name: string; blurb: string; colour: string; level: number; tiers: string; where: string }> = {
+export const CREW: Record<CrewId, { name: string; blurb: string; colour: string; level: number; tiers: string; where: string }> = {
   'lantern-sisters': { name: 'The Lantern Sisters', blurb: 'Pale-robed prospectors with lanterns of their own.', colour: '#b8ad98', level: 2, tiers: 'weapon 1', where: 'Level 1' },
   ferrymen: { name: 'The Ferrymen', blurb: 'River toughs in blue-grey. They take a toll from anyone who crosses.', colour: '#7f97ad', level: 3, tiers: 'weapon 1, armor 1', where: 'Level 2' },
   'gallows-choir': { name: 'The Gallows Choir', blurb: 'Black and bone. They sing while they rob you.', colour: '#d8cfb8', level: 3, tiers: 'weapon 1, armor 1', where: 'Level 2' },

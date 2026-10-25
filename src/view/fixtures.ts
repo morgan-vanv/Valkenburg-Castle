@@ -46,12 +46,12 @@ export function fixtureCampaign(): GameState['campaign'] {
 }
 
 /** V3.7 (20.4): a hero carried off by a crew, with the "Bring back" contract pinned (fixture and checks). */
-export function fixtureCaptive(c: GameState['campaign'], heroId = 'pim', crew: CrewId | 'the-wake' = 'ferrymen'): void {
+export function fixtureCaptive(c: GameState['campaign'], heroId = 'pim', crew: CrewId = 'ferrymen'): void {
   const i = c.roster.findIndex((h) => h.id === heroId);
   if (i < 0) return;
   const [hero] = c.roster.splice(i, 1);
   const siteId = `${crew}-hideout`;
-  c.captives.push({ hero: hero!, crew: crew as CrewId, siteId, delve: c.delveCount });
+  c.captives.push({ hero: hero!, crew, siteId, delve: c.delveCount });
   c.board.push({ id: `rescue-${heroId}`, kind: 'rescue', title: `Bring back ${hero!.name}`, brief: `${hero!.name} was dragged off by ${crew === 'ferrymen' ? 'the Ferrymen' : crew === 'the-wake' ? 'the Wake' : 'a crew'}. They are held at the crew's hideout, alive for now.`, siteId, level: 2, bounty: 150, warnings: ['The Ferrymen', 'Held at HP 1'] });
 }
 
@@ -83,7 +83,7 @@ export function fixtureCrew(s: GameState, stance: RivalCrew['stance'] = 'demandi
   const face = (p: Pos) => facingToward(p, a);
   // V3.7 (20.4): members are built like heroes: level 3, weapon 1, armor 1, a 4-slot pack each.
   const members: Rival[] = [
-    { id: 'r1', crew: 'ferrymen', name: 'Brune', cls: 'sellsword', at: near(0, 0), hp: 12, maxHp: 12, loot: [gold(1)], goneOut: false, level: 3, weaponTier: 1, armorTier: 1, facing: face(near(0, 0)), pack: [item('rp1', 'potion', 'Potion'), item('rp2', 'glue', 'Glue bomb')], intent: stance === 'demanding' ? { kind: 'toll' } : hostile ? { kind: 'item', to: a, hexes: [a, ...posNeighbors(a)] } as Intent : undefined },
+    { id: 'r1', crew: 'ferrymen', name: 'Brune', cls: 'sellsword', at: near(0, 0), hp: 12, maxHp: 12, loot: [gold(1)], goneOut: false, level: 3, weaponTier: 1, armorTier: 1, facing: face(near(0, 0)), pack: [item('rp1', 'potion', 'Potion'), item('rp2', 'glue', 'Glue bomb')], intent: stance === 'demanding' ? { kind: 'toll' } : hostile ? { kind: 'item', item: 'glue', to: a, hexes: [a, ...posNeighbors(a)] } : undefined },
     { id: 'r2', crew: 'ferrymen', name: 'Osk', cls: 'ranger', at: near(0, 1), hp: 9, maxHp: 9, loot: [gold(2)], goneOut: false, level: 3, weaponTier: 1, armorTier: 1, facing: face(near(0, 1)), pack: [item('rp3', 'caltrops', 'Caltrops'), item('rp4', 'caltrops', 'Caltrops'), item('rp5', 'potion', 'Potion')], intent: hostile ? { kind: 'potion' } : undefined },
     { id: 'r3', crew: 'ferrymen', name: 'Hackett', cls: 'sapper', at: near(0, 5), hp: 11, maxHp: 11, loot: [gold(3)], goneOut: false, charges: 2, level: 3, weaponTier: 1, armorTier: 1, facing: face(near(0, 5)), pack: [{ ...item('rp6', 'charge', 'Satchel: 2 charges', 2, 0) }, item('rp7', 'glue', 'Glue bomb')], intent: hostile ? { kind: 'fuse', to: a } : undefined },
   ];
@@ -114,10 +114,10 @@ export function fixtureWake(s: GameState): GameState {
   victim.hp = 0;
   victim.bleed = 2;
   victim.at = near(0, 2);
-  const crew = 'the-wake' as CrewId;
+  const crew: CrewId = 'the-wake';
   const members: Rival[] = [
     { id: 'w1', crew, name: 'Mother Grave', cls: 'sellsword', at: near(0, 0), hp: 16, maxHp: 16, loot: [gold(1)], goneOut: false, level: 4, weaponTier: 2, armorTier: 1, facing: facingToward(near(0, 0), a), pack: [item('wp1', 'potion', 'Potion'), item('wp2', 'potion', 'Potion')], intent: { kind: 'attack', targetId: d.heroes[0]!.heroId, damage: [0, 7] } },
-    { id: 'w2', crew, name: 'Sexton', cls: 'hedgewitch' as Rival['cls'], at: near(0, 1), hp: 12, maxHp: 12, loot: [gold(2)], goneOut: false, level: 4, weaponTier: 2, armorTier: 1, facing: facingToward(near(0, 1), a), pack: [item('wp3', 'potion', 'Potion'), item('wp4', 'potion', 'Potion')], intent: { kind: 'item', targetId: 'w1' } },
+    { id: 'w2', crew, name: 'Sexton', cls: 'hedgewitch', at: near(0, 1), hp: 12, maxHp: 12, loot: [gold(2)], goneOut: false, level: 4, weaponTier: 2, armorTier: 1, facing: facingToward(near(0, 1), a), pack: [item('wp3', 'potion', 'Potion'), item('wp4', 'potion', 'Potion')], intent: { kind: 'item', targetId: 'w1' } },
     { id: 'w3', crew, name: 'Candle', cls: 'shadowmancer', at: near(0, 5), hp: 11, maxHp: 11, loot: [gold(3)], goneOut: false, level: 4, weaponTier: 2, armorTier: 1, facing: facingToward(near(0, 5), a), pack: [item('wp5', 'smoke', 'Smoke bomb'), item('wp6', 'firecracker', 'Firecracker')], intent: { kind: 'veil' } },
     { id: 'w4', crew, name: 'Spade', cls: 'sapper', at: near(0, 2), hp: 13, maxHp: 13, loot: [gold(4)], goneOut: false, level: 4, weaponTier: 2, armorTier: 1, facing: facingToward(near(0, 2), a), pack: [item('wp7', 'charge', 'Satchel: 3 charges', 3, 0)], dragging: victim.heroId, intent: { kind: 'drag', targetId: victim.heroId, to: near(3, 2) } },
   ];

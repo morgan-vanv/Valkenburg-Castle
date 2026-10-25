@@ -257,7 +257,7 @@ function captivesPanel(c: Campaign, host: ScreenHost): HTMLElement | '' {
     h('div', { class: 'kicker', title: 'Captives · Heroes a rival crew dragged out of the castle. Each is held at that crew\'s hideout at 1 HP, with level and gear but no gold. Take the "Bring back" job to free them; freed and brought out, they rejoin the roster.' }, 'Captives'),
     ...list.map((cp) => {
       const k = captiveContract(c, cp);
-      const crew = CREW[cp.crew as keyof typeof CREW];
+      const crew = CREW[cp.crew];
       return h(
         'div',
         { class: `cap-row crew-${cp.crew}`, 'data-captive': cp.hero.id, title: `${cp.hero.name} · L${cp.hero.level} ${className(cp.hero.cls)}, taken by ${crew?.name ?? 'a crew'} on delve ${cp.delve}.\nHeld at their hideout${crew ? ` (${crew.where})` : ''} at 1 HP. Gold and gems lost; level and gear kept.${k ? `\n"${k.title}" is on the notice post: ${k.bounty} gold.` : ''}` },
@@ -420,7 +420,7 @@ const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover:
 
 function contractCard(k: Contract, host: ScreenHost, locked = false, captive?: Captive): HTMLElement {
   const st = k.story ? STORY[k.story] : null;
-  const crew = captive ? CREW[captive.crew as keyof typeof CREW] : null;
+  const crew = captive ? CREW[captive.crew] : null;
   return h(
     'article',
     { class: `contract kind-${k.kind} ${st ? 'story' : ''} ${captive ? `captive crew-${captive.crew}` : ''}`, 'data-story': k.story ?? '', 'data-captive': captive?.hero.id ?? '' },

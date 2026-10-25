@@ -29,6 +29,8 @@ export interface HeroX extends HeroInDelve {
   dozing?: boolean;
   /** V3.7 (spec 20.1): the last move was a sneak (undefined = never moved: counts as walking). Monsters notice by it. */
   sneaked?: boolean;
+  /** V3.7 (spec 20.4): a hostile crew member has already taken this (downed) hero's gold and gems. */
+  robbed?: boolean;
 }
 
 export interface RivalX extends Rival {
@@ -42,6 +44,12 @@ export interface RivalX extends Rival {
   tier?: number;
   /** Sellsword shove: the hex it shoves from. */
   shoveFrom?: Pos;
+  /** V3.7 (spec 20.4): the Sellsword guards this member (takes hits meant for it while adjacent). */
+  guarding?: string;
+  /** V3.7 (spec 20.4): warded by the Hedgewitch: rounds left of 1 less per hit. */
+  ward?: number;
+  /** V3.7: the kit intent's helper hex (a Sapper's set spot, a potion's step back). */
+  kitFrom?: Pos;
 }
 
 export interface CrewX extends RivalCrew {
@@ -58,6 +66,8 @@ export interface CrewX extends RivalCrew {
   dealRound?: number;
   /** Chests a paid job opened for the party: the crew leaves the loot alone. */
   spare?: string[];
+  /** V3.7 (spec 20.4): the hero the whole crew goes for this round (focus fire). */
+  target?: string;
 }
 
 export interface DelveX extends Delve {

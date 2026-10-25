@@ -856,8 +856,10 @@ export class Hud {
         return;
       }
     }
+    // The fuse picker already showed the blast; no second card for set-charge.
+    const picked = this.fusePicked;
     this.fusePicked = false;
-    if (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink') {
+    if (!picked && (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink')) {
       const p = this.engine.preview(this.state, sel.heroId, o.action, t);
       this.openPreview({ option: o, target: t, preview: p, focus: 0 });
       return;
@@ -2238,10 +2240,24 @@ export function intentText(s: GameState, it: Intent): string {
       return `robs ${name(it.targetId)} and drags them toward the way out`;
     case 'potion':
       return 'backs off a hex and drinks a potion';
-    case 'item': {
-      const what = (it as { item?: string }).item;
-      return `uses ${what ? `a ${what}` : 'an item'}${it.targetId ? ` on ${name(it.targetId)}` : ''}`;
-    }
+    case 'item':
+      return `uses ${it.item ? `a ${it.item}` : 'an item'}${it.targetId ? ` on ${name(it.targetId)}` : ''}`;
+    case 'fireball':
+      return 'hurls a fireball at the marked hexes (3 Wits slots, 2 per hit)';
+    case 'mend':
+      return `mends ${name(it.targetId)} (heals 4)`;
+    case 'gust':
+      return 'gusts everything round the marked hex outward (pits!)';
+    case 'ward':
+      return `wards ${name(it.targetId)}`;
+    case 'glue':
+      return 'throws a glue bomb at the marked hexes';
+    case 'caltrops':
+      return 'scatters caltrops on the marked hex';
+    case 'firecracker':
+      return 'throws a firecracker: noise 6 where it lands';
+    case 'blink':
+      return 'blinks away';
     default:
       return 'waits';
   }

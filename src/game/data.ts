@@ -1,6 +1,6 @@
 // Numbers from docs/v3-spec.md.
 
-import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
+import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
 import type { ClassInfo } from './api';
 
 /** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
@@ -452,7 +452,7 @@ export const FIRESIDE_HEAL = 3;
 export const HICCUP_NOISE = 1;
 export const HEAVY_MOVE = 3;
 
-// ---------------------------------------------------------------- V3.5 crews (spec 18.5)
+// ---------------------------------------------------------------- V3.5 crews (spec 18.5), reworked in V3.7 (spec 20.4)
 
 export interface RivalStats {
   hp: number;
@@ -465,7 +465,10 @@ export interface RivalStats {
   range: number;
 }
 
-/** Base numbers per rival class (the Sisters' ranger, shadowmancer and burglar as in 16.5). */
+/**
+ * Legacy numbers per rival class (V3.5 saves without `level`). V3.7 crews are built like heroes
+ * from CLASSES (see rivals.ts `rivalStats`); this table only backs members from older saves.
+ */
 export const RIVAL_CLASSES: Record<RivalClass, RivalStats> = {
   ranger: { ...SISTER, armor: 0, range: BOW_RANGE },
   shadowmancer: { ...SISTER, armor: 0, range: 1 },
@@ -473,12 +476,23 @@ export const RIVAL_CLASSES: Record<RivalClass, RivalStats> = {
   sellsword: { hp: 10, slots: 3, chance: 60, dmg: 2, move: 4, armor: 1, range: 1 },
   sapper: { hp: 9, slots: 3, chance: 55, dmg: 2, move: 4, armor: 0, range: 1 },
   pyromancer: { hp: 6, slots: 2, chance: 50, dmg: 1, move: 4, armor: 0, range: 1 },
+  hedgewitch: { hp: 7, slots: 2, chance: 50, dmg: 1, move: 4, armor: 0, range: 1 },
 };
-/** Level 2 tier for cutthroats (16.3): +2 HP, +5 hit. */
+/** Level 2 tier for cutthroats (16.3): +2 HP, +5 hit (legacy saves only). */
 export const CUTTHROAT_TIER = { hp: 2, chance: 5 };
+/** Spec 20.4: the purse a killed member drops, by crew level (30 at level 2 and 3, 50 at level 4). */
+export const CREW_PURSE: Record<number, number> = { 1: 30, 2: 30, 3: 30, 4: 50 };
 export const CUTTHROAT_PURSE = 30;
 export const CUTTHROAT_CHANCE = 0.6;
 export const PROSPECTOR_CHANCE = 0.5;
+/** Spec 20.4: the Wake on Level 3 contracts. */
+export const WAKE_CHANCE = 0.6;
+/** Crew members walk 4 (like heroes). */
+export const RIVAL_MOVE = 4;
+/** Spec 20.4: members at or below half HP back off a hex and drink a potion (heals 5, like a hero's). */
+export const RIVAL_POTION_HEAL = 5;
+/** Spec 20.4: a dragged hero moves 3 a round toward the crew's exit. */
+export const DRAG_MOVE = 3;
 /** Waiting cutthroats notice a hero this close in line of sight, or noise this loud. */
 export const CUTTHROAT_SIGHT = 6;
 export const CUTTHROAT_HEAR = 4;
@@ -494,35 +508,68 @@ export const PYRO_BOLT_DMG = 2;
 export const PYRO_BOLT_NOISE = 3;
 export const SELLSWORD_SHOVE_CHANCE = 60;
 
+export interface CrewMemberDef {
+  name: string;
+  cls: RivalClass;
+  /** Spec 20.4: the 4-slot pack by class (item kinds; 'charge' ×n = n charges). */
+  pack: ItemKind[];
+}
+
 export interface CrewDef {
   id: CrewId;
   name: string;
   temperament: 'prospector' | 'cutthroat';
-  members: { name: string; cls: RivalClass }[];
+  /** Spec 20.4: members are built as heroes of their class at this level (+2 HP, +5 main stat per level above 1). */
+  level: number;
+  weaponTier: 0 | 1 | 2;
+  armorTier: 0 | 1 | 2;
+  /** Which contract levels draw this crew (makeCrew), and the level its posts are on (cutthroats). */
+  contracts: number[];
+  members: CrewMemberDef[];
+  /** Spec 20.4: the crew's hideout, where captives are held ("Bring back" contracts); a ContractSiteDef with `hideout` = this crew. */
+  hideout: { siteId: string; where: string };
 }
 
 export const CREWS: Record<CrewId, CrewDef> = {
   'lantern-sisters': {
-    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector',
-    members: SISTER_NAMES.map((name, i) => ({ name, cls: SISTER_CLASSES[i]! })),
+    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 2, weaponTier: 1, armorTier: 0, contracts: [1],
+    members: [
+      { name: SISTER_NAMES[0]!, cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
+      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+    ],
+    hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
-    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat',
+    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
     members: [
-      { name: 'Ferryman Joost', cls: 'sellsword' },
-      { name: 'Ferryman Sil', cls: 'ranger' },
-      { name: 'Ferryman Brecht', cls: 'sapper' },
+      { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
+      { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
+      { name: 'Ferryman Brecht', cls: 'sapper', pack: ['charge', 'charge', 'glue'] },
     ],
+    hideout: { siteId: 'ferrymen-hideout', where: 'the Drain' },
   },
   'gallows-choir': {
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat',
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
     members: [
-      { name: 'Deacon Harl', cls: 'sellsword' },
-      { name: 'Little Mags', cls: 'burglar' },
-      { name: 'Cantor Vey', cls: 'pyromancer' },
+      { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
+      { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'oil'] },
     ],
+    hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
+  },
+  'the-wake': {
+    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 4, weaponTier: 2, armorTier: 1, contracts: [3],
+    members: [
+      { name: 'Mother Grave', cls: 'sellsword', pack: ['potion', 'potion'] },
+      { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },
+      { name: 'Candle', cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: 'Spade', cls: 'sapper', pack: ['charge', 'charge', 'charge'] },
+    ],
+    hideout: { siteId: 'the-wake-hideout', where: 'the Bone Pile' },
   },
 };
+/** Spec 18.5: the Level 2 pool. */
 export const CUTTHROAT_POOL: CrewId[] = ['ferrymen', 'gallows-choir'];
 
 // ---------------------------------------------------------------- V3.5 parley (spec 18.6)

@@ -33,12 +33,24 @@ const unhover = () => p.evaluate(() => window.vc.hud.onHover(null, null));
 const visible = (sel) => p.$$eval(sel, (els) => els.filter((e) => e.style.display !== 'none' && !e.classList.contains('hidden')).map((e) => ({ text: e.textContent, cls: e.className, title: e.title })));
 const state = () => p.evaluate(() => window.vc.state());
 const fixture = /fixture=1/.test(base);
-const shot = async (name) => {
+/** A screenshot with the camera on `focus` and, when given, the real mouse over `hover` (so the hover path and tip are live). */
+const shot = async (name, focus = null, hover = null) => {
   if (!shots) return;
-  await p.waitForTimeout(400);
+  if (focus) {
+    await p.evaluate((f) => { window.vc.dio.lookAt(f, true); window.vc.dio.rig.distance = 15; window.vc.dio.renderNow(); }, focus);
+    await p.waitForTimeout(200);
+  }
+  if (hover) {
+    const xy = await p.evaluate((hv) => { const d = window.vc.dio; const w = d.worldOf(hv, 0.1); const q = d.project(w); return { x: q.x, y: q.y }; }, hover);
+    await p.mouse.move(xy.x, xy.y);
+    await p.waitForTimeout(250);
+  }
+  await p.waitForTimeout(300);
   await p.evaluate(() => window.vc.dio.renderNow());
   await p.screenshot({ path: `${shots}/${name}.png` });
+  if (hover) await p.mouse.move(5, 790);
 };
+const mid = (a, c) => ({ level: a.level, q: Math.round((a.q + c.q) / 2), r: Math.round((a.r + c.r) / 2) });
 
 await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
@@ -119,7 +131,12 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     check('...and the hover tip lists them (wake % / notices / free swing)', /may wake · \d+%|notices you|free swing \d+–\d+/.test(tip), tip.slice(0, 160));
     const wake = risky.risks.wake[0];
     if (wake) check('wake tag shows the chance', tags.some((t) => /risk-wake/.test(t.cls) && new RegExp(`${Math.round(wake.chance)}%`).test(t.text)), tags.map((t) => t.text).join(' '));
-    await shot('v37-risks');
+    {
+      const who = [...risky.risks.wake.map((x) => x.id), ...risky.risks.notice.map((x) => x.id), ...risky.risks.swings.map((x) => x.id)];
+      const mAt = s.delve.monsters.find((m) => who.includes(m.id))?.at ?? risky.to;
+      await shot('v37-risks', mid(risky.to, mAt), risky.to);
+      await hoverTip(risky.to);
+    }
     // An awake enemy in sight, so the blind arcs have something to shade.
     {
       const hunter = s.delve.monsters.find((m) => m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam');
@@ -291,7 +308,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
             await unhover();
             const log = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
             check('log: "sets a charge. Fuse 2"', /sets a charge\. Fuse 2/.test(log), log.split('\n').slice(-2).join(' | '));
-            await shot('v37-fuse');
+            await shot('v37-fuse', fuse.at, fuse.at);
             // Two castle turns: the fuse counts to 1, then blows.
             await p.evaluate(() => window.vc.send({ type: 'endTurn' }));
             await idle();
@@ -319,8 +336,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
             const log2 = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
             check('blast log line (charge goes off, the wall comes down)', /charge goes off/.test(log2) && /wall comes down/.test(log2), log2.split('\n').slice(-3).join(' | '));
             check('no fuse markers left', (await visible('.fuse-tag')).length === 0);
-            await p.evaluate((at) => window.vc.dio.lookAt(at, true), placed.wall);
-            await shot('v37-blast');
+            await shot('v37-blast', placed.wall, placed.wall);
           }
         }
       }

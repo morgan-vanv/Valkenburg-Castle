@@ -1073,8 +1073,7 @@ export class Diorama {
 
   /** 16.5: a sister's model by her class; 18.5: cutthroats by crew and class. */
   private rivalModel(r: Rival): ModelKey {
-    const crew = r.crew as string;
-    if (crew === 'ferrymen' || crew === 'gallows-choir' || crew === 'the-wake') return `rival-${crew}-${r.cls}` as ModelKey;
+    if (r.crew === 'ferrymen' || r.crew === 'gallows-choir' || r.crew === 'the-wake') return `rival-${r.crew}-${r.cls}` as ModelKey;
     const cls = r.cls;
     return cls === 'ranger' ? 'sisterRanger' : cls === 'shadowmancer' ? 'sisterShadow' : cls === 'burglar' ? 'sisterBurglar' : 'sister';
   }
@@ -1624,9 +1623,26 @@ export class Diorama {
         continue;
       }
       if (it.kind === 'item') {
-        const what = (it as { item?: string }).item;
+        const what = it.item;
         el.title = `${name}: uses ${what ? `a ${what}` : 'an item from the pack'}${target ? ` on ${target}` : ''} next turn.`;
       }
+      // 20.4: crew spells and items with an area: fireball and gust hit everything within 1 of the hex.
+      if ((it.kind === 'fireball' || it.kind === 'gust' || it.kind === 'glue') && (it.to || it.hexes?.length)) {
+        const centre = it.to ?? it.hexes![0]!;
+        const hexes = it.hexes?.length ? it.hexes : [centre, ...range(centre, 1).filter((h) => h.q !== centre.q || h.r !== centre.r).map((h) => ({ level: centre.level, ...h }))];
+        if (it.kind === 'fireball') this.markBreath(hexes, id);
+        else
+          for (const p of hexes) {
+            const ring = new THREE.Mesh(hexRing(0.6, 0.8), new THREE.MeshBasicMaterial({ color: it.kind === 'gust' ? 0xd0f0ff : 0xd8e04a, transparent: true, opacity: 0.6, depthWrite: false }));
+            ring.position.copy(this.worldOf(p, 0.04));
+            ring.userData = { monster: id, level: p.level };
+            this.intentLines.add(ring);
+          }
+        el.title = `${name}: ${INTENT_WORDS[it.kind]} the marked hexes next turn${it.kind === 'fireball' ? ' (3 Wits slots, 2 per hit, allies too)' : it.kind === 'gust' ? ' (everything pushed a hex outward: pits!)' : ' (monsters and heroes there stuck 2 rounds)'}.`;
+        continue;
+      }
+      if (it.kind === 'mend' || it.kind === 'ward') el.title = `${name}: ${INTENT_WORDS[it.kind]} ${target || 'a friend'} next turn${it.kind === 'mend' ? ' (heals 4)' : ' (1 less damage per hit)'}.`;
+      if (it.kind === 'caltrops' || it.kind === 'firecracker' || it.kind === 'blink') el.title = `${name}: ${INTENT_WORDS[it.kind]} the marked hex next turn${it.kind === 'firecracker' ? ' (noise 6: monsters come running)' : it.kind === 'caltrops' ? ' (the first across takes 2 and stops)' : ''}.`;
       if (it.kind === 'flee') {
         el.title = `${name}: feared: runs its full move away${target ? ` from ${target}` : ''}, attacks nobody. Every hero it leaves gets a free swing.`;
       }
@@ -1661,7 +1677,7 @@ export class Diorama {
         if (tp && tp.level === at.level) to = this.worldOf(tp, 0.9);
       } else if (it.to && it.to.level === at.level) to = this.worldOf(it.to, 0.08);
       if (to && at.level === this.shownLevel) {
-        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' || it.kind === 'rob' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : 0xb08a6a;
+        const col = it.kind === 'attack' || it.kind === 'steal' || it.kind === 'grab' || it.kind === 'rob' ? COLORS.danger : it.kind === 'firebolt' ? 0xff7a20 : it.kind === 'web' ? 0xd8d8d8 : it.kind === 'dart' ? 0x9ad0ff : it.kind === 'smoke' ? 0xb0b0b4 : it.kind === 'mend' || it.kind === 'ward' ? 0x7fe08a : it.kind === 'blink' ? 0x9a6aff : 0xb08a6a;
         const g = new THREE.BufferGeometry().setFromPoints([from, to]);
         const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: col, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.85, depthTest: false }));
         line.computeLineDistances();
@@ -1933,13 +1949,14 @@ export class Diorama {
         ring.renderOrder = 5;
         this.fuseMarks.add(ring);
       }
-      // The charge itself: a small keg with a spark.
+      // The charge itself: a small keg with a spark (on top of the wall when it is set on one).
+      const onWall = this.levels.get(f.at.level)?.def.tiles[hexKey(f.at)]?.kind === 'wall' ? WALL_HEIGHT : 0;
       const keg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.3, 8), new THREE.MeshLambertMaterial({ color: 0x4a2a1a, flatShading: true }));
-      keg.position.copy(this.worldOf(f.at, 0.15));
+      keg.position.copy(this.worldOf(f.at, onWall + 0.15));
       keg.userData = { level: f.at.level };
       const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffd060, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
       spark.scale.setScalar(0.7);
-      spark.position.copy(this.worldOf(f.at, 0.48));
+      spark.position.copy(this.worldOf(f.at, onWall + 0.48));
       spark.userData = { spark: true, phase: Math.random() * 6, level: f.at.level };
       this.fuseMarks.add(keg, spark);
       const el = document.createElement('div');
@@ -1947,7 +1964,7 @@ export class Diorama {
       el.innerHTML = `<span class="fuse-icon">✹</span><span class="fuse-n">${f.rounds}</span>`;
       el.title = `Charge set by ${this.nameOf(f.by)} · ${f.rounds <= 1 ? 'goes off at the end of the coming castle turn' : `goes off in ${f.rounds} castle turns`}. 4 damage within 1 (everyone there pushed a hex away), 2 within 2; breaks walls within 1. ${side === 'hero' ? 'The setter takes nothing; other heroes take half.' : 'Get out of the rings.'}`;
       this.fx.appendChild(el);
-      this.fuseTags.push({ el, at: this.worldOf(f.at, 1.1), level: f.at.level });
+      this.fuseTags.push({ el, at: this.worldOf(f.at, onWall + 1.1), level: f.at.level });
     }
   }
 
@@ -3185,6 +3202,14 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   rob: '✋',
   potion: '⚱',
   item: '⚒',
+  fireball: '☀',
+  mend: '✚',
+  gust: '≋',
+  ward: '⛉',
+  glue: '◍',
+  caltrops: '⁂',
+  firecracker: '✺',
+  blink: '⟿',
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -3210,6 +3235,14 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   rob: 'robs',
   potion: 'backs off and drinks a potion',
   item: 'uses an item on',
+  fireball: 'hurls a fireball at',
+  mend: 'mends',
+  gust: 'gusts everything around',
+  ward: 'wards',
+  glue: 'throws a glue bomb at',
+  caltrops: 'scatters caltrops on',
+  firecracker: 'throws a firecracker to',
+  blink: 'blinks away to',
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
