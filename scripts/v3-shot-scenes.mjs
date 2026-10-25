@@ -27,7 +27,7 @@ await p.evaluate(async () => {
   s = E.apply(s, { type: 'newCampaign', seed: 7 }).state;
   window.vc.load(s);
   const k = s.campaign.board[0];
-  await window.vc.send({ type: 'startDelve', contractId: k.id, heroIds: ['hobart', 'brann', 'pim', 'aldous'].filter((id) => s.campaign.roster.some((h) => h.id === id)), entrance: 0, packs: {} });
+  await window.vc.send({ type: 'startDelve', contractId: k.id, heroIds: ['keven', 'brann', 'pim', 'aldous'].filter((id) => s.campaign.roster.some((h) => h.id === id)), entrance: 0, packs: {} });
 });
 await idle();
 // Scene 1: wake monsters near the party and move one adjacent to see intents.

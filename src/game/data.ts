@@ -36,7 +36,7 @@ export interface ClassDef {
 }
 
 export const CLASSES: Record<HeroClass, ClassDef> = {
-  hobart: {
+  heir: {
     name: 'Lord',
     hp: 12,
     stats: { might: 65, finesse: 50, wits: 55, nerve: 80 },
@@ -114,7 +114,7 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
 export const RECRUIT_CLASSES: HeroClass[] = ['sellsword', 'burglar', 'ranger', 'sapper', 'pyromancer', 'shadowmancer', 'hedgewitch'];
 
 const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
-  hobart: { role: 'The heir: steady, rallies the squad.', abilities: ['Rally: allies within 3 gain 1 Focus. Cooldown 3.'] },
+  heir: { role: 'The heir: steady, rallies the squad.', abilities: ['Rally: allies within 3 gain 1 Focus. Cooldown 3.'] },
   sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.'] },
   burglar: {
     role: 'Quiet: picks locks, sneaks fast.',

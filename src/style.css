@@ -635,8 +635,8 @@ input.seed {
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
   color: #120e0b;
 }
-.cls-hobart .hc-badge span,
-.cbadge.cls-hobart {
+.cls-heir .hc-badge span,
+.cbadge.cls-heir {
   background: #d9a93a;
 }
 .cls-sellsword .hc-badge span,
@@ -1018,7 +1018,7 @@ input.seed {
   font-size: 0.75rem;
   color: var(--ember-hot);
 }
-.warn-hobart {
+.warn-heir {
   margin: 12px 0 0;
   padding: 10px 14px;
   border: 1px solid var(--red-dim);

@@ -83,7 +83,7 @@ const walk = await p.evaluate(async () => {
     }
   }
   const same = (a, b) => a.level === b.level && a.q === b.q && a.r === b.r;
-  const hob = () => vc.state().delve.heroes.find((h) => h.heroId === vc.state().campaign.roster.find((r) => r.cls === 'hobart').id);
+  const hob = () => vc.state().delve.heroes.find((h) => h.heroId === vc.state().campaign.roster.find((r) => r.cls === 'heir').id);
   const id = hob().heroId;
   vc.hud.select(id);
   for (let round = 0; round < 40; round++) {
@@ -112,7 +112,7 @@ if (walk.ok) {
   // Make sure the move is available (a fresh turn), then read the bar.
   await p.evaluate(async () => {
     const vc = window.vc;
-    const id = vc.state().campaign.roster.find((r) => r.cls === 'hobart').id;
+    const id = vc.state().campaign.roster.find((r) => r.cls === 'heir').id;
     if (vc.state().delve.heroes.find((h) => h.heroId === id).moved) await vc.send({ type: 'endTurn' });
     vc.hud.select(id);
     vc.hud.refresh();
@@ -136,7 +136,7 @@ if (walk.ok) {
   // Hover the stairs hex: tooltip names the interaction.
   const tip = await p.evaluate(() => {
     const vc = window.vc;
-    const id = vc.state().campaign.roster.find((r) => r.cls === 'hobart').id;
+    const id = vc.state().campaign.roster.find((r) => r.cls === 'heir').id;
     const h = vc.state().delve.heroes.find((x) => x.heroId === id);
     vc.hud.onHover(h.at, null);
     return document.querySelector('.hud-tip')?.textContent ?? '';
@@ -154,7 +154,7 @@ if (walk.ok) {
   await p.waitForTimeout(200);
   const after = await p.evaluate(() => {
     const vc = window.vc;
-    const id = vc.state().campaign.roster.find((r) => r.cls === 'hobart').id;
+    const id = vc.state().campaign.roster.find((r) => r.cls === 'heir').id;
     return { level: vc.state().delve.heroes.find((x) => x.heroId === id).at.level, shown: vc.dio.shownLevel };
   });
   check('clicking it puts Hobart on Level 2', after.level === 2, JSON.stringify(after));
@@ -167,7 +167,7 @@ const blocked = await p.evaluate(() => {
   const E = window.vcEngine;
   const s = JSON.parse(JSON.stringify(vc.state()));
   const d = s.delve;
-  const hob = d.heroes.find((h) => h.heroId === s.campaign.roster.find((r) => r.cls === 'hobart').id);
+  const hob = d.heroes.find((h) => h.heroId === s.campaign.roster.find((r) => r.cls === 'heir').id);
   // The contract heirloom pile (2 slots) if this is a recover contract, else any pile.
   const pile = d.ground.find((g) => g.items.some((i) => i.kind === 'heirloom')) ?? d.ground.find((g) => g.items.length);
   if (!pile) return { skip: 'no ground loot' };

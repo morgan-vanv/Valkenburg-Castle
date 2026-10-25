@@ -52,7 +52,7 @@ export function newGame(w: World, seed: number): GameStateX {
     campaign: {
       gold: START_GOLD,
       stash: [],
-      roster: [makeHero('hobart', 'Lord Hobart', 'hobart')],
+      roster: [makeHero('keven', 'Keven', 'heir')],
       recruits: [],
       board: [],
       reputation: 0,
@@ -301,7 +301,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     monsters,
     rivals: null,
     light: LIGHT_MAX,
-    lanternBearer: ids.includes('hobart') ? 'hobart' : ids[0]!,
+    lanternBearer: ids.includes('keven') ? 'keven' : ids[0]!,
     doors,
     chests: w.castle.chests.map((c) => ({ id: c.id, at: { ...c.at }, tier: c.tier, locked: !!c.locked, jammed: false, opened: false })),
     ground: [],
@@ -561,10 +561,10 @@ export function backToCamp(w: World, s: GameStateX): Res {
     const cls = pick(s, RECRUIT_CLASSES);
     C.roster.push(makeHero(`h${(s.nextHero = (s.nextHero ?? 1) + 1) - 1}`, d.prisoner.name, cls));
   }
-  const hobartDead = sum.dead.includes('hobart');
+  const heirDead = sum.dead.includes('keven');
   s.delve = null;
   s.summary = null;
-  if (hobartDead) {
+  if (heirDead) {
     s.stage = 'over';
     s.overReason = 'The heir has fallen.';
     return { events: [{ type: 'say', text: 'The heir has fallen.' }] };

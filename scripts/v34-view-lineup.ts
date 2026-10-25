@@ -16,7 +16,7 @@ export function lineup(): void {
   const sun = new THREE.DirectionalLight(0xffd8a8, 2.2);
   sun.position.set(-3, 6, 5);
   scene.add(sun);
-  const keys: ModelKey[] = ['hobart', 'sellsword', 'burglar', 'ranger', 'sapper', 'pyromancer', 'shadowmancer', 'hedgewitch', 'sister', 'orc', 'archer', 'captain', 'ghoul', 'berserker'];
+  const keys: ModelKey[] = ['heir', 'sellsword', 'burglar', 'ranger', 'sapper', 'pyromancer', 'shadowmancer', 'hedgewitch', 'sister', 'orc', 'archer', 'captain', 'ghoul', 'berserker'];
   const n = keys.length;
   keys.forEach((key, i) => {
     const m = getModel(key);

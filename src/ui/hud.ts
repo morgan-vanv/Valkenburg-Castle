@@ -1078,7 +1078,7 @@ export class Hud {
       const done = active && hd.moved && hd.acted;
       const dark = active && !this.isLit(hd.heroId);
       if (dark) darks.push(hd.heroId);
-      const word = def.cls === 'hobart' ? 'Heir' : className(def.cls);
+      const word = def.cls === 'heir' ? 'Heir' : className(def.cls);
       const role = CLASS_ROLE[def.cls as keyof typeof CLASS_ROLE] ?? '';
       const manaMax = CLASSES[def.cls]?.mana ?? 0;
       const card = h(

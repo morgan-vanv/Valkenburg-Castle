@@ -398,7 +398,7 @@ function shapedPrism(w: number, h: number, d: number, rings: readonly (readonly 
 // ------------------------------------------------------------ models
 
 export type ModelKey =
-  | 'hobart'
+  | 'heir'
   | 'sellsword'
   | 'burglar'
   | 'mage'
@@ -448,7 +448,7 @@ function buildModel(key: ModelKey): FigureModel {
   const k = new Kit();
   let f: Frame;
   switch (key) {
-    case 'hobart':
+    case 'heir':
       f = humanoid(k, { skin: SKIN, tunic: 0x6f7378, legs: 0x3d3f44, helm: 'crown', helmColor: COLORS.gold, weapon: 'sword', shield: COLORS.gold, pauldrons: COLORS.steel, cape: 0x7a1414 });
       banner(k, 0xd9a93a, f);
       return k.build(f.top + 0.05, 0.22);

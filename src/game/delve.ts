@@ -601,7 +601,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return rivalsOnMap(c).filter((r) => within(r.at, h.at, 2)).map((r) => ({ id: r.id, at: r.at }));
     }
     case 'rally':
-      return cls === 'hobart' && h.rallyCooldown === 0 ? [{ id: h.heroId }] : [];
+      return cls === 'heir' && h.rallyCooldown === 0 ? [{ id: h.heroId }] : [];
     case 'guard':
       if (cls !== 'sellsword') return [];
       return others.filter((o) => o.status === 'active' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId }));

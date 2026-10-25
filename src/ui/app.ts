@@ -12,7 +12,7 @@ import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v33';
+export const SAVE_KEY = 'vc.save.v35';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -612,7 +612,7 @@ export class App {
 
   /** Hobart alone (15.3): the camp opens on the tavern. */
   private needsHire(s: GameState): boolean {
-    return !s.campaign.roster.some((x) => x.cls !== 'hobart' && x.wounded === 0);
+    return !s.campaign.roster.some((x) => x.cls !== 'heir' && x.wounded === 0);
   }
 
   /** Where the camera should go for a world-phase event, or null when nobody can see it. */

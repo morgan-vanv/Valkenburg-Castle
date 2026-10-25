@@ -31,7 +31,7 @@ for (const r of s.campaign.recruits) {
   if (!e.partyProblem(s, [s.campaign.roster[0]!.id])) break;
   run({ type: 'hire', heroId: r.hero.id });
 }
-const hobart = s.campaign.roster.find((h) => h.cls === 'hobart')!;
+const hobart = s.campaign.roster.find((h) => h.cls === 'heir')!;
 const party = s.campaign.roster.slice(0, 2).map((h) => h.id);
 run({ type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: party, entrance: 0, packs: {} });
 if (s.stage !== 'delve') {

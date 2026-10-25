@@ -11,9 +11,9 @@ import { makeHero } from './camp';
 
 const e = createEngine(testCastle);
 const w = new World(testCastle);
-const ALL = ['hobart', 'brann', 'pim', 'aldous'];
+const ALL = ['keven', 'brann', 'pim', 'aldous'];
 
-/** The classic party (V3.2 starts with Hobart alone): a sellsword, a burglar and a pyromancer join for free. */
+/** The classic party (V3.2 starts with Keven alone): a sellsword, a burglar and a pyromancer join for free. */
 function party(s: GameState, extra: [string, string, HeroClass][] = []): GameState {
   s.campaign.roster.push(
     makeHero('brann', 'Brann', 'sellsword'),
@@ -86,31 +86,31 @@ const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
 
 describe('camp', () => {
-  it('new game: 120 gold, Hobart alone, 4 level-1 recruits of 3+ classes at 60 (spec 15.3, 17.1)', () => {
+  it('new game: 120 gold, Keven alone, 4 level-1 recruits of 3+ classes at 60 (spec 15.3, 17.1)', () => {
     const s = e.newGame(7);
     expect(s.campaign.gold).toBe(120);
     expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
-    expect(s.campaign.roster.map((h) => h.id)).toEqual(['hobart']);
+    expect(s.campaign.roster.map((h) => h.id)).toEqual(['keven']);
     expect(s.campaign.board).toHaveLength(2); // the test castle has only 2 sites
     expect(s.campaign.recruits).toHaveLength(4);
     for (let seed = 1; seed < 30; seed++) {
       const t = e.newGame(seed);
       expect(new Set(t.campaign.recruits.map((r) => r.hero.cls)).size).toBeGreaterThanOrEqual(3);
       expect(t.campaign.recruits.every((r) => r.price === 60 + 40 * (r.hero.level - 1))).toBe(true);
-      expect(t.campaign.recruits.every((r) => r.hero.cls !== 'hobart')).toBe(true);
+      expect(t.campaign.recruits.every((r) => r.hero.cls !== 'heir')).toBe(true);
     }
     expect(s.campaign.board.every((k) => k.level === 1)).toBe(true);
   });
 
-  it('the first delve needs a hero; Hobart alone may go', () => {
+  it('the first delve needs a hero; Keven alone may go', () => {
     let s = e.newGame(7);
     expect(e.partyProblem(s, [])).toBe('Pick at least one hero.');
     const k = s.campaign.board[0]!.id;
     expect(e.apply(s, { type: 'startDelve', contractId: k, heroIds: [], entrance: 0, packs: {} }).error).toBeTruthy();
     s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
     expect(s.campaign.roster).toHaveLength(2);
-    expect(e.partyProblem(s, ['hobart'])).toBeNull();
-    expect(ok(s, { type: 'startDelve', contractId: k, heroIds: ['hobart'], entrance: 0, packs: {} }).state.stage).toBe('delve');
+    expect(e.partyProblem(s, ['keven'])).toBeNull();
+    expect(ok(s, { type: 'startDelve', contractId: k, heroIds: ['keven'], entrance: 0, packs: {} }).state.stage).toBe('delve');
     // The tavern refreshes after a delve.
     const empty = { ...s, campaign: { ...s.campaign, roster: [] } };
     expect(e.partyProblem(empty, [])).toBe('Hire at least one hero at the tavern.');
@@ -204,7 +204,7 @@ describe('slot rolls and Focus', () => {
   it('flanking adds a slot', () => {
     const s = delve();
     put(s, 'brann', at(1, 3, 7));
-    put(s, 'hobart', at(1, 5, 7));
+    put(s, 'keven', at(1, 5, 7));
     const m = monster(s, 'orc', at(1, 4, 7), 'hunting');
     const p = e.preview(s, 'brann', 'attack', { id: m.id });
     expect(p.slots).toBe(4);
@@ -239,9 +239,9 @@ describe('movement', () => {
     const s = delve();
     // A corridor: put brann in the gate room next to the door.
     put(s, 'brann', at(1, 6, 7));
-    put(s, 'hobart', at(1, 8, 7));
+    put(s, 'keven', at(1, 8, 7));
     const reach = e.reachable(s, 'brann', false);
-    expect(reach.some((r) => samePos(r.to, at(1, 9, 7)))).toBe(true); // through hobart
+    expect(reach.some((r) => samePos(r.to, at(1, 9, 7)))).toBe(true); // through keven
     expect(reach.some((r) => samePos(r.to, at(1, 8, 7)))).toBe(false);
     monster(s, 'orc', at(1, 7, 7), 'asleep'); // in the doorway
     expect(e.reachable(s, 'brann', false).some((r) => samePos(r.to, at(1, 9, 7)))).toBe(false);
@@ -293,7 +293,7 @@ describe('movement', () => {
 
 describe('exploring by line of sight', () => {
   it('every step of a walk reveals what that hex can see, lit or not', () => {
-    let s = delve({ heroes: ['hobart', 'pim'] });
+    let s = delve({ heroes: ['keven', 'pim'] });
     s.delve!.light = 1; // dark: the lantern lights almost nothing
     const reach = e.reachable(s, 'pim', false).sort((a, b) => b.path.length - a.path.length)[0]!;
     expect(reach.path.length).toBeGreaterThan(2);
@@ -306,10 +306,10 @@ describe('exploring by line of sight', () => {
 
   it('walls stop the glimpse', () => {
     const s = delve();
-    for (const p of glimpseSet(w, s.delve as DelveX, hero(s, 'hobart').at)) {
-      expect(p.level).toBe(hero(s, 'hobart').at.level);
+    for (const p of glimpseSet(w, s.delve as DelveX, hero(s, 'keven').at)) {
+      expect(p.level).toBe(hero(s, 'keven').at.level);
     }
-    const all = glimpseSet(w, s.delve as DelveX, hero(s, 'hobart').at).length;
+    const all = glimpseSet(w, s.delve as DelveX, hero(s, 'keven').at).length;
     const tiles = Object.keys(testCastle.levels[0]!.tiles).length;
     expect(all).toBeLessThan(tiles);
   });
@@ -328,7 +328,7 @@ describe('light', () => {
 
   it('burns 1 per round and lights radius by stage', () => {
     let s = delve();
-    put(s, 'hobart', PITHALL);
+    put(s, 'keven', PITHALL);
     s = ok(s, { type: 'endTurn' }).state;
     expect(s.delve!.light).toBe(19);
     const lit = e.visibility(s).lit;
@@ -340,7 +340,7 @@ describe('light', () => {
 
   it('heroes outside the light fight at dark', () => {
     const s = delve();
-    put(s, 'hobart', PITHALL);
+    put(s, 'keven', PITHALL);
     put(s, 'brann', at(1, 2, 2));
     const m = monster(s, 'orc', at(1, 3, 2), 'hunting');
     const p = e.preview(s, 'brann', 'attack', { id: m.id });
@@ -363,7 +363,7 @@ describe('light', () => {
 
   it('the Gloam comes at 0 and fades when light returns', () => {
     let s = delve();
-    put(s, 'hobart', PITHALL);
+    put(s, 'keven', PITHALL);
     s.delve!.light = 1;
     const r = ok(s, { type: 'endTurn' });
     s = r.state;
@@ -493,17 +493,17 @@ describe('combat', () => {
   it('revive brings a downed hero back at 3 HP', () => {
     let s = delve();
     put(s, 'brann', GATE);
-    put(s, 'hobart', at(1, 5, 7));
+    put(s, 'keven', at(1, 5, 7));
     Object.assign(hero(s, 'brann'), { status: 'downed', hp: 0, bleed: 2 });
-    s = act(s, 'hobart', 'revive', { id: 'brann' }).state;
+    s = act(s, 'keven', 'revive', { id: 'brann' }).state;
     expect(hero(s, 'brann')).toMatchObject({ status: 'active', hp: 3, revived: true });
   });
 
   it('monsters ignore downed heroes', () => {
-    const s = delve(['brann', 'hobart'].length ? {} : {});
+    const s = delve(['brann', 'keven'].length ? {} : {});
     put(s, 'brann', GATE);
     Object.assign(hero(s, 'brann'), { status: 'downed', hp: 0, bleed: 2 });
-    for (const id of ['hobart', 'pim', 'aldous']) put(s, id, at(2, 16, 7 + (id === 'pim' ? 1 : 0)));
+    for (const id of ['keven', 'pim', 'aldous']) put(s, id, at(2, 16, 7 + (id === 'pim' ? 1 : 0)));
     put(s, 'aldous', at(2, 14, 8));
     const orc = monster(s, 'orc', at(1, 5, 7), 'hunting');
     const r = ok(s, { type: 'endTurn' });
@@ -539,7 +539,7 @@ describe('monsters', () => {
   it('intents are computed at delve start for awake monsters and honored', () => {
     const s = delve();
     put(s, 'brann', GATE);
-    for (const id of ['hobart', 'pim', 'aldous']) put(s, id, at(2, 2 + ALL.indexOf(id), 1));
+    for (const id of ['keven', 'pim', 'aldous']) put(s, id, at(2, 2 + ALL.indexOf(id), 1));
     s.delve!.lanternBearer = 'brann';
     const orc = monster(s, 'orc', at(1, 2, 6), 'hunting');
     // Any successful command gives an awake monster without one an intent.
@@ -563,7 +563,7 @@ describe('monsters', () => {
   it('orcs shout when they first see a hero', () => {
     const s = delve();
     put(s, 'brann', GATE);
-    put(s, 'hobart', at(1, 3, 7));
+    put(s, 'keven', at(1, 3, 7));
     monster(s, 'orc', at(1, 1, 8), 'alert');
     const r = ok(s, { type: 'endTurn' });
     expect(r.events.some((x) => x.type === 'noise' && x.radius === 5)).toBe(true);
@@ -571,7 +571,7 @@ describe('monsters', () => {
 
   it('spiders web from range', () => {
     const s = delve();
-    put(s, 'hobart', GATE);
+    put(s, 'keven', GATE);
     put(s, 'brann', at(1, 4, 8));
     put(s, 'pim', at(2, 2, 1));
     put(s, 'aldous', at(2, 3, 1));
@@ -599,11 +599,11 @@ describe('monsters', () => {
     expect(thief.stolen?.id).toBe('ix');
     expect(thief.intent?.kind).toBe('flee');
     // Kill it where it stands.
-    put(s, 'hobart', s.delve!.heroes[0]!.at);
-    const adj = [...e.reachable(s, 'hobart', false)].find((x) => x.to.level === thief.at.level && Math.abs(x.to.q - thief.at.q) + Math.abs(x.to.r - thief.at.r) + Math.abs(x.to.q + x.to.r - thief.at.q - thief.at.r) === 2);
+    put(s, 'keven', s.delve!.heroes[0]!.at);
+    const adj = [...e.reachable(s, 'keven', false)].find((x) => x.to.level === thief.at.level && Math.abs(x.to.q - thief.at.q) + Math.abs(x.to.r - thief.at.r) + Math.abs(x.to.q + x.to.r - thief.at.q - thief.at.r) === 2);
     if (adj) {
-      s = ok(s, { type: 'move', heroId: 'hobart', path: adj.path, sneak: false }).state;
-      s = act(s, 'hobart', 'attack', { id: thief.id }, 3).state;
+      s = ok(s, { type: 'move', heroId: 'keven', path: adj.path, sneak: false }).state;
+      s = act(s, 'keven', 'attack', { id: thief.id }, 3).state;
       expect(s.delve!.ground.some((g) => g.items.some((i) => i.id === 'ix'))).toBe(true);
     }
   });
@@ -611,16 +611,16 @@ describe('monsters', () => {
 
 describe('contracts and summary', () => {
   it('recover: carrying the heirloom out completes it and pays', () => {
-    let s = delve({ kind: 'recover', heroes: ['hobart', 'brann'] });
+    let s = delve({ kind: 'recover', heroes: ['keven', 'brann'] });
     const site = testCastle.contractSites.find((x) => x.kind === 'recover')!.at;
     put(s, 'brann', site);
     s = act(s, 'brann', 'take', { at: site }).state;
     expect(hero(s, 'brann').pack.some((i) => i.kind === 'heirloom')).toBe(true);
     put(s, 'brann', at(1, 2, 9));
-    put(s, 'hobart', at(1, 18, 7));
+    put(s, 'keven', at(1, 18, 7));
     s = act(s, 'brann', 'leave', {}).state;
     expect(s.stage).toBe('delve');
-    const r = act(s, 'hobart', 'leave', {});
+    const r = act(s, 'keven', 'leave', {});
     s = r.state;
     expect(s.stage).toBe('summary');
     expect(s.summary).toMatchObject({ contractDone: true, bounty: 100, lootValue: 60 });
@@ -655,12 +655,12 @@ describe('contracts and summary', () => {
     expect(s.campaign.roster.length).toBe(n + 1);
   });
 
-  it('abandon: heroes off the exits die; Hobart dying ends the campaign', () => {
-    let s = delve({ heroes: ['hobart', 'brann'] });
+  it('abandon: heroes off the exits die; Keven dying ends the campaign', () => {
+    let s = delve({ heroes: ['keven', 'brann'] });
     put(s, 'brann', at(1, 18, 7));
-    put(s, 'hobart', GATE);
+    put(s, 'keven', GATE);
     s = ok(s, { type: 'abandon' }).state;
-    expect(s.summary!.dead).toEqual(['hobart']);
+    expect(s.summary!.dead).toEqual(['keven']);
     expect(s.summary!.survivors).toEqual(['brann']);
     s = ok(s, { type: 'backToCamp' }).state;
     expect(s.stage).toBe('over');
@@ -668,10 +668,10 @@ describe('contracts and summary', () => {
   });
 
   it('fallen heroes leave gear behind for later delves', () => {
-    let s = delve({ heroes: ['hobart', 'brann'] });
+    let s = delve({ heroes: ['keven', 'brann'] });
     hero(s, 'brann').pack.push({ id: 'iz', kind: 'rope', name: 'Rope', amount: 1, slots: 1 });
     put(s, 'brann', PITHALL);
-    put(s, 'hobart', at(1, 18, 7));
+    put(s, 'keven', at(1, 18, 7));
     s = ok(s, { type: 'abandon' }).state;
     s = ok(s, { type: 'backToCamp' }).state;
     expect(s.campaign.fallen.map((f) => f.name)).toEqual(['Brann']);
@@ -965,9 +965,9 @@ describe('the Dragon (14.4)', () => {
 
   it('breath hits only the marked hexes, ignores armor, and alternates with other intents', () => {
     const { s, dragon } = dragonDelve();
-    // Brann straight west of the Dragon at range 2 (inside the Lair); Hobart off the line.
+    // Brann straight west of the Dragon at range 2 (inside the Lair); Keven off the line.
     put(s, 'brann', { level: 3, q: dragon.at.q - 2, r: dragon.at.r });
-    put(s, 'hobart', { level: 3, q: dragon.at.q - 1, r: dragon.at.r - 2 });
+    put(s, 'keven', { level: 3, q: dragon.at.q - 1, r: dragon.at.r - 2 });
     lairCheck(ctx(s), hero(s, 'brann'));
     expect(dragon.awareness).toBe('hunting');
     computeIntents(ctx(s));
@@ -975,11 +975,11 @@ describe('the Dragon (14.4)', () => {
     expect(it.kind).toBe('breath');
     expect(it.hexes!.length).toBeGreaterThan(0);
     expect(it.hexes!.some((p) => samePos(p, hero(s, 'brann').at))).toBe(true);
-    expect(it.hexes!.some((p) => samePos(p, hero(s, 'hobart').at))).toBe(false);
+    expect(it.hexes!.some((p) => samePos(p, hero(s, 'keven').at))).toBe(false);
     const r = ok(s, { type: 'endTurn' });
     expect(r.events.some((x) => x.type === 'breath')).toBe(true);
     expect(hero(r.state, 'brann').hp).toBe(10 - 4);
-    expect(hero(r.state, 'hobart').hp).toBe(12);
+    expect(hero(r.state, 'keven').hp).toBe(12);
     const d2 = r.state.delve!.monsters.find((x) => x.kind === 'dragon')!;
     expect(d2.intent!.kind).not.toBe('breath');
     const r2 = ok(r.state, { type: 'endTurn' });
@@ -993,12 +993,12 @@ describe('the Dragon (14.4)', () => {
     dragon.awareness = 'hunting';
     (dragon as { breathNext?: boolean }).breathNext = false;
     put(s, 'brann', { level: 3, q: dragon.at.q - 1, r: dragon.at.r });
-    put(s, 'hobart', { level: 3, q: dragon.at.q + 1, r: dragon.at.r });
+    put(s, 'keven', { level: 3, q: dragon.at.q + 1, r: dragon.at.r });
     computeIntents(ctx(s));
     expect(dragon.intent!.kind).toBe('sweep');
     const r = ok(s, { type: 'endTurn' });
     const shoved = r.events.filter((x) => x.type === 'shoved').map((x) => (x as { id: string }).id).sort();
-    expect(shoved).toEqual(['brann', 'hobart']);
+    expect(shoved).toEqual(['brann', 'keven']);
   });
 
   it('bites a lone adjacent hero and never leaves the Lair', () => {
@@ -1053,22 +1053,22 @@ describe('slay contract', () => {
     expect(k).toBeTruthy();
     expect(k.bounty).toBe(500);
     expect(k.level).toBe(3);
-    s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: ['hobart', 'brann'], entrance: 0, packs: {} }).state;
+    s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: ['keven', 'brann'], entrance: 0, packs: {} }).state;
     s.delve!.rivals = null;
     const dragon = s.delve!.monsters.find((m) => m.kind === 'dragon')!;
     s.delve!.monsters = [dragon];
     dragon.hp = 1;
     put(s, 'brann', { level: 3, q: dragon.at.q - 1, r: dragon.at.r });
-    put(s, 'hobart', at(3, 1, 8)); // the cave mouth
+    put(s, 'keven', at(3, 1, 8)); // the cave mouth
     s = act(s, 'brann', 'attack', { id: dragon.id }, 3).state;
     expect(s.delve!.monsters).toHaveLength(0);
     expect(s.delve!.kills.brann).toBe(1);
-    s = act(s, 'hobart', 'leave', {}).state;
+    s = act(s, 'keven', 'leave', {}).state;
     s = ok(s, { type: 'abandon' }).state; // Brann is left behind, the contract still counts
     const sum = s.summary!;
     expect(sum.contractDone).toBe(true);
     expect(sum.bounty).toBe(500);
-    expect(sum.xp.hobart).toBe(5 + 1 + 3);
+    expect(sum.xp.keven).toBe(5 + 1 + 3);
     expect(sum.dead).toEqual(['brann']);
   });
 });
@@ -1106,14 +1106,14 @@ describe('lift and winch (14.6)', () => {
 
 describe('sight and fixed light (14.5)', () => {
   it('sight range by stage and depth, never below 2 (a lit hero)', () => {
-    const s = delve({ heroes: ['hobart'] });
-    // Hobart carries the lantern, so he stands in light wherever he is while it has oil.
+    const s = delve({ heroes: ['keven'] });
+    // Keven carries the lantern, so he stands in light wherever he is while it has oil.
     const cases: [number, number, number][] = [[20, 1, 8], [20, 2, 7], [20, 3, 6], [10, 1, 6], [10, 3, 4], [5, 1, 4], [5, 3, 2]];
     for (const [light, level, want] of cases) {
       s.delve!.light = light;
-      put(s, 'hobart', level === 1 ? PITHALL : level === 2 ? at(2, 10, 7) : at(3, 6, 4));
-      expect(e.sightRange(s, 'hobart')).toBe(want);
-      expect(e.heroLit(s, 'hobart')).toBe(true);
+      put(s, 'keven', level === 1 ? PITHALL : level === 2 ? at(2, 10, 7) : at(3, 6, 4));
+      expect(e.sightRange(s, 'keven')).toBe(want);
+      expect(e.heroLit(s, 'keven')).toBe(true);
     }
   });
 
@@ -1279,7 +1279,7 @@ describe('15.2 dash', () => {
 
 describe('15.3 classes', () => {
   it('ranger: shoots at range 6 with noise 1, loses a slot adjacent, can\'t shoot what the party can\'t see', () => {
-    const s = v32({ heroes: ['hobart'], extra: [['rae', 'Rae', 'ranger']] });
+    const s = v32({ heroes: ['keven'], extra: [['rae', 'Rae', 'ranger']] });
     const t = delve({ heroes: ['rae'], extra: [['rae', 'Rae', 'ranger']] });
     void s;
     put(t, 'rae', at(3, 1, 8));
@@ -1623,11 +1623,11 @@ describe('15.4 quartermaster', () => {
     // Not from an ordinary hex.
     expect(option(r.state, 'brann', 'grapple')).toBeUndefined();
     // Top edge hexes all taken: offered but blocked.
-    const t = v32({ heroes: ['brann', 'pim', 'hobart', 'aldous'] });
+    const t = v32({ heroes: ['brann', 'pim', 'keven', 'aldous'] });
     put(t, 'brann', at(2, 10, 3));
     give(t, 'brann', 'hook');
     put(t, 'pim', at(1, 9, 3));
-    put(t, 'hobart', at(1, 11, 3));
+    put(t, 'keven', at(1, 11, 3));
     put(t, 'aldous', at(1, 10, 2));
     monster(t, 'orc', at(1, 9, 2), 'asleep');
     monster(t, 'orc', at(1, 11, 2), 'asleep');
@@ -1717,7 +1717,7 @@ describe('15.7 take never fails silently', () => {
 import { computeIntents as computeIntentsOf } from './world-phase';
 
 /** A full-castle delve (monsters and spawns kept) for spawn-default checks. */
-function castleDelve(heroes = ['hobart', 'brann']) {
+function castleDelve(heroes = ['keven', 'brann']) {
   let s = party(e.newGame(3));
   const k = s.campaign.board[0]!;
   s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: heroes, entrance: 0, packs: {} }).state;
@@ -1787,22 +1787,22 @@ describe('16.1 awareness and patrols', () => {
 
   it('noticing: a lit hero within 6 in sight, or any hero within 3; in the Hollow light does not matter', () => {
     // Level 1, unlit hero 5 away: unseen. Lit (lantern): seen.
-    let s = delve({ heroes: ['hobart', 'brann'] });
-    put(s, 'hobart', at(2, 2, 1)); // the lantern is on L2
+    let s = delve({ heroes: ['keven', 'brann'] });
+    put(s, 'keven', at(2, 2, 1)); // the lantern is on L2
     put(s, 'brann', at(1, 10, 8));
     const far = monster(s, 'orc', at(1, 10, 2), 'alert'); // 6 away across the pit, in sight
     expect(ok(s, { type: 'endTurn' }).state.delve!.monsters.find((m) => m.id === far.id)!.awareness).toBe('alert');
     s.delve!.lanternBearer = 'brann';
     expect(ok(s, { type: 'endTurn' }).state.delve!.monsters.find((m) => m.id === far.id)!.awareness).toBe('hunting');
     // Unlit but within 3: seen.
-    s = delve({ heroes: ['hobart', 'brann'] });
-    put(s, 'hobart', at(2, 2, 1));
+    s = delve({ heroes: ['keven', 'brann'] });
+    put(s, 'keven', at(2, 2, 1));
     put(s, 'brann', at(1, 10, 8));
     const near = monster(s, 'orc', at(1, 10, 5), 'alert');
     expect(ok(s, { type: 'endTurn' }).state.delve!.monsters.find((m) => m.id === near.id)!.awareness).toBe('hunting');
     // The Hollow: unlit hero 5 away is seen.
-    s = delve({ heroes: ['hobart', 'brann'] });
-    put(s, 'hobart', at(2, 2, 1));
+    s = delve({ heroes: ['keven', 'brann'] });
+    put(s, 'keven', at(2, 2, 1));
     put(s, 'brann', at(3, 5, 7));
     const cave = monster(s, 'rats', at(3, 5, 2), 'alert');
     expect(ok(s, { type: 'endTurn' }).state.delve!.monsters.find((m) => m.id === cave.id)!.awareness).toBe('hunting');
@@ -1813,9 +1813,9 @@ describe('16.1 awareness and patrols', () => {
     const pat = s.delve!.monsters.find((m) => m.route)!;
     // Brann, lantern in hand, in the pit hall doorway looking into the east hall... from a hex the patrol can't see him: veil him.
     put(s, 'brann', at(1, 14, 7));
-    put(s, 'hobart', at(1, 14, 8));
+    put(s, 'keven', at(1, 14, 8));
     hero(s, 'brann').veil = 5;
-    hero(s, 'hobart').veil = 5;
+    hero(s, 'keven').veil = 5;
     const r = ok(s, { type: 'endTurn' });
     s = r.state;
     expect(s.delve!.knownRoutes).toContain(pat.id);
@@ -1843,8 +1843,8 @@ describe('16.1 awareness and patrols', () => {
     expect(m.awareness).toBe('patrol');
     expect(m.searchRounds).toBeUndefined();
     // A monster without a route goes back to where it spawned and waits there, alert.
-    const t = delve({ heroes: ['hobart', 'brann'] });
-    put(t, 'hobart', at(2, 2, 1));
+    const t = delve({ heroes: ['keven', 'brann'] });
+    put(t, 'keven', at(2, 2, 1));
     put(t, 'brann', at(1, 10, 7));
     const orc = monster(t, 'orc', at(1, 9, 1), 'hunting');
     orc.spawnedAt = { ...at(1, 9, 1) };
@@ -1864,34 +1864,34 @@ describe('16.1 awareness and patrols', () => {
 
 describe('16.2 light', () => {
   it('shutter is free, toggles the lantern, stops the burn and the light', () => {
-    let s = delve({ heroes: ['hobart'] });
-    put(s, 'hobart', PITHALL);
-    const o = option(s, 'hobart', 'shutter')!;
+    let s = delve({ heroes: ['keven'] });
+    put(s, 'keven', PITHALL);
+    const o = option(s, 'keven', 'shutter')!;
     expect(o.label).toBe('Shutter lantern');
     expect(o.pick).toBe('self');
-    const r = act(s, 'hobart', 'shutter', {});
+    const r = act(s, 'keven', 'shutter', {});
     s = r.state;
     expect(r.events.some((x) => x.type === 'shutter' && x.open === false)).toBe(true);
     expect(s.delve!.lanternOpen).toBe(false);
-    expect(hero(s, 'hobart').acted).toBe(false); // free
+    expect(hero(s, 'keven').acted).toBe(false); // free
     expect(e.inLight(s, PITHALL)).toBe(false);
-    expect(e.heroLit(s, 'hobart')).toBe(false);
-    expect(option(s, 'hobart', 'shutter')!.label).toBe('Open lantern');
+    expect(e.heroLit(s, 'keven')).toBe(false);
+    expect(option(s, 'keven', 'shutter')!.label).toBe('Open lantern');
     s = ok(s, { type: 'endTurn' }).state;
     expect(s.delve!.light).toBe(20); // no burn
-    s = act(s, 'hobart', 'shutter', {}).state;
+    s = act(s, 'keven', 'shutter', {}).state;
     expect(s.delve!.lanternOpen).toBe(true);
     expect(e.inLight(s, PITHALL)).toBe(true);
     s = ok(s, { type: 'endTurn' }).state;
     expect(s.delve!.light).toBe(19);
     // Only the bearer has the option.
-    const t = delve({ heroes: ['hobart', 'brann'] });
+    const t = delve({ heroes: ['keven', 'brann'] });
     expect(option(t, 'brann', 'shutter')).toBeUndefined();
   });
 
   it('sight per hero: unlit heroes see 4 on L1, 2 on L2, 1 on L3; a torch gives the stage range back', () => {
-    const s = delve({ heroes: ['hobart', 'brann'] });
-    put(s, 'hobart', at(2, 2, 1));
+    const s = delve({ heroes: ['keven', 'brann'] });
+    put(s, 'keven', at(2, 2, 1));
     put(s, 'brann', at(1, 10, 7));
     expect(e.heroLit(s, 'brann')).toBe(false);
     expect(e.sightRange(s, 'brann')).toBe(4);
@@ -1910,8 +1910,8 @@ describe('16.2 light', () => {
   });
 
   it('the Gloam rises in the Hollow when a hero stands unlit, keeps to the dark, strikes for 4, fades after 2 calm phases', () => {
-    let s = delve({ heroes: ['hobart', 'brann'] });
-    put(s, 'hobart', at(3, 6, 4)); // the lantern bearer, shuttered: everyone is in the dark
+    let s = delve({ heroes: ['keven', 'brann'] });
+    put(s, 'keven', at(3, 6, 4)); // the lantern bearer, shuttered: everyone is in the dark
     put(s, 'brann', at(3, 7, 4));
     s.delve!.lanternOpen = false;
     const r = ok(s, { type: 'endTurn' });
@@ -1925,19 +1925,19 @@ describe('16.2 light', () => {
     // It came up 4..6 from an unlit hero, and the rise phase moved it (no grace).
     const dist = Math.max(Math.abs(spawn.type === 'gloam' ? spawn.at.q - at(3, 6, 4).q : 0), 0);
     void dist;
-    // Strike: adjacent unlit hero takes 4, armor ignored (Hobart has armor 1).
-    put(s, 'hobart', at(3, 6, 4));
+    // Strike: adjacent unlit hero takes 4, armor ignored (Keven has armor 1).
+    put(s, 'keven', at(3, 6, 4));
     g.at = { ...at(3, 5, 4) };
-    hero(s, 'hobart').hp = 12;
+    hero(s, 'keven').hp = 12;
     s = ok(s, { type: 'endTurn' }).state;
-    expect(hero(s, 'hobart').hp).toBe(8);
+    expect(hero(s, 'keven').hp).toBe(8);
     expect(s.delve!.monsters.some((m) => m.kind === 'gloam')).toBe(true);
     // It never enters a lit hex: open the lantern (radius 4) and it can't close in; two calm phases and it fades.
-    s = act(s, 'hobart', 'shutter', {}).state;
+    s = act(s, 'keven', 'shutter', {}).state;
     expect(s.delve!.lanternOpen).toBe(true);
     const r2 = ok(s, { type: 'endTurn' });
     s = r2.state;
-    expect(hero(s, 'hobart').hp).toBe(8); // no strike on a lit hero
+    expect(hero(s, 'keven').hp).toBe(8); // no strike on a lit hero
     expect(s.delve!.gloamCalm).toBe(1);
     s = ok(s, { type: 'endTurn' }).state;
     expect(s.delve!.monsters.some((m) => m.kind === 'gloam')).toBe(false);
@@ -1955,8 +1955,8 @@ describe('16.2 light', () => {
   });
 
   it('on Levels 1 and 2 the pitch-black rule stays: light 0 brings it, light back makes it fade at once', () => {
-    let s = delve({ heroes: ['hobart', 'aldous'] });
-    put(s, 'hobart', PITHALL);
+    let s = delve({ heroes: ['keven', 'aldous'] });
+    put(s, 'keven', PITHALL);
     put(s, 'aldous', at(1, 9, 7));
     s.delve!.light = 1;
     s = ok(s, { type: 'endTurn' }).state;
@@ -2001,9 +2001,9 @@ describe('16.4 new monsters', () => {
   });
 
   it('captain: armor 1, shield wall for adjacent orcs, shouts first (shown as an intent) and rallies orcs within 8', () => {
-    let s = delve({ heroes: ['brann', 'hobart'] });
+    let s = delve({ heroes: ['brann', 'keven'] });
     put(s, 'brann', at(1, 10, 8));
-    put(s, 'hobart', at(1, 8, 8));
+    put(s, 'keven', at(1, 8, 8));
     const cap = monster(s, 'captain', at(1, 11, 8), 'alert');
     const orc = monster(s, 'orc', at(1, 11, 7), 'alert'); // next to the captain
     const far = monster(s, 'orc', at(1, 8, 1), 'alert'); // 7 rows up, out of sight
@@ -2011,10 +2011,10 @@ describe('16.4 new monsters', () => {
     const p = e.preview(s, 'brann', 'attack', { id: cap.id });
     expect(p.modifiers).toContain('Armor −1 dmg per hit');
     expect(p.outcomes[1]).toBe('1 dmg');
-    const po = e.preview(s, 'hobart', 'attack', { id: orc.id });
-    expect(po.ok).toBe(false); // not adjacent to hobart
-    put(s, 'hobart', at(1, 10, 7));
-    const po2 = e.preview(s, 'hobart', 'attack', { id: orc.id });
+    const po = e.preview(s, 'keven', 'attack', { id: orc.id });
+    expect(po.ok).toBe(false); // not adjacent to keven
+    put(s, 'keven', at(1, 10, 7));
+    const po2 = e.preview(s, 'keven', 'attack', { id: orc.id });
     expect(po2.modifiers).toContain('Shield wall −1 dmg per hit');
     expect(po2.outcomes[1]).toBe('1 dmg');
     // First sight: the captain's intent is shout; it goes off next world phase and the far orc comes hunting.
@@ -2030,9 +2030,9 @@ describe('16.4 new monsters', () => {
   });
 
   it('ghoul: buried until a hero ends a move within 2; grabs (shown first), the held hero cannot move, escape or a kill frees', () => {
-    let s = delve({ heroes: ['brann', 'hobart'] });
+    let s = delve({ heroes: ['brann', 'keven'] });
     put(s, 'brann', at(3, 5, 5));
-    put(s, 'hobart', at(3, 2, 2));
+    put(s, 'keven', at(3, 2, 2));
     const gh = monster(s, 'ghoul', at(3, 8, 6), 'hunting');
     gh.buried = true;
     // Not on the map: not a target, not an obstacle, no intent.
@@ -2068,29 +2068,29 @@ describe('16.4 new monsters', () => {
     // Killing the ghoul frees too.
     const t = structuredClone(s);
     const gt = t.delve!.monsters.find((x) => x.id === gh.id)!;
-    hero(t, 'hobart').at = { ...posNeighborsOf(gt.at).find((p) => w.tile(p)?.kind === 'floor' && !samePos(p, hero(t, 'brann').at))! };
+    hero(t, 'keven').at = { ...posNeighborsOf(gt.at).find((p) => w.tile(p)?.kind === 'floor' && !samePos(p, hero(t, 'brann').at))! };
     gt.hp = 1;
-    const r4 = act(t, 'hobart', 'attack', { id: gh.id }, 3);
+    const r4 = act(t, 'keven', 'attack', { id: gh.id }, 3);
     expect(r4.state.delve!.monsters.some((x) => x.id === gh.id)).toBe(false);
     expect(hero(r4.state, 'brann').grabbedBy).toBeUndefined();
   });
 
   it('spider: web, then drag the webbed hero one hex toward it (pits count)', () => {
-    let s = delve({ heroes: ['brann', 'hobart'] });
-    put(s, 'hobart', at(1, 10, 8));
+    let s = delve({ heroes: ['brann', 'keven'] });
+    put(s, 'keven', at(1, 10, 8));
     put(s, 'brann', at(1, 8, 8));
     const sp = monster(s, 'spider', at(1, 12, 8), 'hunting');
     computeIntentsOf(ctx(s));
     expect(sp.intent?.kind).toBe('web');
-    expect(sp.intent?.targetId).toBe('hobart');
+    expect(sp.intent?.targetId).toBe('keven');
     s = ok(s, { type: 'endTurn' }).state;
-    expect(hero(s, 'hobart').webbed).toBe(true);
+    expect(hero(s, 'keven').webbed).toBe(true);
     const spp = s.delve!.monsters.find((x) => x.id === sp.id)!;
     expect(spp.intent?.kind).toBe('drag');
     expect(spp.intent?.to).toEqual(at(1, 11, 8));
     const r = ok(s, { type: 'endTurn' });
-    expect(r.events.some((x) => x.type === 'dragged' && x.id === 'hobart')).toBe(true);
-    expect(hero(r.state, 'hobart').at).toEqual(at(1, 11, 8));
+    expect(r.events.some((x) => x.type === 'dragged' && x.id === 'keven')).toBe(true);
+    expect(hero(r.state, 'keven').at).toEqual(at(1, 11, 8));
     // Over a pit: Brann on the edge (10,5), the spider across the pit at (10,2)... (10,3) is the pit mouth between them.
     let t = delve({ heroes: ['brann'] });
     put(t, 'brann', at(1, 10, 5));
@@ -2143,9 +2143,9 @@ describe('16.5 the Lantern Sisters\' kit', () => {
   });
 
   it('burglar sister: sleep darts the nearest hero within 5 when hostile; a hit costs the hero their next turn', () => {
-    let s = withRivals(['brann', 'hobart']);
+    let s = withRivals(['brann', 'keven']);
     put(s, 'brann', at(1, 10, 8));
-    put(s, 'hobart', at(1, 8, 8));
+    put(s, 'keven', at(1, 8, 8));
     sisters(s, true, [at(1, 16, 1), at(1, 17, 1), at(1, 10, 5)]);
     computeIntentsOf(ctx(s));
     const bur = s.delve!.rivals!.members[2]!;
@@ -2162,9 +2162,9 @@ describe('16.5 the Lantern Sisters\' kit', () => {
   });
 
   it('ranger sister: overwatch when no hero is in reach, and the shot fires when a hero moves in her sight', () => {
-    let s = withRivals(['brann', 'hobart']);
+    let s = withRivals(['brann', 'keven']);
     put(s, 'brann', at(1, 2, 8)); // the gate room: walled off from the pit hall
-    put(s, 'hobart', at(2, 2, 1));
+    put(s, 'keven', at(2, 2, 1));
     sisters(s, true, [at(1, 10, 1), at(1, 17, 1), at(1, 16, 1)]);
     computeIntentsOf(ctx(s));
     const ran = s.delve!.rivals!.members[0]!;

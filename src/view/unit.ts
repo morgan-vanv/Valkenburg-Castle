@@ -17,7 +17,7 @@ export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
  */
 export const HERO_SCALE = 2.0;
 export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
-  hobart: 2.0,
+  heir: 2.0,
   rats: 1.3,
   orc: 2.1,
   archer: 2.0,

@@ -19,7 +19,7 @@ export function fixtureCampaign(): GameState['campaign'] {
     gold: 100,
     stash: [item('i1', 'torch', 'Torch'), item('i2', 'potion', 'Potion'), item('i3', 'rope', 'Rope')],
     roster: [
-      hero('hobart', 'Lord Hobart', 'hobart', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
+      hero('keven', 'Keven', 'heir', 12, { might: 65, finesse: 50, wits: 55, nerve: 80 }),
       hero('brann', 'Brann', 'sellsword', 10, { might: 70, finesse: 45, wits: 40, nerve: 60 }),
       hero('pim', 'Pim', 'burglar', 7, { might: 40, finesse: 75, wits: 60, nerve: 50 }),
       { ...hero('aldous', 'Aldous', 'pyromancer', 6, { might: 30, finesse: 50, wits: 75, nerve: 55 }), wounded: 1 },
@@ -47,14 +47,14 @@ export function fixtureDelve(castle: CastleDef): GameState {
   const near = (p: Pos, i: number): Pos => posNeighbors(p)[i] ?? p;
   const at0: Pos = near(e, 1);
   const c = fixtureCampaign();
-  const heroIds = ['hobart', 'brann', 'pim', 'aldous'];
+  const heroIds = ['keven', 'brann', 'pim', 'aldous'];
   const spots = [at0, near(at0, 0), near(at0, 2), near(at0, 1)];
   const heroes = heroIds.map((id, i) => ({
     heroId: id,
     at: spots[i]!,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
-    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch')] : id === 'hobart' ? [item('i11', 'potion', 'Potion')] : [],
+    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch')] : id === 'keven' ? [item('i11', 'potion', 'Potion')] : [],
     status: 'active' as const,
     bleed: 0,
     torch: id === 'brann' ? 8 : 0,
@@ -93,7 +93,7 @@ export function fixtureDelve(castle: CastleDef): GameState {
       })),
       rivals: null,
       light: 44,
-      lanternBearer: 'hobart',
+      lanternBearer: 'keven',
       doors: Object.fromEntries(
         castle.levels.flatMap((lv) =>
           Object.entries(lv.tiles)

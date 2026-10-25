@@ -33,7 +33,7 @@ export interface Loadout {
 }
 
 const TITLE = 'Valkenburg Castle';
-const SUBTITLE = "Hobart's Revenge";
+const SUBTITLE = "The Heir's Return";
 
 const WEAPON_PRICE = [0, 60, 150];
 const ARMOR_PRICE = [0, 80, 200];
@@ -50,7 +50,7 @@ export function titleScreen(el: HTMLElement, host: ScreenHost): void {
       { class: 'screen-panel title-panel' },
       h('div', { class: 'kicker' }, 'A delve into the ruined seat of the Van Valkenburgs'),
       h('h1', { class: 'game-title' }, TITLE, h('span', { class: 'game-sub' }, SUBTITLE)),
-      h('p', { class: 'lede' }, 'The keep fell three generations ago. Lord Hobart, last of the line, wants it back, one contract at a time. Mind the lantern. Something waits for the dark.'),
+      h('p', { class: 'lede' }, 'The keep fell three generations ago. Keven, last of the line, wants it back, one contract at a time. Mind the lantern. Something waits for the dark.'),
       h(
         'div',
         { class: 'title-actions' },
@@ -149,7 +149,7 @@ function classBadge(cls: string): HTMLElement {
 
 /** Hobart alone: the squad needs hiring before the first delve. */
 function needsHire(s: GameState): boolean {
-  return !s.campaign.roster.some((x) => x.cls !== 'hobart');
+  return !s.campaign.roster.some((x) => x.cls !== 'heir');
 }
 
 /** Spec 17.2: HP carries over between delves. */
@@ -191,7 +191,7 @@ function boardStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
         'div',
         { class: 'hire-first' },
         h('b', null, 'Hire at least one hero'),
-        h('span', null, ' Lord Hobart will not go in alone. Visit the tavern first.'),
+        h('span', null, ' Keven will not go in alone. Visit the tavern first.'),
         h('button', { class: 'btn btn-primary btn-small', onclick: () => host.setStation('tavern') }, 'Go to the tavern'),
       ),
     );
@@ -314,7 +314,7 @@ function smithyStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
 
 function tavernStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
   const hire = needsHire(s);
-  el.append(stationHead('Tavern', hire ? `Lord Hobart can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.` : 'Blades, bows, sneaks and spellcasters, for a price. Offers change after every delve.'));
+  el.append(stationHead('Tavern', hire ? `Keven can't take the castle alone. Hire at least one hero: you have ${gold(s.campaign.gold)} gold.` : 'Blades, bows, sneaks and spellcasters, for a price. Offers change after every delve.'));
   const grid = h('div', { class: 'recruits' });
   if (!s.campaign.recruits.length) grid.append(h('p', { class: 'dim' }, 'Nobody looking for work. Come back after the next delve.'));
   for (const r of s.campaign.recruits) grid.append(recruitCard(r.hero, r.price, s, host));
@@ -553,8 +553,8 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     );
   }
   el.append(h('h3', { class: 'prep-h' }, `Party `, h('span', { class: 'dim small' }, `${l.heroIds.length}/4`)), party);
-  if (l.heroIds.includes('hobart') || l.heroIds.some((id) => c.roster.find((x) => x.id === id)?.cls === 'hobart')) {
-    el.append(h('p', { class: 'warn-hobart' }, '⚠ If Hobart dies, it is over. The campaign ends with him.'));
+  if (l.heroIds.includes('keven') || l.heroIds.some((id) => c.roster.find((x) => x.id === id)?.cls === 'heir')) {
+    el.append(h('p', { class: 'warn-heir' }, '⚠ If Keven dies, it is over. The campaign ends with him.'));
   }
 
   // Packs.
@@ -686,7 +686,7 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
     const max = s.campaign.roster.find((x) => x.id === id)?.maxHp ?? 0;
     return hd ? `${hd.hp}/${max} HP` : 'out';
   };
-  const hobartDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'hobart');
+  const heirDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
   el.append(
     h(
       'div',
@@ -718,8 +718,8 @@ export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): 
         ),
         h('div', null, h('h2', null, 'Notes'), sm.notes.length ? h('ul', { class: 'loot-list' }, ...sm.notes.map((n) => h('li', null, n))) : h('p', { class: 'dim' }, 'Nothing worth a song.')),
       ),
-      hobartDead ? h('p', { class: 'warn-hobart' }, 'Lord Hobart did not come back.') : '',
-      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, hobartDead ? 'Continue' : 'Back to camp')),
+      heirDead ? h('p', { class: 'warn-heir' }, 'Keven did not come back.') : '',
+      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, heirDead ? 'Continue' : 'Back to camp')),
     ),
   );
   if (sm.levelUps.length) sfx.play('levelup');

@@ -18,7 +18,7 @@ const run = (c: Command) => {
   if (r.error) console.log('  refused:', c.type, r.error);
   s = r.state;
 };
-run({ type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['hobart'], entrance: 0, packs: {} });
+run({ type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['keven'], entrance: 0, packs: {} });
 const d = s.delve!;
 d.lanternOpen = false;
 // Every Level 1 floor hex next to a pit whose jump drops two levels; take the first.
@@ -29,11 +29,11 @@ for (const [k, t] of Object.entries(castle.levels[0]!.tiles)) {
   d.heroes[0]!.at = { level: 1, q, r };
   d.heroes[0]!.moved = false;
   d.heroes[0]!.acted = false;
-  const jump = e.actions(s, 'hobart').find((a) => a.action === 'jump');
+  const jump = e.actions(s, 'keven').find((a) => a.action === 'jump');
   for (const t of jump?.targets ?? []) {
-    const pv = e.preview(s, 'hobart', 'jump', t);
+    const pv = e.preview(s, 'keven', 'jump', t);
     if (!pv.warning?.includes('2 levels')) continue;
-    run({ type: 'act', heroId: 'hobart', action: 'jump', target: t });
+    run({ type: 'act', heroId: 'keven', action: 'jump', target: t });
     jumped = true;
     break;
   }
@@ -48,4 +48,4 @@ const near = l3.filter((k) => {
 });
 console.log(`Level 3 explored: ${l3.length} (within 2 of the hero: ${near.length}, farther: ${l3.length - near.length})`);
 console.log('farther:', l3.filter((k) => !near.includes(k)).join(' '));
-console.log(`hero lit: ${vis.lit.has(posKey(h.at))}, sight ${e.sightRange(s, 'hobart')}`);
+console.log(`hero lit: ${vis.lit.has(posKey(h.at))}, sight ${e.sightRange(s, 'keven')}`);

@@ -177,7 +177,7 @@ export interface CastleDef {
 
 /** V3.2 (spec 15.3): the mage split into three schools; ranger and sapper added. */
 export type HeroClass =
-  | 'hobart'
+  | 'heir'
   | 'sellsword'
   | 'burglar'
   | 'ranger'
@@ -329,7 +329,7 @@ export interface HeroInDelve {
   webbed: boolean;
   /** Pyromancer, Shadowmancer, Hedgewitch: mana left. */
   mana: number;
-  /** Hobart only: rounds until Rally is ready (0 = ready). */
+  /** The heir (Keven) only: rounds until Rally is ready (0 = ready). */
   rallyCooldown: number;
   /** Sellsword only: id of the ally guarded until the next player phase. */
   guarding?: string;
@@ -562,7 +562,7 @@ export type ActionKind =
   | 'shove' // push an adjacent enemy 1 hex (into the pit = it falls)
   | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
-  | 'rally' // Hobart: +1 Focus to allies within 3, cooldown 3
+  | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally
   | 'firebolt' // Mage spell
   | 'kindle' // Mage spell: +12 light

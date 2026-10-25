@@ -12,7 +12,7 @@ import {
 export type AnyClass = HeroClass | 'mage' | 'sellsword' | 'burglar' | 'ranger' | 'sapper' | 'pyromancer' | 'shadowmancer' | 'hedgewitch';
 
 export const CLASS_NAME: Record<AnyClass, string> = {
-  hobart: 'Lord',
+  heir: 'Lord',
   sellsword: 'Sellsword',
   burglar: 'Burglar',
   mage: 'Hedge Mage',
@@ -25,7 +25,7 @@ export const CLASS_NAME: Record<AnyClass, string> = {
 
 /** Counter-style badge glyph, 1980 style. */
 export const CLASS_GLYPH: Record<AnyClass, string> = {
-  hobart: 'L',
+  heir: 'L',
   sellsword: 'S',
   burglar: 'B',
   mage: 'M',
@@ -38,7 +38,7 @@ export const CLASS_GLYPH: Record<AnyClass, string> = {
 
 /** One-line role, shown big on recruit cards. */
 export const CLASS_ROLE: Record<AnyClass, string> = {
-  hobart: 'The heir: rallies the squad. If he dies, it is over.',
+  heir: 'The heir: rallies the squad. If he dies, it is over.',
   sellsword: 'Front line: hits hard, guards allies, shoves harder.',
   burglar: 'Quiet: picks locks, sneaks fast, backstabs.',
   mage: 'Spells: firebolt, kindle, mend. Fragile.',
@@ -51,7 +51,7 @@ export const CLASS_ROLE: Record<AnyClass, string> = {
 
 /** Longer text: kit and abilities (from docs/v3-spec.md 15.3). */
 export const CLASS_BLURB: Record<AnyClass, string> = {
-  hobart: 'The heir. Rally: +1 Focus to allies nearby. If he dies, it is over.',
+  heir: 'The heir. Rally: +1 Focus to allies nearby. If he dies, it is over.',
   sellsword: 'Hits hard, takes hits. Guard: soak blows aimed at an ally.',
   burglar: 'Picks locks, sneaks fast, backstabs the unwary.',
   mage: 'Firebolt, Kindle the lantern, Mend wounds. Fragile.',
@@ -64,7 +64,7 @@ export const CLASS_BLURB: Record<AnyClass, string> = {
 
 /** Weapon and armor line per class (spec 15.3), for recruit cards. */
 export const CLASS_GEAR: Record<AnyClass, string> = {
-  hobart: 'Sword (Might, 3 slots) · Armor 2',
+  heir: 'Sword (Might, 3 slots) · Armor 2',
   sellsword: 'Sword (Might, 3 slots, 2 dmg) · Armor 1',
   burglar: 'Dagger (Finesse, 2 slots, 2 dmg) · Armor 0',
   mage: 'Staff (Might, 2 slots, 1 dmg) · Armor 0',
@@ -77,7 +77,7 @@ export const CLASS_GEAR: Record<AnyClass, string> = {
 
 /** Abilities and spells per class: [name, cost or kind, effect]. */
 export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
-  hobart: [['Rally', 'ability', '+1 Focus to allies within 3; ready every 3 rounds.']],
+  heir: [['Rally', 'ability', '+1 Focus to allies within 3; ready every 3 rounds.']],
   sellsword: [
     ['Guard', 'ability', 'Soak blows aimed at an adjacent ally until your next turn.'],
     ['Shove', 'ability', '+1 slot: push an enemy 1 hex (into a pit, it falls).'],
