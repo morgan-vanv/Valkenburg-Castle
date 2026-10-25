@@ -537,3 +537,31 @@ Overrides earlier sections where they disagree. Contract: `git diff v3.6 -- src/
 - So a charge set or thrown at the pit's edge blows the edge away under whoever stands there; a charge on a bridge (floor over the column) drops the bridge and everyone on it into the Hollow. The blast preview shows the three outcomes by colour before you commit: break (walls), collapse (floor into the pit), rubble.
 - The `blast` event lists `broke`, `collapsed` and `rubbled`. The level is redrawn: collapsed hexes as a ragged new pit edge, rubbled floor as rubble.
 - Filed for later (ideas-later): charges that seal a hallway or bring a ceiling down (blocking tiles), after the owner play-tests this batch.
+
+## 21. V3.7.1: play-test fixes (owner, 2026-10-25 evening; https://claude.ai/artifact/Dw2vU6Hixgak3UeBYd8w8T)
+
+Core tenet (owner): **we want to offer flexibility in approach, but tradeoffs come with it.** Overrides earlier sections where they disagree.
+
+### 21.1 Keven may go alone
+
+- The engine already allows a party of Keven alone. The camp no longer forces a hire: the bounty board and prepare screen open from the start, and the prepare screen shows a warning line when Keven goes alone ("Keven goes in alone. If he falls, it's over.") instead of blocking. The campfire stays highlighted as a suggestion, not a gate.
+
+### 21.2 Starting gold 90
+
+- `START_GOLD` 90: one level-1 hire (60) and an item or two (torch 10 + rope 15, or potion 20 + firecracker 10). Full economy pass later.
+
+### 21.3 Night-eye at the Flagon
+
+- The night-eye draught (30) is sold only once Old Wim is home (`ShopOffer.needs: 'innkeeper'`), and is shown at the Gilded Flagon next to the ales (the UI may also list it at the peddler as locked with "Brewed at the Gilded Flagon: rescue Old Wim"). Bought into the stash, carried in a pack as before.
+
+### 21.4 Lockpicks
+
+- **Improvised pick** (`improvised`, 1 slot, worth 0, never sold): every Burglar starts each delve with 1 in their pack (it doesn't take a slot from their stash picks: it fills a free slot, or is dropped if the pack is full when the delve starts... simplest: it doesn't count toward the 4 slots, like the Sapper's satchel). A Pick using it rolls 2 Finesse slots and uses it up whatever the result.
+- **Proper lockpicks** (`lockpicks`, the smith's, 25 gold, needs the smith): permanent, never used up. A Burglar with them picks at 3 Finesse slots; any other hero with them picks at 2.
+- **No pick, no Pick:** a hero (Burglar included) with neither can't Pick; Smash, a charge or the skeleton key still open locks. Outcome table as before (on 2 slots: 2 hits silent, 1 hit noise 2, 0 jams; on 3 slots as spec 2).
+- A Burglar carrying both uses the proper picks (keeping the improvised one).
+- Blocked-option texts: "Locked · Smash it, or pick it with lockpicks" for heroes without; for a Burglar who's used theirs: "Your improvised pick is spent. Smash it, or buy lockpicks from Gerda."
+
+### 21.5 Noticing a walking hero from farther
+
+- Noticing ranges for a **walking** hero go up by 2: lit walking 8 (was 6), unlit walking 5 (was 3), Hollow walking 8 (was 6). Sneaking unchanged (lit 4, unlit 1, Hollow 3). Blind arc: walking still at half range (4 lit, 2 unlit).
