@@ -22,9 +22,15 @@ api.ts
 
 ## Done
 - Contract above.
+- data.ts: the eight classes (CLASSES with `mana`, weapon `range`/`noise`), RECRUIT_CLASSES, classInfo() role/ability lines, 12-item SHOP, section 15 constants.
+- camp.ts: Hobart alone + 160 gold, tavern of 4 (3 distinct classes + 1), partyProblem(), new HeroInDelve/Delve fields, Sapper's 2 free charges, prisoners join as a random recruit class.
+- world.ts: permissive LOS (center line, then 6 corners pulled 10% in, 4 samples per hex), addEdgeWalls (solid hexes next to seen floor are seen), smoke blocks sight both ways but not light, dug rubble/cracked = floor via `blown`, burning hexes are lit.
+- delve.ts: dash (reachable/doMove via moveKind), all class abilities and items, Sellsword shove 3 slots, Ranger bow range 6 / noise 1 / adjacent −1, Burglar opens chests without the action, `take` blocked reasons + contract item first, ActionOption pick/area/mana, RollPreview hexes/affects.
+- world-phase.ts: veiled heroes unseen, ward (−1 per hit, min 0; Gloam too), overwatch (monsters and hostile rivals, before they move/act), glue (stuck = move 0), caltrops (stop + 2 dmg), burning (1 dmg at the world phase; monsters won't path into fire), timers and per-round resets.
+- Existing tests updated (79 pass): starting roster via a `party()` helper, dash, Sellsword shove slots, glimpse edge walls.
 
 ## In progress / next
-- Rules: LOS (15.1), dash (15.2), squad/classes (15.3), items (15.4); tests; sim.
+- New tests for each ability/spell/item, dash, LOS patchy reveal; sim squad recruiting.
 
 ## Contract requests
 (none)
