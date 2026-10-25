@@ -5,29 +5,30 @@ import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type 
 import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
 import type { ActionOption } from './api';
 import {
-  BLINK_RANGE, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS,
-  GUST_NOISE, GUST_RANGE, KNOCKBACK_RANGE, LIGHT_MAX, MONSTERS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
+  BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, FOCUS_MAX, GHOUL_RISE_RANGE,
+  GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE,
 } from './data';
-import { say, type Ctx, type MonsterX } from './state';
+import { say, type Ctx, type HeroX, type MonsterX } from './state';
 import {
-  activeHeroes, addToPack, armorOf, brightnessAt, chestLoot, cleanGround, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
-  LIGHT_PENALTY, makeHostile, makeNoise, noteOnce, occupant, packUsed, passLanternIfNeeded, putOnGround,
-  rivalsOnMap, roll, valueOf, wakeAdjacent,
+  activeHeroes, addToPack, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
+  LIGHT_PENALTY, makeHostile, makeNoise, monsterArmor, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
+  releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent,
 } from './common';
 import {
-  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, glimpseSet, isFloorish, kindAt, litSet, los, pathTo,
+  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
   pitsNextTo, standable, steps, visibleSet, within,
 } from './world';
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
 import { lairCheck } from './dragon';
+import { rivalOverwatchFire } from './rivals';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
 /** Mark everything in line of sight from `at` as explored (layout only). */
-export function glimpse(c: Ctx, at: Pos, ex: Set<string> = new Set(c.d.explored)): void {
-  for (const p of glimpseSet(c.w, c.d, at)) {
+export function glimpse(c: Ctx, at: Pos, ex: Set<string> = new Set(c.d.explored), lit?: Set<string>): void {
+  for (const p of glimpseSet(c.w, c.d, at, lit)) {
     const k = posKey(p);
     if (!ex.has(k)) {
       ex.add(k);
@@ -48,13 +49,20 @@ export function refreshSight(c: Ctx): void {
   const vis = visibleSet(c.w, c.d, lit);
   const ex = new Set(c.d.explored);
   for (const k of vis) if (!ex.has(k)) c.d.explored.push(k);
-  for (const h of c.d.heroes) if (h.status === 'active') glimpse(c, h.at, ex);
+  for (const h of c.d.heroes) if (h.status === 'active') glimpse(c, h.at, ex, lit);
 
   const cr = c.d.rivals;
-  if (cr && !cr.spotted && rivalsOnMap(c).some((r) => vis.has(posKey(r.at)))) {
+  if (cr && !cr.spotted && rivalsOnMap(c).some((r) => (r.veil ?? 0) <= 0 && vis.has(posKey(r.at)))) {
     cr.spotted = true;
     say(c, `The Lantern Sisters. They want ${cr.goal === 'leave' ? 'out' : 'the loot'}.`);
+    // The Shadowmancer sister slips into shadow the moment she's seen (spec 16.5): shown as an intent first.
+    for (const r of rivalsOnMap(c)) if (r.cls === 'shadowmancer' && !r.veiled) r.intent = { kind: 'veil', targetId: r.id };
   }
+}
+
+/** Active heroes on Level 3 standing in the dark (spec 16.2: the Gloam's quarry). */
+export function unlitOnL3(c: Ctx, lit: Set<string> = litSet(c.w, c.d)): HeroInDelve[] {
+  return c.d.heroes.filter((h) => h.status === 'active' && h.at.level === 3 && !lit.has(posKey(h.at)));
 }
 
 export function setLight(c: Ctx, value: number): void {
@@ -62,10 +70,11 @@ export function setLight(c: Ctx, value: number): void {
   const before = c.d.light;
   c.d.light = clampLight(value);
   if (c.d.light !== before) c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
-  if (c.d.light > 0) {
+  if (c.d.light > 0 && before === 0) {
     const g = c.d.monsters.find((m) => m.kind === 'gloam');
-    if (g) {
+    if (g && !unlitOnL3(c).length) {
       c.d.monsters = c.d.monsters.filter((m) => m !== g);
+      c.d.gloamCalm = 0;
       c.ev.push({ type: 'monsterDied', id: g.id });
       say(c, 'The dark draws back.');
     }
@@ -92,7 +101,7 @@ function trapPenalty(c: Ctx, p: Pos): number {
 
 /** Can this hero move now? 'walk' = first move; 'dash' = second move that spends the action (spec 15.2). */
 export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
-  if (h.status !== 'active' || h.webbed) return null;
+  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing) return null;
   if (!h.moved) return 'walk';
   if (!h.acted && !h.dashed) return 'dash';
   return null;
@@ -128,6 +137,8 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
   if (!h) return 'No such hero.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't move.`;
   if (h.webbed) return `${heroName(c, heroId)} is stuck in a web.`;
+  if (h.grabbedBy) return `${heroName(c, heroId)} is held fast. Break free first.`;
+  if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
   const mk = moveKind(h);
   if (!mk) return h.dashed ? `${heroName(c, heroId)} has already dashed.` : `${heroName(c, heroId)} has already moved.`;
   if (!path.length) return 'Pick a destination.';
@@ -181,6 +192,8 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): str
   ventCheck(c, h);
   afterHeroMove(c, h, sneak);
   makeNoise(c, h.at, h.status === 'active' ? moveNoise(sneak) : 0);
+  checkHolds(c);
+  rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
   return undefined;
@@ -223,7 +236,26 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false): void {
     }
   }
   wakeAdjacent(c, h.at);
+  riseGhouls(c, h);
   lairCheck(c, h, sneak);
+}
+
+/** Buried ghouls within GHOUL_RISE_RANGE of a hero who just ended a move claw their way out, hunting (spec 16.4). */
+export function riseGhouls(c: Ctx, h: HeroInDelve): void {
+  for (const m of c.d.monsters) {
+    if (!m.buried || !within(m.at, h.at, GHOUL_RISE_RANGE)) continue;
+    m.buried = false;
+    if (occupant(c, m.at)) {
+      const free = freeNear(c.w, c.d, m.at, (p) => !!occupant(c, p));
+      if (free) m.at = { ...free };
+    }
+    m.awareness = 'hunting';
+    m.focusAt = { ...h.at };
+    m.intent = undefined;
+    c.ev.push({ type: 'spawned', id: m.id, at: { ...m.at } });
+    c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
+    say(c, `${m.name} claws its way out of the bones.`);
+  }
 }
 
 setAfterLanding((c, h) => {
@@ -232,7 +264,7 @@ setAfterLanding((c, h) => {
 
 // ---------------------------------------------------------------- targets
 
-const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave'];
+const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter'];
 
 function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
@@ -248,7 +280,7 @@ function aroundAndSelf(p: Pos): Pos[] {
 
 function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] {
   const out: ActionTarget[] = [];
-  for (const m of c.d.monsters) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
+  for (const m of onMap(c)) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
   for (const r of rivalsOnMap(c)) if (adjacent(r.at, h.at)) out.push({ id: r.id, at: r.at });
   return out;
 }
@@ -257,7 +289,7 @@ function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] 
 function enemiesInSight(c: Ctx, h: HeroInDelve, n: number, opts: { noDragon?: boolean; monstersOnly?: boolean } = {}): ActionTarget[] {
   const vis = visNow(c);
   const out: ActionTarget[] = [];
-  const cands = [...c.d.monsters.filter((m) => m.kind !== 'gloam' && !(opts.noDragon && m.kind === 'dragon')), ...(opts.monstersOnly ? [] : rivalsOnMap(c))];
+  const cands = [...onMap(c).filter((m) => m.kind !== 'gloam' && !(opts.noDragon && m.kind === 'dragon')), ...(opts.monstersOnly ? [] : rivalsOnMap(c).filter((r) => (r.veil ?? 0) <= 0))];
   for (const m of cands) {
     if (within(m.at, h.at, n) && vis.has(posKey(m.at)) && los(c.w, c.d, h.at, m.at)) out.push({ id: m.id, at: m.at });
   }
@@ -302,7 +334,7 @@ export function awayFrom(from: Pos, at: Pos): Pos {
 }
 
 /** A virtual pusher position so that push()/pushOutcome() send the figure at `at` one hex away from `from`. */
-function pusherFor(from: Pos, at: Pos): Pos {
+export function pusherFor(from: Pos, at: Pos): Pos {
   const dest = awayFrom(from, at);
   return { level: at.level, q: 2 * at.q - dest.q, r: 2 * at.r - dest.r };
 }
@@ -584,6 +616,10 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'passLantern':
       if (c.d.lanternBearer !== h.heroId) return [];
       return others.filter((o) => o.status === 'active' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId }));
+    case 'shutter':
+      return c.d.lanternBearer === h.heroId ? [{ id: h.heroId }] : [];
+    case 'escape':
+      return h.grabbedBy && onMap(c).some((m) => m.id === h.grabbedBy) ? [{ id: h.grabbedBy }] : [];
     case 'leave':
       return kindAt(c.w, c.d, h.at) === 'exit' ? [{ at: h.at }] : [];
   }
@@ -595,16 +631,16 @@ const LABELS: Record<ActionKind, string> = {
   disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', potion: 'Potion', revive: 'Revive',
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
   bribe: 'Bribe (40 gold)', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
-  passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle',
+  passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
   overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', dig: 'Dig', fireball: 'Fireball',
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up',
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape'];
 const ORDER: ActionKind[] = [
-  'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
+  'escape', 'shutter', 'attack', 'knockback', 'overwatch', 'firebolt', 'fireball', 'sleep', 'gust', 'shove', 'pick', 'smash', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'disarm', 'charge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'bribe', 'passLantern', 'give', 'drop', 'leave',
 ];
@@ -614,7 +650,7 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   attack: 'enemy', pick: 'other', smash: 'other', open: 'other', take: 'hex', drop: 'item', give: 'other', disarm: 'hex',
   light: 'hex', torch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
   shove: 'enemy', free: 'other', bribe: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
-  passLantern: 'ally', winch: 'self', leave: 'self',
+  passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', oil: 'self', grapple: 'self',
@@ -627,6 +663,7 @@ const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'firebal
 const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
 
 function canDo(h: HeroInDelve, action: ActionKind): boolean {
+  if ((h as HeroX).dozing) return false;
   if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted;
   if (FREE.includes(action)) return true;
   return !h.acted;
@@ -641,6 +678,7 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
     const t = targetsFor(c, h, a);
     if (!t.length) continue;
     const opt: ActionOption = { action: a, label: LABELS[a], targets: t, rolls: ROLLS.includes(a), pick: PICK[a] };
+    if (a === 'shutter' && !c.d.lanternOpen) opt.label = 'Open lantern';
     if (AREA[a]) opt.area = AREA[a];
     if (MANA_COST[a]) opt.mana = MANA_COST[a];
     // Blocked options (spec 15.7): listed, with the reason, when none of the targets can be done now.
@@ -717,12 +755,21 @@ function sign(n: number): string {
   return n >= 0 ? `+${n}%` : `−${-n}%`;
 }
 
+/** A monster's armor against this hit, with the plain-words modifiers (armor, the captain's shield wall). */
+function armorMods(c: Ctx, m: MonsterX, mods: string[]): number {
+  const base = monsterArmor(c, m) - (shieldWalled(c, m) ? 1 : 0);
+  if (base) mods.push(`Armor −${base} dmg per hit`);
+  if (shieldWalled(c, m)) mods.push('Shield wall −1 dmg per hit');
+  return monsterArmor(c, m);
+}
+
 export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionTarget): Spec {
   const no = (reason: string): Spec => ({ ok: false, reason, slots: 0, chance: 0, modifiers: [], outcomes: [], noise: 0, light: 0 });
   const h = hd(c, heroId);
   if (!h || c.s.stage !== 'delve') return no('Not in a delve.');
   if (h.status !== 'active') return no(`${heroName(c, heroId)} can't act.`);
   if (c.d.phase !== 'player') return no('Wait for your turn.');
+  if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
   if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
   if (!t) return no('No valid target.');
@@ -754,8 +801,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
       if (adjacent(h.at, f.at) && c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
-      const armor = f.monster ? (MONSTERS[f.monster.kind].armor ?? 0) : 0;
-      if (armor) mods.push(`Armor −${armor} dmg per hit`);
+      const armor = f.monster ? armorMods(c, f.monster, mods) : 0;
       const dmg = Math.max(1, cls.weapon.dmg - armor);
       const outcomes = [];
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? 'Miss' : `${i * dmg + (i === slots ? 1 : 0)} dmg`);
@@ -847,8 +893,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       let p = withLight(def.stats.wits);
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
-      const armor = f.monster ? (MONSTERS[f.monster.kind].armor ?? 0) : 0;
-      if (armor) mods.push(`Armor −${armor} dmg per hit`);
+      const armor = f.monster ? armorMods(c, f.monster, mods) : 0;
       const bd = Math.max(1, 2 - armor);
       const outcomes = [];
       for (let i = 0; i <= 3; i++) outcomes.push(i === 0 ? 'Miss' : `${i * bd + (i === 3 ? 1 : 0)} dmg`);
@@ -887,7 +932,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'drop': return simple('Drop it here');
     case 'give': return simple(`Hand to ${heroName(c, t.id!)}`);
-    case 'light': return simple('+6 light, lit for good', 0, 6);
+    case 'light': return simple(`+${BRAZIER_LIGHT} light, lit for good`, 0, BRAZIER_LIGHT);
     case 'torch': return simple(`Torchlight for ${TORCH_ROUNDS} rounds`);
     case 'potion': {
       const o = hd(c, t.id!)!;
@@ -912,7 +957,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'bribe': return simple('Pay 40 gold: they leave');
     case 'rally': return simple('+1 Focus to allies within 3');
     case 'guard': return simple(`Take hits meant for ${heroName(c, t.id!)}`);
-    case 'kindle': return withMana(simple('+12 light', 0, 12), 1);
+    case 'kindle': return withMana(simple(`+${KINDLE_LIGHT} light`, 0, KINDLE_LIGHT), 1);
+    case 'shutter': return simple(c.d.lanternOpen ? 'Shutter the lantern: no light, no burn. Free.' : 'Open the lantern: light again. Free.');
+    case 'escape': {
+      const m = c.d.monsters.find((x) => x.id === t.id)!;
+      return base('might', 2, withLight(def.stats.might), ['Still held', `Free of ${m.name}`, `Free of ${m.name}`], 1);
+    }
     case 'mend': return withMana(simple('Heal 4'), 1);
     case 'passLantern': return simple(`${heroName(c, t.id!)} carries the lantern`);
     case 'leave': return simple('Leave the castle');
@@ -957,10 +1007,10 @@ function ignite(c: Ctx, hexes: Pos[]): void {
 }
 
 /** Smoke in and around `at`: sight blocked, monsters inside lose track. */
-function smokeOut(c: Ctx, at: Pos): Pos[] {
+export function smokeOut(c: Ctx, at: Pos): Pos[] {
   const hexes = areaOf(c, at, 1).filter((p) => isFloorish(c.w, c.d, p) || kindAt(c.w, c.d, p) === 'pit');
   for (const p of hexes) c.d.smoke[posKey(p)] = SMOKE_ROUNDS;
-  for (const m of c.d.monsters) {
+  for (const m of onMap(c)) {
     if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness !== 'hunting') continue;
     if (hexes.some((p) => samePos(p, m.at))) {
       m.awareness = 'alert';
@@ -1062,7 +1112,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (!r.hits) break;
       for (const id of figuresOn(c, hexes)) {
         const m = c.d.monsters.find((x) => x.id === id);
-        const armor = m ? (MONSTERS[m.kind].armor ?? 0) : hd(c, id) ? armorOf(heroDef(c, id)!) : 0;
+        const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : 0;
         const dmg = r.hits * Math.max(1, 2 - armor) + (r.perfect ? 1 : 0);
         if (hd(c, id)) hurtHero(c, hd(c, id)!, dmg, heroId, r.perfect);
         else hurtAny(c, id, dmg, heroId, { crit: r.perfect });
@@ -1075,10 +1125,9 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'cast', by: heroId, spell: 'veil', targetId: o.heroId });
       // Hunting monsters with no unveiled hero left in sight lose the trail.
       const lit = litSet(c.w, c.d);
-      for (const m of c.d.monsters) {
+      for (const m of onMap(c)) {
         if (m.awareness !== 'hunting' || m.kind === 'gloam' || m.kind === 'dragon') continue;
-        const seesSomeone = c.d.heroes.some((x) => x.status === 'active' && x.veil <= 0 && within(x.at, m.at, 6)
-          && (distance(x.at, m.at) <= 2 || lit.has(posKey(x.at))) && los(c.w, c.d, m.at, x.at));
+        const seesSomeone = c.d.heroes.some((x) => x.status === 'active' && x.veil <= 0 && monsterSees(c.w, c.d, m.at, x.at, lit));
         if (seesSomeone) continue;
         m.awareness = 'alert';
         m.focusAt = { ...o.at };
@@ -1142,7 +1191,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const hexes = areaOf(c, t.at!, 1).filter((p) => isFloorish(c.w, c.d, p));
       for (const p of hexes) c.d.glue[posKey(p)] = GLUE_ROUNDS;
       c.ev.push({ type: 'cast', by: heroId, spell: 'glue', at: t.at!, hexes });
-      for (const m of c.d.monsters) {
+      for (const m of onMap(c)) {
         if (m.kind === 'gloam' || m.kind === 'dragon') continue;
         if (hexes.some((p) => samePos(p, m.at))) {
           m.stuck = GLUE_ROUNDS;
@@ -1314,8 +1363,26 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'light': {
       c.d.lit.push(posKey(t.at!));
       c.ev.push({ type: 'brazierLit', at: t.at! });
-      setLight(c, c.d.light + 6);
+      setLight(c, c.d.light + BRAZIER_LIGHT);
       say(c, `${name} lights the brazier.`);
+      break;
+    }
+    case 'shutter': {
+      c.d.lanternOpen = !c.d.lanternOpen;
+      c.visCache = undefined;
+      c.ev.push({ type: 'shutter', open: c.d.lanternOpen });
+      c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
+      say(c, c.d.lanternOpen ? `${name} opens the lantern.` : `${name} shutters the lantern.`);
+      break;
+    }
+    case 'escape': {
+      const r = doRoll();
+      const m = c.d.monsters.find((x) => x.id === t.id)!;
+      makeNoise(c, h.at, 1);
+      if (r.hits) {
+        say(c, `${name} wrenches free.`);
+        releaseHold(c, m);
+      } else say(c, `${m.name} holds on.`);
       break;
     }
     case 'torch':
@@ -1432,7 +1499,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       h.guarding = t.id;
       break;
     case 'kindle':
-      setLight(c, c.d.light + 12);
+      setLight(c, c.d.light + KINDLE_LIGHT);
       break;
     case 'mend': {
       const o = hd(c, t.id!)!;
@@ -1446,6 +1513,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       leaveCastle(c, h);
       break;
   }
+  checkHolds(c);
+  if (action !== 'shutter' && action !== 'leave') rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
   return undefined;
@@ -1454,11 +1523,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
 
 function wakeTarget(c: Ctx, id: string, from: Pos): void {
   const m = c.d.monsters.find((x) => x.id === id);
-  if (m && m.awareness !== 'hunting') {
-    m.awareness = 'hunting';
-    m.focusAt = { ...from };
-    c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
-  }
+  if (m && m.awareness !== 'hunting') goHunting(c, m, from);
 }
 
 export function leaveCastle(c: Ctx, h: HeroInDelve): void {

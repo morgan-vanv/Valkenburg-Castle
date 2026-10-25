@@ -16,7 +16,7 @@ Goal: spec section 16 (awareness and patrols, lantern 20 with shutter, per-hero 
 
 - [x] Spec 16, contract, plan, briefs
 - [ ] Engine: rules, tests, sim (bot opens the lantern on L2/L3)
-- [ ] Castle data: spawns/patrols/lights per level, tests
+- [x] Castle data: sleepers, patrols, archers, captain, buried ghouls, lights per level (L1 83% lit by daylight); 22 castle tests
 - [ ] Presentation: shutter, darkness, patrols, Gloam, new monsters, intents; then scale option C (spec 15.8a)
 - [ ] Integration: typecheck, tests, build; sim check (L1 easy, L2 resistance, L3 deadly unlit)
 - [ ] Merge to `main`, verify live; changelog and decisions

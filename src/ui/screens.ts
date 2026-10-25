@@ -27,6 +27,8 @@ export interface Loadout {
   heroIds: string[];
   packs: Record<string, string[]>;
   entrance: number;
+  /** 16.2: shutter the lantern as the delve starts (Level 1 has daylight). */
+  startShuttered?: boolean;
 }
 
 const TITLE = 'Valkenburg Castle';
@@ -448,6 +450,7 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     heroIds: prev.heroIds.filter(fit).slice(0, 4),
     packs: {},
     entrance: Math.min(prev.entrance, host.engine.castle().entrances.length - 1),
+    startShuttered: !!prev.startShuttered,
   };
   const used = new Set<string>();
   for (const id of l.heroIds) {
@@ -567,6 +570,24 @@ function prepareStation(el: HTMLElement, s: GameState, host: ScreenHost): void {
     return h('button', { class: `btn btn-small ${l.entrance === i ? 'on' : ''}`, onclick: () => ((l.entrance = i), save()) }, room);
   });
   el.append(h('h3', { class: 'prep-h' }, 'Entrance'), h('div', { class: 'prep-contracts' }, ...ents));
+  // 16.2: the lantern shutter. Level 1 is mostly daylit, so starting shuttered saves oil for the dark below.
+  el.append(
+    h('h3', { class: 'prep-h' }, 'Lantern'),
+    h(
+      'label',
+      { class: 'menu-check prep-shutter' },
+      h('input', {
+        type: 'checkbox',
+        checked: !!l.startShuttered,
+        onchange: (e: Event) => {
+          l.startShuttered = (e.target as HTMLInputElement).checked;
+          host.saveLoadout(l);
+        },
+      }),
+      ' Start shuttered ',
+      h('span', { class: 'dim small' }, '— the ruins have daylight; a shuttered lantern burns no oil. Open it with L when it gets dark.'),
+    ),
+  );
 
   let problem: string | null = null;
   try {

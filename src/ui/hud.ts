@@ -10,7 +10,7 @@ import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { linkAt, linkButton, linkReach, linkTooltip, type LinkInfo } from '../view/links';
-import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, BRIGHTNESS_NAME, classGlyph, className, itemGlyph, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, BRIGHTNESS_NAME, MONSTER_NOTE, classGlyph, className, itemGlyph, itemLabel, lightScale, roundsToNext, type LightScale } from './names';
 import type { Settings } from './settings';
 
 export interface HudHost {
@@ -97,12 +97,14 @@ export class Hud {
   private camBox = h('div', { class: 'hud-cam' });
   private menuEl = h('div', { class: 'hud-menu hidden' });
   private emptyEl = h('div', { class: 'hud-empty hidden' });
+  /** 16.2: persistent warning while the Gloam is up and a hero on Level 3 stands in the dark. */
+  private gloamEl = h('div', { class: 'hud-gloam hidden' }, h('span', { class: 'gloam-eye' }, '◉'), ' The dark here is awake. Stand in the light.');
 
   constructor(
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.hint, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.gloamEl, this.hint, this.bar, this.picker, this.previewEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
@@ -178,6 +180,29 @@ export class Hud {
 
   private heroDef(id: string): Hero | undefined {
     return this.state?.campaign.roster.find((x) => x.id === id);
+  }
+
+  /** 16.2: engine.heroLit, tolerant of an engine without it (then: lit). */
+  private isLit(heroId: string): boolean {
+    const s = this.state;
+    if (!s?.delve) return true;
+    try {
+      return this.engine.heroLit(s, heroId);
+    } catch {
+      return true;
+    }
+  }
+
+  /** 16.2: engine.sightRange per hero, or null when the engine can't say. */
+  private sightOf(heroId: string): number | null {
+    const s = this.state;
+    if (!s?.delve) return null;
+    try {
+      const n = this.engine.sightRange(s, heroId);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -367,7 +392,11 @@ export class Hud {
       else if (hero) {
         const def = this.heroDef(hero.heroId);
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
-      } else if (rival && d.rivals) lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
+      } else if (rival && d.rivals) {
+        lines.push(`<b>${rival.name}</b> <span class="dim">${d.rivals.name}${rival.cls ? ` · ${className(rival.cls)}` : ''}</span>`, `HP ${rival.hp}/${rival.maxHp} · ${d.rivals.stance}`, d.rivals.spotted ? `Goal: ${GOAL_TEXT[d.rivals.goal]}` : '');
+        const rit = this.intents[rival.id] ?? rival.intent;
+        if (rit && rit.kind !== 'wait') lines.push(`<span class="neg">Next: ${intentText(this.state, rit)}</span>`);
+      }
       else if (d.prisoner?.id === unitId) lines.push(`<b>${d.prisoner.name}</b>`, d.prisoner.freed ? 'Freed, following' : 'Shackled. Free them (adjacent).', `HP ${d.prisoner.hp}/5`);
       const act = this.bestActionFor(unitId, at);
       const link = unitId === this.selectedId ? this.linkHere() : null;
@@ -404,7 +433,10 @@ export class Hud {
     const it = this.intents[m.id];
     const out = [`<b>${m.name}</b> <span class="dim">${m.awareness}</span>`];
     if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}`);
-    else out.push('Cannot be harmed. Raise the light.');
+    const note = MONSTER_NOTE[m.kind];
+    if (note) out.push(`<span class="dim">${note}</span>`);
+    if (m.awareness === 'patrol') out.push(`<span class="dim">On patrol${this.state?.delve?.knownRoutes.includes(m.id) ? ': route known (drawn on the map)' : ''}</span>`);
+    if (m.holding) out.push(`<span class="neg">Holding ${this.nameOf(m.holding)}</span>`);
     if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
     return out;
   }
@@ -431,7 +463,7 @@ export class Hud {
       else act('Door', 'Open, then walk through');
     } else if (t.kind === 'brazier') {
       if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
-      else act('Brazier', 'Light: +6 lantern, lit for good');
+      else act('Brazier', 'Light: +4 lantern oil, lit for good');
     } else if (t.kind === 'prop' || t.kind === 'tallprop') {
       if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
       else parts.push(`${propName(t.prop)} <span class="dim">${t.kind === 'tallprop' ? 'blocks sight' : 'cover'}</span>`);
@@ -867,6 +899,25 @@ export class Hud {
     return this.scale;
   }
 
+  /** 16.2: is the lantern open (burning and lighting)? Old saves without the flag count as open. */
+  private lanternOpen(): boolean {
+    return this.state?.delve?.lanternOpen !== false;
+  }
+
+  /** 16.2: toggle the shutter for the bearer (free; any time in the player phase). */
+  toggleShutter(): void {
+    const d = this.state?.delve;
+    if (!d || this.busy || d.phase !== 'player') return;
+    const bearer = d.heroes.find((x) => x.heroId === d.lanternBearer);
+    if (!bearer || bearer.status !== 'active') {
+      this.toast('Nobody holds the lantern.');
+      return;
+    }
+    sfx.play('click', { pitch: this.lanternOpen() ? 0.8 : 1.2 });
+    this.cancel();
+    void this.host.send({ type: 'act', heroId: bearer.heroId, action: 'shutter', target: {}, focus: 0 });
+  }
+
   private lightMeter(light: number, b: Brightness): HTMLElement {
     const sc = this.lightScale();
     if (light > sc.max) sc.max = light;
@@ -875,15 +926,41 @@ export class Hud {
     } catch {
       /* ignore */
     }
+    const open = this.lanternOpen();
     const next = roundsToNext(light, sc);
     const pct = Math.min(100, (light / sc.max) * 100);
     const at = (v: number) => `left:${Math.min(100, (v / sc.max) * 100)}%`;
+    const d = this.state?.delve;
+    const onL1 = !!d && d.heroes.some((x) => x.status === 'active' && x.at.level === 1);
+    // Level 1 is mostly daylit: say so once in a while (first rounds, lantern open).
+    const hint = open && onL1 && !!d && d.round <= 10 ? h('div', { class: 'light-hint small' }, 'The ruins have daylight. Shutter the lantern to save oil.') : '';
+    const toggle = h(
+      'button',
+      {
+        class: `btn btn-small light-toggle ${open ? 'open' : 'shut'}`,
+        title: open ? 'Shutter the lantern (L): burns no oil, gives no light. Free.' : 'Open the lantern (L): light and burn oil again. Free.',
+        onclick: (e: Event) => {
+          e.stopPropagation();
+          this.toggleShutter();
+        },
+        disabled: this.busy || d?.phase !== 'player',
+      },
+      open ? 'Shutter' : 'Open',
+      h('kbd', null, 'L'),
+    );
     return h(
       'div',
-      { class: `light light-${b}`, title: `Lantern oil burns 1 per round. Bright ${sc.min.bright}+, Dim ${sc.min.dim}–${sc.min.bright - 1}, Dark 1–${sc.min.dim - 1}, Pitch black at 0: the Gloam hunts.` },
-      h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, BRIGHTNESS_NAME[b]), h('span', { class: 'light-num num' }, `${light}`)),
+      { class: `light light-${b} ${open ? '' : 'light-shut'}`, title: `Lantern oil burns 1 per round while the lantern is open. Bright ${sc.min.bright}+, Dim ${sc.min.dim}–${sc.min.bright - 1}, Dark 1–${sc.min.dim - 1}, Pitch black at 0. In the Hollow, the dark itself hunts anyone standing unlit.` },
+      h('div', { class: 'light-head' }, h('span', { class: 'kicker' }, 'Lantern'), h('b', { class: 'light-stage' }, open ? BRIGHTNESS_NAME[b] : 'Shuttered'), h('span', { class: 'light-num num' }, `${light}`)),
       h('div', { class: 'light-track' }, h('div', { class: 'light-fill', style: `width:${pct}%` }), h('i', { class: 'mark', style: at(sc.min.dim) }), h('i', { class: 'mark', style: at(sc.min.bright) })),
-      h('div', { class: 'light-next dim small' }, light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'The Gloam hunts'),
+      h(
+        'div',
+        { class: 'light-foot' },
+        h('span', { class: `light-state ${open ? 'open' : 'shut'}` }, open ? 'Open · burning' : 'Shuttered · not burning'),
+        h('span', { class: 'light-next dim small' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
+        toggle,
+      ),
+      hint,
     );
   }
 
@@ -925,6 +1002,7 @@ export class Hud {
     const d = s.delve!;
     clear(this.cards);
     const edges: Pos[] = [];
+    const darks: string[] = [];
     d.heroes.forEach((hd, i) => {
       const risk = hd.status === 'active' ? this.engine.edgeRisk(s, hd.heroId) : null;
       if (risk) edges.push(hd.at);
@@ -932,10 +1010,12 @@ export class Hud {
       if (!def) return;
       const sel = hd.heroId === this.selectedId;
       const done = hd.status === 'active' && hd.moved && hd.acted;
+      const dark = hd.status === 'active' && !this.isLit(hd.heroId);
+      if (dark) darks.push(hd.heroId);
       const card = h(
         'button',
         {
-          class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${done ? 'done' : ''}`,
+          class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${done ? 'done' : ''} ${dark ? 'dark' : ''}`,
           onclick: () => this.select(hd.heroId),
           disabled: hd.status !== 'active',
         },
@@ -962,12 +1042,23 @@ export class Hud {
             MAGES.has(def.cls) ? h('span', { class: 'hc-res', title: `Mana ${hd.mana}/3` }, pips(hd.mana, 3, 'mana')) : '',
             packRow(hd.pack),
           ),
-          h('div', { class: 'hc-status' }, ...statusChips(hd, risk, def.name)),
+          h('div', { class: 'hc-status' }, ...statusChips(hd, risk, def.name, dark ? this.sightOf(hd.heroId) : null, hd.grabbedBy ? d.monsters.find((m) => m.id === hd.grabbedBy)?.name : undefined)),
         ),
       );
       this.cards.append(card);
     });
     this.dio.showEdgeLips(edges);
+    this.dio.setDarkHeroes(darks);
+    this.renderGloam(darks);
+    this.applyDark();
+  }
+
+  /** 16.2: the Gloam line shows while it is up and a hero on Level 3 stands unlit. */
+  private renderGloam(darks: string[]): void {
+    const d = this.state?.delve;
+    const gloam = !!d && d.monsters.some((m) => m.kind === 'gloam' && m.hp > 0);
+    const unlitL3 = !!d && darks.some((id) => d.heroes.find((x) => x.heroId === id)?.at.level === 3);
+    this.gloamEl.classList.toggle('hidden', !(gloam && unlitL3));
   }
 
   private renderBar(): void {
@@ -979,7 +1070,13 @@ export class Hud {
     const def = sel ? this.heroDef(sel.heroId) : undefined;
     const left = h('div', { class: 'bar-who' });
     if (sel && def) {
-      left.append(h('b', null, def.name), h('span', { class: 'dim small' }, ` ${className(def.cls)}`), h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved ? 'used' : 'ready' }, sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.dashed ? 'Dashed' : sel.acted ? 'Acted' : 'Action ready'), this.reach.some((r) => r.dash) ? h('span', { class: 'dash-note', title: 'Moving again spends the action (a dash)' }, ' · Dash ready') : ''));
+      const held = sel.grabbedBy ? d.monsters.find((m) => m.id === sel.grabbedBy) : undefined;
+      left.append(
+        h('b', null, def.name),
+        h('span', { class: 'dim small' }, ` ${className(def.cls)}`),
+        h('div', { class: 'small bar-turn' }, h('span', { class: sel.moved || sel.grabbedBy ? 'used' : 'ready' }, sel.grabbedBy ? 'Held' : sel.moved ? 'Moved' : 'Move ready'), ' · ', h('span', { class: sel.acted ? 'used' : 'ready' }, sel.dashed ? 'Dashed' : sel.acted ? 'Acted' : 'Action ready'), this.reach.some((r) => r.dash) ? h('span', { class: 'dash-note', title: 'Moving again spends the action (a dash)' }, ' · Dash ready') : ''),
+        sel.grabbedBy ? h('div', { class: 'small bar-held neg' }, `⛓ Held by ${held?.name ?? 'a ghoul'}: Escape or kill it.`) : '',
+      );
     }
     // Move group: walk/sneak, and the stairs or lift under the hero (15.7).
     const usedKeys = new Set<string>(['s', 'e', 'c']);
@@ -1005,10 +1102,33 @@ export class Hud {
         ),
       );
     }
+    const groupEls: HTMLElement[] = [move];
+    // 16.2: the lantern bearer gets a Lantern group with the free shutter toggle (hotkey L, wins over Light/Oil's L).
+    if (sel && sel.heroId === d.lanternBearer) {
+      usedKeys.add('l');
+      const open = this.lanternOpen();
+      groupEls.push(
+        h(
+          'div',
+          { class: 'bar-group bar-group-lantern' },
+          h('span', { class: 'bar-group-name' }, 'Lantern'),
+          h(
+            'button',
+            { class: `act act-shutter ${open ? 'open' : 'shut'}`, onclick: () => this.toggleShutter(), disabled: this.busy, 'data-key': 'l', 'data-action': 'shutter', title: `${open ? 'Shutter the lantern' : 'Open the lantern'} · free\n${ACTION_HELP.shutter ?? ''}` },
+            h('span', { class: 'act-glyph' }, open ? '◑' : '◐'),
+            h('span', { class: 'act-label' }, open ? 'Shutter' : 'Open'),
+            h('kbd', null, 'L'),
+            h('span', { class: 'act-count' }, 'free'),
+          ),
+        ),
+      );
+    }
     // The rest, grouped: Interact · Abilities · Items.
     const groups: Record<'interact' | 'ability' | 'item', ActionOption[]> = { interact: [], ability: [], item: [] };
-    for (const o of this.options) groups[ITEM_ACTIONS.has(o.action) ? 'item' : SPELLS.has(o.action) || ABILITIES.has(o.action) ? 'ability' : 'interact'].push(o);
-    const groupEls: HTMLElement[] = [move];
+    for (const o of this.options) {
+      if (o.action === 'shutter') continue;
+      groups[ITEM_ACTIONS.has(o.action) ? 'item' : SPELLS.has(o.action) || ABILITIES.has(o.action) ? 'ability' : 'interact'].push(o);
+    }
     for (const [name, list] of [
       ['Interact', groups.interact],
       ['Abilities', groups.ability],
@@ -1023,7 +1143,7 @@ export class Hud {
         const btn = h(
           'button',
           {
-            class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''} ${o.blocked ? 'blocked' : ''} ${ITEM_ACTIONS.has(o.action) ? 'act-item' : SPELLS.has(o.action) ? 'act-spell' : ''}`,
+            class: `act ${this.pending === o ? 'on' : ''} ${o.rolls ? 'rolls' : ''} ${o.blocked ? 'blocked' : ''} ${ITEM_ACTIONS.has(o.action) ? 'act-item' : SPELLS.has(o.action) ? 'act-spell' : o.action === 'escape' ? 'act-escape' : ''}`,
             onclick: () => this.startAction(o),
             disabled: this.busy,
             'data-key': key ?? '',
@@ -1042,7 +1162,7 @@ export class Hud {
       }
       groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
     }
-    if (!this.options.length && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
+    if (!this.options.some((o) => o.action !== 'shutter') && !link && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
     // End turn: how many heroes still have a move or an action.
     const waiting = d.heroes.filter((x) => x.status === 'active' && (!x.moved || !x.acted)).length;
     const end = h(
@@ -1070,6 +1190,12 @@ export class Hud {
     if (!lv) return [];
     const found: { text: string; dist: number; at: Pos; danger?: boolean }[] = [];
     const seen = (p: Pos) => this.vis!.explored.has(posKey(p)) || this.vis!.visible.has(posKey(p));
+    const lead: HTMLElement[] = [];
+    // 16.2: standing in the dark: say so, with the hero's own sight range.
+    if (!this.isLit(sel.heroId)) {
+      const sight = this.sightOf(sel.heroId);
+      lead.push(h('span', { class: 'hint-dark', title: sel.at.level === 3 ? 'In the Hollow the dark itself hunts anyone standing unlit.' : 'Monsters see you only within 3 while you stand unlit; you see less too.' }, h('b', null, 'In the dark'), sight !== null ? `: sight ${sight}` : ''));
+    }
     const R = 4;
     for (let dq = -R; dq <= R; dq++)
       for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
@@ -1096,7 +1222,7 @@ export class Hud {
         if (text) found.push({ text, dist, at: p, danger: text === 'Trap' });
       }
     found.sort((a, b) => a.dist - b.dist);
-    const out: (HTMLElement | string)[] = [];
+    const out: (HTMLElement | string)[] = [...lead];
     for (const f of found.slice(0, 4)) {
       const where = f.dist === 0 ? 'here' : f.dist === 1 ? 'next to you' : `${f.dist} hexes ${compass(sel.at, f.at)}`;
       if (out.length) out.push(h('span', { class: 'hint-sep' }, ' · '));
@@ -1183,7 +1309,18 @@ export class Hud {
     this.vignette.classList.add(kind === 'hurt' ? 'pulse-hurt' : 'pulse-dark');
   }
 
+  private baseDark: Brightness = 'bright';
+
   setDark(b: Brightness): void {
+    this.baseDark = b;
+    this.applyDark();
+  }
+
+  /** 16.2: the vignette follows the selected hero: unlit = dark (pitch in the Hollow), else the lantern stage. */
+  private applyDark(): void {
+    const sel = this.selected();
+    const unlit = !!sel && sel.status === 'active' && !this.isLit(sel.heroId);
+    const b: Brightness = unlit ? (sel!.at.level === 3 ? 'pitch' : 'dark') : this.lanternOpen() ? this.baseDark : 'dark';
     this.vignette.dataset.b = b;
   }
 
@@ -1263,7 +1400,7 @@ export class Hud {
         }),
         ' Ask before ending a turn with moves left',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
@@ -1397,6 +1534,8 @@ export class Hud {
     }
     if (k === 's') return this.setSneak(!this.sneak);
     if (k === 'e') return this.endTurn();
+    // 16.2: L shutters/opens the lantern unless the selected hero has a Light/Oil button on L.
+    if (k === 'l' && !this.bar.querySelector('button.act[data-key="l"]:not(.act-shutter)')) return this.toggleShutter();
     if (k === '[') return this.dio.rig.snapRotate(1);
     if (k === ']') return this.dio.rig.snapRotate(-1);
     if (k === 'c') {
@@ -1457,6 +1596,20 @@ export function intentText(s: GameState, it: Intent): string {
       return `breathes fire on ${it.hexes?.length ?? 5} hexes${dmg}`;
     case 'sweep':
       return `sweeps its tail: every adjacent hero shoved${dmg}`;
+    case 'shout':
+      return `shouts: every orc within 8 wakes and hunts${it.targetId ? ` ${name(it.targetId)}` : ''}`;
+    case 'drag':
+      return `drags ${name(it.targetId)} one hex closer`;
+    case 'grab':
+      return `grabs ${name(it.targetId)}: held until they escape`;
+    case 'overwatch':
+      return 'goes on overwatch: shoots the first hero that moves or acts within 6';
+    case 'smoke':
+      return `throws a smoke bomb${it.targetId ? ` at ${name(it.targetId)}` : ''}`;
+    case 'veil':
+      return 'veils herself';
+    case 'dart':
+      return `throws a sleep dart at ${name(it.targetId)}`;
     default:
       return 'waits';
   }
@@ -1491,9 +1644,11 @@ function packRow(pack: Item[]): HTMLElement {
 }
 
 /** 15.7: statuses as small badges; the turn state lives in the name row. */
-function statusChips(hd: HeroInDelve, risk: { levels: number; damage: number; levelName: string } | null, name: string): (HTMLElement | string)[] {
+function statusChips(hd: HeroInDelve, risk: { levels: number; damage: number; levelName: string } | null, name: string, darkSight: number | null = null, heldBy?: string): (HTMLElement | string)[] {
   const out: HTMLElement[] = [];
   if (hd.status === 'downed') out.push(h('span', { class: 'chip bad' }, `Downed · dies in ${hd.bleed}`));
+  if (hd.status === 'active' && darkSight !== null) out.push(h('span', { class: 'chip dark', title: `${name} stands in the dark: sight ${darkSight}${hd.at.level === 3 ? '. In the Hollow the dark itself hunts the unlit.' : ', and monsters only notice within 3.'}` }, `In the dark · sight ${darkSight}`));
+  if (hd.grabbedBy) out.push(h('span', { class: 'chip bad grab', title: `Held by ${heldBy ?? 'a ghoul'}: can’t move. Escape (2 Might slots) or kill it.` }, `⛓ Held`));
   if (hd.status === 'out') out.push(h('span', { class: 'chip good' }, 'Out'));
   if (hd.status === 'dead') out.push(h('span', { class: 'chip bad' }, 'Dead'));
   if (risk) out.push(h('span', { class: 'chip edge', title: `On the edge: a shove would drop ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} into ${risk.levelName} (${risk.damage} damage).` }, `Edge ${risk.damage}`));

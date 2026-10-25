@@ -7,7 +7,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { castle } from '../src/data/castle/index';
-import { axialToOffset, parseHexKey, type Hex, type Pos } from '../src/game/hex';
+import { axialToOffset, neighbors as hexNeighbors, parseHexKey, type Hex, type Pos } from '../src/game/hex';
 import type { LevelDef, PropKind } from '../src/game/types';
 
 const outDir = process.argv[2] ?? 'docs/castle-preview';
@@ -46,7 +46,32 @@ const PROP_GLYPH: Record<PropKind, string> = {
   shelf: 'S', forge: 'F', winch: 'W', statue: '†', rack: '/', stalagmite: '^',
 };
 const LIGHT_COL = { sconce: '#ffb050', daylight: '#fff2b0', fire: '#ff5a1a', fungus: '#8af08a', glow: '#ff8a5a' };
-const MON: Record<string, string> = { rats: 'r', orc: 'O', spider: 'S', cutpurse: 'C', berserker: 'B', dragon: 'D' };
+const MON: Record<string, string> = { rats: 'r', orc: 'O', spider: 'S', cutpurse: 'C', berserker: 'B', dragon: 'D', archer: 'A', captain: 'K', ghoul: 'G' };
+const ROUTE_COLS = ['#ffee00', '#5af0ff', '#ff7ad9', '#9dff5a', '#ffb060'];
+
+const WALK = new Set(['floor', 'rubble', 'stairs', 'exit', 'lift', 'door']);
+
+/** Shortest walk from a to b over floor-like tiles and doors (breadth first); [a] if none. */
+function walk(lv: LevelDef, a: Hex, b: Hex): Hex[] {
+  const key = (h: Hex) => `${h.q},${h.r}`;
+  const prev = new Map<string, string | null>([[key(a), null]]);
+  const queue: Hex[] = [a];
+  while (queue.length) {
+    const h = queue.shift()!;
+    if (h.q === b.q && h.r === b.r) {
+      const out: Hex[] = [];
+      for (let k: string | null = key(h); k; k = prev.get(k) ?? null) out.unshift(parseHexKey(k));
+      return out;
+    }
+    for (const n of hexNeighbors(h)) {
+      const k = key(n);
+      if (prev.has(k) || !WALK.has(lv.tiles[k]?.kind ?? '')) continue;
+      prev.set(k, key(h));
+      queue.push(n);
+    }
+  }
+  return [a];
+}
 
 function renderLevel(lv: LevelDef): string {
   const p: string[] = [];
@@ -114,10 +139,42 @@ function renderLevel(lv: LevelDef): string {
     const col = s.kind === 'rescue' ? '#2e7fd1' : '#1f9e8a';
     mark(s.at, (x, y) => `<polygon points="${x},${y - 8} ${x + 8},${y} ${x},${y + 8} ${x - 8},${y}" fill="${col}" stroke="#fff" stroke-width="1.2"/><text x="${x}" y="${y + 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#fff">${s.kind === 'rescue' ? 'P' : 'H'}</text>`);
   }
+  // Patrol routes (V3.3): the walked loop (shortest path waypoint to waypoint, as the engine
+  // walks it), dashed, one colour per route, waypoints numbered.
+  const patrols = castle.spawns.filter((m) => m.patrol && on(m.at));
+  patrols.forEach((m, i) => {
+    const col = ROUTE_COLS[i % ROUTE_COLS.length]!;
+    const route = m.patrol!;
+    const walked: Hex[] = [];
+    for (let j = 0; j < route.length; j++) {
+      const leg = walk(lv, route[j]!, route[(j + 1) % route.length]!);
+      walked.push(...(j ? leg.slice(1) : leg));
+    }
+    const d = walked.map((h, j) => {
+      const q = xy(h);
+      return `${j ? 'L' : 'M'}${q.x.toFixed(1)},${q.y.toFixed(1)}`;
+    }).join(' ');
+    p.push(`<path d="${d}" fill="none" stroke="#1a1208" stroke-width="4" opacity="0.6" stroke-linejoin="round"/><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" stroke-dasharray="5 3" stroke-linejoin="round"/>`);
+    const pts = route.map((w) => xy(w));
+    pts.forEach((q, j) => {
+      if (j === 0) return; // the spawn hex carries the monster itself
+      p.push(`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5" fill="${col}" stroke="#1a1208" stroke-width="1"/><text x="${q.x.toFixed(1)}" y="${(q.y + 2.6).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="bold" fill="#1a1208">${j + 1}</text>`);
+    });
+  });
   for (const m of castle.spawns) {
-    const awake = m.asleep === false;
+    const asleep = m.asleep === true;
+    const buried = m.buried === true;
     const r = m.kind === 'dragon' ? 10 : 7;
-    mark(m.at, (x, y) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${m.name || m.kind === 'dragon' ? '#7a0f0f' : '#c0392b'}" stroke="${awake ? '#ffee00' : '#fff'}" stroke-width="${awake ? 2 : 1}"/><text x="${x}" y="${y + 3}" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">${MON[m.kind]}</text>`);
+    const pi = patrols.indexOf(m);
+    const ring = pi >= 0 ? ROUTE_COLS[pi % ROUTE_COLS.length]! : '#fff';
+    const fill = buried ? '#3a2a4a' : m.name || m.kind === 'dragon' ? '#7a0f0f' : '#c0392b';
+    mark(m.at, (x, y) => {
+      let s = `<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${ring}" stroke-width="${pi >= 0 ? 2.2 : 1}"${buried ? ' stroke-dasharray="2 2"' : ''}/>`;
+      s += `<text x="${x}" y="${y + 3}" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">${MON[m.kind] ?? '?'}</text>`;
+      // Sleepers: a small blue "z" badge at the top right.
+      if (asleep) s += `<circle cx="${x + r - 1}" cy="${y - r + 1}" r="4.5" fill="#4a7fd8" stroke="#1a1208" stroke-width="0.8"/><text x="${x + r - 1}" y="${y - r + 3.4}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#fff">z</text>`;
+      return s;
+    });
   }
   for (const e of castle.rivalEntrances) mark(e, (x, y) => `<circle cx="${x}" cy="${y}" r="${SIZE + 3}" fill="none" stroke="#b37cff" stroke-width="2" stroke-dasharray="3 2"/>`);
   for (const r of lv.rooms) {
@@ -129,7 +186,10 @@ function renderLevel(lv: LevelDef): string {
 
 function legend(): string {
   const rows: [string, string][] = [
-    [`<circle r="7" fill="#c0392b" stroke="#fff"/>`, 'Monster (dark = named; yellow ring = awake)'],
+    [`<circle r="7" fill="#c0392b" stroke="#fff"/>`, 'Monster, awake (dark = named)'],
+    [`<circle r="7" fill="#c0392b" stroke="#fff"/><circle cx="6" cy="-6" r="4.5" fill="#4a7fd8" stroke="#1a1208"/>`, 'Asleep (z badge)'],
+    [`<circle r="7" fill="#3a2a4a" stroke="#fff" stroke-dasharray="2 2"/>`, 'Buried ghoul (rises within 2)'],
+    [`<path d="M-9,0 L9,0" stroke="#ffee00" stroke-width="1.8" stroke-dasharray="5 3"/><circle cx="9" r="4" fill="#ffee00"/>`, 'Patrol route, waypoints numbered'],
     [`<rect x="-7" y="-5" width="14" height="10" rx="2" fill="#9a6a2e" stroke="#f2d24b"/>`, 'Chest (tier; dark = locked)'],
     [`<circle r="4.5" fill="#f2d24b"/>`, 'Coins'],
     [`<path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="#c03ac0" stroke-width="2.2"/>`, 'Trap'],

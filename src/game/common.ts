@@ -340,10 +340,8 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     m.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit });
     if (m.awareness !== 'hunting') {
-      m.awareness = 'hunting';
       const src = by ? hd(c, by) : undefined;
-      if (src) m.focusAt = { ...src.at };
-      c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
+      goHunting(c, m, src?.at);
     }
     if (m.hp <= 0) {
       killMonster(c, m, by);
@@ -414,6 +412,17 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
       m.focusAt = { ...at };
     }
   }
+}
+
+/** The monster has a quarry: hunting, no longer searching or walking back. */
+export function goHunting(c: Ctx, m: MonsterX, at?: Pos): void {
+  if (m.buried) return;
+  const was = m.awareness;
+  m.awareness = 'hunting';
+  m.searchRounds = undefined;
+  m.returning = undefined;
+  if (at) m.focusAt = { ...at };
+  if (was !== 'hunting') c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
 }
 
 /** A sleeper or patroller hears something: alert at the source, searching for SEARCH_ROUNDS (berserkers hunt). */

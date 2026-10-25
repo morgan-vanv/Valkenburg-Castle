@@ -295,12 +295,12 @@ describe('exploring by line of sight', () => {
 });
 
 describe('light', () => {
-  it('stages by oil', () => {
-    expect(brightnessOf(40)).toBe('bright');
-    expect(brightnessOf(27)).toBe('bright');
-    expect(brightnessOf(26)).toBe('dim');
-    expect(brightnessOf(13)).toBe('dim');
-    expect(brightnessOf(12)).toBe('dark');
+  it('stages by oil (spec 16.2: 20 max; bright > 12, dim 7..12, dark 1..6)', () => {
+    expect(brightnessOf(20)).toBe('bright');
+    expect(brightnessOf(13)).toBe('bright');
+    expect(brightnessOf(12)).toBe('dim');
+    expect(brightnessOf(7)).toBe('dim');
+    expect(brightnessOf(6)).toBe('dark');
     expect(brightnessOf(1)).toBe('dark');
     expect(brightnessOf(0)).toBe('pitch');
   });
@@ -309,10 +309,10 @@ describe('light', () => {
     let s = delve();
     put(s, 'hobart', PITHALL);
     s = ok(s, { type: 'endTurn' }).state;
-    expect(s.delve!.light).toBe(39);
+    expect(s.delve!.light).toBe(19);
     const lit = e.visibility(s).lit;
     expect(lit.has(posKey(at(1, 10, 3)))).toBe(true); // 4 rows up
-    s.delve!.light = 15; // dim: radius 3
+    s.delve!.light = 10; // dim: radius 3
     expect(e.visibility(s).lit.has(posKey(at(1, 10, 3)))).toBe(false);
     expect(e.inLight(s, PITHALL)).toBe(true);
   });
@@ -327,16 +327,16 @@ describe('light', () => {
     expect(p.chance).toBe(50);
   });
 
-  it('kindle adds 12, braziers add 6 and stay lit', () => {
+  it('kindle adds 6, braziers add 4 and stay lit (spec 16.2)', () => {
     let s = delve();
-    s.delve!.light = 20;
+    s.delve!.light = 8;
     s = act(s, 'aldous', 'kindle', {}).state;
-    expect(s.delve!.light).toBe(32);
+    expect(s.delve!.light).toBe(14);
     expect(hero(s, 'aldous').mana).toBe(2);
     put(s, 'brann', at(1, 16, 3));
     const b = at(1, 16, 2);
     s = act(s, 'brann', 'light', { at: b }).state;
-    expect(s.delve!.light).toBe(38);
+    expect(s.delve!.light).toBe(18);
     expect(s.delve!.lit).toContain(posKey(b));
   });
 
@@ -1084,12 +1084,15 @@ describe('lift and winch (14.6)', () => {
 });
 
 describe('sight and fixed light (14.5)', () => {
-  it('sight range by stage and depth, never below 2', () => {
-    const s = delve();
-    const cases: [number, number, number][] = [[40, 1, 8], [40, 2, 7], [40, 3, 6], [20, 1, 6], [20, 3, 4], [5, 1, 4], [5, 3, 2], [0, 1, 2], [0, 3, 2]];
+  it('sight range by stage and depth, never below 2 (a lit hero)', () => {
+    const s = delve({ heroes: ['hobart'] });
+    // Hobart carries the lantern, so he stands in light wherever he is while it has oil.
+    const cases: [number, number, number][] = [[20, 1, 8], [20, 2, 7], [20, 3, 6], [10, 1, 6], [10, 3, 4], [5, 1, 4], [5, 3, 2]];
     for (const [light, level, want] of cases) {
       s.delve!.light = light;
-      expect(e.sightRange(s, level)).toBe(want);
+      put(s, 'hobart', level === 1 ? PITHALL : level === 2 ? at(2, 10, 7) : at(3, 6, 4));
+      expect(e.sightRange(s, 'hobart')).toBe(want);
+      expect(e.heroLit(s, 'hobart')).toBe(true);
     }
   });
 

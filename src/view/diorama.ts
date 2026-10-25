@@ -155,7 +155,6 @@ export class Diorama {
   /** 16.2: the Gloam's creeping darkness at the edge of the party's light (Level 3). */
   private gloamEdge: THREE.InstancedMesh;
   private gloamEdgeKey = '';
-  private gloamPresent = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -726,7 +725,6 @@ export class Diorama {
   private refreshGloamEdge(): void {
     const d = this.state?.delve;
     const gloam = d?.monsters.find((m) => m.kind === 'gloam' && m.hp > 0);
-    this.gloamPresent = !!gloam;
     const on = !!gloam && gloam.at.level === this.shownLevel;
     const key = on ? `${this.shownLevel}:${this.vis.visible.size}:${this.vis.lit.size}:${gloam!.id}` : '';
     if (key === this.gloamEdgeKey) return;
@@ -1293,7 +1291,7 @@ export class Diorama {
     // 16.5: rivals carry their own intent; monsters' come from the engine.
     const list: { id: string; name: string; at: Pos; it: Intent }[] = [];
     for (const [id, it] of Object.entries(intents)) {
-      const m = d.monsters.find((x) => x.id === id);
+      const m = d.monsters.find((x) => x.id === id) ?? d.rivals?.members.find((x) => x.id === id);
       if (m) list.push({ id, name: m.name, at: m.at, it });
     }
     if (d.rivals && d.rivals.spotted && d.round >= d.rivals.entersRound)
@@ -1771,10 +1769,146 @@ export class Diorama {
         await clock.wait(0.12);
         return;
       }
-      case 'spawned':
+      case 'spawned': {
+        const v = this.units.get(e.id);
+        if (!v) return;
+        if (v.root.userData.rise) {
+          // 16.4: a ghoul claws its way up out of the ground.
+          delete v.root.userData.rise;
+          v.at = { ...e.at };
+          const rest = this.worldOf(e.at);
+          v.root.position.copy(rest);
+          this.refreshUnits();
+          if (!v.root.visible) {
+            v.setOpacity(1);
+            return;
+          }
+          v.busy++;
+          const depth = v.height * 0.95;
+          this.dustPuff(rest);
+          this.floatText(rest.clone().add(new THREE.Vector3(0, v.height + 0.6, 0)), 'Something rises', 'warn', 1.4);
+          if (!this.reduceShake) this.rig.addShake(0.12);
+          await clock.tween(0.55, (t) => {
+            const k = easeOutCubic(t);
+            v.setOpacity(Math.min(1, t * 3));
+            v.root.position.y = rest.y - depth * (1 - k);
+            v.fig.rotation.x = Math.sin(t * Math.PI) * 0.35;
+          });
+          v.fig.rotation.x = 0;
+          v.root.position.y = rest.y;
+          this.dustPuff(rest);
+          v.busy--;
+          return;
+        }
+        if (e.at.level === this.shownLevel) await clock.wait(0.25);
+        return;
+      }
       case 'gloam': {
-        const at = 'id' in e ? this.units.get(e.id)?.at : e.at;
-        if (at && at.level === this.shownLevel) await clock.wait(0.25);
+        if (e.at.level === this.shownLevel) {
+          this.floatText(this.worldOf(e.at, 1.4), 'The dark here is awake', 'warn', 2);
+          if (!this.reduceShake) this.rig.addShake(0.1);
+          await clock.wait(0.35);
+        }
+        return;
+      }
+      case 'shout': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), 'RALLY!', 'warn', 1.3);
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, v.height, 0)), 0xffa040, 2.5);
+        if (!this.reduceShake) this.rig.addShake(0.12);
+        // One big ring racing out to radius 8.
+        const R = 8 * Math.sqrt(3) * HEX;
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.05, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.8, depthWrite: false, depthTest: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+        ring.position.copy(v.root.position).add(new THREE.Vector3(0, 0.06, 0));
+        ring.renderOrder = 7;
+        this.overlay.add(ring);
+        await clock.tween(0.6, (t) => {
+          ring.scale.setScalar(Math.max(0.01, R * easeOutCubic(t)));
+          (ring.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+        });
+        this.overlay.remove(ring);
+        return;
+      }
+      case 'dragged': {
+        // 16.4: the webbed hero is hauled one hex toward the spider on a strand of web.
+        const v = this.units.get(e.id);
+        if (!v) return;
+        const to = this.worldOf(e.to);
+        const watch = v.root.visible || e.from.level === this.shownLevel;
+        if (this.levels.get(e.to.level)?.pits.has(hexKey(e.to))) to.y = levelY(e.to.level) + FLOOR_TOP;
+        if (!watch) {
+          v.at = { ...e.to };
+          v.root.position.copy(to);
+          return;
+        }
+        v.busy++;
+        const from = v.root.position.clone();
+        const dir = to.clone().sub(from).setY(0).normalize();
+        const strandEnd = to.clone().add(dir.clone().multiplyScalar(Math.sqrt(3) * HEX * 1.4)).add(new THREE.Vector3(0, 0.9, 0));
+        const strand = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)), strandEnd]), new THREE.LineBasicMaterial({ color: 0xe8e8f0, transparent: true, opacity: 0.9, depthTest: false }));
+        strand.renderOrder = 7;
+        this.overlay.add(strand);
+        v.face(dir.x, dir.z);
+        v.flash(new THREE.Color(0.8, 0.8, 0.9), 0.4);
+        this.floatText(from.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), 'Dragged!', 'warn', 1.2);
+        await clock.tween(0.38, (t) => {
+          const k = easeInOut(t);
+          v.root.position.lerpVectors(from, to, k);
+          v.fig.rotation.x = -Math.sin(t * Math.PI) * 0.35;
+          (strand.geometry as THREE.BufferGeometry).setFromPoints([v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)), strandEnd]);
+        });
+        v.fig.rotation.x = 0;
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        v.at = { ...e.to };
+        this.overlay.remove(strand);
+        strand.geometry.dispose();
+        v.busy--;
+        if (!this.reduceShake) this.rig.addShake(0.06);
+        return;
+      }
+      case 'grabbed': {
+        const v = this.units.get(e.id);
+        const g = this.units.get(e.by);
+        if (!v || !v.root.visible) return;
+        if (g) await this.lunge(g, v);
+        v.flash(new THREE.Color(0.6, 1, 0.5), 0.5);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), '⛓ Grabbed!', 'warn', 1.5);
+        if (!this.reduceShake) this.rig.addShake(0.1);
+        await clock.wait(0.25);
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
+      case 'released': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), 'Free', 'heal', 1.2);
+        await this.recoil(v);
+        return;
+      }
+      case 'shutter': {
+        this.lanternOpen = e.open;
+        const b = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
+        if (b && b.root.visible) {
+          this.floatText(b.root.position.clone().add(new THREE.Vector3(0, b.height + 0.3, 0)), e.open ? 'Lantern open' : 'Lantern shuttered', 'info', 1.2);
+          if (e.open) this.flash(b.root.position.clone().add(new THREE.Vector3(0, b.height, 0)), 0xffb862, 4);
+        }
+        if (this.state?.delve) this.state.delve.lanternOpen = e.open;
+        for (const h of this.state?.delve?.heroes ?? []) if (h.heroId === this.lanternBearer) this.setTag(h.heroId, heroTag(h, this.state!.campaign.roster.find((r) => r.id === h.heroId)?.maxHp ?? 10, true, e.open));
+        await clock.wait(0.2);
+        return;
+      }
+      case 'routeKnown': {
+        // 16.1: the route lights up once, then stays as the faint dotted loop.
+        if (!e.route.length || e.route[0]!.level !== this.shownLevel) return;
+        if (this.state?.delve && !this.state.delve.knownRoutes.includes(e.id)) this.state.delve.knownRoutes = [...this.state.delve.knownRoutes, e.id];
+        const m = this.state?.delve?.monsters.find((x) => x.id === e.id);
+        if (m && !m.route) m.route = e.route;
+        this.routesKey = '';
+        this.refreshRoutes();
+        const v = this.units.get(e.id);
+        if (v && v.root.visible) this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), 'Patrol route known', 'info', 1.6);
+        await this.ringPulse(e.route, 0xe0b078);
         return;
       }
       case 'stolen': {

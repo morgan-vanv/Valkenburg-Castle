@@ -98,7 +98,7 @@ export function edgeRiskAt(c: Ctx, at: Pos, self?: string): FallInfo | null {
 export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   const f = figure(c, id);
   if (!f) return;
-  if (f.kind === 'monster' && f.m.kind === 'dragon') return;
+  if (f.kind === 'monster' && (f.m.kind === 'dragon' || f.m.kind === 'gloam')) return;
   const info = fallInfo(c, pit, id);
   const name = nameOf(c, id);
   if (!info) {
@@ -203,15 +203,15 @@ export function pushText(o: PushOutcome, extra = 0): string {
  * Push figure `id` one hex straight away from `from`. Resolves pits (falls),
  * railings, fire, vents, other figures and walls. Emits `shoved` when it moves.
  */
-export function push(c: Ctx, id: string, from: Pos, by: string | null): PushKind | null {
+export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: 'shoved' | 'dragged' = 'shoved'): PushKind | null {
   const f = figure(c, id);
   if (!f) return null;
-  if (f.kind === 'monster' && f.m.kind === 'dragon') return null;
+  if (f.kind === 'monster' && (f.m.kind === 'dragon' || f.m.kind === 'gloam')) return null;
   const at = posOf(c, f);
   const o = pushOutcome(c, from, at, id);
   switch (o.kind) {
     case 'fall':
-      c.ev.push({ type: 'shoved', id, from: at, to: o.dest });
+      c.ev.push({ type: evType, id, from: at, to: o.dest });
       setPos(c, f, o.dest);
       fall(c, id, o.dest, by);
       break;
@@ -238,7 +238,7 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null): PushKind
       if (kindAt(c.w, c.d, o.dest) === 'door') {
         // Shoved into an open doorway.
       }
-      c.ev.push({ type: 'shoved', id, from: at, to: o.dest });
+      c.ev.push({ type: evType, id, from: at, to: o.dest });
       setPos(c, f, o.dest);
       if (o.kind === 'vent') {
         say(c, `${nameOf(c, id)} lands on a fire vent.`);

@@ -16,6 +16,14 @@ const L1 = (c: number, r: number) => at(1, c, r);
 const L2 = (c: number, r: number) => at(2, c, r);
 const L3 = (c: number, r: number) => at(3, c, r);
 
+/** A patrol route on one level, in offset (col, row); the first waypoint is the spawn hex. */
+const route = (level: number, pts: [number, number][]) => pts.map(([c, r]) => at(level, c, r));
+
+// Level 2 arcade loop: east end, the length of the north arcade, down the west arcade and back
+// up it (the corner waypoint keeps the return leg off the bridges, which would be shorter).
+// Two orcs share it; the second starts one hex off the first so they walk as a pair.
+const ARCADE_LOOP: [number, number][] = [[32, 7], [15, 6], [15, 18], [15, 8]];
+
 export const castle: CastleDef = {
   name: 'Castle Valkenburg',
   levels: [b1.finish(), b2.finish(), b3.finish()],
@@ -28,35 +36,54 @@ export const castle: CastleDef = {
   // Index order matters to `startDelve.entrance`: main gate, sally port, east breach.
   entrances: [L1(24, 31), L1(1, 14), L1(44, 21)],
   rivalEntrances: [L1(44, 21), L1(1, 14)],
+  // V3.3 (spec 16.1): spawns are awake unless `asleep: true`. Sleepers: Level 1 the rats and
+  // the spider; Level 2 only the barracks squad; Level 3 only the Dragon.
   spawns: [
-    // Level 1
-    { at: L1(8, 12), kind: 'rats' },
-    { at: L1(5, 16), kind: 'rats' },
-    { at: L1(8, 24), kind: 'cutpurse', asleep: false },
-    { at: L1(7, 3), kind: 'spider' },
-    { at: L1(21, 13), kind: 'orc', asleep: false },
-    { at: L1(31, 17), kind: 'orc' },
-    { at: L1(36, 4), kind: 'orc' },
-    // Level 2
-    { at: L2(19, 3), kind: 'orc' },
-    { at: L2(21, 2), kind: 'orc' },
-    { at: L2(26, 3), kind: 'orc' },
-    { at: L2(29, 2), kind: 'orc' },
-    { at: L2(11, 23), kind: 'orc', name: 'Grub the Jailer', asleep: false },
-    { at: L2(7, 12), kind: 'spider' },
-    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand' },
-    { at: L2(28, 21), kind: 'rats' },
-    { at: L2(20, 7), kind: 'orc', asleep: false },
-    { at: L2(24, 6), kind: 'orc', asleep: false },
-    { at: L2(35, 19), kind: 'orc' },
-    // Level 3
-    { at: L3(22, 14), kind: 'rats' },
-    { at: L3(14, 3), kind: 'spider' },
-    { at: L3(15, 5), kind: 'spider' },
-    { at: L3(23, 25), kind: 'orc' },
-    { at: L3(25, 25), kind: 'orc' },
-    { at: L3(7, 22), kind: 'berserker' },
-    { at: L3(39, 11), kind: 'dragon' },
+    // Level 1: the Ruined Keep. Vermin sleep; the orcs are up, one walks the hall.
+    { at: L1(8, 12), kind: 'rats', asleep: true }, // kitchens
+    { at: L1(5, 16), kind: 'rats', asleep: true }, // kitchens
+    { at: L1(7, 3), kind: 'spider', asleep: true }, // library
+    { at: L1(8, 24), kind: 'cutpurse' }, // courtyard
+    { at: L1(21, 13), kind: 'orc' }, // hall, west of the pit
+    { at: L1(31, 17), kind: 'orc' }, // hall, east of the pit
+    { at: L1(36, 4), kind: 'orc' }, // tower stair
+    { at: L1(17, 25), kind: 'orc' }, // courtyard, by the gatehouse
+    { at: L1(35, 24), kind: 'orc' }, // chapel, by the chest
+    // The hall patrol: clockwise round the pit mouth, floor only, no doors.
+    { at: L1(19, 10), kind: 'orc', patrol: route(1, [[19, 10], [27, 10], [32, 12], [32, 18], [25, 20], [18, 17]]) },
+    // Level 2: the Crossing. The barracks squad sleeps with its captain; everything else is up.
+    { at: L2(19, 3), kind: 'orc', asleep: true }, // barracks squad
+    { at: L2(21, 2), kind: 'orc', asleep: true },
+    { at: L2(26, 3), kind: 'orc', asleep: true },
+    { at: L2(29, 2), kind: 'orc', asleep: true },
+    { at: L2(23, 3), kind: 'captain', asleep: true }, // with the squad
+    { at: L2(11, 23), kind: 'orc', name: 'Grub the Jailer' }, // cellblock
+    { at: L2(7, 12), kind: 'spider' }, // archive
+    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand' }, // forge
+    { at: L2(28, 21), kind: 'rats' }, // south rim
+    // The arcade patrol: two orcs on one loop, the second a hex behind the first.
+    { at: L2(24, 6), kind: 'orc', patrol: route(2, [[24, 6], ...ARCADE_LOOP]) },
+    { at: L2(23, 7), kind: 'orc', patrol: route(2, [[23, 7], ...ARCADE_LOOP]) },
+    // Guard post <-> barracks: the short way is through the barracks door (it opens it), the long
+    // way round by the arcade gaps if the door is ever blocked.
+    { at: L2(36, 4), kind: 'orc', patrol: route(2, [[36, 4], [22, 3]]) },
+    // The east-ledge walker: down the ledge from below the archer to the forge end and back.
+    { at: L2(35, 19), kind: 'orc', patrol: route(2, [[35, 19], [34, 11], [35, 22]]) },
+    { at: L2(28, 7), kind: 'archer' }, // arcade, in the broken railing over the pit
+    { at: L2(35, 10), kind: 'archer' }, // top of the east ledge
+    { at: L2(21, 25), kind: 'orc' }, // winch room, guarding the lift
+    { at: L2(7, 15), kind: 'cutpurse' }, // archive, after the chest
+    // Level 3: the Hollow. All awake but the Dragon; ghouls wait under the bones.
+    { at: L3(22, 14), kind: 'rats' }, // bone pile
+    { at: L3(20, 12), kind: 'ghoul', buried: true }, // bone pile, north-west
+    { at: L3(28, 13), kind: 'ghoul', buried: true }, // bone pile, east
+    { at: L3(23, 19), kind: 'ghoul', buried: true }, // bone pile, by the lift tunnel
+    { at: L3(14, 3), kind: 'spider' }, // spider nest
+    { at: L3(15, 5), kind: 'spider' }, // spider nest
+    { at: L3(23, 25), kind: 'orc' }, // lift base
+    { at: L3(25, 25), kind: 'orc' }, // lift base
+    { at: L3(7, 22), kind: 'berserker' }, // the drain
+    { at: L3(39, 11), kind: 'dragon', asleep: true },
   ],
   chests: [
     // Level 1: tiers 1 and 2; the armory's is locked.

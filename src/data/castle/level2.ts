@@ -75,13 +75,13 @@ export function buildLevel2(): LevelBuilder {
   // Railing: the arcade's pit side, broken at (28, 7) and (15, 14).
   b.railing([[26, 7], [27, 7], [29, 7], [30, 7], [31, 7], [15, 13], [15, 15]]);
 
-  // Lights. The bridges and the Crossing are dark on purpose.
-  b.sconce(16, 1).sconce(31, 1); // barracks
-  b.sconce(6, 1); // officers
-  b.sconce(14, 6).sconce(33, 6); // arcade
+  // Lights (V3.3, spec 16.2): sparse. Four sconces, the forge's fire and the pit glow at the
+  // Crossing; the arcade, the bridges and the ledge are dark.
+  b.sconce(16, 1); // barracks, by the door end
+  b.sconce(33, 6); // arcade, at the guard post end
   b.sconce(7, 23); // cellblock
-  b.sconce(18, 23).sconce(26, 28); // winch room
+  b.sconce(26, 28); // winch room, by the lift
   b.light('fire', [[37, 28]]); // the forge
-  b.sconce(30, 24); // forge
+  b.light('glow', [[23, 15], [22, 17]]); // the pit glow from the Hollow, strongest at the Crossing
   return b;
 }

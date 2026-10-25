@@ -12,7 +12,7 @@ import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v32';
+export const SAVE_KEY = 'vc.save.v33';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -51,8 +51,10 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   key: 'pick',
   oil: 'torch',
   grapple: 'creak',
+  shutter: 'click',
+  escape: 'chop',
 };
-const LOADOUT_KEY = 'vc.loadout.v32';
+const LOADOUT_KEY = 'vc.loadout.v33';
 /** 15.8: default camera distance at delve start; figures are hex-tall now, so a bit further out. */
 const DELVE_DISTANCE = 22;
 
@@ -309,6 +311,11 @@ export class App {
     }
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
+    // 16.2: "start shuttered" on the prepare screen: shutter is free, so send it right after the delve starts.
+    if (cmd.type === 'startDelve' && this.loadout?.startShuttered && this.state?.delve && this.state.delve.lanternOpen !== false) {
+      const bearer = this.state.delve.lanternBearer;
+      void this.send({ type: 'act', heroId: bearer, action: 'shutter', target: {}, focus: 0 });
+    }
     return true;
   }
 
@@ -379,7 +386,14 @@ export class App {
         }
         case 'hit': {
           const heroHurt = this.isHero(e.target);
-          sfx.play(heroHurt ? 'hurt' : 'sword');
+          const byGloam = this.state?.delve?.monsters.some((m) => m.id === e.attacker && m.kind === 'gloam') || before.delve?.monsters.some((m) => m.id === e.attacker && m.kind === 'gloam');
+          if (byGloam) {
+            // 16.2: the Gloam's strike: a deep thrum, a hard shake and a dark pulse.
+            sfx.play('gloam');
+            this.hud.pulse('dark');
+            this.hud.log(`The dark strikes ${this.hud.nameOf(e.target)} for ${e.damage}.`, 'log-enemy');
+            if (!this.settings.reduceShake) this.dio.rig.addShake(0.45);
+          } else sfx.play(heroHurt ? 'hurt' : 'sword');
           if (heroHurt) this.hud.pulse('hurt');
           await this.dio.playEvent(e);
           this.hud.hideRoll();
@@ -425,7 +439,7 @@ export class App {
           const prev = this.state?.delve ? this.engine.brightness(before) : 'bright';
           this.hud.updateLight(e.light, e.brightness);
           this.hud.setDark(e.brightness);
-          if (e.brightness !== prev) {
+          if (e.brightness !== prev && this.state?.delve?.lanternOpen !== false) {
             this.hud.log(`The lantern gutters: ${e.brightness === 'pitch' ? 'pitch black' : e.brightness}.`, 'log-enemy');
             this.hud.pulse('dark');
           }
@@ -433,12 +447,55 @@ export class App {
           continue;
         }
         case 'gloam':
-          sfx.play('horn', { pitch: 0.4, gain: 0.5 });
+          sfx.play('gloam', { pitch: 0.8, gain: 0.8 });
           sfx.setDrone(true);
-          this.hud.log('Something moves in the dark.', 'log-enemy');
+          this.hud.log('The dark here is awake.', 'log-enemy');
           this.hud.pulse('dark');
-          if (!instant()) await wait(0.6);
+          await this.dio.playEvent(e);
+          if (!instant()) await wait(0.4);
           continue;
+        case 'shout':
+          sfx.play('horn', { pitch: 1.35, gain: 0.55 });
+          this.hud.log(`${this.hud.nameOf(e.id)} shouts: every orc within 8 wakes and hunts!`, 'log-enemy');
+          await this.dio.playEvent(e);
+          continue;
+        case 'dragged':
+          sfx.play('web', { pitch: 0.8 });
+          this.hud.log(`${this.hud.nameOf(e.id)} is dragged toward the spider.`, 'log-enemy');
+          if (this.isHero(e.id)) this.hud.pulse('hurt');
+          await this.dio.playEvent(e);
+          continue;
+        case 'grabbed':
+          sfx.play('chop', { pitch: 0.6, gain: 0.8 });
+          this.hud.log(`${this.hud.nameOf(e.by)} grabs ${this.hud.nameOf(e.id)}! Escape (2 Might slots) or kill it.`, 'log-enemy');
+          if (this.isHero(e.id)) this.hud.pulse('hurt');
+          await this.dio.playEvent(e);
+          continue;
+        case 'released':
+          sfx.play('click', { pitch: 1.3 });
+          this.hud.log(`${this.hud.nameOf(e.id)} is free.`);
+          await this.dio.playEvent(e);
+          continue;
+        case 'shutter':
+          sfx.play('click', { pitch: e.open ? 1.2 : 0.7, gain: 0.8 });
+          this.hud.log(e.open ? 'The lantern is open: it lights, and burns.' : 'The lantern is shuttered: no light, no burn.');
+          await this.dio.playEvent(e);
+          if (this.state?.delve) this.hud.updateLight(this.state.delve.light, this.engine.brightness(this.state));
+          continue;
+        case 'routeKnown':
+          sfx.play('flip', { pitch: 1.1 });
+          this.hud.log(`${this.hud.nameOf(e.id)}'s patrol route is known. It is drawn on the map.`);
+          await this.dio.playEvent(e);
+          continue;
+        case 'spawned': {
+          const isGhoul = this.state?.delve?.monsters.some((m) => m.id === e.id && m.kind === 'ghoul');
+          if (isGhoul && this.dio.canSee(e.at)) {
+            sfx.play('thud', { pitch: 0.7, gain: 0.6 });
+            this.hud.log(`${this.hud.nameOf(e.id)} claws out of the ground!`, 'log-enemy');
+          }
+          await this.dio.playEvent(e);
+          continue;
+        }
         case 'blast':
           await this.dio.playEvent(e);
           continue;
@@ -587,6 +644,15 @@ export class App {
       case 'spawned':
         return d.canSee(e.at) ? e.at : null;
       case 'caltrops':
+        return d.canSee(e.at) ? e.at : null;
+      case 'shout':
+        return d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
+      case 'dragged':
+        return this.isHero(e.id) || d.canSee(e.from) ? e.from : null;
+      case 'grabbed':
+      case 'released':
+        return d.unitPos(e.id);
+      case 'gloam':
         return d.canSee(e.at) ? e.at : null;
       case 'cast':
         // Overwatch shots fire in the world phase: show them.

@@ -77,13 +77,21 @@ export function buildLevel1(): LevelBuilder {
   // Railing: a few short bits left on the pit mouth's rim.
   b.railing([[25, 11], [26, 11], [22, 14], [22, 15]]);
 
-  // Lights.
+  // Lights (V3.3, spec 16.2): abundant daylight, so most of the level is lit without the lantern.
   b.sconce(4, 1).sconce(12, 5); // library
   b.sconce(3, 11).sconce(11, 17); // kitchens
   b.sconce(18, 7).sconce(30, 7).sconce(15, 14).sconce(33, 15); // hall and dais
   b.sconce(34, 3).sconce(40, 3); // tower
   b.sconce(42, 10); // armory
-  b.sconce(23, 22); // gate passage
+  // Courtyard and gatehouse: open sky.
   b.light('daylight', [[4, 24], [9, 21], [12, 26], [7, 28], [17, 26], [22, 25], [27, 25], [24, 29]]);
+  // The great hall's collapsed roof: daylight all round the pit mouth.
+  b.light('daylight', [[20, 10], [29, 10], [19, 14], [32, 14], [19, 18], [31, 18], [24, 20]]);
+  // Corridors open to the sky: the hall's library arm, the servants' passage, the gate passage,
+  // the sally port and the east breach.
+  b.light('daylight', [[15, 6], [6, 8], [23, 22], [2, 14], [42, 21]]);
+  // More fallen roof: the chapel's nave and south aisle, the kitchens' chimney, the tower's top.
+  // The library and the armory stay dim: the lantern still earns its oil there.
+  b.light('daylight', [[37, 20], [34, 24], [8, 14], [37, 4]]);
   return b;
 }
