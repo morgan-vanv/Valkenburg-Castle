@@ -137,6 +137,8 @@ export interface CoinDef {
 
 export interface TrapDef {
   at: Pos;
+  /** V4.0 (spec 29.5): a venom trap: 1 damage and venom instead of 3 damage. */
+  venom?: boolean;
 }
 
 /** Where a contract objective can be placed. */
@@ -264,7 +266,10 @@ export type ItemKind =
   | 'improvised-charge' // V4.0 (spec 26.5): the Sapper's improvised explosives: slotless, `amount` left (3 per delve), blast like a blasting charge
   | 'nightsight' // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
   // V4.0 (spec 25.2)
-  | 'gatekey'; // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
+  | 'gatekey' // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
+  // V4.0 (spec 29): venom
+  | 'antidote' // drink or give to an adjacent ally (an action): cures venom and paralysis
+  | 'venomdart'; // throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
 
 export interface Item {
   id: string;
@@ -361,7 +366,9 @@ export interface AleOffer {
 export type ShopKind =
   | 'torch' | 'potion' | 'rope' | 'charge'
   | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker'
-  | 'lockpicks' | 'nightsight';
+  | 'lockpicks' | 'nightsight'
+  // V4.0 (spec 29): Mott's essentials and his quiet work
+  | 'antidote' | 'venomdart';
 
 export interface ShopOffer {
   kind: ShopKind;
@@ -485,6 +492,12 @@ export interface HeroInDelve {
    * else on 'walk'; absent = walk). A `move` without `sneak` uses it; the `setMoveMode` command changes it.
    */
   moveMode?: 'walk' | 'sneak';
+  /** V4.0 (spec 29.1): envenomed: world phases left before paralysis (absent or 0 = no venom). */
+  venom?: number;
+  /** V4.0 (spec 29.2): paralyzed: world phases left (absent or 0 = not). Can't move or act; not downed. */
+  paralyzed?: number;
+  /** V4.0 (spec 29.4): the paralyzed ally (hero id) this hero has on their shoulders: they follow every move. */
+  carrying?: string;
 }
 
 export interface Intent {
@@ -500,7 +513,9 @@ export interface Intent {
    */
   kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink' | 'hamstring'
     /** V4.0 (spec 28, pillar 17): crews play by the party's rules: pick or smash a lock, disarm a trap, dig through (a Sapper). */
-    | 'pick' | 'smash' | 'disarm' | 'dig';
+    | 'pick' | 'smash' | 'disarm' | 'dig'
+    /** V4.0 (spec 29.3): a crew member throws a venom dart at a hero. */
+    | 'venomdart';
   /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
   sneak?: boolean;
   /** V3.7 `item` intents: which item. */
@@ -548,6 +563,9 @@ export interface Monster {
   /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
   feared?: number;
   fearOf?: string;
+  /** V4.0 (spec 29): envenomed (world phases to paralysis) and paralyzed (world phases left): can't move or act. */
+  venom?: number;
+  paralyzed?: number;
 }
 
 /** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
@@ -611,6 +629,9 @@ export interface Rival {
   stuck?: number;
   /** V4.0 (spec 28.1, pillar 17): the member's last move was a sneak (monsters notice by it; the view draws it crouched). */
   sneaked?: boolean;
+  /** V4.0 (spec 29, pillar 17): envenomed and paralyzed, as a hero. */
+  venom?: number;
+  paralyzed?: number;
 }
 
 export interface RivalCrew {
@@ -709,7 +730,8 @@ export interface Delve {
   ground: GroundLoot[];
   /** Traps still armed, by posKey; `spotted` = visible to the player. */
   /** `spotted`: by the party. V4.0 (spec 28.4): `crewSpotted`: by the rival crew (they walk round it; their Burglar disarms it). */
-  traps: Record<string, { spotted: boolean; crewSpotted?: boolean }>;
+  /** V4.0 (spec 29.5): `venom`: a venom trap (1 damage and venom instead of 3 damage). */
+  traps: Record<string, { spotted: boolean; crewSpotted?: boolean; venom?: boolean }>;
   /** Braziers lit, by posKey (includes campaign.litBraziers). */
   lit: string[];
   /** Cracked walls blown open, built walls broken, and rubble/cracked walls dug out, by posKey. Engine kindAt treats these as floor (rubble for broken walls, spec 20.3). */
@@ -853,7 +875,12 @@ export type ActionKind =
   | 'key' // [hex] adjacent (or own hex) locked door or chest, silent
   | 'unbar' // V4.0 [hex] the sally port key on the adjacent barred gate: opens it for good, silent
   | 'oil' // [self] +10 light
-  | 'grapple'; // [hex on the level above] uses move and action; the hook is kept
+  | 'grapple' // [hex on the level above] uses move and action; the hook is kept
+  // ---- V4.0 (spec 29): venom
+  | 'venomdart' // [enemy] throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
+  | 'antidote' // [self or adjacent ally id] cures venom and paralysis
+  | 'shoulder' // [adjacent paralyzed ally id] carry them: they follow every move; the carrier moves 3 at most
+  | 'setDown'; // [self] free: put the carried ally down
 
 export interface ActionTarget {
   /** V3.7 setCharge: fuse length in world phases (1 or 2). */
@@ -923,8 +950,8 @@ export type GameEvent =
   | { type: 'noise'; at: Pos; radius: number }
   | { type: 'light'; light: number; brightness: Brightness }
   | { type: 'brazierLit'; at: Pos }
-  | { type: 'trap'; at: Pos; id: string; damage: number }
-  | { type: 'trapSpotted'; at: Pos }
+  | { type: 'trap'; at: Pos; id: string; damage: number; /** V4.0 (spec 29.5) */ venom?: boolean }
+  | { type: 'trapSpotted'; at: Pos; /** V4.0 (spec 29.5): a venom trap */ venom?: boolean }
   | { type: 'awake'; id: string; awareness: Awareness }
   | { type: 'spawned'; id: string; at: Pos }
   | { type: 'gloam'; at: Pos }
@@ -975,7 +1002,14 @@ export type GameEvent =
   | { type: 'released'; id: string }
   | { type: 'shutter'; open: boolean }
   | { type: 'routeKnown'; id: string; route: Pos[] }
-  | { type: 'say'; text: string };
+  | { type: 'say'; text: string }
+  // V4.0 (spec 29): venom. `venom`: world phases to paralysis now; `dose` 2 for a second dose.
+  | { type: 'envenomed'; id: string; by: string; venom: number; dose: number }
+  | { type: 'paralyzed'; id: string; rounds: number }
+  /** Venom and paralysis gone: `how` 'antidote' | 'mend' | 'worn' (paralysis wore off) | 'out' (left the castle). */
+  | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'worn' | 'out' }
+  | { type: 'shouldered'; by: string; id: string }
+  | { type: 'setDown'; by: string; id: string };
 
 export interface ApplyResult {
   state: GameState;

@@ -1568,9 +1568,9 @@ describe('15.3 classes', () => {
 });
 
 describe('15.4 quartermaster', () => {
-  it('sells fourteen items (V3.6: lockpicks and the night-eye draught); buying puts them in the stash', () => {
+  it('sells sixteen items (V3.6: lockpicks and the night-eye draught; V4.0: venom darts and the antidote); buying puts them in the stash', () => {
     const shop = e.shop();
-    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'caltrops', 'hook', 'key', 'oil', 'firecracker', 'lockpicks', 'nightsight']);
+    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'nightsight']);
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;

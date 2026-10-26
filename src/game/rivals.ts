@@ -515,6 +515,7 @@ function lockIntent(c: Ctx, r: RivalX, chestId: string | undefined): Intent | nu
 export function planRival(c: Ctx, r: RivalX): Intent {
   const cr = c.d.rivals!;
   const st = rivalStats(r);
+  if ((r.paralyzed ?? 0) > 0) return { kind: 'wait' }; // V4.0 (spec 29.2)
   if ((r.feared ?? 0) > 0) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
   if (r.intent?.kind === 'veil' && !r.veiled && cr.stance !== 'hostile') return r.intent;
   const foe = defendTarget(c, r);
@@ -801,6 +802,11 @@ export function rivalsAct(c: Ctx): void {
   let jobDone = false;
   for (const r of rivalsOnMap(c)) {
     if (!rivalsOnMap(c).includes(r)) continue;
+    // V4.0 (spec 29.2): a paralyzed member neither moves nor acts.
+    if ((r.paralyzed ?? 0) > 0) {
+      r.overwatch = false;
+      continue;
+    }
     if ((r.feared ?? 0) > 0) {
       r.overwatch = false;
       fleeAct(c, r);

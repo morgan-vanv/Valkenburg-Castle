@@ -504,7 +504,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     doors,
     chests: w.castle.chests.map((c) => ({ id: c.id, at: { ...c.at }, tier: c.tier, locked: !!c.locked, jammed: false, opened: false })),
     ground: [],
-    traps: Object.fromEntries(w.castle.traps.map((t) => [posKey(t.at), { spotted: false }])),
+    traps: Object.fromEntries(w.castle.traps.map((t) => [posKey(t.at), { spotted: false, ...(t.venom ? { venom: true } : {}) }])),
     lit: [...C.litBraziers],
     blown: [],
     ropes: [],

@@ -27,6 +27,7 @@ import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, lookRound, moodOf, noticeFigure, perceivable, sightedHeroes, type Sighted } from './stealth';
+import { checkCarries, isParalyzed, venomTick } from './venom';
 
 // ---------------------------------------------------------------- planning
 
@@ -177,6 +178,7 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
   if (m.kind === 'gloam') return planGloam(c, m, lit);
   if (m.kind === 'dragon') return planDragon(c, m);
   if (m.awareness === 'asleep' || m.buried) return WAIT;
+  if (isParalyzed(m)) return WAIT; // V4.0 (spec 29.2)
   const st = monsterStats(m);
   const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
   const noAbility = !!opts.noAbility;
@@ -311,7 +313,7 @@ function planGloam(c: Ctx, g: MonsterX, lit: Set<string>): Plan {
 export function computeIntents(c: Ctx): void {
   const lit = litSet(c.w, c.d);
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' || m.buried) {
+    if (m.awareness === 'asleep' || m.buried || isParalyzed(m)) {
       m.intent = undefined;
       continue;
     }
@@ -372,7 +374,8 @@ export function lookAll(c: Ctx, first?: string, before?: () => void, anyPhase = 
   const lit = litSet(c.w, c.d);
   const found: { m: MonsterX; ids: string[]; turnedTo?: string }[] = [];
   for (const m of onMap(c)) {
-    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') continue;
+    // V4.0 (spec 29.2): a paralyzed monster can't turn its head.
+    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || isParalyzed(m)) continue;
     const hs = heroes.filter((x) => x.at.level === m.at.level);
     if (!hs.length) continue;
     const r = lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first);
@@ -492,6 +495,11 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
 }
 
 function monsterAct(c: Ctx, m: MonsterX): void {
+  // V4.0 (spec 29.2): paralyzed: it neither moves nor acts.
+  if (isParalyzed(m)) {
+    m.intent = undefined;
+    return;
+  }
   const lit = litSet(c.w, c.d);
   const wasPatrol = m.awareness === 'patrol';
   perceive(c, m, lit);
@@ -779,6 +787,8 @@ export function worldPhase(c: Ctx): void {
     h.bleed -= 1;
     if (h.bleed <= 0) killHero(c, h);
   }
+  // V4.0 (spec 29.1, 29.2): venom counts down; paralysis wears off.
+  venomTick(c);
   // 2. Monsters, in id order.
   const order = [...d.monsters].filter((m) => m.kind !== 'gloam').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   for (const m of order) {
@@ -787,6 +797,7 @@ export function worldPhase(c: Ctx): void {
     monsterAct(c, m);
   }
   // 3. Rivals. 4. The Gloam.
+  checkCarries(c);
   rivalsAct(c);
   relockGate(c); // V4.0 (spec 25.4): a crew that came in by the sally port bars it behind itself
   gloamPhase(c);

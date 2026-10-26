@@ -20,6 +20,7 @@ import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
 import { faceToward, inRearHalf } from './stealth';
 import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals';
+import { cureVenom, envenom, isParalyzed, venomTakes } from './venom';
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 
 // ---------------------------------------------------------------- the pack
@@ -261,6 +262,24 @@ function dartIntent(c: Ctx, r: RivalX): Intent | null {
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
 }
 
+/** V4.0 (spec 29.3): heroes within this of another hero who is up are not "alone" for the venom dart. */
+const VENOM_ALONE = 4;
+
+/**
+ * V4.0 (spec 29.3, pillar 17): a venom dart at a hero in range 5 and sight the venom can take (not paralyzed already,
+ * not envenomed: one dose is enough to count down): a hero alone first (nobody up within 4: nobody to carry them
+ * out), else the crew's target, else the nearest.
+ */
+function venomIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
+  if (!hasKit(r, 'venomdart')) return null;
+  const seen = heroesInSight(c, r, THROW_RANGE.venomdart).filter((x) => x.hero && !(x.hero.venom ?? 0) && venomTakes(c, x.id));
+  if (!seen.length) return null;
+  const up = activeHeroes(c).filter((h) => !isParalyzed(h) && !(h as HeroX).dozing);
+  const lone = seen.find((x) => !up.some((o) => o.heroId !== x.id && o.at.level === x.at.level && distance(o.at, x.at) <= VENOM_ALONE));
+  const pick = lone ?? (t && seen.find((x) => x.id === t.id)) ?? seen[0]!;
+  return { kind: 'venomdart', item: 'venomdart', targetId: pick.id };
+}
+
 /**
  * Caltrops on the hex the nearest hero would charge through: the member's neighbour on that hero's
  * shortest way in. Only while the bow has nothing to shoot at (a Ranger with a target shoots).
@@ -459,6 +478,9 @@ function shadowIntent(c: Ctx, r: RivalX): Intent | null {
 function witchIntent(c: Ctx, r: RivalX): Intent | null {
   const mana = manaOf(r);
   if (mana < 1) return null;
+  // V4.0 (spec 29.6): Mend draws out venom too: a paralyzed or envenomed member first.
+  const sick = rivalsOnMap(c).filter((m) => ((m.venom ?? 0) > 0 || isParalyzed(m)) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)) || (a.id < b.id ? -1 : 1))[0];
+  if (sick) return { kind: 'mend', targetId: sick.id };
   const hurt = rivalsOnMap(c).filter((m) => belowHalf(m) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => a.hp - b.hp || (a.id < b.id ? -1 : 1))[0];
   if (hurt) return { kind: 'mend', targetId: hurt.id };
   for (const t of heroesInSight(c, r, GUST_RANGE + 1)) {
@@ -480,7 +502,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   if (potion) return potion;
   switch (r.cls) {
     case 'burglar':
-      return dartIntent(c, r) ?? smokeIntent(c, r);
+      return venomIntent(c, r, t) ?? dartIntent(c, r) ?? smokeIntent(c, r);
     case 'ranger':
       return knockbackIntent(c, r) ?? rangerHamstring(c, r, t) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
     case 'sellsword':
@@ -498,7 +520,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   return null;
 }
 
-export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring'];
+export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring'];
 
 /** A sleep dart on a hero: a hit costs them their next move and action (spec 16.5). */
 function throwDart(c: Ctx, r: RivalX, t: Target): void {
@@ -615,6 +637,20 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       throwDart(c, r, t);
       return true;
     }
+    case 'venomdart': {
+      // V4.0 (spec 29.3): the heroes' venom dart turned on them: 1 Finesse slot, a hit envenoms.
+      if (!hasKit(r, 'venomdart') || !t?.hero || !within(t.at, r.at, THROW_RANGE.venomdart) || !los(c.w, c.d, r.at, t.at)) return false;
+      faceToward(r, t.at);
+      spendKit(r, 'venomdart');
+      c.ev.push({ type: 'thrown', by: r.id, kind: 'venomdart', from: { ...r.at }, to: { ...t.at } });
+      const rr = roll(c, r.id, 'Venom dart', 1, dartChance(r));
+      c.ev.push({ type: 'cast', by: r.id, spell: 'venomdart', targetId: t.id, at: { ...t.at } });
+      if (rr.hits) {
+        c.ev.push({ type: 'hit', attacker: r.id, target: t.id, damage: 0, crit: false });
+        envenom(c, t.id, r.id);
+      } else c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
+      return true;
+    }
     case 'fuse': {
       // The charge lands (or is set) where the intent showed and burns a fuse of 1: it goes off at the end of the next world phase.
       if (!hasKit(r, 'charge') || !it.to || fuseAt(c.d, it.to)) return false;
@@ -721,7 +757,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       const before = member.hp;
       member.hp = Math.min(member.maxHp, member.hp + 4);
       c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: member.id });
-      say(c, `${r.name} mends ${member.name} (+${member.hp - before}).`);
+      const drawn = cureVenom(c, member.id, 'mend', r.id);
+      say(c, `${r.name} mends ${member.name} (+${member.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
       return true;
     }
     case 'ward': {
@@ -935,6 +972,11 @@ export function hiredKit(c: Ctx, r: RivalX): Intent | null {
   const potion = potionIntent(c, r);
   if (potion) return potion;
   if (r.cls === 'hedgewitch' && manaOf(r) >= 1) {
+    // V4.0 (spec 29.6): a hero with venom in them first (paralyzed before envenomed), then the most hurt below half.
+    const sick = activeHeroes(c)
+      .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && ((h.venom ?? 0) > 0 || isParalyzed(h)))
+      .sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)))[0];
+    if (sick) return { kind: 'mend', targetId: sick.heroId };
     const hurt = activeHeroes(c)
       .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && h.hp * 2 < (c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? 0))
       .sort((a, b) => a.hp - b.hp)[0];
@@ -954,7 +996,8 @@ export function hiredUse(c: Ctx, r: RivalX, it: Intent): boolean {
     const before = h.hp;
     h.hp = Math.min(max, h.hp + 4);
     c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: h.heroId });
-    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before}).`);
+    const drawn = cureVenom(c, h.heroId, 'mend', r.id);
+    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
     return true;
   }
   return false;

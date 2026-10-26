@@ -22,6 +22,7 @@ import { lookAll } from './world-phase';
 import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse } from './charges';
 import { digOut } from './delve';
 import { checkWays } from './ways';
+import { envenom, trapDamage } from './venom';
 
 // ---------------------------------------------------------------- telling the party (pillar 17: visible and named)
 
@@ -325,12 +326,16 @@ function crewWakeRolls(c: Ctx, r: RivalX, p: Pos, last: boolean, sneak: boolean,
 
 /** A crew member steps on a trap: 3 damage (no armor), the trap is gone, noise 2; the party sees it, or hears a crash. */
 export function springCrewTrap(c: Ctx, r: RivalX, at: Pos): void {
+  const tr = c.d.traps[posKey(at)];
   delete c.d.traps[posKey(at)];
+  // V4.0 (spec 29.5): a venom trap: 1 damage and venom, as on a hero.
+  const dmg = trapDamage(tr);
   if (crewSeen(c, r, at)) {
-    c.ev.push({ type: 'trap', at: { ...at }, id: r.id, damage: 3 });
-    say(c, `A trap bites ${r.name}.`);
+    c.ev.push({ type: 'trap', at: { ...at }, id: r.id, damage: dmg, ...(tr?.venom ? { venom: true } : {}) });
+    say(c, tr?.venom ? `A venom needle bites ${r.name}.` : `A trap bites ${r.name}.`);
   }
-  hurtAny(c, r.id, 3, null, { noise: false });
+  hurtAny(c, r.id, dmg, null, { noise: false });
+  if (tr?.venom) envenom(c, r.id, 'trap');
   makeNoise(c, at, 2, { what: 'crash' });
 }
 
@@ -353,7 +358,7 @@ export function crewSpotTraps(c: Ctx, r: RivalX): void {
       say(c, `${r.name} spots a trap and marks it.`);
       if (!t.spotted) {
         t.spotted = true;
-        c.ev.push({ type: 'trapSpotted', at });
+        c.ev.push({ type: 'trapSpotted', at, ...(t.venom ? { venom: true } : {}) });
       }
     }
   }
@@ -369,12 +374,15 @@ function crewDisarm(c: Ctx, r: RivalX, at: Pos): void {
     tell(c, r, `${r.name} kneels and disarms a trap.`, at);
     return;
   }
+  const tr = c.d.traps[posKey(at)];
   delete c.d.traps[posKey(at)];
+  const dmg = trapDamage(tr);
   if (crewSeen(c, r, at)) {
-    c.ev.push({ type: 'trap', at: { ...at }, id: r.id, damage: 3 });
+    c.ev.push({ type: 'trap', at: { ...at }, id: r.id, damage: dmg, ...(tr?.venom ? { venom: true } : {}) });
     say(c, `The trap goes off in ${r.name}'s hands.`);
   }
-  hurtAny(c, r.id, 3, null, { noise: false });
+  hurtAny(c, r.id, dmg, null, { noise: false });
+  if (tr?.venom) envenom(c, r.id, 'trap');
   makeNoise(c, at, 2, { what: 'crash' });
 }
 
