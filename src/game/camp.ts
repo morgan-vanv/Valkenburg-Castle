@@ -531,7 +531,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   // The Dragon's hoard: what's been carried out never comes back.
   placeHoard(w, s, d, Math.max(0, HOARD_PIECES - (s.hoardTaken ?? 0)));
   // Rivals (spec 18.5): the Sisters on a Level 1 contract, a cutthroat crew from the pool on Level 2 or 3.
-  d.rivals = makeCrew(w, s, d, contract.level);
+  d.rivals = makeCrew(w, s, d, contract.level, entrance);
   // Place heroes at the entrance and around it.
   const spots = freeSpotsNear(w, d, entrance, ids.length, monsters.map((m) => m.at));
   ids.forEach((id, i) => {

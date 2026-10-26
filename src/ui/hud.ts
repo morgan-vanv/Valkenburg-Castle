@@ -12,6 +12,7 @@ import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, blastPreview, breakableWall, collapsible, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords } from '../view/stealth';
+import { longPath, stepsToTurn } from '../view/pathing';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
@@ -65,14 +66,11 @@ export function hitOdds(slots: number, chance: number, locked: number): number[]
 export class Hud {
   readonly root: HTMLElement;
   selectedId: string | null = null;
-  /** Combat: the move mode of the bar (walk or sneak). Exploring uses each hero's own stance. */
   sneak = false;
-  /** V3.8 (22.8): every selected hero, the leader (`selectedId`) first. */
-  selection: string[] = [];
-  /** V3.8 (22.2): the exploring clock is paused (Space). */
-  paused = false;
-  /** The explore path under the mouse (leader), cached by hex, hero hex and stance. */
-  private hoverWalk: { key: string; reach: Reach | null } | null = null;
+  /** V3.7 (20.5): free move brings the party along (default on). */
+  follow = true;
+  /** The long path under the mouse while calm. */
+  private hoverLong: Pos[] | null = null;
   private state: GameState | null = null;
   private vis: Visibility | null = null;
   private busy = false;
@@ -113,17 +111,13 @@ export class Hud {
   private emptyEl = h('div', { class: 'hud-empty hidden' });
   /** 16.2: persistent warning while the Gloam is up and a hero on Level 3 stands in the dark. */
   private gloamEl = h('div', { class: 'hud-gloam hidden' }, h('span', { class: 'gloam-eye' }, '◉'), ' The dark here is awake. Stand in the light.');
-  /** V3.8 (22.8): "Exploring" / "Combat · round N", top centre; the paused overlay. */
-  private modeEl = h('button', { class: 'hud-mode', 'data-mode': '' });
-  private pauseEl = h('div', { class: 'hud-paused hidden' }, h('div', { class: 'bn-title' }, 'Paused'), h('div', { class: 'bn-sub' }, 'Space to resume. Plan, aim, then let the castle move.'));
 
   constructor(
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.pauseEl, this.topbar, this.modeEl, this.rivalEl, this.cards, this.logEl, this.camBox, this.gloamEl, this.hint, this.bar, this.picker, this.previewEl, this.parleyEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud' }, this.vignette, this.emptyEl, this.topbar, this.rivalEl, this.cards, this.logEl, this.camBox, this.gloamEl, this.hint, this.bar, this.picker, this.previewEl, this.parleyEl, this.rollEl, this.bannerEl, this.toastEl, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
-    this.modeEl.addEventListener('click', () => this.togglePause());
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
       if (!this.tip.classList.contains('hidden')) this.placeTip();
@@ -180,11 +174,7 @@ export class Hud {
       const next = active.find((x) => !x.moved || !x.acted) ?? active[0];
       this.selectedId = next?.heroId ?? null;
     }
-    this.selection = this.selection.filter((id) => id !== this.selectedId && active.some((x) => x.heroId === id));
-    if (this.selectedId) this.selection.unshift(this.selectedId);
-    // V3.8: combat is one hero at a time.
-    if (this.mode() === 'combat') this.selection = this.selection.slice(0, 1);
-    this.dio.select(this.selectedId, this.selection);
+    this.dio.select(this.selectedId);
     this.intents = this.engine.intents(s);
     this.dio.showIntents(s, this.intents);
     this.refresh();
@@ -192,7 +182,6 @@ export class Hud {
 
   /** After a command: if the selected hero is spent, select the next one with something left. */
   autoAdvance(): void {
-    if (this.mode() === 'explore') return;
     const d = this.state?.delve;
     const sel = this.selected();
     if (!d || !sel || sel.status !== 'active' || !(sel.moved && sel.acted)) return;
@@ -215,26 +204,14 @@ export class Hud {
     this.renderBar();
   }
 
-  /** Select one hero; `add` (Shift, exploring) toggles them in the multi-selection instead. */
-  select(id: string, add = false): void {
+  select(id: string): void {
     const d = this.state?.delve;
     const hd = d?.heroes.find((x) => x.heroId === id);
     if (!hd || hd.status !== 'active') return;
-    if (add && this.mode() === 'explore' && this.selectedId) {
-      if (this.selection.includes(id)) {
-        if (this.selection.length > 1) this.selection = this.selection.filter((x) => x !== id);
-        if (this.selectedId === id) this.selectedId = this.selection[0] ?? id;
-      } else this.selection.push(id);
-      this.dio.select(this.selectedId, this.selection);
-      sfx.play('click', { pitch: 1.15 });
-      this.refresh();
-      return;
-    }
     this.selectedId = id;
-    this.selection = [id];
     this.pending = null;
     this.closePreview();
-    this.dio.select(id, this.selection);
+    this.dio.select(id);
     if (hd.at.level !== this.dio.shownLevel) this.dio.showLevel(hd.at.level);
     this.dio.lookAt(hd.at);
     sfx.play('click');
@@ -279,13 +256,6 @@ export class Hud {
   private linkHere(): { info: LinkInfo; reach: Reach } | null {
     const sel = this.selected();
     if (!sel) return null;
-    if (this.mode() === 'explore') {
-      // V3.8: exploring, the stairs or a working lift are one step of a walk order.
-      const info = linkAt(this.engine.castle(), sel.at);
-      if (!info || (info.kind === 'lift' && !this.state?.delve?.liftWorking)) return null;
-      const r = this.explorePath(sel.heroId, info.to, this.stanceOf(sel));
-      return r && r.path.length ? { info, reach: r } : null;
-    }
     const reach = linkReach(this.reach, sel.at);
     if (!reach) return null;
     const info = linkAt(this.engine.castle(), sel.at);
@@ -298,8 +268,7 @@ export class Hud {
     if (!l || !sel || this.busy) return;
     this.cancel();
     sfx.play('click');
-    if (this.mode() === 'explore') void this.host.send({ type: 'walk', heroId: sel.heroId, path: l.reach.path, sneak: this.stanceOf(sel) });
-    else void this.host.send({ type: 'move', heroId: sel.heroId, path: l.reach.path, sneak: this.sneak });
+    void this.host.send({ type: 'move', heroId: sel.heroId, path: l.reach.path, sneak: this.sneak });
   }
 
   /** V3.6 (19.5): the exit the selected hero stands on, with the engine's `leave` option if it offers one. */
@@ -333,118 +302,23 @@ export class Hud {
     return !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
   }
 
-  /** V3.8 (22.1): exploring or fighting (engine.mode, else Delve.mode; old saves: combat). */
-  mode(): 'explore' | 'combat' {
+  /** V3.7 (20.5): engine.calm, tolerant of an engine without it (then Delve.calm, else not calm). */
+  private calmState(): { calm: boolean; why?: string } {
     const s = this.state;
-    if (!s?.delve) return 'combat';
+    if (!s?.delve) return { calm: false };
     try {
-      if (typeof this.engine.mode === 'function') return this.engine.mode(s).mode;
+      if (typeof this.engine.calm === 'function') return this.engine.calm(s);
     } catch {
       /* fall through */
     }
-    return s.delve.mode ?? 'combat';
+    return { calm: !!s.delve.calm };
   }
 
-  /** The selected heroes who are on the board, leader first. */
-  private selectedHeroes(): HeroInDelve[] {
+  /** Free move is on: calm, player phase, a selected active hero who can still walk. */
+  private freeMove(): boolean {
     const d = this.state?.delve;
-    if (!d) return [];
-    return this.selection.map((id) => d.heroes.find((x) => x.heroId === id)).filter((x): x is HeroInDelve => !!x && x.status === 'active');
-  }
-
-  /** V3.8 (22.6): a hero's stance while exploring (the walk order's, else the hero's). */
-  private stanceOf(h: HeroInDelve | undefined): boolean {
-    if (!h) return this.sneak;
-    if (this.mode() !== 'explore') return this.sneak;
-    return h.walk?.sneak ?? !!h.sneaking;
-  }
-
-  /** V3.8 (22.2): something that should stop the clock is open (parley, menu, confirm, a roll preview). */
-  modalOpen(): boolean {
-    return !!this.confirmBox || !!this.parleyHero || !!this.pv || !this.menuEl.classList.contains('hidden');
-  }
-
-  togglePause(force?: boolean): void {
-    if (this.mode() !== 'explore' && force === undefined) return;
-    const next = force ?? !this.paused;
-    if (next === this.paused) return;
-    this.paused = next;
-    sfx.play('click', { pitch: next ? 0.8 : 1.2 });
-    this.renderMode();
-  }
-
-  /** Engine.explorePath, cached for the hover (and tolerant of an engine without it). */
-  private explorePath(heroId: string, to: Pos, sneak: boolean): Reach | null {
-    const s = this.state;
-    if (!s?.delve) return null;
-    try {
-      return typeof this.engine.explorePath === 'function' ? this.engine.explorePath(s, heroId, to, sneak) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Engine.vision, or nothing. */
-  private visionAll(): { id: string; walk: Pos[]; sneak: Pos[] }[] {
-    const s = this.state;
-    if (!s?.delve) return [];
-    try {
-      return typeof this.engine.vision === 'function' ? this.engine.vision(s) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  /** V3.8 (22.8): cones of the seen enemies within 10 of a selected hero, and the red edge when a selected hero stands in one. */
-  private drawVision(): void {
-    const d = this.state?.delve;
-    const explore = this.mode() === 'explore';
-    if (!d || !explore || !this.vis) {
-      this.dio.showVision([]);
-      this.vignette.classList.remove('in-cone');
-      this.root.classList.remove('in-cone');
-      return;
-    }
-    const all = this.visionAll();
-    const sel = this.selectedHeroes();
-    const pos = (id: string) => d.monsters.find((m) => m.id === id)?.at ?? d.rivals?.members.find((r) => r.id === id)?.at;
-    const near = all.filter((v) => {
-      const at = pos(v.id);
-      if (!at || !this.vis!.visible.has(posKey(at))) return false;
-      return sel.some((hh) => hh.at.level === at.level && Math.max(Math.abs(hh.at.q - at.q), Math.abs(hh.at.r - at.r), Math.abs(hh.at.q + hh.at.r - at.q - at.r)) <= 10);
-    });
-    this.dio.showVision(near);
-    const inCone = sel.some((hh) => {
-      const sneak = this.stanceOf(hh);
-      return all.some((v) => (sneak ? v.sneak : v.walk).some((p) => samePos(p, hh.at)));
-    });
-    this.vignette.classList.toggle('in-cone', inCone);
-    this.root.classList.toggle('in-cone', inCone);
-  }
-
-  /** V3.8 (22.8): the mode label, top centre. */
-  private renderMode(): void {
-    const d = this.state?.delve;
-    if (!d) return;
-    const explore = this.mode() === 'explore';
-    const paused = explore && this.paused;
-    this.modeEl.dataset.mode = explore ? 'explore' : 'combat';
-    this.modeEl.className = `hud-mode ${explore ? 'm-explore' : 'm-combat'} ${paused ? 'paused' : ''}`;
-    this.modeEl.title = explore ? `${MOVE_HELP.explore}\nClick or press Space to ${paused ? 'resume' : 'pause'}.` : 'Combat: turns. Each hero moves once and acts once, then the castle takes its turn (End turn, E). When nothing hunts you any more, the castle quiets and you explore again.';
-    clear(this.modeEl);
-    if (explore) this.modeEl.append(h('span', { class: 'mode-glyph' }, '☽'), h('b', null, 'Exploring'), paused ? h('span', { class: 'mode-badge' }, 'Paused') : h('span', { class: 'mode-tick' }, h('kbd', null, 'Space'), ' pause'));
-    else this.modeEl.append(h('span', { class: 'mode-glyph' }, '⚔'), h('b', null, 'Combat'), h('span', { class: 'mode-round' }, ` · round ${d.round}`));
-    this.pauseEl.classList.toggle('hidden', !paused || this.modalOpen());
-  }
-
-  /** Replace a container's children only when what they render changed (exploring re-renders every tick). */
-  private swap(el: HTMLElement, kids: (HTMLElement | string)[]): void {
-    const tmp = document.createElement('div');
-    tmp.append(...kids);
-    const sig = tmp.innerHTML;
-    if (el.dataset.sig === sig && el.childNodes.length) return;
-    el.dataset.sig = sig;
-    el.replaceChildren(...tmp.childNodes);
+    const sel = this.selected();
+    return !!d && d.phase === 'player' && !!sel && sel.status === 'active' && !sel.grabbedBy && !sel.webbed && !(sel.rooted ?? 0) && this.calmState().calm;
   }
 
   /** Recompute reach and options and redraw panels and highlights. */
@@ -453,23 +327,22 @@ export class Hud {
     const d = s?.delve;
     if (!s || !d) return;
     const sel = this.selected();
-    const explore = this.mode() === 'explore';
-    const canAct = !!sel && sel.status === 'active' && (explore || d.phase === 'player');
-    // V3.8 (22.6): exploring has no move budget: the walk goes by Engine.explorePath on hover and click.
-    this.reach = canAct && !this.busy && !explore ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
-    this.options = canAct && !this.busy ? this.engine.actions(s, sel.heroId) : [];
-    // An action being aimed keeps its targets current as figures walk.
-    if (this.pending) {
-      const p = this.pending;
-      const now = this.options.find((o) => o.action === p.action && o.label === p.label);
-      if (now) this.pending = now;
-      else {
-        this.pending = null;
-        this.picker.classList.add('hidden');
+    const canAct = !!sel && sel.status === 'active' && d.phase === 'player';
+    this.reach = canAct && !this.busy ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
+    // 20.5: while calm the engine's calmReach (every explored hex, with path and risks) replaces the budget.
+    if (canAct && !this.busy && this.freeMove()) {
+      try {
+        const far = typeof this.engine.calmReach === 'function' ? this.engine.calmReach(s, sel.heroId, this.sneak) : [];
+        if (far.length) {
+          const near = new Map(this.reach.map((r) => [posKey(r.to), r] as const));
+          for (const r of far) if (!near.has(posKey(r.to))) near.set(posKey(r.to), r);
+          this.reach = [...near.values()];
+        }
+      } catch {
+        /* the view paths the rest itself */
       }
     }
-    this.hoverWalk = null;
-    this.renderMode();
+    this.options = canAct && !this.busy ? this.engine.actions(s, sel.heroId) : [];
     this.renderTop();
     this.renderCards();
     this.placeBelowTop();
@@ -479,7 +352,6 @@ export class Hud {
     this.renderParley();
     this.renderEmpty();
     this.drawHighlights();
-    this.drawVision();
   }
 
   // ------------------------------------------------------------ highlights
@@ -488,7 +360,7 @@ export class Hud {
     this.dio.clearHighlights();
     if (this.busy || !this.state?.delve) return;
     this.dio.showLanding(null, null, '', false);
-    this.dio.showBlindArcs(!this.pending && !this.pv && this.mode() !== 'explore' && this.sneak && !!this.selected());
+    this.dio.showBlindArcs(!this.pending && !this.pv && this.sneak && !!this.selected());
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
       const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
@@ -516,8 +388,8 @@ export class Hud {
       return;
     }
     const dash = this.reach.some((r) => r.dash);
-    // V3.8: exploring has no budget rings; the hovered path shows the route and its risks.
-    if (this.mode() !== 'explore')
+    // 20.5: while calm the move is free: no budget rings, the hovered path shows the route and its risks.
+    if (!this.freeMove())
       this.dio.highlight(
         this.reach.map((r) => r.to),
         dash ? 'dash' : this.sneak ? 'sneak' : 'walk',
@@ -626,19 +498,20 @@ export class Hud {
     // Path preview.
     const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
     const sel = this.selected();
-    const explore = this.mode() === 'explore';
-    const ew = explore && at && !unitId && !this.pending && sel ? this.hoverExplore(sel, at) : null;
+    this.hoverLong = null;
+    const free = this.freeMove();
     if (r && sel) {
       this.dio.showPath(r.path);
       const noise = this.engine.moveNoise(this.state, sel.heroId, this.sneak);
       this.dio.showRipple(r.to, noise);
       // V3.7 (20.1, 20.2): what the move risks, on the monsters.
       this.dio.showRisks(r.risks ?? null);
-    } else if (ew) {
-      // V3.8 (22.8): the walk order's path and what it risks.
-      this.dio.showPath(ew.path);
+    } else if (free && at && !unitId && !this.pending && sel && this.vis) {
+      // 20.5: free move: a long path to any explored hex.
+      this.hoverLong = longPath(this.engine.castle(), this.state, this.vis, sel.heroId, at);
+      this.dio.showPath(this.hoverLong);
       this.dio.showRipple(null, 0);
-      this.dio.showRisks(ew.risks ?? null);
+      this.dio.showRisks(null);
     } else if (!this.pending) {
       this.dio.showPath(null);
       this.dio.showRipple(null, 0);
@@ -687,16 +560,18 @@ export class Hud {
       else if (act) lines.push(act.option.blocked ? `<span class="neg">${act.option.label}: ${act.option.blocked}</span>` : `<span class="tip-act">Click: ${act.option.label}</span>`);
       this.dio.setHoverStyle('plain');
     } else if (at) {
-      if (ew && sel) {
-        const n = ew.path.length;
-        const sn = this.stanceOf(sel);
-        const more = this.selectedHeroes().length - 1;
-        lines.push(`<b>${sn ? 'Sneak' : 'Walk'}</b> ${n} hex${n === 1 ? '' : 'es'} · ${sn ? 'silent, ' : 'noise 1 a hex, '}about ${Math.ceil((n * (sn ? 2 : 1)) / 2)}s${more > 0 ? ` · ${more} more follow${more === 1 ? 's' : ''} in formation` : ''}`);
-        lines.push(...this.riskLines(ew.risks, sn));
+      if (r && free) {
+        const n = r.path.length;
+        lines.push(`<b>Free move</b> · ${this.sneak ? 'sneak' : 'walk'} ${n} hex${n === 1 ? '' : 'es'} · ${this.calmWords(n)}`);
+        lines.push(...this.riskLines(r.risks));
       } else if (r) {
         lines.push(`<b>${r.dash ? (this.sneak ? 'Dash (sneak)' : 'Dash') : this.sneak ? 'Sneak' : 'Walk'}</b> ${r.cost} · noise ${this.engine.moveNoise(this.state, sel!.heroId, this.sneak)}${this.sneak ? '' : ' per hex'}${r.dash ? ' · <span class="neg">uses the action</span>' : ''}`);
         lines.push(...this.riskLines(r.risks));
-      } else if (explore && !this.pending && sel && !samePos(sel.at, at)) {
+      } else if (this.hoverLong) {
+        const n = this.hoverLong.length;
+        lines.push(`<b>Free move</b> · ${this.sneak ? 'sneak' : 'walk'} ${n} hexes · ${this.calmWords(n)}${this.follow ? ' · the party follows' : ''}`);
+        lines.push('<span class="dim">Stops if anything notices you, a sleeper wakes or a trap goes off.</span>');
+      } else if (free && !this.pending && !sel?.moved) {
         const why = this.longPathWhy(at);
         if (why) lines.push(`<span class="dim">${why}</span>`);
       }
@@ -793,15 +668,13 @@ export class Hud {
     return out;
   }
 
-  /** V3.8: the leader's explore path to the hovered hex (cached until the next refresh). */
-  private hoverExplore(sel: HeroInDelve, at: Pos): Reach | null {
-    const key = `${posKey(at)}|${posKey(sel.at)}|${this.stanceOf(sel) ? 1 : 0}`;
-    if (this.hoverWalk?.key === key) return this.hoverWalk.reach;
-    const k = posKey(at);
-    const known = !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
-    const reach = known && !samePos(sel.at, at) ? this.explorePath(sel.heroId, at, this.stanceOf(sel)) : null;
-    this.hoverWalk = { key, reach };
-    return reach;
+  /** 20.5: "the castle turns in 2 steps (3 turns on the way)". */
+  private calmWords(steps: number): string {
+    const d = this.state?.delve;
+    const per = V37.calmSteps;
+    const left = stepsToTurn(d?.calmSteps, per);
+    const turns = Math.floor(((d?.calmSteps ?? 0) % per + steps) / per);
+    return `the castle turns in ${left} step${left === 1 ? '' : 's'}${turns ? ` (${turns} turn${turns === 1 ? '' : 's'} on the way)` : ''}`;
   }
 
   /** Why a free move can't end on this hex, in a few words (or nothing worth saying). */
@@ -816,13 +689,13 @@ export class Hud {
   }
 
   /** V3.7 (20.1, 20.2): the risks of a move, one line each, for the hover tip and the swing confirm. */
-  private riskLines(risks: MoveRisks | undefined, sneak = this.sneak): string[] {
+  private riskLines(risks: MoveRisks | undefined): string[] {
     if (!risks) return [];
     const out: string[] = [];
     for (const w of risks.wake) out.push(`<span class="risk-line risk-wake">☾ ${this.nameOf(w.id)} may wake · ${Math.round(w.chance)}%</span>`);
     for (const n of risks.notice) out.push(`<span class="risk-line risk-notice">👁 ${this.nameOf(n.id)} notices you</span>`);
     for (const sw of risks.swings) out.push(`<span class="risk-line risk-swing">⚔ ${this.nameOf(sw.id)}: free swing ${sw.damage[0]}–${sw.damage[1]}</span>`);
-    if (!out.length && sneak) out.push('<span class="dim">Nobody stirs.</span>');
+    if (!out.length && this.sneak) out.push('<span class="dim">Nobody stirs.</span>');
     return out;
   }
 
@@ -962,8 +835,7 @@ export class Hud {
     if (!s || !d) return;
     if (this.parleyHero && ev.button !== 2) return;
     if (ev.button === 2) {
-      // V3.8 (22.8): right-click cancels what's open, else stops the selection's walk.
-      if (!this.cancel() && this.mode() === 'explore') this.stopSelection();
+      this.cancel();
       return;
     }
     if (this.pv) return;
@@ -985,7 +857,7 @@ export class Hud {
       return;
     }
     if (unitId && d.heroes.some((x) => x.heroId === unitId && x.status === 'active')) {
-      this.select(unitId, ev.shiftKey);
+      this.select(unitId);
       return;
     }
     if (this.pending) {
@@ -998,10 +870,13 @@ export class Hud {
         this.moveAlong(r);
         return;
       }
-      // V3.8 (22.8): exploring: the selection walks there, keeping its formation.
-      if (this.mode() === 'explore' && sel && !best) {
-        void this.walkSelection(at);
-        return;
+      // 20.5: free move to any explored hex.
+      if (this.freeMove() && sel && this.vis) {
+        const path = this.hoverLong && samePos(this.hoverLong[this.hoverLong.length - 1]!, at) ? this.hoverLong : longPath(this.engine.castle(), s, this.vis, sel.heroId, at);
+        if (path) {
+          void this.host.send({ type: 'move', heroId: sel.heroId, path, sneak: this.sneak, follow: this.follow });
+          return;
+        }
       }
       if (best) this.choose(best.option, best.target);
     }
@@ -1012,7 +887,8 @@ export class Hud {
     const sel = this.selected();
     if (!sel) return;
     const swings = r.risks?.swings ?? [];
-    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak });
+    const free = this.freeMove();
+    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak, follow: free ? this.follow : undefined });
     if (!swings.length) return go();
     const name = this.heroDef(sel.heroId)?.name ?? sel.heroId;
     const list = swings.map((sw) => `${this.nameOf(sw.id)} gets a free swing: ${sw.damage[0]}–${sw.damage[1]}`).join('; ');
@@ -1020,109 +896,22 @@ export class Hud {
     this.confirm(`${list}. ${swings.length === 1 ? 'It strikes' : 'They strike'} as ${name} leaves reach${this.sneak ? ' (sneaking does not avoid it)' : ''}. Move anyway?`, 'Move', go, { title: `${name} takes a swing?`, cancel: 'Stay', danger: true });
   }
 
-  /** Close whatever is open (confirm, parley, preview, aim, menu). True when something was. */
-  private cancel(): boolean {
+  private cancel(): void {
     this.fusePicked = false;
     if (this.confirmBox) {
       this.closeConfirm();
-      return true;
+      return;
     }
     if (this.parleyHero) {
       this.closeParley();
-      return true;
+      return;
     }
-    let closed = true;
     if (this.pv) this.closePreview();
     else if (this.pending) this.pending = null;
     else if (!this.menuEl.classList.contains('hidden')) this.menuEl.classList.add('hidden');
-    else closed = !this.picker.classList.contains('hidden');
     this.picker.classList.add('hidden');
     this.drawHighlights();
     this.renderBar();
-    this.renderMode();
-    return closed;
-  }
-
-  /**
-   * V3.8 (22.8): walk every selected hero toward `at`: the leader to the hex, each other hero to the
-   * hex nearest the target that keeps their offset from the leader (a hero with no path stays).
-   */
-  private async walkSelection(at: Pos): Promise<void> {
-    const s = this.state;
-    const d = s?.delve;
-    const heroes = this.selectedHeroes().filter((x) => !x.grabbedBy && !x.webbed && !(x.rooted ?? 0));
-    const lead = heroes[0];
-    if (!s || !d || !lead) return;
-    const claimed: Pos[] = [];
-    const orders: { heroId: string; path: Pos[]; sneak: boolean }[] = [];
-    const lv = this.engine.castle().levels.find((l) => l.level === at.level);
-    for (const hh of heroes) {
-      const sneak = this.stanceOf(hh);
-      let target = at;
-      if (hh !== lead && hh.at.level === lead.at.level && at.level === lead.at.level) target = { level: at.level, q: at.q + hh.at.q - lead.at.q, r: at.r + hh.at.r - lead.at.r };
-      const cands: Pos[] = hh === lead ? [target] : [target, ...this.areaAround(target, 2).filter((p) => !samePos(p, target) && !!lv?.tiles[hexKey(p)])].sort((a, b) => hexDist(a, target) - hexDist(b, target) || hexDist(a, at) - hexDist(b, at));
-      for (const c of cands.slice(0, 12)) {
-        if (claimed.some((p) => samePos(p, c)) || (hh !== lead && samePos(c, at))) continue;
-        if (samePos(c, hh.at)) {
-          claimed.push(c);
-          break;
-        }
-        const r = this.explorePath(hh.heroId, c, sneak);
-        if (r && r.path.length) {
-          orders.push({ heroId: hh.heroId, path: r.path, sneak });
-          claimed.push(c);
-          break;
-        }
-      }
-    }
-    if (!orders.length) {
-      const why = this.longPathWhy(at);
-      this.toast(why || 'No known way there.');
-      return;
-    }
-    sfx.play('step', { gain: 0.6 });
-    this.dio.showPath(null);
-    await this.sendAll(orders.map((o) => ({ type: 'walk', heroId: o.heroId, path: o.path, sneak: o.sneak })));
-  }
-
-  /** Send several commands in order, waiting out any playback between them. */
-  private async sendAll(cmds: import('../game/types').Command[]): Promise<void> {
-    for (const c of cmds) {
-      for (let i = 0; i < 200 && this.host.isBusy(); i++) await new Promise((r) => setTimeout(r, 20));
-      await this.host.send(c);
-    }
-  }
-
-  /** V3.8 (22.8): a drag box picked these heroes (exploring); Shift adds them to the selection. */
-  boxSelect(ids: string[], add: boolean): void {
-    const d = this.state?.delve;
-    if (!d || this.busy || this.mode() !== 'explore') return;
-    const act = ids.filter((id) => d.heroes.some((x) => x.heroId === id && x.status === 'active'));
-    if (!act.length) return;
-    const next = add ? [...this.selection, ...act.filter((id) => !this.selection.includes(id))] : act;
-    if (!add || !this.selectedId) this.selectedId = next[0]!;
-    this.selection = [this.selectedId!, ...next.filter((id) => id !== this.selectedId)];
-    this.pending = null;
-    this.closePreview();
-    this.dio.select(this.selectedId, this.selection);
-    sfx.play('click', { pitch: 1.1 });
-    this.refresh();
-  }
-
-  /** V3.8: stop the selected heroes' walk orders. */
-  stopSelection(): void {
-    const walking = this.selectedHeroes().filter((x) => x.walk);
-    void this.sendAll(walking.map((x) => ({ type: 'stopWalk', heroId: x.heroId })));
-    if (walking.length) sfx.play('click', { pitch: 0.8 });
-  }
-
-  /** V3.8 (22.6): S while exploring: the selection sneaks (or, if all already do, walks). */
-  private toggleStance(): void {
-    const heroes = this.selectedHeroes();
-    if (!heroes.length) return;
-    const on = !heroes.every((x) => this.stanceOf(x));
-    sfx.play('click', { pitch: on ? 0.8 : 1.2 });
-    void this.sendAll(heroes.map((x) => ({ type: 'sneak', heroId: x.heroId, on })));
   }
 
   // ------------------------------------------------------------ actions
@@ -1141,10 +930,8 @@ export class Hud {
     }
   }
 
-  private startAction(o0: ActionOption): void {
+  private startAction(o: ActionOption): void {
     if (this.busy) return;
-    // The bar keeps its buttons while nothing changes (exploring re-renders every tick): use the current option.
-    const o = this.options.find((x) => x.action === o0.action && x.label === o0.label) ?? o0;
     if (o.action === 'parley' && !o.blocked) {
       sfx.play('click');
       this.openParley();
@@ -1438,13 +1225,12 @@ export class Hud {
   private renderTop(): void {
     const s = this.state!;
     const d = s.delve!;
-    const top: HTMLElement[] = [];
-    const explore = this.mode() === 'explore';
+    clear(this.topbar);
     const light = d.light;
     const b = this.engine.brightness(s);
-    top.push(this.lightMeter(light, b));
-    top.push(h('div', { class: 'hud-round', title: explore ? `Round ${d.round}.\nExploring, a round passes every 4 seconds (8 ticks): spells, torches' timers and other round counts tick down. The lantern burns by distance walked instead: 1 for every 4 hexes its bearer walks.` : `Round ${d.round}.\nA round is your turn (each hero moves once and acts once), then the castle's turn: the lantern burns 1 if open, torches burn, monsters act. End turn (E) starts the castle's turn.` }, h('span', { class: 'kicker' }, 'Round'), h('b', { class: 'num' }, `${d.round}`)));
-    top.push(this.goalBox());
+    this.topbar.append(this.lightMeter(light, b));
+    this.topbar.append(h('div', { class: 'hud-round', title: `Round ${d.round}.\nA round is your turn (each hero moves once and acts once), then the castle's turn: the lantern burns 1 if open, torches burn, monsters act. End turn (E) starts the castle's turn.` }, h('span', { class: 'kicker' }, 'Round'), h('b', { class: 'num' }, `${d.round}`)));
+    this.topbar.append(this.goalBox());
     const levels = h('div', { class: 'hud-levels' });
     for (const lv of this.engine.castle().levels) {
       const here = d.heroes.some((x) => x.status === 'active' && x.at.level === lv.level);
@@ -1463,8 +1249,8 @@ export class Hud {
         ),
       );
     }
-    top.push(levels);
-    top.push(
+    this.topbar.append(levels);
+    this.topbar.append(
       h(
         'div',
         { class: 'hud-sys' },
@@ -1472,7 +1258,6 @@ export class Hud {
         h('button', { class: 'btn btn-small', title: 'Menu: playback speed, settings, keys, abandon the delve', onclick: () => this.toggleMenu() }, 'Menu'),
       ),
     );
-    this.swap(this.topbar, top);
   }
 
   updateLight(light: number, b: Brightness): void {
@@ -1536,10 +1321,6 @@ export class Hud {
     const onL1 = !!d && d.heroes.some((x) => x.status === 'active' && x.at.level === 1);
     // Level 1 is mostly daylit: say so in the first rounds while the lantern is open (in the "next" slot, so the meter keeps its height).
     const daylight = open && onL1 && !!d && d.round <= 10;
-    // V3.8 (22.2): exploring, the lantern burns by distance: 1 per 4 hexes its bearer walks.
-    const explore = this.mode() === 'explore';
-    const per = explore ? 'per 4 hexes walked' : 'per round';
-    const toNext = explore ? `${next.rounds * 4} hexes to ${BRIGHTNESS_NAME[next.stage]}` : `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}`;
     const toggle = h(
       'button',
       {
@@ -1549,7 +1330,7 @@ export class Hud {
           e.stopPropagation();
           this.toggleShutter();
         },
-        disabled: this.busy || (!explore && d?.phase !== 'player'),
+        disabled: this.busy || d?.phase !== 'player',
       },
       open ? 'Shutter' : 'Open',
       h('kbd', null, 'L'),
@@ -1562,7 +1343,7 @@ export class Hud {
       h(
         'div',
         { class: 'light-foot' },
-        h('span', { class: `light-state ${open ? 'open' : 'shut'}`, title: open ? `Open: the lantern lights the bearer's surroundings and burns 1 ${per}.` : 'Shuttered: no light from the lantern, and it burns nothing.' }, open ? 'Open · burning' : 'Shuttered · not burning'),
+        h('span', { class: `light-state ${open ? 'open' : 'shut'}`, title: open ? 'Open: the lantern lights the bearer\'s surroundings and burns 1 per round.' : 'Shuttered: no light from the lantern, and it burns nothing.' }, open ? 'Open · burning' : 'Shuttered · not burning'),
         toggle,
       ),
       h(
@@ -1570,7 +1351,7 @@ export class Hud {
         { class: 'light-sub' },
         daylight
           ? h('span', { class: 'light-next light-hint small', title: 'Most of the Ruined Keep is daylit. A shuttered lantern burns no oil; open it when it gets dark.' }, 'Daylight here: shutter to save oil')
-          : h('span', { class: 'light-next dim small', title: open ? `When the light drops to the next stage at 1 ${per}.` : 'Light kept in the shuttered lantern.' }, open ? (light > 0 ? toNext : 'Pitch black') : `${light} oil kept`),
+          : h('span', { class: 'light-next dim small', title: open ? 'When the light drops to the next stage at 1 per round.' : 'Light kept in the shuttered lantern.' }, open ? (light > 0 ? `${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage]}` : 'Pitch black') : `${light} oil kept`),
       ),
     );
   }
@@ -1579,7 +1360,7 @@ export class Hud {
   private lightTip(light: number, sc: LightScale, open: boolean): string {
     const st = (b: Brightness, range: string) => `${BRIGHTNESS_NAME[b]} ${range}: lantern lights ${LANTERN_RADIUS[b]} around the bearer, sight ${SIGHT_BY_STAGE[b]}${b === 'bright' ? '' : `, rolls ${b === 'dim' ? '−10%' : b === 'dark' ? '−20%' : '−30%'}`}`;
     return [
-      this.mode() === 'explore' ? `Lantern · ${light} light left. Exploring, it burns 1 for every 4 hexes its bearer walks (standing still costs nothing); in combat, 1 per round.` : `Lantern · ${light} rounds of light left. Burns 1 per round while open.`,
+      `Lantern · ${light} rounds of light left. Burns 1 per round while open.`,
       st('bright', `${sc.min.bright}+`),
       st('dim', `${sc.min.dim}–${sc.min.bright - 1}`),
       st('dark', `1–${sc.min.dim - 1}`),
@@ -1641,8 +1422,7 @@ export class Hud {
   private renderCards(): void {
     const s = this.state!;
     const d = s.delve!;
-    const explore = this.mode() === 'explore';
-    const cardEls: HTMLElement[] = [];
+    clear(this.cards);
     const edges: Pos[] = [];
     const darks: string[] = [];
     d.heroes.forEach((hd, i) => {
@@ -1650,9 +1430,9 @@ export class Hud {
       if (risk) edges.push(hd.at);
       const def = this.heroDef(hd.heroId);
       if (!def) return;
-      const sel = hd.heroId === this.selectedId || this.selection.includes(hd.heroId);
+      const sel = hd.heroId === this.selectedId;
       const active = hd.status === 'active';
-      const done = active && !explore && hd.moved && hd.acted;
+      const done = active && hd.moved && hd.acted;
       const dark = active && !this.isLit(hd.heroId);
       if (dark) darks.push(hd.heroId);
       const word = def.cls === 'heir' ? 'Heir' : className(def.cls);
@@ -1661,12 +1441,12 @@ export class Hud {
       const card = h(
         'button',
         {
-          class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${hd.heroId === this.selectedId ? 'lead' : ''} ${done ? 'done' : ''} ${dark ? 'dark' : ''} ${explore && hd.walk?.path.length ? 'walking' : ''}`,
-          onclick: (e: Event) => this.select(hd.heroId, (e as MouseEvent).shiftKey),
+          class: `hcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${done ? 'done' : ''} ${dark ? 'dark' : ''}`,
+          onclick: () => this.select(hd.heroId),
           disabled: !active,
           'data-hero': hd.heroId,
         },
-        h('div', { class: 'hc-badge', title: `${def.name} · ${word}, level ${def.level}\n${role}\nClick the card or press ${i + 1} to select${explore ? '; Shift-click to add to the selection' : ''}.` }, h('span', null, classGlyph(def.cls)), h('kbd', null, `${i + 1}`)),
+        h('div', { class: 'hc-badge', title: `${def.name} · ${word}, level ${def.level}\n${role}\nClick the card or press ${i + 1} to select.` }, h('span', null, classGlyph(def.cls)), h('kbd', null, `${i + 1}`)),
         h(
           'div',
           { class: 'hc-body' },
@@ -1688,9 +1468,8 @@ export class Hud {
           h('div', { class: 'hc-status' }, ...this.statusChips(hd, def.name, risk, dark ? this.sightOf(hd.heroId) : null)),
         ),
       );
-      cardEls.push(card);
+      this.cards.append(card);
     });
-    this.swap(this.cards, cardEls);
     this.dio.showEdgeLips(edges);
     this.dio.setDarkHeroes(darks);
     this.renderGloam(darks);
@@ -1699,12 +1478,6 @@ export class Hud {
 
   /** Turn state on a card: Move and Act marks, or the hero's fate when off the board. */
   private turnMarks(hd: HeroInDelve): HTMLElement {
-    if (hd.status === 'active' && this.mode() === 'explore') {
-      // V3.8: exploring, the card says the stance and the walk order instead of Move/Act.
-      const sn = this.stanceOf(hd);
-      const n = hd.walk?.path.length ?? 0;
-      return h('span', { class: 'hc-turn hc-explore', title: `${sn ? 'Sneaking: half speed, silent, seen only close and never from behind' : 'Walking: 1 hex a tick, heard'}${n ? ` · ${n} hex${n === 1 ? '' : 'es'} to go` : ''}` }, h('i', { class: `tp stance ${sn ? 'sneak' : ''}` }, sn ? 'Sneak' : 'Walk'), n ? h('i', { class: 'tp going' }, `→${n}`) : '');
-    }
     if (hd.status === 'downed') return h('span', { class: 'hc-fate bad', title: `Downed: bleeding out, dies after ${hd.bleed} more castle turn${hd.bleed === 1 ? '' : 's'}.\nA hero next to them can Revive (up with 3 HP) or give a Potion (up with 5).` }, `Downed · ${hd.bleed}`);
     if (hd.status === 'dead') return h('span', { class: 'hc-fate dead', title: 'Dead. Gone for good.' }, 'Dead');
     if (hd.status === 'out') return h('span', { class: 'hc-fate good', title: 'Out of the castle: safe, with everything in the pack.' }, 'Out');
@@ -1774,33 +1547,12 @@ export class Hud {
   private renderBar(): void {
     const s = this.state;
     const d = s?.delve;
-    if (!s || !d) {
-      clear(this.bar);
-      return;
-    }
-    const explore = this.mode() === 'explore';
+    clear(this.bar);
+    if (!s || !d) return;
     const sel = this.selected();
     const def = sel ? this.heroDef(sel.heroId) : undefined;
     const left = h('div', { class: 'bar-who' });
-    if (sel && def && explore) {
-      // V3.8 (22.8): exploring: who, their stance (S) and their walk order; no move budget.
-      const sn = this.stanceOf(sel);
-      const more = this.selectedHeroes().length - 1;
-      const order = sel.walk?.path.length ? `walking · ${sel.walk.path.length} hex${sel.walk.path.length === 1 ? '' : 'es'} to go` : 'standing';
-      left.append(
-        h('b', null, def.name),
-        h('span', { class: 'dim small' }, ` ${className(def.cls)}`),
-        more > 0 ? h('span', { class: 'bar-more small', title: `${this.selectedHeroes().map((x) => this.nameOf(x.heroId)).join(', ')} are selected: a click on the map walks them all, keeping formation. Shift-click a hero to add or drop them.` }, ` +${more}`) : '',
-        h(
-          'div',
-          { class: 'small bar-turn' },
-          h('button', { class: `stance-btn ${sn ? 'sneak' : 'walk'}`, 'data-action': 'stance', disabled: this.busy, onclick: () => this.toggleStance(), title: `${sn ? 'Sneaking' : 'Walking'} · key S toggles\n${MOVE_HELP.stance}` }, sn ? '◒ Sneaking' : '● Walking', h('kbd', null, 'S')),
-          h('span', { class: `bar-order ${sel.walk?.path.length ? 'on' : ''}` }, ` · ${order}`),
-          sel.walk?.path.length ? h('span', { class: 'dim' }, ' · Esc stops') : '',
-        ),
-        sel.grabbedBy ? h('div', { class: 'small bar-held neg' }, `⛓ Held: Escape or kill it.`) : '',
-      );
-    } else if (sel && def) {
+    if (sel && def) {
       const held = sel.grabbedBy ? d.monsters.find((m) => m.id === sel.grabbedBy) : undefined;
       left.append(
         h('b', null, def.name),
@@ -1818,8 +1570,21 @@ export class Hud {
       h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: `Walk · noise 1 per hex\n${MOVE_HELP.walk}` }, 'Walk'),
       h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}` }, 'Sneak ', h('kbd', null, 'S')),
     );
-    // V3.8 (22.8): exploring has no Move group; the stairs and the way out sit in a "Here" group.
-    const move = explore ? h('div', { class: 'bar-group bar-group-here' }, h('span', { class: 'bar-group-name' }, 'Here')) : h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
+    const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
+    // 20.5: free move while calm: the state line and the Follow toggle.
+    if (sel && this.calmState().calm && d.phase === 'player') {
+      const left = stepsToTurn(d.calmSteps, V37.calmSteps);
+      move.classList.add('bar-group-calm');
+      move.append(
+        h('div', { class: 'bar-calm', title: `Free move · ${MOVE_HELP.calm}` }, h('span', { class: 'calm-glyph' }, '☽'), h('span', null, h('b', null, 'Free move'), ` · the castle turns in ${left} step${left === 1 ? '' : 's'}`)),
+        h(
+          'button',
+          { class: `act act-follow ${this.follow ? 'on' : ''}`, onclick: () => this.toggleFollow(), disabled: this.busy, 'data-action': 'follow', 'aria-pressed': this.follow ? 'true' : 'false', title: `Follow · ${this.follow ? 'on' : 'off'}\n${MOVE_HELP.follow}` },
+          h('span', { class: 'act-glyph' }, this.follow ? '⚑' : '⚐'),
+          h('span', { class: 'act-label' }, this.follow ? 'Party follows' : 'Walk alone'),
+        ),
+      );
+    }
     if (link) {
       usedKeys.add('t');
       const l = link.info;
@@ -1830,7 +1595,7 @@ export class Hud {
           h('span', { class: 'act-glyph' }, l.down ? '⇓' : '⇑'),
           h('span', { class: 'act-label' }, linkButton(l)),
           h('kbd', null, 'T'),
-          link.reach.dash && !explore ? h('span', { class: 'act-count' }, 'dash') : '',
+          link.reach.dash ? h('span', { class: 'act-count' }, 'dash') : '',
         ),
       );
     }
@@ -1858,7 +1623,7 @@ export class Hud {
         ),
       );
     }
-    const groupEls: HTMLElement[] = explore && move.childElementCount < 2 ? [] : [move];
+    const groupEls: HTMLElement[] = [move];
     // 16.2: the lantern bearer gets a Lantern group with the free shutter toggle (hotkey L, wins over Light/Oil's L).
     if (sel && sel.heroId === d.lanternBearer) {
       usedKeys.add('l');
@@ -1922,7 +1687,7 @@ export class Hud {
       }
       groupEls.push(h('div', { class: `bar-group bar-group-${name.toLowerCase()}` }, h('span', { class: 'bar-group-name' }, name), acts));
     }
-    if (!opts.some((o) => o.action !== 'shutter' && o.action !== 'leave') && !link && !exit?.option && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted && !explore ? 'Action used this round.' : 'Nothing in reach. Walk closer to something.')));
+    if (!opts.some((o) => o.action !== 'shutter' && o.action !== 'leave') && !link && !exit?.option && sel && !this.busy) groupEls.push(h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Interact'), h('span', { class: 'dim small bar-empty' }, sel.acted ? 'Action used this round.' : 'Nothing in reach. Move closer to something.')));
     // End turn: how many heroes did nothing at all this round (20.5: a hero who moved and kept the action is ready, not waiting).
     const waiting = d.heroes.filter((x) => x.status === 'active' && !x.moved && !x.acted).length;
     const end = h(
@@ -1931,8 +1696,7 @@ export class Hud {
       h('span', null, 'End turn ', h('kbd', null, 'E')),
       h('span', { class: `bar-end-note ${waiting ? 'waiting' : ''}` }, waiting ? `${waiting} still waiting` : 'nobody idle'),
     );
-    this.swap(this.bar, explore ? [left, ...groupEls] : [left, ...groupEls, end]);
-    this.bar.dataset.mode = explore ? 'explore' : 'combat';
+    this.bar.append(left, ...groupEls, end);
     this.hint.replaceChildren(...this.contextHint());
     this.hint.classList.toggle('hidden', !this.hint.childNodes.length || this.busy);
     // The bar grows when a group stacks; keep the hint just above it (V3.6).
@@ -2352,7 +2116,7 @@ export class Hud {
     }
     clear(m);
     const st = this.host.settings;
-    const speed = h('div', { class: 'menu-row' }, h('span', { class: 'kicker', title: 'Animation speed in combat; exploring ticks every 750 ms (½×), 500 ms (1×) or 300 ms (faster).' }, 'Speed'), ...SPEEDS.map((sp) => h('button', { class: `btn btn-small ${st.speed === sp.value ? 'on' : ''}`, onclick: () => this.setSpeed(sp.value) }, sp.label)));
+    const speed = h('div', { class: 'menu-row' }, h('span', { class: 'kicker' }, 'Playback'), ...SPEEDS.map((sp) => h('button', { class: `btn btn-small ${st.speed === sp.value ? 'on' : ''}`, onclick: () => this.setSpeed(sp.value) }, sp.label)));
     m.append(
       h('div', { class: 'kicker' }, 'Settings'),
       speed,
@@ -2397,7 +2161,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, 'Exploring: ', h('kbd', null, 'Space'), ' pause · click a hex to walk · ', h('kbd', null, 'Shift'), '-click or drag a box to select several · ', h('kbd', null, 'Esc'), ' or right-click stops · ', h('kbd', null, 'S'), ' sneak (the selection) · red hexes: seen walking, dark red: seen sneaking'), h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (shows blind arcs; hover a hex for wake, notice and swing risks) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'In combat, hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (shows blind arcs; hover a hex for wake, notice and swing risks) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
@@ -2460,17 +2224,22 @@ export class Hud {
 
   // ------------------------------------------------------------ input
 
-  /**
-   * V3.8 (22.8): the mode switch banner. Combat: "Combat! The orc saw Pim" (enemies first) or
-   * "Ambush!" (party first); back to exploring: "The castle quiets".
-   */
-  async modeBanner(mode: 'explore' | 'combat', first: 'party' | 'enemies' | undefined, sub: string, wait: (s: number) => Promise<void>): Promise<void> {
+  private toggleFollow(): void {
+    this.follow = !this.follow;
+    sfx.play('click', { pitch: this.follow ? 1.2 : 0.8 });
+    this.renderBar();
+  }
+
+  /** 20.5: free move ends: "Combat!" with the reason; begins: a quiet note. */
+  async calmBanner(calm: boolean, why: string | undefined, wait: (s: number) => Promise<void>): Promise<void> {
+    if (calm) {
+      this.toast(`Calm again: free move. ${why ?? ''}`.trim());
+      return;
+    }
     clear(this.bannerEl);
-    const ambush = mode === 'combat' && first === 'party';
-    this.bannerEl.className = `hud-banner mode-banner ${mode === 'combat' ? (ambush ? 'world ambush' : 'world combat') : 'quiet'}`;
-    this.bannerEl.dataset.mode = mode;
-    this.bannerEl.append(h('div', { class: 'bn-title' }, mode === 'explore' ? 'The castle quiets' : ambush ? 'Ambush!' : 'Combat!'), h('div', { class: 'bn-sub' }, sub));
-    await wait(mode === 'explore' ? 0.6 : 0.8);
+    this.bannerEl.className = 'hud-banner world combat';
+    this.bannerEl.append(h('div', { class: 'bn-title' }, 'Combat!'), h('div', { class: 'bn-sub' }, why ?? 'Something has noticed the party. Your move.'));
+    await wait(0.7);
     this.bannerEl.classList.add('hidden');
   }
 
@@ -2480,7 +2249,7 @@ export class Hud {
   }
 
   private endTurn(): void {
-    if (this.busy || this.mode() === 'explore') return;
+    if (this.busy) return;
     this.cancel();
     const d = this.state?.delve;
     // 20.5: ask once, only for heroes who did nothing at all (neither moved nor acted).
@@ -2500,7 +2269,7 @@ export class Hud {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (e.key === 'Escape') {
-      if (!this.cancel() && this.mode() === 'explore' && !this.busy) this.stopSelection();
+      this.cancel();
       return;
     }
     if (this.confirmBox) {
@@ -2528,10 +2297,9 @@ export class Hud {
     }
     const d = s.delve;
     const k = e.key.toLowerCase();
-    const digit = /^Digit[1-4]$/.test(e.code) ? e.code.slice(5) : k;
-    if (digit >= '1' && digit <= '4' && digit.length === 1) {
-      const hd = d.heroes[Number(digit) - 1];
-      if (hd) this.select(hd.heroId, e.shiftKey);
+    if (k >= '1' && k <= '4') {
+      const hd = d.heroes[Number(k) - 1];
+      if (hd) this.select(hd.heroId);
       return;
     }
     if (e.key === 'Tab') {
@@ -2548,9 +2316,8 @@ export class Hud {
       const sel = this.selected();
       if (sel && this.dealsFor(sel.heroId).length) return this.openParley();
     }
-    const explore = this.mode() === 'explore';
-    if (k === 's') return explore ? this.toggleStance() : this.setSneak(!this.sneak);
-    if (k === 'e') return explore ? undefined : this.endTurn();
+    if (k === 's') return this.setSneak(!this.sneak);
+    if (k === 'e') return this.endTurn();
     // 16.2: L shutters/opens the lantern unless the selected hero has a Light/Oil button on L.
     if (k === 'l' && !this.bar.querySelector('button.act[data-key="l"]:not(.act-shutter)')) return this.toggleShutter();
     if (k === '[') return this.dio.rig.snapRotate(1);
@@ -2675,10 +2442,6 @@ export function intentText(s: GameState, it: Intent): string {
 }
 
 /** Compass word from one hex to another, in world space (north = away from the default camera). */
-function hexDist(a: Pos, b: Pos): number {
-  return (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2 + (a.level === b.level ? 0 : 100);
-}
-
 function compass(from: Pos, to: Pos): string {
   const a = hexToWorld(from, 1);
   const b = hexToWorld(to, 1);

@@ -7,7 +7,6 @@
 //   node scripts/v36-ui-check.mjs <baseUrl>          (http://localhost:5183/?fixture=1 until the engine lands)
 //   SHOTS=<dir> saves two shots: a hero on an exit before and after the heirloom is picked up.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
-import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base = 'http://localhost:5183/?fixture=1'] = process.argv.slice(2);
 const shots = process.env.SHOTS ?? '';
@@ -33,7 +32,6 @@ await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
-await inTurns(p);
 
 // ---- camp: a new campaign, then the peddler and the notice post
 await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });

@@ -6,6 +6,7 @@ import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { blastPreview } from './charges';
+import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
@@ -13,7 +14,7 @@ import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, checkDelveEnd, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
-import { checkCombatEnd, combatReason, doSneak, doStopWalk, doTick, doWalk, exploreAct, exploreDeal, explorePath, vision } from './explore';
+import { calmReason, updateCalm } from './calm';
 
 function ctx(w: World, s: GameStateX, ev: GameEvent[] = []): Ctx | null {
   if (!s.delve) return null;
@@ -38,16 +39,11 @@ export function createEngine(castle: CastleDef): Engine {
       if (r.error) return refuse(r.error);
       if (command.type === 'startDelve') {
         const c = ctx(w, s, ev)!;
-        // V3.8 (spec 22.1): a delve starts exploring, on a clean clock.
-        c.d.mode = 'explore';
-        c.d.ticks = 0;
-        c.d.lanternSteps = 0;
         refreshSight(c);
         computeIntents(c);
-        for (const m of c.d.monsters) m.intent = undefined;
+        updateCalm(c);
         c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
         c.ev.push({ type: 'phase', phase: 'player', round: 1 });
-        c.ev.push({ type: 'mode', mode: 'explore' });
         c.ev.push({ type: 'say', text: `${c.d.contract.title}. The lantern is full.` });
         return { state: s, events: [...r.events, ...ev] };
       }
@@ -56,44 +52,22 @@ export function createEngine(castle: CastleDef): Engine {
     if (s.stage !== 'delve') return refuse('Not now.');
     const c = ctx(w, s, ev)!;
     if (c.d.phase !== 'player') return refuse('Wait for your turn.');
-    // V3.8 (spec 22.1): absent `mode` (saves and states from before V3.8) is combat.
-    const exploring = c.d.mode === 'explore';
     let err: string | undefined;
     switch (command.type) {
-      case 'tick':
-        // Ticks only move the world while exploring; one that arrives in combat changes nothing.
-        if (!exploring) return { state, events: [] };
-        doTick(c);
-        break;
-      case 'walk':
-        if (!exploring) return refuse('In combat: move on your turn.');
-        err = doWalk(c, command.heroId, command.path, command.sneak);
-        break;
-      case 'stopWalk':
-        err = doStopWalk(c, command.heroId);
-        break;
-      case 'sneak':
-        err = doSneak(c, command.heroId, command.on);
-        break;
       case 'move':
-        if (exploring) return refuse('Exploring: give a walk order.');
-        err = doMove(c, command.heroId, command.path, command.sneak);
+        err = doMove(c, command.heroId, command.path, command.sneak, command.follow);
         break;
       case 'act':
-        err = exploring ? exploreAct(c, command.heroId, command.action, command.target, command.focus) : doAct(c, command.heroId, command.action, command.target, command.focus);
+        err = doAct(c, command.heroId, command.action, command.target, command.focus);
         break;
       case 'endTurn':
-        if (exploring) return refuse('Nothing to end while exploring.');
         worldPhase(c);
         break;
       case 'deal':
-        if (exploring) err = exploreDeal(c, command.heroId, command.deal, command.job);
-        else {
-          err = doDeal(c, command.heroId, command.deal, command.job);
-          if (!err) {
-            refreshSight(c);
-            checkDelveEnd(c);
-          }
+        err = doDeal(c, command.heroId, command.deal, command.job);
+        if (!err) {
+          refreshSight(c);
+          checkDelveEnd(c);
         }
         break;
       case 'abandon':
@@ -103,11 +77,12 @@ export function createEngine(castle: CastleDef): Engine {
         return refuse('Not during a delve.');
     }
     if (err) return refuse(err);
-    // In combat: monsters woken mid-turn get an intent the player can see; nothing left to fight, back to exploring (spec 22.5).
-    if (s.stage === 'delve' && c.d.phase === 'player' && c.d.mode !== 'explore') {
+    // Monsters woken mid-turn get an intent the player can see.
+    if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
       for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.intent) m.intent = planMonster(c, m, lit).intent;
-      checkCombatEnd(c);
+      // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
+      updateCalm(c);
     }
     return { state: s, events: ev };
   }
@@ -227,13 +202,9 @@ export function createEngine(castle: CastleDef): Engine {
 
     shop: (state) => shopOffers(state),
     ales: (state) => aleOffers(state),
-    explorePath(state, heroId, to, sneak) {
+    calmReach(state, heroId, sneak) {
       const c = rctx(state);
-      return c && state.stage === 'delve' ? explorePath(c, heroId, to, sneak) : null;
-    },
-    vision(state) {
-      const c = rctx(state);
-      return c && state.stage === 'delve' ? vision(c) : [];
+      return c ? calmReach(c, heroId, sneak) : [];
     },
 
     blastPreview(state, at) {
@@ -242,12 +213,11 @@ export function createEngine(castle: CastleDef): Engine {
       return blastPreview(c, at);
     },
 
-    mode(state) {
+    calm(state) {
       const c = rctx(state);
-      if (!c || state.stage !== 'delve') return { mode: 'combat', why: 'Not in a delve.' };
-      if (c.d.mode === 'explore') return { mode: 'explore' };
-      const why = combatReason(c);
-      return why === undefined ? { mode: 'combat' } : { mode: 'combat', why };
+      if (!c || state.stage !== 'delve') return { calm: false, why: 'Not in a delve.' };
+      const why = calmReason(c);
+      return why === undefined ? { calm: true } : { calm: false, why };
     },
     deals(state, heroId) {
       const c = rctx(state);
@@ -268,8 +238,6 @@ export function createEngine(castle: CastleDef): Engine {
         for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
         // V3.5: saves without the village start with nothing won back.
         s.campaign.village ??= newVillage();
-        // V3.8 (spec 22.1): a delve saved before exploration mode is in combat; it goes exploring once nothing is left to fight.
-        if (s.delve && !s.delve.mode) s.delve.mode = 'combat';
         return s;
       } catch {
         return null;

@@ -263,20 +263,13 @@ export const DREAD_ROUNDS = 2;
 
 // ---------------------------------------------------------------- V3.7 kit and free movement (spec 20.5)
 
-// V3.8 (spec 22.2): exploration mode runs on ticks of half a second of game time.
-/** Ticks per hex: walking 1, sneaking or carrying the heavy copper 2 (a hex that costs 2 takes twice as long). */
-export const WALK_TICKS = 1;
-export const SNEAK_TICKS = 2;
-export const HEAVY_TICKS = 2;
-/** Patrols, investigators, monsters walking back and prospector crews: 1 hex every this many ticks. */
-export const PATROL_TICKS = 4;
-/** An exploring round (round-based timers count down) every this many ticks. */
-export const ROUND_TICKS = 8;
-/** The open lantern burns 1 light for every this many hexes its bearer walks; a lit torch 1 round likewise. */
-export const LANTERN_HEXES = 4;
-export const TORCH_HEXES = 4;
-/** Explore walk orders and paths: the longest path searched (movement cost). */
-export const EXPLORE_PATH_MAX = 400;
+/** Free movement while calm: the castle takes a turn (a full world phase) every this many steps. */
+export const CALM_STEPS = 4;
+/**
+ * V3.7.2 (spec 23.1): free movement while calm (spec 20.5) is switched off; the game is entirely
+ * turn-based. The code stays for a later return (see docs/shelved/exploration-mode.md).
+ */
+export const FREE_MOVE = { enabled: false };
 /** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
 export const BRACE_DMG = 1;
 export const BRACE_CHANCE = -15;
@@ -542,6 +535,9 @@ export const CREW_PURSE: Record<number, number> = { 1: 30, 2: 30, 3: 30, 4: 50 }
 export const CUTTHROAT_PURSE = 30;
 export const CUTTHROAT_CHANCE = 0.6;
 export const PROSPECTOR_CHANCE = 0.5;
+/** Spec 23.2: prospectors come in between these rounds, never by the party's way in, and wait while a hero is this close to theirs. */
+export const PROSPECTOR_ENTERS: [number, number] = [6, 9];
+export const PROSPECTOR_KEEP_OFF = 6;
 /** Spec 20.4: the Wake on Level 3 contracts. */
 export const WAKE_CHANCE = 0.6;
 /** Crew members walk 4 (like heroes). */

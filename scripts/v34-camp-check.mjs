@@ -3,7 +3,6 @@
 // it works. No screenshots.
 //   node scripts/v34-camp-check.mjs <baseUrl>
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
-import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base] = process.argv.slice(2);
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -21,7 +20,6 @@ await p.goto(base);
 await p.evaluate(() => localStorage.clear());
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
-await inTurns(p);
 const s0 = await p.evaluate(() => {
   const s = window.vcEngine.newGame(42);
   window.vc.load(s);

@@ -13,7 +13,7 @@ import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type 
 import { CREW, STANCE, STORY, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v38';
+export const SAVE_KEY = 'vc.save.v37';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -104,7 +104,6 @@ export class App {
       hover: (at, id) => this.hud.onHover(at, id),
       click: (at, id, ev) => this.hud.onClick(at, id, ev),
       levelChanged: () => this.hud?.levelChanged(),
-      boxSelect: (ids, add) => this.hud?.boxSelect(ids, add),
     });
     this.dio.setCastle(engine.castle());
     this.dio.onStep = (side) => sfx.play('step', { gain: side === 'hero' ? 0.8 : 0.5, pitch: side === 'hero' ? 1 : 0.8 });
@@ -136,22 +135,14 @@ export class App {
       /* ignore */
     }
 
-    // V3.8 (22.8): Space pauses the exploring clock; in combat, holding it hurries playback.
+    // Hold Space to hurry playback.
     addEventListener('keydown', (e) => {
       if (e.code === 'Space' && this.state?.stage === 'delve') {
         e.preventDefault();
-        if (this.exploring() && !this.busy) {
-          if (!e.repeat) this.hud.togglePause();
-          return;
-        }
         this.hurry = true;
         this.applySettings();
       }
     });
-    addEventListener('visibilitychange', () => {
-      if (document.hidden && this.exploring()) this.hud.togglePause(true);
-    });
-    setInterval(() => this.clockStep(), 50);
     addEventListener('keyup', (e) => {
       if (e.code === 'Space') {
         this.hurry = false;
@@ -165,110 +156,6 @@ export class App {
       this.state = saved;
       this.render(true);
     } else this.showTitle();
-  }
-
-  // ------------------------------------------------------------ V3.8 the exploring clock
-
-  private lastTick = 0;
-  private ticking = false;
-  private ticksSinceSave = 0;
-
-  /** In a delve, exploring (Engine.mode). */
-  exploring(): boolean {
-    const s = this.state;
-    if (!s || s.stage !== 'delve' || !s.delve) return false;
-    try {
-      return this.engine.mode(s).mode === 'explore';
-    } catch {
-      return s.delve.mode === 'explore';
-    }
-  }
-
-  /** Milliseconds per tick by the speed setting (22.2): slow 750, normal 500, fast and instant 300. */
-  tickMs(): number {
-    const sp = this.settings.speed;
-    return sp > 0 && sp < 1 ? 750 : sp === 1 ? 500 : 300;
-  }
-
-  /** Should the clock run right now? */
-  private clockLive(): boolean {
-    return this.exploring() && !this.hud.paused && !this.busy && !this.ticking && !this.hud.modalOpen() && !document.hidden && this.root.isConnected && this.root.dataset.stage === 'delve';
-  }
-
-  private clockStep(): void {
-    const now = performance.now();
-    if (!this.clockLive()) {
-      this.lastTick = now;
-      return;
-    }
-    if (now - this.lastTick < this.tickMs()) return;
-    this.lastTick = now;
-    void this.tick();
-  }
-
-  /** Events a tick can carry without stopping the clock: the figures slide, the HUD updates in place. */
-  private static readonly QUIET = new Set<GameEvent['type']>(['moved', 'say', 'light', 'noise', 'doorChanged', 'investigate', 'walkStopped', 'routeKnown', 'awake']);
-
-  /**
-   * V3.8 (22.2): one tick. Quiet ticks (steps, a door, a noise) update in place, figures gliding over
-   * the tick interval; anything else plays through the event player like any command.
-   */
-  async tick(): Promise<boolean> {
-    if (!this.state || this.busy || this.ticking) return false;
-    const before = this.state;
-    let res;
-    try {
-      res = this.engine.apply(before, { type: 'tick' });
-    } catch (e) {
-      console.error('Tick failed:', e);
-      this.hud.togglePause(true);
-      return false;
-    }
-    if (res.error) {
-      // Not exploring after all (or the engine refused): stop the clock quietly.
-      this.lastTick = performance.now() + 1000;
-      return false;
-    }
-    const quiet = res.events.every((e) => App.QUIET.has(e.type) && (e.type !== 'moved' || e.path.length <= 2) && (e.type !== 'noise' || e.radius < 4));
-    if (!quiet) {
-      // Something happened: the normal path (playback, then render). `send` re-applies nothing: replay the result.
-      return this.commit(before, res, { type: 'tick' });
-    }
-    this.ticking = true;
-    try {
-      this.state = res.state;
-      if (++this.ticksSinceSave >= 10 || res.events.some((e) => e.type === 'doorChanged' || e.type === 'walkStopped')) {
-        this.ticksSinceSave = 0;
-        this.save();
-      }
-      for (const e of res.events) {
-        if (e.type === 'say') this.hud.log(e.text);
-        else if (e.type === 'walkStopped') {
-          this.hud.log(`${this.hud.nameOf(e.heroId)} stops: ${e.why}`);
-          if (this.hud.selection.includes(e.heroId)) this.hud.toast(`${this.hud.nameOf(e.heroId)} stops: ${e.why}`);
-        } else if (e.type === 'investigate') {
-          if (this.dio.canSee(e.at) || this.dio.isWatchable(e.id)) this.hud.log(`${this.hud.nameOf(e.id)} goes to look at a noise.`, 'log-enemy');
-        } else if (e.type === 'doorChanged') {
-          sfx.play(e.open ? 'creak' : 'slam', { gain: 0.6 });
-          void this.dio.playEvent(e);
-        } else if (e.type === 'moved' && this.isHero(e.id)) sfx.play('step', { gain: 0.35, pitch: 1 });
-      }
-      this.dio.glideNext(this.tickMs() / 1000);
-      this.render(false);
-      this.followWalker();
-    } finally {
-      this.ticking = false;
-    }
-    return true;
-  }
-
-  /** Exploring: the camera drifts after the selected hero while they walk (no jumps). */
-  private followWalker(): void {
-    const id = this.hud.selectedId;
-    const h = this.state?.delve?.heroes.find((x) => x.heroId === id);
-    const walking = !!h && (!!h.walk?.path.length || this.dio.isGliding(h.heroId));
-    if (walking && h.at.level !== this.dio.shownLevel) this.dio.showLevel(h.at.level);
-    this.dio.setFollow(walking ? h.heroId : null);
   }
 
   /**
@@ -421,7 +308,6 @@ export class App {
 
   async send(cmd: Command): Promise<boolean> {
     if (this.busy || !this.state) return false;
-    if (cmd.type === 'tick') return this.tick();
     const before = this.state;
     const res = this.engine.apply(before, cmd);
     if (res.error) {
@@ -430,13 +316,7 @@ export class App {
       else this.screenToast(res.error);
       return false;
     }
-    return this.commit(before, res, cmd);
-  }
-
-  /** Take an applied result: save, play its events, render. */
-  private async commit(before: GameState, res: import('../game/types').ApplyResult, cmd: Command): Promise<boolean> {
     this.state = res.state;
-    this.ticksSinceSave = 0;
     this.save();
     if (cmd.type === 'act') {
       const snd = ACTION_SFX[cmd.action];
@@ -472,12 +352,8 @@ export class App {
       sfx.play('levelup', { gain: 0.8 });
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
-    if (cmd.type === 'startDelve') this.hud.togglePause(false);
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
-    if (this.exploring()) this.followWalker();
-    else this.dio.setFollow(null);
-    this.lastTick = performance.now();
     // 16.2: "start shuttered" on the prepare screen: shutter is free, so send it right after the delve starts.
     if (cmd.type === 'startDelve' && this.loadout?.startShuttered && this.state?.delve && this.state.delve.lanternOpen !== false) {
       const bearer = this.state.delve.lanternBearer;
@@ -685,32 +561,15 @@ export class App {
           sfx.play('gloam', { pitch: 1.6, gain: 0.5 });
           await this.dio.playEvent(e);
           continue;
-        // ---- V3.8 (22.4, 22.5): the mode switches.
-        case 'mode': {
-          const at = e.by ? this.dio.unitPos(e.by) : null;
-          if (e.mode === 'combat') {
-            sfx.play('horn', { pitch: e.first === 'party' ? 1.4 : 1.2, gain: 0.55 });
-            if (e.first !== 'party') this.hud.pulse('hurt');
-            const seen = [...events.slice(0, events.indexOf(e))].reverse().find((x): x is Extract<GameEvent, { type: 'noticed' }> => x.type === 'noticed');
-            const sub = e.first === 'party' ? (e.why ?? `${e.by ? this.hud.nameOf(e.by) : 'The party'} strikes first.`) : (e.why ?? (seen ? `${this.hud.nameOf(seen.by)} saw ${this.hud.nameOf(seen.hero)}.` : 'Something has noticed the party.'));
-            // The engine's own `say` logs "Combat! …" / "Ambush! …".
-            if (at && !instant()) await this.dio.panTo(at, 0.2);
-            this.hud.togglePause(false);
-            await this.hud.modeBanner('combat', e.first, sub, (x) => wait(instant() ? 0.25 : x));
-          } else {
-            sfx.play('flip', { pitch: 1.1, gain: 0.5 });
-            // The engine says "The castle quiets." itself; only add a reason it gave beyond that.
-            if (e.why && e.why !== 'The castle quiets.') this.hud.log(e.why, 'log-ally');
-            await this.hud.modeBanner('explore', undefined, e.why && e.why !== 'The castle quiets.' ? e.why : 'Nothing hunts you. Exploring again.', (x) => wait(instant() ? 0.2 : x));
+        // ---- V3.7 (20.5)
+        case 'calm':
+          if (e.calm) sfx.play('flip', { pitch: 1.1, gain: 0.5 });
+          else {
+            sfx.play('horn', { pitch: 1.2, gain: 0.5 });
+            this.hud.pulse('hurt');
           }
-          continue;
-        }
-        case 'walkStopped':
-          this.hud.log(`${this.hud.nameOf(e.heroId)} stops: ${e.why}`);
-          continue;
-        case 'investigate':
-          if (this.dio.canSee(e.at) || this.dio.isWatchable(e.id)) this.hud.log(`${this.hud.nameOf(e.id)} goes to look at a noise.`, 'log-enemy');
-          await this.dio.playEvent(e);
+          this.hud.log(e.calm ? `Calm again: free move.${e.why ? ` ${e.why}` : ''}` : `Combat! ${e.why ?? 'Something has noticed the party.'}`, e.calm ? 'log-ally' : 'log-enemy');
+          if (!instant() || !e.calm) await this.hud.calmBanner(e.calm, e.why, (x) => wait(instant() ? 0 : x));
           continue;
         case 'propSmashed':
           sfx.play('smash', { pitch: 1.3, gain: 0.7 });
@@ -970,8 +829,6 @@ export class App {
     return {
       state: () => this.state,
       send: (c: Command) => this.send(c),
-      /** V3.8: milliseconds per exploring tick. */
-      tickMs: () => this.tickMs(),
       dio: this.dio,
       hud: this.hud,
       busy: () => this.busy,
