@@ -5,7 +5,7 @@ You are transcribing levels 1, 2 and 3 of the 1980 board game "Valkenburg Castle
 ## Project context
 
 - Repo: /home/claude/valkenburg-castle (Vite + TypeScript 7 + Vitest 5). Do NOT commit or push; the lead will commit. Do NOT edit files outside the paths listed under "You own".
-- Read these first: docs/demo-spec.md (sections 3.1, 6.1, 6.5), src/engine/types.ts (LevelMap, CastleMap, LevelLink, Coord, CellKind, EdgeKind), src/engine/geometry.ts (edge indexing, COLUMN_LETTERS, at()).
+- Read these first: docs/archive/demo-spec.md (sections 3.1, 6.1, 6.5), src/engine/types.ts (LevelMap, CastleMap, LevelLink, Coord, CellKind, EdgeKind), src/engine/geometry.ts (edge indexing, COLUMN_LETTERS, at()).
 - Rules: game data must be plain TypeScript with no DOM access. Keep dependencies at zero.
 - npm with network: `source scripts/npmenv.sh` first. `npx tsc` and `npx vitest run` work offline.
 

@@ -118,7 +118,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
   sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.', 'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.'] },
   burglar: {
     role: 'Quiet: picks locks, sneaks fast.',
-    abilities: ['Pick locks.', 'Sneaks at full pace, with the quietest feet.', "Backstab: from behind an enemy that hasn't noticed you, +1 slot and double damage.", 'Opens chests silently and takes loot without using the action.'],
+    abilities: ['Pick locks.', 'Sneaks at full pace, with the quietest feet.', "Backstab: from behind an enemy that hasn't noticed you, +1 slot and double damage.", 'Opens chests without using the action.'],
   },
   ranger: {
     role: 'Eyes: shoots from range, holds a lane.',

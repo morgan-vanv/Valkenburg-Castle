@@ -220,7 +220,7 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
 const NOT_BLINDSIDED = { extra: 0, unseen: false };
 
 /**
- * An attack on hero `h` by `attacker`: from the hero's rear half it is blindsided (+1 slot); `unseen`
+ * An attack on hero `h` by `attacker`: from the hero's blind area (V3.9.2: the cone straight behind) it is blindsided (+1 slot); `unseen`
  * when no hero can see the attacker either. Monsters, crews, free swings and overwatch shots alike.
  */
 export function blindside(c: Ctx, attacker: string, h: HeroInDelve): { extra: number; unseen: boolean } {

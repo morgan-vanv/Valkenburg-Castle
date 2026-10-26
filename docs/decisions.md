@@ -1,6 +1,6 @@
 # Decisions
 
-A running log. Newest at the bottom.
+A running log. Newest at the bottom. Later entries override earlier ones where they disagree (the V1 and V2 entries at the top are mostly superseded); `docs/current-rules.md` has the live picture.
 
 - **2026-10-23** Static site on GitHub Pages, TypeScript and Vite. Keeps the demo free to host with no server to maintain.
 - **2026-10-23** Rules engine kept separate from rendering. Lets us test the rules and try different visual directions independently.
@@ -10,7 +10,7 @@ A running log. Newest at the bottom.
 - **2026-10-23** Multi-man squads fight alongside named heroes. It is the 1980 game's identity and what makes frontage matter.
 - **2026-10-23** Desktop first with mouse and keyboard; UI kept touch-friendly to adapt later. Lets the camera and UI be designed without phone compromises.
 - **2026-10-23** Demo economy tuned: goal 2,000 gold, outfitting 100, searches find something on 3–6, deeper levels add more to treasure rolls. The 1980 tables assume a 52-week siege; at 4 weeks a simple bot banked almost nothing.
-- **2026-10-23** V2: one-shot run instead of a 4-week campaign; a new spacious two-level map instead of the 1980 transcription; doors, loot and carrying simplified (see docs/v2-changes.md). Play-testers found V1 claustrophobic and clunky; V1 is kept on the `v1-prototype` branch.
+- **2026-10-23** V2: one-shot run instead of a 4-week campaign; a new spacious two-level map instead of the 1980 transcription; doors, loot and carrying simplified (see docs/archive/v2-changes.md). Play-testers found V1 claustrophobic and clunky; V1 is kept on the `v1-prototype` branch.
 
 The full design lives in the Game Design Document: https://claude.ai/artifact/5p4XddApJVqAodPrEuEGzc
 - **2026-10-24** V3: rebuilt as a turn-based extraction crawler (Dark and Darker premise, For the King 2 slot rolls, XCOM permadeath) on a new two-level hex castle; light is the clock, noise is spatial. The owner found the 1980-derived rules encumbering; see docs/v3-changes.md.
@@ -65,3 +65,5 @@ The V3 Game Design Document: https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1
 - **2026-10-25** V3.9.1: the Face command and turning toward an action's target are shelved behind `FACING` flags; heroes face their last step. Owner: err on the side of simplicity before V4.0. Hover rear-half wash removed; facing preview is an arrow.
 - **2026-10-26** V3.9.2: actions turn heroes, monsters and crews toward their target again; heroes and crew members are blind only in the cone straight behind (one direction), monsters keep the whole rear half (owner: players and crews the same, monsters more forgiving).
 - **2026-10-26** V3.9.3 hearing (spec 24.8): hearing lives in src/game/hearing.ts and only writes `Delve.heard` and `heard` events; it keeps its own copy of the visible set (keyed by a cheap signature of heroes, doors, light, smoke, fire and revealed figures) and never reads or fills the engine's `visCache`, so monsters' targeting is byte-identical with it on or off (`HEARING.enabled`; a test and the sim confirm the same RNG and monster state). Footsteps are recorded in the shared `walk` (monsters and crews), loud sounds through `makeNoise`'s new `what` (enemy call sites only) plus hearing-only radii where the engine made no noise before: enemy strikes (clash 2), an unseen attacker downing a hero (scream 3), a locked door forced (crash 4), monsters and crew members hurt (scream 2). Entries are deduplicated per hex and kind. The log groups by sound and compass direction ("beyond the door" when a closed door lies on the straight line from the nearest hero), loud first, two lines at most. Stale shove/drag arrows: drawn only while the victim stands next to the landing hex.
+- **2026-10-26** V3.9.4: move-risk tags and the backstab dagger fade in (opacity only). They are placed by `transform` every frame, so an animated transform slid them in from the screen's corner; any tag placed that way must not animate `transform` or `scale`.
+- **2026-10-26** V3.9.4: `docs/current-rules.md` is the consolidated description of the live game, written from the code; the spec stays as version-by-version history. Where they disagree the code wins, and the known spec-vs-code disagreements are listed at the end of current-rules for V4.0 to settle. Old V1/V2/V3.0–3.3 plans moved to `docs/archive/`.

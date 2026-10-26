@@ -4,7 +4,7 @@ You are building the presentation layer of a browser game demo: a low-poly 3D di
 
 ## Read first
 
-- docs/demo-spec.md — the demo's rules; section 8 says exactly what the presentation must do. Sections 2 and 4 say what the player can do and see.
+- docs/archive/demo-spec.md — the demo's rules; section 8 says exactly what the presentation must do. Sections 2 and 4 say what the player can do and see.
 - src/engine/types.ts — GameState, Expedition, Unit, LevelMap, CastleMap, Command, GameEvent and more.
 - src/engine/api.ts — the `Engine` interface. `createEngine(map)` in src/engine/engine.ts implements it. src/engine/index.ts will export `engine = createEngine(classicCastle)` once the map exists; until then use `miniCastle()` from src/engine/test/miniCastle.ts.
 - src/engine/geometry.ts — coordinates, edge keys, labels ("C-12"). Use these helpers.

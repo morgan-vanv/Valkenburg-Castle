@@ -1,4 +1,6 @@
-# V3 spec: Hobart's Revenge (first playable slice)
+# V3 spec: Hobart's Revenge to The Heir's Return (V3.0–V3.9.4)
+
+> **Read `docs/current-rules.md` first.** This file is the version-by-version history: each section was the build spec for one release, and later sections override earlier ones (sections 1–13 are V3.0 and many of their numbers have changed). Section 22 (V3.8 exploration mode) was reverted and lives only on branch `shelf/exploration-mode` (see `docs/shelved/exploration-mode.md`). Where this file and the code disagree, the code wins; the known disagreements are listed at the end of `docs/current-rules.md`.
 
 The rules the engine implements and the presentation shows. Design intent is in the GDD (https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1); this file is the buildable version with numbers. Types: src/game/types.ts. API: src/game/api.ts. Hex math: src/game/hex.ts.
 
@@ -566,6 +568,10 @@ Core tenet (owner): **we want to offer flexibility in approach, but tradeoffs co
 
 - Noticing ranges for a **walking** hero go up by 2: lit walking 8 (was 6), unlit walking 5 (was 3), Hollow walking 8 (was 6). Sneaking unchanged (lit 4, unlit 1, Hollow 3). Blind arc: walking still at half range (4 lit, 2 unlit).
 
+## 22. V3.8: exploration mode (shelved)
+
+Built, deployed, then reverted in V3.7.2. The full section is on branch `shelf/exploration-mode`; summary and how to resume: `docs/shelved/exploration-mode.md`.
+
 ## 23. V3.7.2: back to turns (owner, 2026-10-25 night)
 
 V3.8's exploration mode (section 22) is reverted and shelved: docs/shelved/exploration-mode.md, branch `shelf/exploration-mode`. Section 22 doesn't apply to `main`.
@@ -643,3 +649,4 @@ Sight is narrow; sound fills the gap, **for the heroes only**. Monsters and crew
 
 - Move-risk tags (wake %, notice eye, free swing) and the Burglar's backstab dagger appear over their figure or hex from their first frame: their appear animation is a fade only. (It used to animate `transform`, which these tags use for their screen position, so they slid in from the screen's top-left corner.) The owner will revisit the free-swing warning's presentation in V4.0.
 - The unlit hint's tooltip names the live unlit notice ranges (5 walking, 1 sneaking) instead of a stale 3.
+- Help texts brought in line with 24.6–24.7: a hero's hover says they are blind only straight behind; backstab and blindsided texts say "from behind" (a monster's rear half, straight behind a crew member or hero); the key list shows F (Face) only when `FACING.faceCommand` is on; the sneak help no longer mentions the removed rear-half hover. The Burglar's ability line reads "Opens chests without using the action" (Take is free for everyone).
