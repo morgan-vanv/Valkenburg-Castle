@@ -303,7 +303,10 @@ export class Diorama {
       const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.36, 3), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthWrite: false }));
       arrow.rotation.x = Math.PI / 2;
       arrow.position.z = Math.sqrt(3) * HEX * 0.62;
-      this.facePreview.add(cone, arrow);
+      // V3.9.1 (spec 24.6): a subtle forward arrow only (no wedge).
+      void cone;
+      arrow.material.opacity = 0.7;
+      this.facePreview.add(arrow);
       this.facePreview.visible = false;
       this.facePreview.renderOrder = 3;
     }

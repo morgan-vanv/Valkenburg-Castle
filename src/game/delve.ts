@@ -28,7 +28,7 @@ import { capture, rivalCaltropsStep, striker } from './crewai';
 import { parleyTargets } from './parley';
 import { dirIndex, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
-import { BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS } from './data';
+import { BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS, FACING } from './data';
 import {
   BRIAR_DMG, BRIAR_MANA, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS,
   HAMSTRING_SLOTS, NIGHTTHORN_DMG, NIGHTTHORN_MANA, NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SHIELD_BRACED_DMG, SMASH_GOLD, SMASH_GOLD_CHANCE, SMASH_ITEM_CHANCE,
@@ -123,6 +123,7 @@ export function setFacing(c: Ctx, h: HeroInDelve, facing: number): void {
 export function doFace(c: Ctx, heroId: string, facing: number): string | undefined {
   const h = hd(c, heroId);
   if (!h) return 'No such hero.';
+  if (!FACING.faceCommand) return 'Heroes face the way they last moved.';
   if (!Number.isInteger(facing) || facing < 0 || facing > 5) return 'Face one of the six sides.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't turn.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
@@ -1360,7 +1361,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
   if (focus < 0 || focus > Math.min(h.focus, sp.slots)) return 'Not that much Focus.';
   // V3.9 (spec 24.2): an action aimed at a hex or a figure turns the hero that way.
   const aim = t.at ?? (t.id ? figurePos(c, t.id) : undefined);
-  if (aim && aim.level === h.at.level && !samePos(aim, h.at)) {
+  if (FACING.turnOnAction && aim && aim.level === h.at.level && !samePos(aim, h.at)) {
     setFacing(c, h, dirIndex(h.at, aim));
     if (!c.visCache) refreshSight(c);
   }

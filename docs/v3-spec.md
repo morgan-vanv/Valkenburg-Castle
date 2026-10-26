@@ -614,3 +614,10 @@ New core tenets (claude/design-pillars.md): **flavor** (each class has a "flavor
 - Unseen rear hexes render like explored-but-not-visible (dimmed, no units). A hero alone with nobody covering their back shows a small "back exposed" badge on their card with a tooltip.
 - Remove the blind-arc wash shown while sneaking. Hovering a seen awake enemy shows its rear half faintly. When a Burglar is selected, seen unaware enemies get a small dagger marker on their rear hexes ("Backstab from here").
 - `unseenHit`: the hero flashes, an arrow from behind, log line "Something strikes Pim from behind".
+
+### 24.6 V3.9.1: facing simplified (owner, 2026-10-25 late night)
+
+- The managed facing mechanic is shelved: no Face command or button (`FACING.faceCommand = false`), and actions no longer turn a hero toward their target (`FACING.turnOnAction = false`). A hero faces the way of their last step (and into the castle at delve start). To turn, move.
+- Kept: front-half sight for heroes and enemies, sleepers hear only, blindsided +1 slot, unseen hits, the Burglar's quiet feet and backstab, previews only for seen enemies.
+- Presentation: the move preview's end shows a subtle forward arrow only (no wedge); no rear-half wash on hovering an enemy; heroes and enemies keep their small facing arrows.
+- The shelved code stays behind the two flags in src/game/data.ts; engine tests for it run with the flags on.

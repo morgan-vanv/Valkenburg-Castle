@@ -55,6 +55,7 @@ import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
 import { breakableWall } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
+import { FACING } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -408,7 +409,7 @@ function turnToFoe(s: GameState, id: string): GameState {
   const vis = e.visibility(s).visible;
   const foes = [...d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep'), ...(d.rivals?.stance === 'hostile' ? d.rivals.members.filter((r) => r.hp > 0 && !r.goneOut) : [])];
   const f = foes.find((m) => m.at.level === me.at.level && hexDistance(m.at, me.at) === 1 && seen.has(m.id) && !vis.has(posKey(m.at)));
-  if (!f) return s;
+  if (!f || !FACING.faceCommand) return s;
   const r = run(s, { type: 'face', heroId: id, facing: dirIndex(me.at, f.at) });
   if (r !== s) eyes.turnedToFoe++;
   return r;
@@ -452,7 +453,7 @@ function faceParty(s: GameState): GameState {
   for (const h of act) {
     if (done.has(h.heroId)) continue;
     const group = act.filter((o) => o.at.level === h.at.level && hexDistance(o.at, h.at) <= 2);
-    if (group.length < 2) continue;
+    if (group.length < 2 || !FACING.faceCommand) continue;
     for (const g of group) done.add(g.heroId);
     const lead = group.find((g) => g.heroId === d.lanternBearer) ?? group[0]!;
     const fwd = lead.facing ?? 0;
