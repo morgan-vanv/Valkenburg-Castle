@@ -314,7 +314,8 @@ if (fit([[3, 1], [0, 1]])) {
 {
   await p.evaluate(() => window.vc.hud.toggleMenu?.());
   const menu = await p.$eval('.hud-menu', (e) => e.innerText).catch(() => '');
-  check('menu keys list F: face', /F\s*face/i.test(menu), menu.match(/.{0,30}face.{0,30}/i)?.[0]);
+  // V3.9.4: the Face command is shelved (FACING.faceCommand false), so the key list leaves F out.
+  check('menu keys leave out the shelved F: face', !/F\s*face/i.test(menu) && /sneak/i.test(menu), menu.match(/.{0,30}(face|sneak).{0,30}/i)?.[0]);
   await p.evaluate(() => window.vc.hud.toggleMenu?.());
 }
 

@@ -1,28 +1,12 @@
-# What changed in V3: Hobart's Revenge
+# What changed in V3: from Hobart's Revenge to The Heir's Return
 
-V3 rebuilds the game as a turn-based extraction crawler, following the V3 Game Design Document (https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1). Rules with numbers: docs/v3-spec.md. V2 is in `main`'s history (last V2 commit 7a62311).
+V3 rebuilt the game as a turn-based extraction crawler, following the V3 Game Design Document (https://claude.ai/artifact/Q7766w5bBz11paXkw4YPf1). It launched as "Hobart's Revenge" (V3.0) and became "The Heir's Return" in V3.5. How the game works today: docs/current-rules.md. Rules with numbers, version by version: docs/v3-spec.md. V2 is in `main`'s history (last V2 commit 7a62311).
 
-## The loop
-
-Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and their packs → delve → get out with the prize and whatever else you carried → spend it at camp.
-
-- **Contracts:** Rescue (free a prisoner and walk them out) and Recover (carry an heirloom out). Level 1 jobs from the start; Level 2 jobs after your first success.
-- **Lord Hobart** joins delves as the strongest hero. If he dies, the campaign is over.
-- **Permadeath:** heroes at 0 HP are downed and bleed out in 2 rounds unless revived. Revived heroes sit out 2 contracts. The dead go to the memorial, and their gear stays where they fell.
-
-## In the castle
-
-- **Two hand-built hex levels:** the Ruined Keep (12 rooms around the great hall, the pit balcony, three exits) and the Barracks and Cells (cellblock, mess hall, locked storeroom, a cracked-wall shortcut). Preview: docs/castle-preview.svg.
-- **Turns:** each hero moves once and acts once, in either order; then the castle moves. Walk 4, or Sneak 2 quietly (the Burglar sneaks 4).
-- **Slot rolls everywhere:** attacks, lockpicks, smashing doors, disarming traps. The preview shows slots, odds per hit count, modifiers and noise before you commit; Focus locks slots as hits.
-- **Light is the clock:** a 40-round lantern. Bright, Dim and Dark make every roll harder; at pitch black the Gloam hunts you. Torches, braziers (they stay lit forever) and the mage's Kindle buy time. Splitting up is a real choice: heroes outside the light fight at Dark.
-- **Noise:** every action makes a ripple you can see before acting. Sleeping monsters wake and come to look; closed doors muffle it.
-- **Monsters show their intent:** who they'll hit and for how much. Rats, orcs (they shout for help), spiders (webs), the cutpurse (steals and runs) and berserkers.
-- **The Lantern Sisters:** a rival crew that sometimes shows up to race you for chests and your prize. Leave them be, fight them, or bribe them 40 gold to leave.
+**Where it stands (V3.9.4, 2026-10-26):** Keven, heir of the late Lord Hobart, camps in Lowgate and wins the village back with story contracts; squads of up to 4 from eight classes delve a three-level castle (the Ruined Keep, the Crossing, the Hollow and its Dragon) on a 20-round lantern. Play is entirely turn-based. Stealth runs on facing and fields of view (monsters blind in their rear half, heroes and crews in a cone behind), noise and hearing; free swings both ways; the Sapper reshapes the level; rival crews parley, fight, rob and drag heroes off. Shelved: free exploration outside combat (docs/shelved/exploration-mode.md) and the Face command.
 
 ## Since launch
 
-- **V3.9.4, tidy-up (2026-10-26):** the move preview's warnings over enemies (free swing, may wake, will notice) and the Burglar's backstab dagger now appear in place instead of sliding in from the top-left corner of the screen each time you hover a hex. The "In the dark" hint's tooltip gives the right notice ranges. Docs, readme and old checks brought up to date for V4.0.
+- **V3.9.4, tidy-up (2026-10-26):** the move preview's warnings over enemies (free swing, may wake, will notice) and the Burglar's backstab dagger now appear in place instead of sliding in from the top-left corner of the screen each time you hover a hex. Help texts catch up with V3.9.2: heroes are blind only straight behind, backstab works from behind (a monster's back half, straight behind a crew member), the shelved F key is gone from the key list, and the "In the dark" tooltip gives the right notice ranges. Docs, readme and old checks brought up to date for V4.0.
 
 - **V3.9.3, hearing (2026-10-26):** your heroes hear what they can't see. In the castle's turn, footsteps of unseen monsters and crews within earshot leave a trail of faint footprints (closed doors muffle; rats and spiders are quiet, the Dragon carries far), and fights, shouts, smashes, blasts, roars and screams out of sight show as a pulsing ring with an icon. The log sums it up in a line or two ("Footsteps beyond the door to the north-east", "A clash to the west"). Hearing tells you where, not who: heard enemies stay unseen. The marks last until the castle moves again. Monsters gain nothing from it. Also: a monster's shove or drag arrow is no longer drawn once its victim has moved away from it (the intent tag still says what it planned).
 
@@ -52,14 +36,43 @@ Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and 
 
 - **Exploring by line of sight (2026-10-24):** every step of a walk reveals the layout of everything in line of sight within 8 hexes, lit or not, so long moves no longer leave gaps and walking into a room shows the room. Monsters still only show in light.
 
-## Camp
+## Known gaps (V3.9.4)
+
+- No touch or mobile pass.
+- Monsters don't target hired crews; a cutthroat crew on a truce holds its post; a captive loses their non-valuable pack items.
+- Balance: the bot finds Level 2 the difficulty wall; the sim's Burglar rarely backstabs.
+- Later (docs/ideas-later.md): endless descent behind the Sealed Stair, fear and Nerve, companions, crafting and side quests, crews that remember you, arrows as ammunition, tripwires, ceiling collapse, a full economy pass.
+
+## At launch (V3.0, 2026-10-24)
+
+Kept as history; much of this has changed since (see above).
+
+### The loop
+
+Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and their packs → delve → get out with the prize and whatever else you carried → spend it at camp.
+
+- **Contracts:** Rescue (free a prisoner and walk them out) and Recover (carry an heirloom out). Level 1 jobs from the start; Level 2 jobs after your first success.
+- **Lord Hobart** joins delves as the strongest hero. If he dies, the campaign is over.
+- **Permadeath:** heroes at 0 HP are downed and bleed out in 2 rounds unless revived. Revived heroes sit out 2 contracts. The dead go to the memorial, and their gear stays where they fell.
+
+### In the castle
+
+- **Two hand-built hex levels:** the Ruined Keep (12 rooms around the great hall, the pit balcony, three exits) and the Barracks and Cells (cellblock, mess hall, locked storeroom, a cracked-wall shortcut). Preview (of the later three-level castle): docs/castle-preview/.
+- **Turns:** each hero moves once and acts once, in either order; then the castle moves. Walk 4, or Sneak 2 quietly (the Burglar sneaks 4).
+- **Slot rolls everywhere:** attacks, lockpicks, smashing doors, disarming traps. The preview shows slots, odds per hit count, modifiers and noise before you commit; Focus locks slots as hits.
+- **Light is the clock:** a 40-round lantern. Bright, Dim and Dark make every roll harder; at pitch black the Gloam hunts you. Torches, braziers (they stay lit forever) and the mage's Kindle buy time. Splitting up is a real choice: heroes outside the light fight at Dark.
+- **Noise:** every action makes a ripple you can see before acting. Sleeping monsters wake and come to look; closed doors muffle it.
+- **Monsters show their intent:** who they'll hit and for how much. Rats, orcs (they shout for help), spiders (webs), the cutpurse (steals and runs) and berserkers.
+- **The Lantern Sisters:** a rival crew that sometimes shows up to race you for chests and your prize. Leave them be, fight them, or bribe them 40 gold to leave.
+
+### Camp
 
 Bounty board, quartermaster (torches, potions, rope, blasting charges), smithy (weapon and armor tiers), tavern (recruits), infirmary, stash (sell valuables) and memorial.
 
-## Presentation
+### Presentation
 
 Low-poly hex diorama with a rotatable camera (right-drag, `[` `]`), light and fog of war, roll animations, intents over enemies, event log, playback speed up to instant, hold Space to hurry the castle's turn, autosave. Keys: 1–4 select, Tab next, S sneak, E end turn.
 
-## Known gaps
+### Known gaps at launch
 
 No touch/mobile pass; Levels 3–5, the Dragon, the Sapper, other crews, hiring rivals and the endless Deep Vaults mode come later. Balance is a first pass from a bot: Level 1 is a warm-up, Level 2 is dangerous.

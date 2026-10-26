@@ -1972,7 +1972,7 @@ export class Diorama {
       el.className = 'backstab-tag';
       el.textContent = '🗡';
       el.dataset.target = x.target;
-      el.title = `Backstab from here: ${this.nameOf(x.target)} has not noticed the Burglar. A melee strike from its rear half gets +1 slot and double damage per hit (before armor), on top of the sneak attack.`;
+      el.title = `Backstab from here: ${this.nameOf(x.target)} has not noticed the Burglar. A melee strike from behind it gets +1 slot and double damage per hit (before armor), on top of the sneak attack.`;
       this.fx.appendChild(el);
       this.blindTags.push({ el, at: this.worldOf(x.at, 0.35) });
     });

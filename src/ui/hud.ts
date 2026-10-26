@@ -584,7 +584,7 @@ export class Hud {
         const def = this.heroDef(hero.heroId);
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
         const hf = facingOf(hero);
-        if (hf !== undefined && hero.status === 'active') lines.push(`<span class="dim">Faces ${this.facingWords(hero.at, hf)} (the way they last moved): sees only that half.</span>`);
+        if (hf !== undefined && hero.status === 'active') lines.push(`<span class="dim">Faces ${this.facingWords(hero.at, hf)} (the way they last moved or acted): blind only straight behind.</span>`);
         if (this.backExposed(hero.heroId)) lines.push('<span class="neg">Back exposed: nobody covers the hex behind them.</span>');
       } else if (rival && d.rivals) {
         const st = STANCE[d.rivals.stance];
@@ -2273,7 +2273,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (hover a hex for wake, notice and swing risks; hover an enemy for its rear half) · ', h('kbd', null, 'F'), ' face (then click a hex; free) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (hover a hex for wake, notice and swing risks) · ', FACING.faceCommand ? h('kbd', null, 'F') : '', FACING.faceCommand ? ' face (then click a hex; free) · ' : '', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');

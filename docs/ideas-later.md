@@ -1,22 +1,31 @@
 # Ideas saved for later
 
-- **Thin walls** (2026-10-24): walls along hex edges instead of whole wall hexes, like the reference image in the castle redesign pitch. Tighter rooms and a cleaner look; needs movement, sight and the renderer reworked. Deferred: the demo keeps whole-hex walls rendered as pale cutaway walls.
-- **Endless descent** (2026-10-24): the Sealed Stair on Level 3 opens onto generated floors, each harder than the last. Stretch goal once the core game is settled; the stair stays sealed in the demo.
-- **Hiring or allying with rival crews** (from the V3 GDD).
+Open ideas, newest batch last. Built-then-shelved features with code are in `docs/shelved/`. Ideas that have since shipped are listed at the bottom with the version that did it.
 
-Castle redesign pitch: https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd
-- **Thin walls (visual only):** done in V3.2 style pass (spec 15.8). Walls along hex edges as a *gameplay* model (tiles between edges) remains deferred.
-- **Scale and proportion, second look** (2026-10-24): option C is in but the owner isn't fully satisfied. The study is parametric (mockup/scale-options.ts, any value on the URL), so new variants are cheap.
+## Open
 
-## Filed 2026-10-25 (owner's V3.3 play-test notes)
+- **Thin walls as a gameplay model** (2026-10-24): walls along hex edges instead of whole wall hexes (the reference image in the castle redesign pitch, https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd). Tighter rooms; needs movement, sight and the renderer reworked. (The *look* of thin walls shipped in V3.2, spec 15.8.)
+- **Endless descent** (2026-10-24): the Sealed Stair on Level 3 opens onto generated floors, each harder than the last. Stretch goal once the core game is settled; the stair stays sealed.
+- **Scale and proportion, second look** (2026-10-24): option C is in but the owner isn't fully satisfied. The study is parametric (`mockup/scale-options.ts`, any value on the URL), so new variants are cheap.
+- **Fear, Nerve and darkness** (2026-10-25, V3.3 play-test): make Nerve matter. Heroes who stand unlit, see an ally fall, or face the Gloam roll Nerve; a failure costs Focus, or makes them falter (no dash, −1 slot) or bolt one hex toward light. Keven's Rally and a lit brazier steady nerves. Ties to "light is the clock" and fear by depth (spec 16).
+- **Summons and animal companions** (2026-10-25): summon a mouse to scout (a tiny unit that reveals as it walks, can't fight or carry, slips under doors); a Hunter class with a dog (tracks noise, flanks, can be sent ahead; dies for good). Pillar 8: a scout changes how you approach a room.
+- **More meta progression** (2026-10-25): NPCs met in the castle hand out side quests; more rescued specialists reopen services (a retired adventurer, a bard, a fletcher); looted ingredients (glowcap fungus, forge coal, spider silk) craft items, potions and food. The Gilded Flagon's "version 3" (more ales, a bigger recruit pool) belongs here.
+- **Crews that remember you** (2026-10-25, rival option C in https://claude.ai/artifact/PttJ4kNWutJvUAegNgAxeA): a crew you robbed, paid or betrayed treats you accordingly next time.
+- **Arrows as ammunition** (2026-10-25): bows use purchasable arrows (a quiver item), with specialty arrows as forge upgrades (fire, barbed, grapple line, whistling lure).
+- **Tripwire charges** (2026-10-25): the Sapper lays a charge as a trap that enemies set off; a forge upgrade from Gerda.
+- **Collapse ceilings and seal hallways with charges** (2026-10-25): a charge against a hallway's roof or a doorway brings it down, filling hexes with rock that blocks movement and sight (Dig clears it slowly).
+- **A full economy pass** (2026-10-25): prices, bounties and loot were tuned piecemeal (V3.4, V3.7.1); look at the whole curve once the systems settle.
 
-- **Fear, Nerve and darkness:** make Nerve matter. Ideas: heroes who stand unlit, see an ally fall, or face the Gloam roll Nerve; a failure costs Focus, or makes them falter (no dash, -1 slot) or bolt one hex toward light. Hobart's Rally and a lit brazier steady nerves. Ties to "light is the clock" and fear by depth (spec 16).
-- **Summons and animal companions:** control or summon a mouse to scout (a tiny unit that reveals as it walks, can't fight or carry, slips under doors); a Hunter class with a dog companion (tracks noise, flanks, can be sent ahead; dies for good). Pillar 8: a scout changes how you approach a room.
-- **Meta progression:** NPCs met in the castle hand out side quests; rescued specialists join the camp and unlock upgrades (a brewer, a retired adventurer, a bard, a fletcher); looted ingredients (glowcap fungus, forge coal, spider silk) craft items, potions and food. Crews that remember you (rival option C) belong here too.
-- **The Gilded Flagon (Deep Rock-style pub):** ales that change how a hero plays one delve, opened through a quest chain (rescue the innkeeper, recover the brewing copper, recover the cask book), drawing higher-level recruits. Three versions are written up for the owner in "V3.4 proposals: rival crews and the pub" (https://claude.ai/artifact/PttJ4kNWutJvUAegNgAxeA); not approved yet.
-- **Rival crews fleshed out:** parley card with deals (leave, truce, job, sell-swords, fight), neutral prospectors on Level 1 and toll-demanding cutthroats on Level 2. Same proposals doc; waiting on the owner's pick.
-- **Arrows as ammunition (2026-10-25):** bows use purchasable arrows (a quiver item), with specialty arrows as forge upgrades (fire, barbed/hamstring, grapple line, whistling/lure). Owner's second play-test batch.
-- **Tripwire charges (2026-10-25):** the Sapper lays a charge as a trap that enemies set off; a forge upgrade from Gerda.
-- **Collapse ceilings and seal hallways with charges (2026-10-25):** a charge against a hallway's roof or a doorway brings it down, filling hexes with rock that blocks movement and sight (and Dig clears it slowly). Revisit after the owner play-tests the V3.7 Sapper rework.
-- **Free exploration outside combat (shelved 2026-10-25):** BG3-style exploration (V3.8) and the earlier calm free move (V3.7). Code, findings and how to resume: docs/shelved/exploration-mode.md (branch `shelf/exploration-mode`). The owner wants to return to it.
-- **Managed facing (shelved 2026-10-25):** the free Face command (F) and turning toward an action's target, from V3.9. Code behind `FACING` in src/game/data.ts (and the hud's Face mode); engine tests still cover it. Revisit in or after V4.0 if blindsided feels unfair without a way to turn in place.
+## Shelved (code exists)
+
+- **Free exploration outside combat** (shelved 2026-10-25): BG3-style exploration (V3.8) and the earlier calm free move (V3.7). Code, findings and how to resume: `docs/shelved/exploration-mode.md` (branch `shelf/exploration-mode`; the calm walk is on `main` behind `FREE_MOVE.enabled`). The owner wants to return to it.
+- **Managed facing** (shelved 2026-10-25, V3.9.1): the free Face command (F). Code behind `FACING.faceCommand` in `src/game/data.ts` and the HUD's Face mode; engine tests still cover it. Turning toward an action's target came back in V3.9.2 (`FACING.turnOnAction`). Revisit if blindsided feels unfair without a way to turn in place.
+- **Rear-half shading on hover** (removed from view 2026-10-25, V3.9.1): hovering an enemy shaded its blind area. `Diorama.showRearHalf` still exists; the HUD always passes null.
+- **The free-swing warning's presentation** (owner, 2026-10-26): revisit in V4.0 (the move preview's ⚔ tag over the enemy).
+
+## Shipped since being filed
+
+- Hiring or allying with rival crews (V3 GDD) → V3.5 parley card: hire for a job or 5 rounds.
+- Rival crews fleshed out (parley, prospectors on Level 1, cutthroats on Level 2) → V3.5.
+- The Gilded Flagon, a Deep Rock-style pub with ales, opened by rescuing Old Wim and recovering the copper and the cask book → V3.5.
+- Thin walls, the look → V3.2.

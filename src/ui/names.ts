@@ -71,7 +71,7 @@ export const V39 = {
 /** V3.9 (spec 24): the help lines for facing, backs and the Burglar. */
 export const FACING_HELP = {
   face: 'Facing: a hero faces the way of their last step, or toward whatever they last attacked, took or used. They see all round except a narrow cone straight behind them, even next to them.',
-  backExposed: `Back exposed: nobody else can see the hex straight behind this hero. Something coming from there is unseen, and a hit from a hero's rear half is blindsided: +${V39.blindsideSlots} slot to the attacker. Have another hero stand where they can see it.`,
+  backExposed: `Back exposed: nobody else can see the hex straight behind this hero. Something coming from there is unseen, and a hit from straight behind a hero is blindsided: +${V39.blindsideSlots} slot to the attacker. Have another hero stand where they can see it.`,
   blindsided: `Blindsided: an attack from the cone straight behind a hero gets +${V39.blindsideSlots} slot (monsters, crews, free swings, overwatch shots alike). If no hero can see the attacker, it strikes unseen ("Something strikes … from behind") and stays visible until your next turn ends.`,
   backstab: `Backstab (Burglar): a melee strike from behind the target (a monster's whole rear half, or straight behind a crew member) on a monster or crew member that has not noticed the Burglar (asleep, or awake without having noticed them): +${V39.backstabSlots} slot and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit (before armor), on top of the sneak attack's +${V37.sneakSlots}. Not the Dragon or the Gloam. With a Burglar selected, a 🗡 marks the hexes to strike from.`,
   quietFeet: `Quietest feet (Burglar): sneaks at full pace (4, dash 4), rubble no louder. Sleepers roll only ${V39.burglarWakeSneak}% per hex a sneaking Burglar passes (others ${V37.wakeSneak}%), ${V39.burglarWakeEndSneak}% for ending next to one (others ${V37.wakeEndSneak}%). Awake enemies notice a sneaking Burglar in their front half only within ${V39.burglarNoticeLitSneak} lit (others ${V37.noticeLitSneak}), when adjacent unlit, ${V39.burglarNoticeHollowSneak} in the Hollow (others ${V37.noticeHollowSneak}).`,
@@ -160,7 +160,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   burglar: [
     ['Pick', 'ability', 'An improvised pick each delve (2 slots, used up). With the smith\'s lockpicks: 3 slots, kept.'],
     ['Quietest feet', 'passive', 'Sneaks at full pace (4, dash 4), quieter than anyone: half the wake chance, noticed only up close.'],
-    ['Backstab', 'passive', 'From an unaware enemy\'s rear half: +1 slot and double damage per hit, on top of the sneak attack.'],
+    ['Backstab', 'passive', 'From behind an unaware enemy (a monster\'s rear half, straight behind a crew member): +1 slot and double damage per hit, on top of the sneak attack.'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
   ],
   mage: [
@@ -395,7 +395,7 @@ export function actionHelp(action: ActionKind, cls?: string): string {
   if (action === 'attack' && cls && cls in CLASSES) {
     const w = CLASSES[cls as HeroClass].weapon;
     const stat = `${w.stat[0]!.toUpperCase()}${w.stat.slice(1)}`;
-    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}. Sneak attack: +1 slot on a monster that has not noticed you${cls === 'burglar' ? `. Backstab from its rear half: +${V39.backstabSlots} more and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage` : ''}.`;
+    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}. Sneak attack: +1 slot on a monster that has not noticed you${cls === 'burglar' ? `. Backstab from behind (a monster's rear half, straight behind a crew member): +${V39.backstabSlots} more and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage` : ''}.`;
   }
   return ACTION_HELP[action] ?? '';
 }
@@ -418,8 +418,8 @@ export function modifierHelp(m: string): string {
   if (/^(Bright|Dim|Dark|Pitch)/.test(m)) return 'how much light you stand in';
   if (/^Weapon/.test(m)) return 'smithy upgrade';
   if (/^Asleep/.test(m)) return 'the target is asleep';
-  if (/^Backstab/.test(m)) return 'from its rear half, unnoticed: +1 slot and double damage per hit';
-  if (/^Blindsided|^From behind/.test(m)) return 'struck from the target\'s rear half';
+  if (/^Backstab/.test(m)) return 'from behind, unnoticed: +1 slot and double damage per hit';
+  if (/^Blindsided|^From behind/.test(m)) return 'struck from straight behind the target';
   if (/^Sneak attack|^Unnoticed|^Unaware/.test(m)) return 'it has not noticed you yet';
   if (/^Free swing/.test(m)) return 'a swing as it leaves your reach: 1 slot fewer';
   if (/^Braced/.test(m)) return 'the target has planted their feet';
@@ -448,7 +448,7 @@ export const MOVE_HELP = {
   follow: 'Follow: every other active hero within 3 comes along behind in single file, the lantern with them. Off: only the selected hero walks.',
   walk: `Walk: up to 4 hexes, noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you in their front half within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit; in their rear half only when adjacent. Hovering a hex shows what the move risks.
 After moving, a second move (a dash) spends the action.`,
-  sneak: `Sneak (S): up to 2 hexes (Burglar 4, dash 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (Burglar ${V39.burglarWakeSneak}%; half unlit; ending next to one ${V37.wakeEndSneak}%, Burglar ${V39.burglarWakeEndSneak}%). Awake monsters notice you in their front half within ${V37.noticeLitSneak} lit (Burglar ${V39.burglarNoticeLitSneak}), ${V37.noticeDarkSneak} unlit, and never in their rear half: hover an enemy to see its back. Your first strike on a monster that has not noticed you gets +${V37.sneakSlots} slot.`,
+  sneak: `Sneak (S): up to 2 hexes (Burglar 4, dash 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (Burglar ${V39.burglarWakeSneak}%; half unlit; ending next to one ${V37.wakeEndSneak}%, Burglar ${V39.burglarWakeEndSneak}%). Awake monsters notice you in their front half within ${V37.noticeLitSneak} lit (Burglar ${V39.burglarNoticeLitSneak}), ${V37.noticeDarkSneak} unlit, and never in their rear half (hovering an enemy says which way it faces). Your first strike on a monster that has not noticed you gets +${V37.sneakSlots} slot.`,
   swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once as you leave its reach, with 1 slot fewer. Sneaking does not avoid it. Your heroes swing the same way at enemies that leave their reach while their action is still ready.',
   blind: FACING_HELP.rear,
 };
