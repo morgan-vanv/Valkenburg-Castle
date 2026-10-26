@@ -253,7 +253,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
       expect(rolls(r.events, burglar!.id).some((x) => x.what === 'Pick')).toBe(true);
     });
 
-    it('the paid "open" job: the lockpicker\'s best attempt; a jammed lock hands the price back', () => {
+    it('the paid "open" job: the lockpicker\'s best attempt; a jammed lock ends the job and they keep the price (spec 28.8)', () => {
       let done = false;
       for (let i = 1; i < 400 && !done; i++) {
         const s = seeded(delve(), i);
@@ -266,7 +266,8 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
         if (!ch.jammed) continue;
         done = true;
         const after = r.state.delve!.heroes[0]!.pack.filter((x) => x.kind === 'gold').reduce((n, x) => n + x.amount, 0);
-        expect(after - before).toBe(30);
+        expect(after).toBe(before); // no refund: the gold stays spent
+        expect(r.events.some((x) => x.type === 'say' && /jams the lock\. The job's done; they keep the 30\./.test(x.text))).toBe(true);
         expect(r.state.delve!.rivals!.job).toBeUndefined();
       }
       expect(done).toBe(true);

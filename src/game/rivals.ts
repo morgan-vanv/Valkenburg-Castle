@@ -15,7 +15,7 @@ import {
 import { chance, int, pick, random } from './rng';
 import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type MonsterX, type RivalX } from './state';
 import {
-  addToPack, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
+  crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue,
   rivalsOnMap, roll, turnOnHit, valueOf, activeHeroes,
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
@@ -633,22 +633,11 @@ function hiredAct(c: Ctx, r: RivalX): void {
   }
 }
 
-/** V4.0 (spec 28.3): give the job's price back to the hero who paid (gold in their pack, else at their feet). */
-function refundJob(c: Ctx): number {
-  const job = c.d.rivals?.job;
-  const h = job?.by ? hd(c, job.by) : undefined;
-  const n = job?.price ?? 0;
-  if (!n || !h) return 0;
-  const left = addToPack(c, h.pack, makeItem(c, 'gold', n));
-  if (left) putOnGround(c, h.at, [left]);
-  return n;
-}
-
 /**
  * The paid job (spec 18.6): walk there, then work the winch or open the lock. V4.0 (spec 28.3): the lock is the
  * crew lockpicker's best attempt by the heroes' rules: every slot: silent, as promised; one short: open, but a clunk
- * (noise 2, said honestly); it holds: they try again next round; it jams: the job can't be done, and the price is
- * handed back. Returns true if this member did it.
+ * (noise 2, said honestly); it holds: they try again next round; it jams: the job is over, failed, and (owner, spec 28.8)
+ * the crew keeps the price: no refund. Returns true if this member did it.
  */
 function jobAct(c: Ctx, r: RivalX): boolean {
   const cr = c.d.rivals!;
@@ -671,8 +660,7 @@ function jobAct(c: Ctx, r: RivalX): boolean {
     const at = job.at;
     const door = kindAt(c.w, c.d, at) === 'door';
     if (crewPickSlots(r) === null) {
-      const back = refundJob(c);
-      say(c, `${r.name} has no picks to do it quietly. ${cr.name} hand back your ${back} gold.`);
+      say(c, `${r.name} has no picks for the lock. The job's done; they keep the ${job.price ?? 0}.`);
     } else {
       const res = crewWorkLock(c, r, at, false, false);
       if (res === 'holds' || res === 'stuck') {
@@ -680,8 +668,8 @@ function jobAct(c: Ctx, r: RivalX): boolean {
         return true;
       }
       if (res === 'jammed') {
-        const back = refundJob(c);
-        say(c, `${r.name}'s pick snaps in the lock: it's jammed. ${cr.name} hand back your ${back} gold.`);
+        // Spec 28.8 (owner): a failed job is the party's risk; the crew keeps the money.
+        say(c, `${r.name} jams the lock. The job's done; they keep the ${job.price ?? 0}.`);
       } else {
         const ch = door ? undefined : c.d.chests.find((x) => samePos(x.at, at) && !x.opened);
         if (ch) {

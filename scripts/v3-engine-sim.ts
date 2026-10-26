@@ -300,7 +300,7 @@ function lanternCheck(s: GameState, id: string): GameState {
 let crewLog: string[] = [];
 let crewDelves = 0;
 let pickFight = false;
-const crewStats = { fights: 0, won: 0, lost: 0, fled: 0, captured: 0, rescuesTried: 0, rescuesDone: 0, membersKilled: 0, heroesDowned: 0 };
+const crewStats = { fights: 0, won: 0, lost: 0, fled: 0, captured: 0, heroesDead: 0, rescuesTried: 0, rescuesDone: 0, membersKilled: 0, heroesDowned: 0 };
 const fightLog: string[] = [];
 function parleyCheck(s: GameState, id: string): GameState {
   const cr = s.delve?.rivals;
@@ -860,6 +860,7 @@ for (let i = 0; i < N; i++) {
       crewStats.fights++;
       const dead = cr.members.filter((m) => m.hp <= 0).length;
       crewStats.membersKilled += dead;
+      crewStats.heroesDead += sum.dead.length;
       const allDead = cr.members.every((m) => m.hp <= 0);
       const lost = sum.dead.length > 0 || taken > 0;
       if (allDead && !lost) crewStats.won++;
@@ -917,7 +918,7 @@ for (const r of crews) {
 }
 console.log(`crews (spec 18.5): ${crews.length} delves with a crew; ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).length}, refused ${crews.filter((r) => r.crew.includes('refused toll')).length}; deaths in crew delves ${crews.reduce((a, r) => a + r.deaths, 0)}`);
-console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
+console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes dead in crew fights ${crewStats.heroesDead}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
 for (const f of fightLog) console.log(`  ${f}`);
 console.log(`crew parity (spec 28): members ${parity.members}, killed by monsters (no party fight) ${parity.killedByMonsters}, left with loot ${parity.leftWithLoot}, piles/chests looted ${parity.lootedPiles}; monster strikes on crew ${parity.monsterHits}, crew strikes on monsters ${parity.hitsOnMonsters}; picks ${parity.picks}, smashes ${parity.smashes}, traps spotted ${parity.trapsSpotted} / disarmed ${parity.disarms} / sprung in sight ${parity.trapsSprung}; sleepers woken by crews ${parity.woke}; crew fuses ${parity.fuses}; crew backstabs ${parity.backstabs}, sneak attacks ${parity.sneakAttacks}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
