@@ -374,10 +374,14 @@ export const SHOP: ShopOffer[] = [
   { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
   { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
   { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
+  // V4.0 (spec 29.3): Mott sells venom darts from the start.
+  { kind: 'venomdart', name: 'Venom dart', price: 30, text: 'Throw 5: a Finesse hit envenoms a monster or crew member: paralyzed in 3 turns, for 6. Silent.' },
   { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
   { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
   { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
+  // V4.0 (spec 29.6): an essential: always sold.
+  { kind: 'antidote', name: 'Antidote', price: 20, text: 'Drink, or give to a hero next to you (an action): draws out venom, even from the paralyzed.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
   // V3.6 (spec 19.2, 19.3).
   { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.', needs: 'smith' },
@@ -422,7 +426,18 @@ export const GUST_NOISE = 2;
 export const VEIL_ROUNDS = 2;
 export const WARD_ROUNDS = 2;
 export const VEIL_BREAK_NOISE = 4;
-export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker', number> = { smoke: 4, glue: 4, dart: 5, firecracker: 6 };
+export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker' | 'venomdart', number> = { smoke: 4, glue: 4, dart: 5, firecracker: 6, venomdart: 5 };
+
+// V4.0 (spec 29): venom and paralysis.
+/** World phases from the first dose to paralysis; a second dose while envenomed takes 1 off (to 1 at least). */
+export const VENOM_ROUNDS = 3;
+/** World phases a paralyzed figure stays paralyzed before it wears off (owner: a long time). */
+export const PARALYSIS_ROUNDS = 6;
+/** A trap's bite (spec 13.4) and a venom trap's (1 and venom instead). */
+export const TRAP_DMG = 3;
+export const VENOM_TRAP_DMG = 1;
+/** A hero shouldering a paralyzed ally moves this far at most (dash too), like HEAVY_MOVE. */
+export const CARRY_MOVE = 3;
 export const SMOKE_ROUNDS = 2;
 export const GLUE_ROUNDS = 2;
 export const CALTROPS_DMG = 2;
@@ -656,7 +671,8 @@ export const CREWS: Record<CrewId, CrewDef> = {
     id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
     members: [
       { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
-      { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+      // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.
+      { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'venomdart', 'smoke', 'lockpicks'] },
       { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'oil'] },
     ],
     hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },

@@ -130,9 +130,10 @@ export function makeBook(): PropView {
   return { obj: g, mats: [leather, page] };
 }
 
-export function makeTrap(): PropView {
-  const iron = fogMaterial({ color: 0x5a5250, litFloor: 0.2 });
-  const red = new THREE.MeshBasicMaterial({ color: COLORS.danger, transparent: true, opacity: 0.55, depthWrite: false });
+/** A spotted trap: an iron plate of spikes in a red ring; V4.0 (spec 29.5) a venom trap's needles and ring are green. */
+export function makeTrap(venom = false): PropView {
+  const iron = fogMaterial({ color: venom ? 0x4f6a48 : 0x5a5250, litFloor: 0.2 });
+  const red = new THREE.MeshBasicMaterial({ color: venom ? 0x6fdc5a : COLORS.danger, transparent: true, opacity: venom ? 0.7 : 0.55, depthWrite: false });
   const g = new THREE.Group();
   const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.03, 6), iron);
   plate.position.y = FLOOR_TOP + 0.015;

@@ -1568,9 +1568,9 @@ describe('15.3 classes', () => {
 });
 
 describe('15.4 quartermaster', () => {
-  it('sells fourteen items (V3.6: lockpicks and the night-eye draught); buying puts them in the stash', () => {
+  it('sells sixteen items (V3.6: lockpicks and the night-eye draught; V4.0: venom darts and the antidote); buying puts them in the stash', () => {
     const shop = e.shop();
-    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'caltrops', 'hook', 'key', 'oil', 'firecracker', 'lockpicks', 'nightsight']);
+    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'nightsight']);
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
@@ -3970,6 +3970,39 @@ describe('V3.7 crews', () => {
       const t = scene(at(1, 15, 8), { dozing: true });
       computeIntentsOf(ctx(t));
       expect(member(t, 0).intent?.kind).not.toBe('rob');
+    });
+
+    it('V4.0 (spec 29): paralyzed counts as helpless: seized alone, held through the paralysis; a paralyzed friend is not "up"', () => {
+      const s = scene(at(1, 2, 8), { dozing: true });
+      const b0 = hero(s, 'brann') as HeroX;
+      b0.dozing = undefined;
+      b0.webbed = false;
+      b0.paralyzed = 5;
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      const r = ok(s, { type: 'endTurn' });
+      expect(r.events.some((x) => x.type === 'say' && /finds Brann paralyzed and alone/.test(x.text))).toBe(true);
+      const b = hero(r.state, 'brann') as HeroX;
+      expect(b.grabbedBy).toBe(member(r.state, 0).id);
+      expect(b.status).toBe('active');
+      expect(e.actions(r.state, 'brann')).toEqual([]); // still paralyzed: no Escape yet
+      // Keven within 4 but paralyzed too: not "up", so Brann is still alone.
+      const t = scene(at(1, 15, 8), { dozing: true });
+      const bt = hero(t, 'brann') as HeroX;
+      bt.dozing = undefined;
+      bt.webbed = false;
+      bt.paralyzed = 5;
+      hero(t, 'keven').paralyzed = 5;
+      computeIntentsOf(ctx(t));
+      expect(member(t, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      // Keven up within 4: not alone, not seized.
+      const u = scene(at(1, 15, 8), { dozing: true });
+      const bu = hero(u, 'brann') as HeroX;
+      bu.dozing = undefined;
+      bu.webbed = false;
+      bu.paralyzed = 5;
+      computeIntentsOf(ctx(u));
+      expect(member(u, 0).intent?.kind).not.toBe('rob');
     });
 
     it('a lone heir downed is fair game: carried off, and the campaign ends', () => {

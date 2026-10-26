@@ -860,3 +860,55 @@ Rope, jump, climb and grapple; crew light sources and lighting braziers; Focus, 
 Numbers (crew arena, 40 fights × 4 crews × 5 parties, SEED=1; dead / captured): before 277 / 272, after 610 / 123. Captures now come mostly from wipes (the last hero down is alone) and from parties of two; captures went down in every cell but two (vs l1x4: Ferrymen 14 → 16, the Wake 6 → 9). Side effect: crews are deadlier, because a member no longer leaves the fight to drag a hero off while the rest of the party stands, and finishes the downed: fights lost rose (Ferrymen vs l1x4 5% → 50%, Choir vs l1x3 28% → 98% (stalls before), vs l1x4 0% → 10%, the Wake vs l1x4 3% → 20%, vs l2x4 3% → 23%, vs l3x4 23% → 30%); L2+ parties still win every fight against the Sisters, Ferrymen and Choir. A balance pass on crew lethality may be wanted. Sim (`v3-engine-sim.ts 10`, SEED=1,2,3; 8 crew fights): dead 7 / captured 1 before, 6 / 3 after (all three: two-hero L1 parties wiped by the Sisters).
 
 Tests: engine.test.ts "spec 28.8: helpless and alone" (seized when downed and alone; finished with a friend within 4, the living fought when one is at its blade; a dozing lone hero seized, dragged, wakes held, Escape frees; a lone heir taken ends the campaign), crews.test.ts (the jammed job: no refund).
+## 29. V4.0 venom (owner, 2026-10-26)
+
+Owner-approved; design pillars 15 (the countdown is a number that informs a choice), 16 (intuitive rules, creative approaches: an antidote, Mend, a friend's shoulders, or the way out), 17 (crews by the same rules). Contract (types.ts): `ItemKind` and `ShopKind` gain `'antidote'` and `'venomdart'`; `ActionKind` gains `'venomdart'`, `'antidote'`, `'shoulder'`, `'setDown'`; `HeroInDelve.venom`, `.paralyzed`, `.carrying`; `Monster.venom`, `.paralyzed`; `Rival.venom`, `.paralyzed`; `TrapDef.venom` and `Delve.traps[k].venom`; `Intent.kind` gains `'venomdart'`; events `envenomed` (`venom`, `dose`), `paralyzed` (`rounds`), `cured` (`how`: antidote, mend, worn, out), `shouldered`, `setDown`; `trap` and `trapSpotted` gain `venom`. Code: src/game/venom.ts (new). Tests: src/game/venom.test.ts.
+
+### 29.1 Envenomed
+
+- A dose sets a countdown of `VENOM_ROUNDS` 3 on a hero (up or downed), a monster (not the Dragon or the Gloam) or a crew member. It drops by 1 at step 2 of every world phase (with the bleeding, before monsters act); at 0 the figure is paralyzed. A second dose while envenomed takes 1 off (to 1 at least); a paralyzed figure takes no dose.
+
+### 29.2 Paralyzed
+
+- For `PARALYSIS_ROUNDS` 6 world phases (run down at step 2; a newly paralyzed figure doesn't count down that phase): no move, no action, free actions included; no free swings; no bleeding; not downed. Damage hurts as usual (a hero at 0 HP goes down by 8.5, the paralysis running on underneath). Monsters still target a paralyzed hero. It wears off by itself: back with HP as it is.
+- What stops: a hero's escort (the prisoner waits), guard, brace and overwatch; a paralyzed lantern bearer drops the lantern to the nearest able hero. A monster's intent (none shown), its hold, its looking round and turning to noise. A crew member's walk and kit (it waits); a dragged hero is dropped.
+- The delve ends when no hero can stir (active and not paralyzed). A paralyzed hero still inside at the end dies, as a downed one ("left behind").
+
+### 29.3 Sources
+
+- **Spiders:** a bite that hits (strike or free swing, every level) envenoms the hero or crew member. The intent reads "bites Fenna, 0–5 damage (venom)".
+- **Venom dart** (new item, 1 slot, Mott, 30 gold, from the start): throw 5 at a visible monster (not the Dragon or the Gloam) or crew member in line of sight, not paralyzed: 1 Finesse slot (+20 asleep, light penalty as usual); a hit envenoms. Silent; a hit doesn't make a monster hunt (as the sleep dart); on a crew member the crew turns hostile.
+- **Crews:** the Gallows Choir's Little Mags carries a venom dart instead of one sleep dart. A hostile crew Burglar with one shows the intent `venomdart` at a hero in range 5 and sight with no venom in them: a hero alone first (no other able hero within 4: nobody to carry them out), else the crew's target, else the nearest; then her sleep darts as before.
+- **Venom traps:** see 29.5.
+
+### 29.4 Carrying: Shoulder and Set down
+
+- **Shoulder** (an action; target: an active, paralyzed ally next to you that nobody carries; the carrier able and carrying nobody): `carrying` = the ally. After each of the carrier's moves the carried ally is set on a free hex next to the carrier, nearest where they were (the escorted prisoner's rule: not onto doors but the open sally port gate, nor traps, vents or fire). The carrier moves `CARRY_MOVE` 3 at most (dash too), and their action is spent for the turn they shoulder.
+- **Set down:** free, any time.
+- Carrying ends: the carrier downed, paralyzed or gone; the carried one recovering (cured or worn off), downed or dead; a jump, climb, grapple or blink.
+- A carrier who Leaves on an exit takes the carried ally out with them (both out; the venom drawn out).
+- Crews don't shoulder yet (docs/ideas-later.md, "Venom, the crew side").
+
+### 29.5 Venom traps
+
+- Two on Level 2, added to the two plain ones: the east ledge corridor (34, 13), on the way down to the forge, and the cellblock's east passage (15, 23), by the door to the winch room. 1-wide corridors (no stepping round), off the bridges, more than 2 from any contract site (castle.test).
+- Stepped on (heroes and crews) or set off by a failed Disarm: 1 damage (`VENOM_TRAP_DMG`) and a dose, instead of 3 damage. Hidden, spotted and disarmed like any trap. Spotted, it is drawn with a green ring and needles; the move preview says "A venom trap on the way: 1 damage, and paralyzed in 3 turns" when one lies on the path.
+
+### 29.6 Cures
+
+- **Antidote** (new item, 1 slot, 20 gold, always sold: an essential): an action, on yourself while envenomed or on a hero next to you (up or downed) who is envenomed or paralyzed: venom and paralysis gone.
+- **Mend** (Hedgewitch): heals 4 and draws out venom and paralysis; an envenomed or paralyzed hero within 3 is a target even at full HP. Crew Hedgewitches mend a paralyzed or envenomed member first; a hired one mends a hero with venom first.
+- **Leaving the castle** draws the venom out (a return report note: "Fenna came out with venom in them; the open air drew it out.").
+
+### 29.7 Presentation
+
+- Party card: a green drop with the countdown (aria "Venom 2", hover "Venom: paralyzed in 2 turns. Antidote, Mend, or get out."); paralyzed, a line under the HP ("Paralyzed · wears off in 4 turns. Shoulder them to carry them out." / "On Corin's shoulders · wears off in …"), both turn pips off; a carry icon on the carrier.
+- Hotbar: the antidote and venom darts are pack items (click to use, targeted like the other throws and potions); Shoulder is a contextual action that glows next to a paralyzed ally; Set down takes its place while carrying.
+- Enemy tags: a drop with the countdown, or "paralyzed"; cards say "Envenomed: paralyzed in N turns." / "Paralyzed: can't move or act for N more turns."; the mood word "paralyzed".
+- The target card for a venom dart: "Envenoms it: paralyzed in 3 turns if it hits." The castle's-turn caption: "The spider bites Fenna" with "2 damage, venom." Float words over figures (Venom, Paralyzed, Venom drawn out, Can move again); Chronicle lines with a drop or carry icon.
+- Lowgate: the antidote under "Light and mending", the venom dart under "Quiet work".
+
+### 29.8 With spec 28.8 (crews take the helpless and alone)
+
+- A paralyzed hero is **helpless** (as downed or dozing), and isn't "up" for another hero's "alone". A crew member that can stand next to a paralyzed hero with nobody up within `CAPTURE_ALONE` (4) seizes them ("finds Fenna paralyzed and alone"): held (`grabbedBy`), dragged toward the way out; they may Escape once the paralysis ends or a friend cures it (an antidote from next to them, Mend within 3). A friend can't Shoulder a hero a crew member holds. Held when the delve ends, they are captured, not left to die.
+- The Gallows Choir's venom dart goes for a hero alone (28.8's `alone`) first: paralyzed and alone, the crew can carry them off.
