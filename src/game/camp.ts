@@ -591,9 +591,9 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       moveMode: h.cls === 'burglar' ? 'sneak' : 'walk',
       ...(ale ? { ale } : {}),
     };
-    // V3.7 (spec 20.3): the Sapper's satchel: 3 charges in one slotless pack item; bought charges add to them.
-    if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
-    // V3.7.1 (spec 21.4): every Burglar brings one improvised pick, outside the 4 slots like the satchel.
+    // V3.7 (spec 20.3), V4.0 (26.5): the Sapper's own 3 improvised explosives, one slotless pack item; bought charges add to them.
+    if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'improvised-charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
+    // V3.7.1 (spec 21.4): every Burglar brings one improvised pick, outside the 4 slots like the explosives.
     if (h.cls === 'burglar') hid.pack.push({ ...makeItem({ s }, 'improvised'), slots: 0 });
     // V3.9 (spec 24.2): everyone starts facing into the castle.
     hid.facing = facingInto(w, d, hid.at);
@@ -729,7 +729,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
       if (it.story || isGateKey(it)) continue; // spec 18.3: to the village, below; V4.0: the sally key opens its gate (ways.ts)
-      if (isKit(it)) continue; // spec 20.3, 21.4: the satchel and the improvised pick refill each delve
+      if (isKit(it)) continue; // spec 20.3, 21.4, 26.5: class kit (improvised explosives, the improvised pick) refills each delve
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
     }

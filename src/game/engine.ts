@@ -5,7 +5,7 @@ import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Comm
 import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
-import { blastPreview } from './charges';
+import { blastPreview, migrateSatchel } from './charges';
 import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { edgeRiskAt, fallInfo } from './falls';
@@ -258,6 +258,8 @@ export function createEngine(castle: CastleDef): Engine {
         // V4.0 (spec 25): a save without `opened` had every way in open, and keeps them (campaignOpen
         // reads the absent field as open). A delve saved mid-way gets its ways set up the same way.
         const d = s.delve as DelveX | null;
+        // V4.0 (spec 26.5): a Sapper's satchel saved mid-delve becomes their improvised explosives.
+        for (const h of d?.heroes ?? []) for (const i of h.pack) migrateSatchel(i);
         if (d && !d.ways) {
           d.ways = startWays(w, s);
           applyOpenWays(w, d);
