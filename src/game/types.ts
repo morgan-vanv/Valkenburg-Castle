@@ -634,7 +634,7 @@ export interface RivalCrew {
   /** Rounds of sell-sword service left. */
   hiredRounds?: number;
   /** A job paid for and not yet done. */
-  job?: { kind: JobKind; at?: Pos; /** V4.0 (spec 28.3): what was paid and by whom (a jammed lock is refunded) */ price?: number; by?: string };
+  job?: { kind: JobKind; at?: Pos; /** V4.0 (spec 28.3): what was paid and by whom (spec 28.8: kept by the crew, named in the log; no refund) */ price?: number; by?: string };
   spotted: boolean;
   /** Round they enter; they're off the map before it. */
   entersRound: number;
