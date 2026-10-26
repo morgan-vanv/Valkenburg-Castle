@@ -13,7 +13,7 @@ import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, 
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
-import { computeIntents, planMonster, worldPhase } from './world-phase';
+import { computeIntents, lookAll, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
 import { applyOpenWays, castleMemory, entranceList, startWays } from './ways';
 
@@ -61,9 +61,17 @@ export function createEngine(castle: CastleDef): Engine {
       case 'setMoveMode':
         err = doSetMoveMode(c, command.heroId, command.sneak);
         break;
-      case 'act':
+      case 'act': {
+        // V4.0 (spec 27): an action that changes the light (a torch, the lantern opened, shuttered or passed, kindle, oil)
+        // lets every awake monster look again.
+        const before = litSet(w, c.d);
         err = doAct(c, command.heroId, command.action, command.target, command.focus);
+        if (!err && s.stage === 'delve' && c.d.phase === 'player') {
+          const after = litSet(w, c.d);
+          if (after.size !== before.size || [...after].some((k) => !before.has(k))) lookAll(c);
+        }
         break;
+      }
       case 'endTurn':
         worldPhase(c);
         break;

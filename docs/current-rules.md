@@ -259,7 +259,9 @@ Sleepers never notice anyone by sight. For each hex a hero steps on within 2 of 
 
 ### 5.4 Noticing (awake monsters and waiting/hostile crews)
 
-An awake watcher notices a hero it has not yet noticed by these ranges (line of sight; smoke on either hex hides beyond 1):
+V4.0 (spec 27): monsters see by their **mood**, the mark over their head (5.5). Where a hero stands is read in the six hex directions relative to the watcher's facing: **front** (the facing and its two neighbours), **sides** (the two rear-side directions), **behind** (the single back direction).
+
+The **front ranges** (line of sight; smoke on either hex hides beyond 1):
 
 | Hero is | Walking | Sneaking | Sneaking Burglar |
 | --- | --- | --- | --- |
@@ -267,33 +269,47 @@ An awake watcher notices a hero it has not yet noticed by these ranges (line of 
 | Unlit (L1, L2) | 5 | 1 | 1 |
 | Level 3, any light | 8 | 3 | 2 |
 
-- In the watcher's blind area (section 6): a walking hero is noticed only when adjacent; a sneaking hero never.
-- "Sneaking" is the hero's last move mode; it persists while they stand still. A hero who never moved counts as walking. The Walk/Sneak setting (5.1) doesn't change this: a Burglar set to sneak who hasn't moved yet counts as walking, and switching a standing hero to Sneak doesn't hide them.
+| Mood | Front | Sides | Behind |
+| --- | --- | --- | --- |
+| Unaware (at its post, on patrol) | front ranges | a walker within 2 (`SIDE_NOTICE_WALK`, line of sight); anyone adjacent (`SIDE_NOTICE_ADJACENT`) except a sneaking Burglar (`BURGLAR_SIDE_QUIET`); a sneaker at 2+ never | a walker adjacent; a sneaker never |
+| Searching (`?`) | front ranges | front ranges | as unaware |
+| Hunting (`!`), heroes not yet noticed | front ranges | front ranges | as unaware |
+| Hunting, heroes it has noticed | plain sight all round (below) | | |
+| Asleep | sees nothing; hears only (5.3) | | |
 
-When (V4.0, spec 26.2): noticing happens the moment it would.
-- **During a move, in the player phase:** at every hex of a walk, every awake monster on that level (not asleep, not the Gloam, not the Dragon, not buried) that hasn't noticed the moving hero checks the rule above at that hex; so a hero who walks through a field of view and out again is still spotted. The check comes after the step (the hero faces the step) and before that step's noise and wake rolls: a sleeper woken by a step notices from the hero's next step on; a sleeper woken by the last step stays alert until the world phase or the hero's next move. Arrivals that aren't walks (blink, fall, jump, climb, grapple, a gust push) check once at the landing hex, before the landing's wake rolls. Only the hero who moved is checked (another hero newly lit by the lantern bearer's walk is noticed in the world phase).
-- Effects, the same as in the world phase: remembered (`noticedIds`), a `noticed` event (`at`: the hero's hex then; `faced`: whether it turned), hunting with focus on that hex (an unaware monster turns to the hero; one already hunting keeps its facing and its quarry), the orc's first-sight bellow (noise 5, which can set off a waiting cutthroat crew's toll). The hero finishes the move. The monster re-plans its intent when the command ends (`Ctx.replan`, in `engine.apply`), keeping its quarry, so the intent shown for the world phase is right. A walk's `moved` event is split at the hex so the view plays the "!" there.
+- The Dragon and the Gloam keep their own rules. Crew members see like heroes: blind only straight behind (their sides count as front), front ranges elsewhere, a walker adjacent behind.
+- "Sneaking" is the hero's last move mode (`isSneaking`); it persists while they stand still. A hero who never moved counts as walking. The Walk/Sneak setting (5.1) doesn't change this: a Burglar set to sneak who hasn't moved yet counts as walking, and switching a standing hero to Sneak doesn't hide them.
+- **Blowing cover (cascade):** a monster that notices one or more heroes at once turns to the first of them if it wasn't hunting (the moving hero when among them, else the nearest, ties in party order), goes hunting, and looks again at every hero with its new facing and hunting sight, until nobody new: one careless hero gives away friends near them. One already hunting doesn't turn (spec 26.3).
+
+When (V4.0, spec 26.2, 27): monsters look whenever anything moves.
+- **In the player phase,** at every hex of any hero's walk, and where a blink, fall, jump, climb, grapple, gust or shove lands a hero, every awake monster (not asleep, not the Gloam, not the Dragon, not buried) looks at **every** active, unveiled hero on its level it hasn't noticed, where they stand and in the light as it is at that moment (a lantern carried past can light a sneaking friend). An action that changes the lit hexes (a torch, the lantern opened, shuttered or passed, kindle, oil, fire) makes them look again. They all look at the same moment; then each acts on what it saw, in map order. Deterministic: no rolls. The look comes after the step (the hero faces it) and before that step's noise and wake rolls: a sleeper woken by a step looks from the next step on; one woken by the last step (or a landing), or a monster turned by a bellow, looks at the next look or in the world phase.
+- Effects, the same as in the world phase: remembered (`noticedIds`), a `noticed` event per hero (`at`: that hero's hex; `faced`: true only for the hero it turned to), hunting with focus on that hero's hex, the orc's first-sight bellow (noise 5, `BELLOW_NOISE`: it can set off a waiting cutthroat crew's toll and sends other monsters searching by the noise rules). The hero finishes the move. The monster re-plans its intent when the command ends (`Ctx.replan`, in `engine.apply`), keeping its quarry. A walk's `moved` event is split at the hex of the first notice so the view plays the "!" there.
 - A waiting cutthroat crew checks the moving hero the same way at every hex (`crewNotice(c, heroId)`), and demands its toll then; it still checks every hero after every command (`refreshSight`).
-- **In the world phase:** each monster still looks round as it acts (`perceive`), so one that turned or moved can spot heroes then.
+- **In the world phase:** each monster still looks round as it acts (`perceive`): it notices every hero it makes out, faces and hunts its quarry, then looks again with hunting sight (the cascade).
 - A monster that has noticed a hero (`noticedIds`) keeps tracking them by plain sight, ignoring facing: within 8 (`MONSTER_SIGHT`) in line of sight, and the hero lit or within 5 (`MONSTER_DARK_SIGHT`); on Level 3 light doesn't matter; smoke hides beyond 1.
-- Noticing makes the monster hunt. In the world phase it looks round on its turn and hunts its quarry: the hero its intent named, while it still makes them out, else the nearest perceived hero; it faces the quarry (V4.0: not the last hero noticed). A monster forgets who it noticed when it loses its quarry, is put to sleep, or is smoked out.
+- In the world phase it hunts its quarry: the hero its intent named, while it still makes them out, else the nearest perceived hero. A monster forgets who it noticed when it loses its quarry, is put to sleep, or is smoked out.
 - Veiled heroes are not targets at all.
-- Waiting cutthroats use the same noticing rule capped at 6 (`CUTTHROAT_SIGHT`).
+- Waiting cutthroats use the crew noticing rule capped at 6 (`CUTTHROAT_SIGHT`).
 
-### 5.5 Monster awareness states
+### 5.5 Monster awareness states and moods
 
-- `asleep`: doesn't act; wakes by sound only.
-- `alert`: walks toward `focusAt`; searches 3 rounds (`SEARCH_ROUNDS`), then patrollers return to the nearest waypoint (`patrol`), others walk back to their spawn hex and stand alert there.
-- `patrol`: walks its move allowance along its looping route. A hero who sees a patroller walk learns its route (`knownRoutes`).
-- `hunting`: goes for the nearest perceived hero; on losing sight, goes alert at the last seen hex (berserkers never lose interest).
-- Defaults at spawn: alert at post; patrol if it has a route; asleep only if the map says so; berserkers and buried ghouls hunting.
+| `awareness` | Mood (mark) | Meaning |
+| --- | --- | --- |
+| `asleep` | asleep (z) | doesn't act; wakes by sound only |
+| `alert`, no `searchRounds` | unaware (no mark) | at its post (or walking back to it, or dropped down a pit while asleep) |
+| `alert` with `searchRounds` | searching (`?`) | heard something (or lost its quarry, was smoked out, lost sight of a veiled hero): walks toward `focusAt` and searches 3 rounds (`SEARCH_ROUNDS`), then patrollers return to the nearest waypoint (`patrol`), others walk back to their spawn hex and stand there unaware |
+| `patrol` | unaware (👣) | walks its move allowance along its looping route. A hero who sees a patroller walk learns its route (`knownRoutes`) |
+| `hunting` | hunting (`!`) | goes for its quarry; on losing sight, goes searching at the last seen hex (berserkers never lose interest) |
+
+- `moodOf(m)` / `isSearching(m)` (stealth.ts) read it; saves from before spec 27 load the same way (alert without `searchRounds` = unaware).
+- Defaults at spawn: alert at post (unaware); patrol if it has a route; asleep only if the map says so; berserkers and buried ghouls hunting.
 - Monsters use stairs and the lift only while hunting. The Gloam uses stairs and passes locked doors.
 
 ### 5.6 Move preview (`Reach.risks`)
 
-Each reachable hex lists: wake rolls along the path for sleepers the party has seen, with chance; awake enemies currently visible that would notice the hero at any hex of the path (V4.0, `at`: the first such hex), taking watchers as they face now (a wake roll or a bellow on the way can turn one; the dice can't be previewed), a waiting crew within 6; free swings leaving provokes from seen enemies, with damage range (blindside slot included). Unseen enemies still roll and act; they are just not previewed.
+The preview plays the move through the eyes of every monster the party has seen (V4.0, spec 27), hex by hex as the move does: wake rolls along the path for seen sleepers, with chance; `notice`: each (watcher, hero) pair that would happen, in order, for watchers visible now, `at` the mover's hex then and `hero` the hero seen (the mover, or a friend whose cover the move blows: a cascade, or the lantern carried past); free swings leaving provokes from seen enemies (including one that noticed the mover earlier on the path), with damage range (blindside slot included). It follows what can be known: doors opened on the way, a swing turning its swinger, walking noise and an orc's bellow turning heads and sending monsters searching, sleepers woken for sure (100%). Dice can't be previewed: a sleeper that may wake is taken as asleep, a hero who may be downed by a swing walks on. A waiting crew is checked for the mover within 6. Unseen enemies still roll and act; they are just not previewed. The HUD: "👁 Orc will see you, then Fenna".
 
-Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`; camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the `replan` pass); stealth.ts `wouldNotice`, `perceivable`, `isSneaking`, `noticeHero`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
+Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`, `smokeOut`, `doAct` (`veil`); camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the look after an `act` that changed the light, the `replan` pass); stealth.ts `wouldNotice`, `bearingOf`, `moodOf`, `isSearching`, `lookRound`, `sightedHeroes`, `perceivable`, `isSneaking`, `noticeHero`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `lookAll`, `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `SIDE_NOTICE_WALK`, `SIDE_NOTICE_ADJACENT`, `BURGLAR_SIDE_QUIET`, `BELLOW_NOISE`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
 
 ---
 
@@ -304,19 +320,19 @@ Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetti
 - Every hero, monster and crew member has `facing` 0..5. Direction from a hex to another is the nearest of the six (`dirIndex`, ties to the lower index).
 - Heroes: face their last step; turn toward the target of any action aimed at a hex or figure on their level (`FACING.turnOnAction = true`). There is no Face command (`FACING.faceCommand = false`).
 - Monsters and crew members: face their last step and turn toward anything they strike or use an item, spell or ability on. Spawned monsters face the map's facing (default 0). A figure with no facing (a crew at its post) sees all round.
-- V4.0 (spec 26.3), monsters: an unaware one (asleep, alert, patrolling) turns toward a noise it hears and toward a hero it newly notices. A hunting one does neither (it still notices them): it turns on its own turn, toward its quarry as it looks round (5.4), the step it takes or what it strikes, and when hit. Going hunting turns a monster to its quarry (hit while unaware, the captain's shout, a ghoul rising).
+- V4.0 (spec 26.3), monsters: an unaware or searching one (asleep, alert, patrolling) turns toward a noise it hears and toward a hero it newly notices (several at once: toward one of them, spec 27). A hunting one does neither (it still notices them): it turns on its own turn, toward its quarry as it looks round (5.4), the step it takes or what it strikes, and when hit. Going hunting turns a monster to its quarry (hit while unaware, the captain's shout, a ghoul rising).
 - Crew members turn toward a hero they notice and never toward noise (unchanged).
 - **Hits turn them** (V4.0): a single-target attack that hits a monster (not the Gloam) or crew member turns it to face the attacker, after the hit resolves (a backstab lands from behind first): strikes, shots, firebolt, night thorn, briar, hamstring, shove, knockback, free swings, overwatch, a hired crew member's hit on a monster. Misses don't turn it. Area damage (fireball, gust, blasts, fire, caltrops, traps) doesn't turn a hunting monster; an unaware one hit by it goes hunting toward the caster, and so faces them, as before.
 
-### 6.2 Blind areas
+### 6.2 Blind areas and sight
 
-| Figure | Blind area |
-| --- | --- |
-| Hero | Cone straight behind: the single back direction, any distance, adjacent included |
-| Crew member | Same cone straight behind |
-| Monster | Whole rear half: the back direction and its two neighbours |
+| Figure | Front | Sides | Behind |
+| --- | --- | --- | --- |
+| Hero | sees | sees | blind: the single back direction, any distance, adjacent included |
+| Crew member | sees | sees | blind (a walker adjacent is noticed) |
+| Monster | sees | by mood (5.4): unaware, only a walker within 2 or anyone adjacent (not a sneaking Burglar); searching and hunting see | blind but for a walker adjacent |
 
-Everything that says "behind" uses the figure's blind area: hero visibility, noticing, blindsided, unseen hits, overwatch (heroes and crew), backstab.
+"Behind" for hero visibility, blindsided, unseen hits and overwatch is the hero's or crew member's blind cone. A Burglar's backstab works from outside the target's front: a monster's sides or straight behind it, straight behind a crew member (8.2). (Design pillar 14's "monsters blind in their whole rear half" is superseded by spec 27.)
 
 ### 6.3 Hero visibility
 
@@ -338,7 +354,7 @@ During the world phase, a monster or crew member the party can't see that makes 
 - **Loud** (`loud` with `what`), heard within the sound's own path radius: `clash` (enemy strikes and free swings 2; enemy noise-making attacks at their noise), `shout` (5), `crash` (a locked door forced 4; crew winch 6; crew gust 2), `blast` (charges 8, crew fireball 6, crew firecracker 6), `roar` (breath 6), `scream` (a monster or crew member hurt out of sight 2; a hero downed by an unseen attacker 3).
 - Hearing never changes what monsters see or do.
 
-Code: world.ts `dirIndex`, `inFrontHalf`, `blindCone`, `seesHex`, `visibleSet`, `glimpseSet`; stealth.ts `faceToward`, `noticeHero`, `inRearHalf`, `facingInto`; common.ts `turnOnHit`, `makeNoise`, `goHunting`; world-phase.ts `perceive`; ai.ts `blindside`, `unseenStrike`; delve.ts `setFacing`, `refreshSight`, `noteSeen`, `seenSet`; hearing.ts (`STEP_RANGE`, `CREW_STEP_RANGE`, `FLEE_STEP_BONUS`, `CLASH_HEAR`, `DOWNED_HEAR`, `FORCED_DOOR_HEAR`, `hearStep`, `hearLoud`, `clearHeard`); data.ts `FACING`, `HEARING`, `BLINDSIDE_SLOTS`.
+Code: world.ts `dirIndex`, `inFrontHalf`, `blindCone`, `seesHex`, `visibleSet`, `glimpseSet`; stealth.ts `faceToward`, `noticeHero`, `inRearHalf` (outside the front), `bearingOf`, `wouldNotice`, `facingInto`; common.ts `turnOnHit`, `makeNoise`, `goHunting`; world-phase.ts `perceive`; ai.ts `blindside`, `unseenStrike`; delve.ts `setFacing`, `refreshSight`, `noteSeen`, `seenSet`; hearing.ts (`STEP_RANGE`, `CREW_STEP_RANGE`, `FLEE_STEP_BONUS`, `CLASH_HEAR`, `DOWNED_HEAR`, `FORCED_DOOR_HEAR`, `hearStep`, `hearLoud`, `clearHeard`); data.ts `FACING`, `HEARING`, `BLINDSIDE_SLOTS`.
 
 ---
 
@@ -414,7 +430,7 @@ Code: world.ts `brightnessOf`, `litSet`, `fixedLit`, `farLit`, `farLitTest`, `si
 | Raised floor (ranged) | +10 | bow attack, firebolt, fireball (no raised hexes exist in the current castle) |
 | Flanked | +1 slot | melee: an active ally on the hex directly across the target |
 | Sneak attack | +1 slot | weapon `attack` on an enemy that hasn't noticed this hero (asleep, or not in its `noticedIds`; crew: not hostile or demanding) |
-| Backstab (Burglar) | +1 slot, weapon damage ×2 per hit before armor | melee from the target's blind area, target unaware of the Burglar; monsters and crew members, not the Dragon or the Gloam. Stacks with sneak attack |
+| Backstab (Burglar) | +1 slot, weapon damage ×2 per hit before armor | melee from outside the target's front (a monster's sides or straight behind it; straight behind a crew member), target unaware of the Burglar; monsters and crew members, not the Dragon or the Gloam. Stacks with sneak attack |
 | Adjacent bow shot | −1 slot | Ranger attack |
 | Hamstring aim | −20 | hamstring |
 

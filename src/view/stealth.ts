@@ -263,8 +263,9 @@ export function inFrontHalf(at: Pos, facing: number, p: Pos): boolean {
 }
 
 /**
- * Is `p` in the figure's blind area? Monsters: the rear half (the back direction and its two
- * neighbours). V3.9.2 (spec 24.7) `cone`: heroes and crew members, only straight behind.
+ * Is `p` outside the figure's front? Monsters: their sides and straight behind (the back direction and its
+ * two neighbours: where a Burglar backstabs from, spec 27). V3.9.2 (spec 24.7) `cone`: heroes and crew
+ * members, only straight behind.
  */
 export function inRearHalf(at: Pos, facing: number, p: Pos, cone = false): boolean {
   if (at.level !== p.level || samePos(at, p)) return false;
@@ -272,7 +273,7 @@ export function inRearHalf(at: Pos, facing: number, p: Pos, cone = false): boole
   return cone ? i === (facing + 3) % 6 : backDirs(facing).includes(i);
 }
 
-/** The three neighbour hexes in a figure's rear half: directly behind first, then the two back flanks. */
+/** The neighbour hexes outside a figure's front: directly behind first, then its two sides (a monster's backstab hexes). */
 export function rearNeighbours(at: Pos, facing: number, cone = false): Pos[] {
   const back = (facing + 3) % 6;
   return (cone ? [back] : [back, (back + 5) % 6, (back + 1) % 6]).map((i) => ({ level: at.level, ...add(at, DIRS[i]!) }));
@@ -359,8 +360,8 @@ export function wasBackstab(before: GameState, attackerId: string, targetId: str
 }
 
 /**
- * 24.5: dagger markers while a Burglar is selected: for every seen, unaware enemy on the level, its
- * rear-half neighbour hexes the Burglar could strike from now (where it stands, or a hex it can
+ * 24.5, 27: dagger markers while a Burglar is selected: for every seen, unaware enemy on the level, its
+ * neighbour hexes at its sides and straight behind it the Burglar could strike from now (where it stands, or a hex it can
  * reach). Only enemies in `seen` and currently `visible` count (24.4: nothing about unseen enemies).
  */
 export function backstabSpots(s: GameState, heroId: string, reach: Pos[], seen: Set<string>, visible: Set<string>): { at: Pos; target: string }[] {

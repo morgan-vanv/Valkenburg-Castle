@@ -1,7 +1,8 @@
 // V3.9 presentation check (spec 24.5), headless, by DOM text and scene state; one screenshot with SHOTS.
 // Covers: hero facing wedges, Face (F, click a hex, `face` sent, the wedge turns), the move preview's
 // end facing, the "back exposed" badge (and covering it), no blind-arc wash while sneaking, an enemy's
-// rear half on hover, the Burglar's backstab daggers (seen unaware enemies only), the backstab preview
+// sight by mood on hover (V4.0, spec 27: no "front half"/"rear half" wording), the Burglar's backstab daggers
+// (seen unaware enemies only; behind and at the sides, spec 27), the backstab preview
 // and log line, no free-swing confirm, risk tags only on visible enemies, the unseen hit; tooltips.
 //   node scripts/v39-ui-check.mjs <baseUrl>     (http://localhost:5186/?fixture=1, or the real engine)
 //   SHOTS=<dir> saves v39-facing.png (wedges and a backstab dagger).
@@ -139,7 +140,7 @@ const scene = async (place, mons, extra = {}) => {
   }
   d.lanternBearer = Object.keys(place).includes(burglarId) ? burglarId : Object.keys(place)[0];
   const tmpl = d.monsters[0] ?? { kind: 'orc', name: 'Orc', hp: 6, maxHp: 6 };
-  d.monsters = mons.map((m, i) => ({ ...structuredClone(tmpl), id: m.id ?? `t${i}`, kind: m.kind ?? 'orc', name: m.name ?? 'Orc', hp: 6, maxHp: 6, at: m.at, spawnedAt: m.at, awareness: m.awareness ?? 'asleep', facing: m.facing, feared: 0, fearOf: undefined, stuck: 0, holding: undefined, intent: undefined, noticedIds: m.noticedIds, buried: false }));
+  d.monsters = mons.map((m, i) => ({ ...structuredClone(tmpl), id: m.id ?? `t${i}`, kind: m.kind ?? 'orc', name: m.name ?? 'Orc', hp: 6, maxHp: 6, at: m.at, spawnedAt: m.at, awareness: m.awareness ?? 'asleep', searchRounds: m.searchRounds, facing: m.facing, feared: 0, fearOf: undefined, stuck: 0, holding: undefined, intent: undefined, noticedIds: m.noticedIds, buried: false }));
   Object.assign(d, extra);
   await load(st);
   await p.waitForTimeout(80);
@@ -190,7 +191,7 @@ if (fit([[3, 1], [3, 2], [2, 1], [4, 1]])) {
   await unhover();
 }
 
-// ---- 3. no blind-arc wash while sneaking; an enemy's rear half on hover
+// ---- 3. no blind-arc wash while sneaking; an enemy's sight by mood on hover (V4.0, spec 27)
 if (fit([[0, 1], [0, 2], [0, 3]])) {
   const a = others[0];
   const M = step(P, 0, 3);
@@ -206,10 +207,29 @@ if (fit([[0, 1], [0, 2], [0, 3]])) {
     const tip = await hoverTip(M, 'aw');
     const n = await p.evaluate(() => window.vc.dio.blindFill.count);
     check('hovering a seen awake enemy shades nothing (V3.9.1: no rear-half wash)', n === 0, `${n} hexes`);
-    check('...and the tip says it sees only its front half', /front half/.test(tip) && /rear half/.test(tip), tip.slice(0, 160));
+    check('...the tip names its mood: at its post', /at its post/.test(tip), tip.slice(0, 200));
+    check('...and its sight by mood: sees ahead; at its sides only a walker within 2 or anyone right beside it; nothing straight behind', /sees ahead/.test(tip) && /sides only a walker within 2 or anyone right beside it/.test(tip) && /nothing straight behind/.test(tip), tip.slice(0, 300));
+    check('...no "front half" / "rear half" wording', !/front half|rear half/.test(tip), tip.slice(0, 300));
     await unhover();
-    check('unhover: the rear half is gone', (await p.evaluate(() => window.vc.dio.blindFill.count)) === 0);
-  } else skip('rear half on hover', 'the enemy is not in sight');
+    check('unhover: nothing shaded', (await p.evaluate(() => window.vc.dio.blindFill.count)) === 0);
+    // Turned so the hero stands at its side (3 away): the tip says what that means for a walker.
+    await scene({ [a]: { at: P, facing: F(0) } }, [{ id: 'aw', at: M, awareness: 'alert', facing: F(1) }]);
+    await select(a);
+    const side = await hoverTip(M, 'aw');
+    check('hero at an unaware monster\'s side: "You are at its side: walking, it notices you within 2."', /You are at its side: walking, it notices you within 2/.test(side), side.slice(0, 300));
+    await unhover();
+    // Searching (?): the tag and the words.
+    await scene({ [a]: { at: P, facing: F(0) } }, [{ id: 'aw', at: M, awareness: 'alert', searchRounds: 3, facing: F(1) }]);
+    await select(a);
+    const srch = await hoverTip(M, 'aw');
+    check('a searching monster: "searching", sees ahead and at its sides', /searching/i.test(srch) && /ahead and at its sides/.test(srch) && !/You are at its side/.test(srch), srch.slice(0, 300));
+    await unhover();
+    const marks = await p.evaluate(() => [...document.querySelectorAll('.tag-alert, .tag-hunt')].map((e) => e.textContent));
+    check('...its tag shows "?"', marks.includes('?'), JSON.stringify(marks));
+    await scene({ [a]: { at: P, facing: F(0) } }, [{ id: 'aw', at: M, awareness: 'alert', facing: F(1) }]);
+    const post = await p.evaluate(() => [...document.querySelectorAll('.tag-alert')].length);
+    check('at its post: no "?" (unaware)', post === 0, `${post} ? tags`);
+  } else skip('sight by mood on hover', 'the enemy is not in sight');
 }
 
 // ---- 4. the Burglar's daggers: seen unaware enemies only, on rear hexes it can reach
@@ -225,7 +245,7 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
   await p.waitForTimeout(120);
   const seen = await p.evaluate(() => [...(window.vcEngine.seenEnemies?.(window.vc.state()) ?? [])]);
   const tags = await p.$$eval('.backstab-tag', (els) => els.map((e) => ({ target: e.dataset.target, title: e.title })));
-  check('Burglar selected: dagger markers on the sleeper\'s rear hexes', tags.some((t) => t.target === 'sl'), JSON.stringify(tags.map((t) => t.target)));
+  check('Burglar selected: dagger markers on the sleeper\'s back and side hexes', tags.some((t) => t.target === 'sl'), JSON.stringify(tags.map((t) => t.target)));
   check('...none for the enemy nobody has seen', !tags.some((t) => t.target === 'un') && !seen.includes('un'), `seen ${JSON.stringify(seen)}`);
   check('..."Backstab from here" in the marker tooltip', /Backstab from here/.test(tags[0]?.title ?? ''));
   const spot = step(M, 3);
@@ -268,6 +288,17 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
       check(`log: "${nm} backstabs the orc: N"`, new RegExp(`${nm} backstabs (the )?orc: \\d+`, "i").test(log), log.slice(-160));
     } else skip('backstab preview and log', `the engine's preview has no Backstab yet (${pv.replace(/\n/g, ' | ').slice(0, 80)})`);
   } else skip('backstab strike', 'the rear hex is not in reach');
+  // V4.0 (spec 27): backstab from a monster's sides as well as straight behind; never from its front. An awake orc at
+  // its post two hexes off: turned so the hex between them is at its side, then so it is in front.
+  for (const [f, want] of [[1, true], [3, false]]) {
+    const O = step(P, 0, 2);
+    await scene({ [burglarId]: { at: P, facing: F(0) } }, [{ id: 'aw', at: O, awareness: 'alert', facing: F(f) }]);
+    await select(burglarId);
+    await p.waitForTimeout(120);
+    const spots = await p.evaluate(() => window.vc.dio.stabSpots.map((x) => x.at));
+    const has = spots.some((y) => same(y, step(P, 0, 1)));
+    check(want ? 'an unaware orc: a dagger on the hex at its side' : '...none on the hex in front of it', has === want, JSON.stringify(spots));
+  }
 }
 
 // ---- 5. no free-swing confirm; risk tags only on visible enemies
