@@ -1312,8 +1312,9 @@ function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, pag
           o
             ? ''
             : btn({ class: 'btn lg-ghost lg-btn-s', k: `packval-${it.id}`, data: { packval: it.id }, off: !who || full, tip: !who ? 'Pack · Nobody to pack it for.' : full ? `Pack · ${who.name}'s pack is full.` : `Pack · into ${who.name}'s pack\nCrews take gems and trinkets as payment.`, onclick: () => pack(it) }, 'Pack'),
-          // TODO(V4.0): per-item sale needs an engine command (e.g. { type: 'sell', itemId }); only `sellAll` exists today.
-          btn({ class: 'btn lg-btn-s', k: `sell-${it.id}`, data: { sell: it.id }, off: true, tip: "Sell · one at a time isn't possible yet\nSell all sells every valuable on the cart.", onclick: () => {} }, 'Sell'),
+          btn({ class: 'btn lg-btn-s', k: `sell-${it.id}`, data: { sell: it.id }, tip: `Sell · ${it.name} for ${host.engine.value([it])} gold${o ? `\nIt comes out of ${heroOf(c, o)?.name ?? o}'s pack.` : ''}`, onclick: async () => {
+            if (await host.send({ type: 'sell', itemId: it.id })) sfx.play('coin');
+          } }, 'Sell'),
         );
       }),
     ),

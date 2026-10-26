@@ -293,6 +293,17 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       events.push({ type: 'say', text: `Sold ${sell.length} valuables for ${v} gold.` });
       return { events };
     }
+    case 'sell': {
+      // V4.0: one valuable at a time, from Keven's cart.
+      const it = C.stash.find((i) => i.id === cmd.itemId);
+      if (!it) return err('No such item on the cart.');
+      if (it.story || !(it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'heirloom' || it.kind === 'hoard')) return err(`${it.name} can't be sold.`);
+      const v = valueOf([it]);
+      C.gold += v;
+      C.stash = C.stash.filter((i) => i !== it);
+      events.push({ type: 'say', text: `Sold ${it.name} for ${v} gold.` });
+      return { events };
+    }
     case 'hire': {
       const r = C.recruits.find((x) => x.hero.id === cmd.heroId);
       if (!r) return err('No such recruit.');

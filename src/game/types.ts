@@ -850,6 +850,7 @@ export type Command =
   | { type: 'newCampaign'; seed: number }
   | { type: 'buy'; kind: ShopOffer['kind'] }
   | { type: 'sellAll' } // sell every valuable in the stash
+  | { type: 'sell'; itemId: string } // V4.0: sell one valuable from the stash
   | { type: 'hire'; heroId: string }
   | { type: 'heal'; heroId: string }
   | { type: 'buyShield'; heroId: string } // V3.7 camp (spec 20.5): 50 gold at the forge

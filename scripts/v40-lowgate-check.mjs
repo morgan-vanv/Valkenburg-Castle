@@ -150,7 +150,17 @@ await p.waitForTimeout(80);
 const gearKinds = await p.$$eval('[data-cart]', (els) => els.map((e) => e.dataset.cart));
 const valIds = await p.$$eval('[data-valuable]', (els) => els.map((e) => e.dataset.valuable));
 check('cart: gear and valuables in their own compartments', gearKinds.includes('torch') && gearKinds.includes('potion') && !gearKinds.includes('gem') && valIds.length === 2, `${gearKinds} / ${valIds}`);
-check('cart: per-item Sell shown (disabled: no engine command yet), Sell all names the gear stays', (await p.$$('[data-sell][aria-disabled="true"]')).length === 2 && /Gear stays on the cart/.test(await p.$eval('.lg-sellall', (e) => e.innerText)));
+check('cart: per-item Sell buttons live, Sell all names the gear stays', (await p.$$('[data-sell]:not([aria-disabled="true"])')).length === 2 && /Gear stays on the cart/.test(await p.$eval('.lg-sellall', (e) => e.innerText)));
+{
+  const g0 = await p.evaluate(() => window.vc.state().campaign.gold);
+  await p.click('[data-sell="gem-x"]');
+  await p.waitForTimeout(120);
+  const after = await p.evaluate(() => ({ gold: window.vc.state().campaign.gold, ids: window.vc.state().campaign.stash.map((i) => i.id) }));
+  check('cart: selling one gem adds its value and leaves the torc', after.gold === g0 + 70 && !after.ids.includes('gem-x') && after.ids.includes('jw-x'), JSON.stringify(after));
+  await edit(`s.campaign.stash.push({ id: 'gem-x', kind: 'gem', name: 'Moonstone', amount: 70, slots: 1 }); s.campaign.gold -= 70;`);
+  await p.click('[data-tab="cart"]');
+  await p.waitForTimeout(80);
+}
 check('cart: "Sell all · 180 gold"', /Sell all\s*·\s*180\s*gold/.test(await p.$eval('[data-sellall]', (e) => e.innerText)));
 await p.click('[data-cart="torch"]');
 await p.waitForTimeout(80);
