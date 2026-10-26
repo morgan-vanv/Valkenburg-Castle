@@ -2,16 +2,16 @@
 // whom, the wake rolls a passing hero provokes, attacks of opportunity both ways, and the
 // move preview's risks. Pure rules: no DOM, all dice through the seeded RNG.
 
-import { DIRS, distance, hexToWorld, posKey, posNeighbors, samePos, type Hex, type Pos } from './hex';
+import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { HeroInDelve } from './types';
 import type { MoveRisks } from './api';
 import {
-  CLASSES, NOTICE, RUBBLE_STEP_NOISE, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK, WAKE_RANGE, WAKE_SNEAK, WAKE_WALK,
+  BLINDSIDE_SLOTS, CLASSES, NOTICE, NOTICE_QUIET, RUBBLE_STEP_NOISE, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK, WAKE_END_SNEAK_QUIET, WAKE_RANGE, WAKE_SNEAK, WAKE_SNEAK_QUIET, WAKE_WALK,
 } from './data';
 import { chance } from './rng';
-import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
+import { say, type Ctx, type DelveX, type HeroX, type MonsterX, type RivalX } from './state';
 import { activeHeroes, armorOf, goAlert, hd, heroDef, heroName, hurtAny, lightPenaltyFor, monsterArmor, monsterStats, occupant, rivalsOnMap, roll } from './common';
-import { dijkstra, kindAt, los, noiseField, pathTo, smoky } from './world';
+import { dijkstra, dirIndex, inFrontHalf, isFloorish, kindAt, los, noiseField, pathTo, smoky, type World } from './world';
 import { blocked, hitRange, strikeDetailed, wardOf, type Target } from './ai';
 import { figure } from './falls';
 import { rivalStats } from './rivals';
@@ -28,24 +28,7 @@ export interface Facer {
   facing?: number;
 }
 
-/** The DIRS index nearest to the direction from `from` to `to` (exact for neighbours; ties go to the lower index). */
-export function dirIndex(from: Hex, to: Hex): number {
-  const A = hexToWorld(from);
-  const B = hexToWorld(to);
-  const vx = B.x - A.x;
-  const vz = B.z - A.z;
-  let best = 0;
-  let bestDot = -Infinity;
-  DIRS.forEach((d, i) => {
-    const D = hexToWorld(d);
-    const dot = D.x * vx + D.z * vz;
-    if (dot > bestDot + 1e-9) {
-      bestDot = dot;
-      best = i;
-    }
-  });
-  return best;
-}
+export { dirIndex };
 
 /** Turn toward `p` (no change when p is its own hex or another level). */
 export function faceToward(f: Facer, p: Pos): void {
@@ -59,16 +42,57 @@ export function behindHex(f: Facer): Pos {
   return { level: f.at.level, q: f.at.q + b.q, r: f.at.r + b.r };
 }
 
-/** The three directions behind it: the back direction and its two neighbours, at any distance (spec 20.1). */
-export function inBlindArc(f: Facer, p: Pos): boolean {
+export { inFrontHalf };
+
+/** The rear half (spec 24.1): the back direction and its two neighbours, at any distance. Never with no facing. */
+export function inRearHalf(f: Facer, p: Pos): boolean {
   if (f.facing === undefined || p.level !== f.at.level || samePos(p, f.at)) return false;
-  const back = (f.facing + 3) % 6;
-  const i = dirIndex(f.at, p);
-  return i === back || i === (back + 1) % 6 || i === (back + 5) % 6;
+  return !inFrontHalf(f, p);
 }
+
+/** V3.7 name for the rear half (spec 24.1 made the blind arc the whole rear half). */
+export const inBlindArc = inRearHalf;
 
 export function directlyBehind(f: Facer, p: Pos): boolean {
   return f.facing !== undefined && samePos(behindHex(f), p);
+}
+
+/**
+ * V3.9 (spec 24.2): the way a hero faces at delve start: into the castle, toward the middle of the
+ * floor within 6 hexes of where they stand on that level.
+ */
+export function facingInto(w: World, d: DelveX, at: Pos): number {
+  let x = 0;
+  let z = 0;
+  let n = 0;
+  for (const hh of range(at, 6)) {
+    const p = { level: at.level, ...hh };
+    if (samePos(p, at) || !w.tile(p) || !isFloorish(w, d, p)) continue;
+    const P = hexToWorld(p);
+    x += P.x;
+    z += P.z;
+    n++;
+  }
+  if (!n) return 0;
+  const A = hexToWorld(at);
+  const vx = x / n - A.x;
+  const vz = z / n - A.z;
+  let best = 0;
+  let bestDot = -Infinity;
+  DIRS.forEach((dd, i) => {
+    const D = hexToWorld(dd);
+    const dot = D.x * vx + D.z * vz;
+    if (dot > bestDot + 1e-9) {
+      bestDot = dot;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/** Is this hero a Burglar (quiet feet, backstab: spec 24.3)? */
+export function quietFeet(c: Ctx, heroId: string): boolean {
+  return heroDef(c, heroId)?.cls === 'burglar';
 }
 
 // ---------------------------------------------------------------- noticing
@@ -79,22 +103,19 @@ export function isSneaking(h: HeroInDelve): boolean {
 }
 
 /**
- * Would an awake watcher at `f` notice a hero standing at `heroAt` (spec 20.1)? Line of sight
- * (smoke hides beyond 1), then the range by light and move mode: lit 6/4, unlit 3/1, in the
- * Hollow 6/3 whatever the light. In the blind arc a walking hero is noticed at half range;
- * a sneaking hero only when adjacent, and never from the hex directly behind.
+ * Would an awake watcher at `f` notice a hero standing at `heroAt` (spec 20.1, 21.5, 24.1, 24.3)? Line of
+ * sight (smoke hides beyond 1), then the range by light and move mode: lit 8/4, unlit 5/1, in the Hollow
+ * 8/3 whatever the light; a sneaking Burglar (`quiet`) lit 2, unlit 1, Hollow 2. In the rear half a
+ * walking hero is noticed only when adjacent, a sneaking hero never.
  */
-export function wouldNotice(c: Ctx, f: Facer, heroAt: Pos, sneaking: boolean, lit: Set<string>): boolean {
+export function wouldNotice(c: Ctx, f: Facer, heroAt: Pos, sneaking: boolean, lit: Set<string>, quiet = false): boolean {
   if (f.at.level !== heroAt.level || samePos(f.at, heroAt)) return false;
   const dist = distance(f.at, heroAt);
+  if (inRearHalf(f, heroAt)) return !sneaking && dist === 1;
   const hollow = heroAt.level === 3;
   const isLit = lit.has(posKey(heroAt));
-  let range: number = hollow ? (sneaking ? NOTICE.hollowSneak : NOTICE.hollowWalk) : isLit ? (sneaking ? NOTICE.litSneak : NOTICE.litWalk) : sneaking ? NOTICE.unlitSneak : NOTICE.unlitWalk;
-  if (inBlindArc(f, heroAt)) {
-    if (sneaking) {
-      if (dist > 1 || directlyBehind(f, heroAt)) return false;
-    } else range = Math.max(1, Math.floor(range / 2));
-  }
+  const sneakRange = quiet ? (hollow ? NOTICE_QUIET.hollowSneak : isLit ? NOTICE_QUIET.litSneak : NOTICE_QUIET.unlitSneak) : hollow ? NOTICE.hollowSneak : isLit ? NOTICE.litSneak : NOTICE.unlitSneak;
+  const range: number = sneaking ? sneakRange : hollow ? NOTICE.hollowWalk : isLit ? NOTICE.litWalk : NOTICE.unlitWalk;
   if (dist > range) return false;
   if (dist > 1 && (smoky(c.d, heroAt) || smoky(c.d, f.at))) return false;
   return los(c.w, c.d, f.at, heroAt);
@@ -104,7 +125,7 @@ export function wouldNotice(c: Ctx, f: Facer, heroAt: Pos, sneaking: boolean, li
 export function perceivable(c: Ctx, m: MonsterX, t: Target, lit: Set<string>, sees: (from: Pos, to: Pos, lit: Set<string>) => boolean): boolean {
   if (!t.hero) return sees(m.at, t.at, lit);
   if ((m.noticedIds ?? []).includes(t.id)) return sees(m.at, t.at, lit);
-  return wouldNotice(c, m, t.at, isSneaking(t.hero), lit);
+  return wouldNotice(c, m, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id));
 }
 
 /** A monster or crew member takes note of a hero: remembered for sneak attacks and swings, faces them, one `noticed` event. */
@@ -142,20 +163,23 @@ export function stepNoise(c: Ctx, p: Pos, sneak: boolean): number {
 /**
  * The chance (0..100) that sleeper `m` wakes as a hero stands on `p` of their path (spec 20.1):
  * walking 50, sneaking 10, halved on an unlit hex; at the end of the move next to it: walking
- * sure, sneaking 25. Walking noise that reaches it wakes it for sure.
+ * sure, sneaking 25 (a Burglar: 5 and 10, spec 24.3). Walking noise that reaches it wakes it for sure.
+ * V3.9 (spec 24.1): these are sound rolls; sleepers never notice anyone by sight.
  */
-export function wakeChance(m: MonsterX, p: Pos, last: boolean, sneak: boolean, lit: Set<string>, heard?: Map<string, number>): number {
+export function wakeChance(m: MonsterX, p: Pos, last: boolean, sneak: boolean, lit: Set<string>, heard?: Map<string, number>, quiet = false): number {
   const adj = distance(m.at, p) === 1;
   if (!sneak && heard?.has(posKey(m.at))) return 100;
-  if (last && adj) return sneak ? WAKE_END_SNEAK : 100;
-  const base = sneak ? WAKE_SNEAK : WAKE_WALK;
+  // V3.9 (spec 24.3): a sneaking Burglar's quiet feet: 5% per hex, 10% ending adjacent.
+  if (last && adj) return sneak ? (quiet ? WAKE_END_SNEAK_QUIET : WAKE_END_SNEAK) : 100;
+  const base = sneak ? (quiet ? WAKE_SNEAK_QUIET : WAKE_SNEAK) : WAKE_WALK;
   return lit.has(posKey(p)) ? base : base / 2;
 }
 
 /** Roll the wake checks for a hero standing on `p` (one hex of their move). Woken sleepers go alert at the hero's hex. */
 export function wakeRolls(c: Ctx, h: HeroInDelve, p: Pos, last: boolean, sneak: boolean, lit: Set<string>): void {
+  const quiet = quietFeet(c, h.heroId);
   for (const m of sleepersNear(c, p)) {
-    const pct = wakeChance(m, p, last, sneak, lit);
+    const pct = wakeChance(m, p, last, sneak, lit, undefined, quiet);
     if (pct <= 0 || !chance(c.s, pct)) continue;
     goAlert(c, m, p);
     c.ev.push({ type: 'woke', id: m.id, by: h.heroId });
@@ -312,35 +336,43 @@ function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (hero
 }
 
 /**
- * What a move along `path` risks (spec 20.1, 20.2): every wake roll on the way with its chance,
- * the awake enemies that would notice the hero at the destination (those that haven't yet),
- * and the free swings leaving provokes, with their damage range.
+ * What a move along `path` risks (spec 20.1, 20.2, 24.4): every wake roll on the way with its chance,
+ * the awake enemies that would notice the hero at the destination (those that haven't yet), and the
+ * free swings leaving provokes, with their damage range. V3.9: only enemies the party has seen
+ * (`seen`): wake rolls for seen sleepers, notice for enemies visible now (`vis`), swings for seen ones.
+ * Unseen sleepers still roll when the move is made.
  */
-export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, lit: Set<string>): MoveRisks {
+export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, lit: Set<string>, seen: Set<string>, vis: Set<string>): MoveRisks {
   const risks: MoveRisks = { wake: [], notice: [], swings: [] };
   if (!path.length) return risks;
   const armor = armorOf(heroDef(c, h.heroId)!) + wardOf(h);
+  const quiet = quietFeet(c, h.heroId);
   const swung = new Set<string>();
   let from = h.at;
+  let facing = h.facing;
   path.forEach((p, i) => {
     const last = i === path.length - 1;
     const noise = stepNoise(c, p, sneak);
     const heard = noise ? noiseField(c.w, c.d, p, noise) : undefined;
     for (const m of sleepersNear(c, p)) {
-      const pct = wakeChance(m, p, last, sneak, lit, heard);
+      if (!seen.has(m.id)) continue;
+      const pct = wakeChance(m, p, last, sneak, lit, heard, quiet);
       if (pct > 0) risks.wake.push({ at: { ...p }, id: m.id, chance: Math.round(pct) });
     }
     for (const sw of swingersFor(c, h.heroId, from, p)) {
-      if (swung.has(sw.id)) continue;
+      if (swung.has(sw.id) || !seen.has(sw.id)) continue;
       swung.add(sw.id);
-      risks.swings.push({ id: sw.id, damage: hitRange(sw.slots, sw.dmg, armor) });
+      // V3.9 (spec 24.2): a swing from the hero's rear half (as they stand before the step) is blindsided.
+      const extra = inRearHalf({ at: from, facing }, sw.at) ? BLINDSIDE_SLOTS : 0;
+      risks.swings.push({ id: sw.id, damage: hitRange(sw.slots + extra, sw.dmg, armor) });
     }
+    if (p.level === from.level) facing = dirIndex(from, p);
     from = p;
   });
   const dest = path[path.length - 1]!;
   for (const wt of watchers(c, dest.level)) {
-    if (wt.noticed(h.heroId)) continue;
-    if (wouldNotice(c, wt.f, dest, sneak, lit)) risks.notice.push({ id: wt.id });
+    if (wt.noticed(h.heroId) || !vis.has(posKey(wt.f.at))) continue;
+    if (wouldNotice(c, wt.f, dest, sneak, lit, quiet)) risks.notice.push({ id: wt.id });
   }
   return risks;
 }

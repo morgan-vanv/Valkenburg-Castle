@@ -10,10 +10,10 @@ import type { Reach } from './api';
 import { CALM_STEPS, FREE_MOVE } from './data';
 import { say, type Ctx, type HeroX } from './state';
 import { activeHeroes, hd, heroName, levelHeal, makeNoise, nameOf, occupant, onMap, rivalsOnMap, wakeAdjacent } from './common';
-import { brightnessOf, dijkstra, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
+import { brightnessOf, dijkstra, dirIndex, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
 import { moveRisks, provokeSwings, stepNoise, wakeRolls } from './stealth';
 import { ventCheck } from './falls';
-import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, springTrap } from './delve';
+import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, seenSet, springTrap, visNow } from './delve';
 import { worldPhase } from './world-phase';
 import { rivalCaltropsStep } from './crewai';
 
@@ -101,11 +101,13 @@ export function calmReach(c: Ctx, heroId: string, sneak: boolean): Reach[] {
     budget: 400,
   });
   const lit = litSet(c.w, c.d);
+  const vis = visNow(c);
+  const seen = seenSet(c, vis);
   const out: Reach[] = [];
   for (const n of nodes.values()) {
     if (samePos(n.p, h.at) || occupant(c, n.p)) continue;
     const path = pathTo(nodes, n.p);
-    out.push({ to: n.p, cost: n.cost, path, risks: moveRisks(c, h, path, sneak, lit) });
+    out.push({ to: n.p, cost: n.cost, path, risks: moveRisks(c, h, path, sneak, lit, seen, vis) });
   }
   return out;
 }
@@ -131,7 +133,7 @@ function figuresInSight(c: Ctx, lit: Set<string>): Set<string> {
   const eyes = activeHeroes(c);
   const figs: { id: string; at: Pos }[] = [...onMap(c)];
   if (c.d.rivals?.stance !== 'hired') for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0) figs.push(r);
-  for (const f of figs) if (eyes.some((h) => seesHex(c.w, c.d, h.at, f.at, lit))) out.add(f.id);
+  for (const f of figs) if (eyes.some((h) => seesHex(c.w, c.d, h.at, f.at, lit, h.facing))) out.add(f.id);
   return out;
 }
 
@@ -161,6 +163,7 @@ function stepTo(c: Ctx, wk: Walker, p: Pos, sneak: boolean, last: boolean, lit: 
     h.at = { ...p };
     levelHeal(c, h);
   }
+  if (p.level === from.level) h.facing = dirIndex(from, p); // V3.9 (spec 24.2)
   h.at = { ...p };
   c.visCache = undefined;
   glimpse(c, p);

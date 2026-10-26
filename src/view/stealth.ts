@@ -247,3 +247,140 @@ export function blownWalls(castle: CastleDef, blown: string[]): Set<string> {
   }
   return out;
 }
+
+// ------------------------------------------------------------ V3.9 (spec 24): eyes front
+
+/** The three directions centred on `facing`: the front half (what a figure sees). */
+export function frontDirs(facing: number): number[] {
+  const f = ((facing % 6) + 6) % 6;
+  return [(f + 5) % 6, f, (f + 1) % 6];
+}
+
+/** Is `p` in the front half of a figure at `at` facing `facing`? (Its own hex is not.) */
+export function inFrontHalf(at: Pos, facing: number, p: Pos): boolean {
+  if (at.level !== p.level || samePos(at, p)) return false;
+  return frontDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
+}
+
+/** Is `p` in the rear half (the back direction and its two neighbours)? */
+export function inRearHalf(at: Pos, facing: number, p: Pos): boolean {
+  if (at.level !== p.level || samePos(at, p)) return false;
+  return backDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
+}
+
+/** The three neighbour hexes in a figure's rear half: directly behind first, then the two back flanks. */
+export function rearNeighbours(at: Pos, facing: number): Pos[] {
+  const back = (facing + 3) % 6;
+  return [back, (back + 5) % 6, (back + 1) % 6].map((i) => ({ level: at.level, ...add(at, DIRS[i]!) }));
+}
+
+/** The direction of a step (or of "toward"): hex.ts DIRS index, as the engine's dirIndex. */
+export function dirToward(from: Pos, to: Pos): number {
+  return dirIndexOf(to.q - from.q, to.r - from.r);
+}
+
+/** The facing a hero ends a path with: the direction of its last step (or `fallback` for no step). */
+export function pathEndFacing(start: Pos, path: Pos[], fallback?: number): number | undefined {
+  if (!path.length) return fallback;
+  const last = path[path.length - 1]!;
+  const prev = path.length > 1 ? path[path.length - 2]! : start;
+  if (prev.level !== last.level || samePos(prev, last)) return fallback;
+  return dirToward(prev, last);
+}
+
+/**
+ * 24.5: "back exposed": the hero's back is not covered by anyone's front half. Read from the
+ * engine's visibility: the hex directly behind the hero (or, when that is not floor, either back
+ * flank) is standable and not visible. A hex another active hero stands on counts as covered.
+ */
+export function backExposed(castle: CastleDef, d: Delve, heroId: string, visible: Set<string>): boolean {
+  const h = d.heroes.find((x) => x.heroId === heroId);
+  if (!h || h.status !== 'active') return false;
+  const f = facingOf(h);
+  if (f === undefined) return false;
+  const lv = castle.levels.find((l) => l.level === h.at.level);
+  if (!lv) return false;
+  const open = (p: Pos) => {
+    const t = lv.tiles[hexKey(p)];
+    return !!t && STANDABLE.has(t.kind);
+  };
+  const covered = (p: Pos) => visible.has(posKey(p)) || d.heroes.some((o) => o.status === 'active' && o.heroId !== heroId && samePos(o.at, p));
+  const [behind, ...flanks] = rearNeighbours(h.at, f);
+  if (open(behind!)) return !covered(behind!);
+  return flanks.some((p) => open(p) && !covered(p));
+}
+
+/** A figure that may be backstabbed (spec 24.3): monsters and crew members, not the Dragon or the Gloam. */
+type Stabbable = { id: string; at: Pos; facing?: number; awareness?: Monster['awareness']; kind?: string; hp: number; noticedIds?: string[] };
+
+function stabTarget(d: Delve, id: string): { u: Stabbable; crew: boolean } | null {
+  const m = d.monsters.find((x) => x.id === id);
+  if (m) return m.kind === 'dragon' || m.kind === 'gloam' || m.hp <= 0 || m.buried ? null : { u: m as Stabbable, crew: false };
+  const r = d.rivals?.members.find((x) => x.id === id);
+  return r && r.hp > 0 && !r.goneOut ? { u: r as Stabbable, crew: true } : null;
+}
+
+/**
+ * Has this target not noticed the hero (24.3: asleep, or awake without that hero noticed)? The
+ * engine keeps `noticedIds` on monsters; without it, a hunting monster counts as having noticed.
+ * Crew members notice everyone once hostile.
+ */
+export function unawareOf(d: Delve, targetId: string, heroId: string): boolean {
+  const t = stabTarget(d, targetId);
+  if (!t) return false;
+  if (t.crew) return d.rivals?.stance !== 'hostile';
+  if (t.u.awareness === 'asleep') return true;
+  if (Array.isArray(t.u.noticedIds)) return !t.u.noticedIds.includes(heroId);
+  return t.u.awareness !== 'hunting';
+}
+
+/** Would a melee attack by `heroId` (a Burglar) from `from` on `targetId` be a backstab (24.3)? */
+export function backstabFrom(s: GameState, heroId: string, targetId: string, from: Pos): boolean {
+  const d = s.delve;
+  if (!d) return false;
+  const cls = s.campaign.roster.find((x) => x.id === heroId)?.cls;
+  if (cls !== 'burglar') return false;
+  const t = stabTarget(d, targetId);
+  if (!t) return false;
+  const f = facingOf(t.u);
+  if (f === undefined) return false;
+  if (!unawareOf(d, targetId, heroId)) return false;
+  return inRearHalf(t.u.at, f, from) && Math.max(Math.abs(from.q - t.u.at.q), Math.abs(from.r - t.u.at.r), Math.abs(from.q + from.r - t.u.at.q - t.u.at.r)) === 1;
+}
+
+/** Was this hit (in the state before it) a backstab? */
+export function wasBackstab(before: GameState, attackerId: string, targetId: string): boolean {
+  const h = before.delve?.heroes.find((x) => x.heroId === attackerId);
+  return !!h && backstabFrom(before, attackerId, targetId, h.at);
+}
+
+/**
+ * 24.5: dagger markers while a Burglar is selected: for every seen, unaware enemy on the level, its
+ * rear-half neighbour hexes the Burglar could strike from now (where it stands, or a hex it can
+ * reach). Only enemies in `seen` and currently `visible` count (24.4: nothing about unseen enemies).
+ */
+export function backstabSpots(s: GameState, heroId: string, reach: Pos[], seen: Set<string>, visible: Set<string>): { at: Pos; target: string }[] {
+  const d = s.delve;
+  const h = d?.heroes.find((x) => x.heroId === heroId);
+  if (!d || !h || h.status !== 'active') return [];
+  if (s.campaign.roster.find((x) => x.id === heroId)?.cls !== 'burglar') return [];
+  const can = new Set([posKey(h.at), ...reach.map((p) => posKey(p))]);
+  const out: { at: Pos; target: string }[] = [];
+  const done = new Set<string>();
+  const ids = [...d.monsters.map((m) => m.id), ...(d.rivals && d.round >= d.rivals.entersRound ? d.rivals.members.map((r) => r.id) : [])];
+  for (const id of ids) {
+    if (!seen.has(id)) continue;
+    const t = stabTarget(d, id);
+    if (!t || t.u.at.level !== h.at.level || !visible.has(posKey(t.u.at))) continue;
+    if (t.crew && d.rivals?.stance === 'hired') continue;
+    const f = facingOf(t.u);
+    if (f === undefined || !unawareOf(d, id, heroId)) continue;
+    for (const p of rearNeighbours(t.u.at, f)) {
+      const k = posKey(p);
+      if (!can.has(k) || done.has(k)) continue;
+      done.add(k);
+      out.push({ at: p, target: id });
+    }
+  }
+  return out;
+}

@@ -487,6 +487,8 @@ export interface Monster {
   shoutCooldown?: number;
   /** Buried ghoul: not on the map until it rises. */
   buried?: boolean;
+  /** V3.7 (spec 20.1): heroes this monster has noticed (sneak attack and backstab apply to the others). */
+  noticedIds?: string[];
   /** V3.7 (spec 20.1): the hex direction (0..5, see hex.ts DIRS) it faces: the way it last moved or looked. */
   facing?: number;
   /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
@@ -828,7 +830,7 @@ export type GameEvent =
   | { type: 'moved'; id: string; path: Pos[] }
   | { type: 'levelChanged'; id: string; from: number; to: number }
   | { type: 'roll'; who: string; what: string; roll: SlotRoll }
-  | { type: 'hit'; attacker: string; target: string; damage: number; crit: boolean }
+  | { type: 'hit'; attacker: string; target: string; damage: number; crit: boolean; /** V3.9: a Burglar's backstab */ backstab?: boolean }
   | { type: 'miss'; attacker: string; target: string }
   | { type: 'downed'; id: string }
   | { type: 'revived'; id: string }

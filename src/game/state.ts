@@ -89,6 +89,10 @@ export interface DelveX extends Delve {
   taken?: string[];
   /** The Dragon died this delve. */
   dragonSlain?: boolean;
+  /** V3.9 (spec 24.4): monsters and crew members any hero has seen this delve (ids). */
+  seen?: string[];
+  /** V3.9 (spec 24.2): figures that struck a hero unseen, visible to the party through the player phase of this round (id -> round). */
+  revealed?: Record<string, number>;
 }
 
 export interface GameStateX extends GameState {

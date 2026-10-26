@@ -10,8 +10,8 @@ import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
-import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, MOVE_HELP, STANCE, TEMPERAMENT, V37, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
-import { backDirs, blastPreview, breakableWall, collapsible, dirIndexOf, facingOf, fuseAt, fuseSide, fuseWords } from '../view/stealth';
+import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
+import { backDirs, backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
@@ -67,6 +67,8 @@ export class Hud {
   readonly root: HTMLElement;
   selectedId: string | null = null;
   sneak = false;
+  /** V3.9 (24.2): Face mode (key F): the next click on a hex turns the selected hero toward it. */
+  facing = false;
   /** V3.7 (20.5): free move brings the party along (default on). */
   follow = true;
   /** The long path under the mouse while calm. */
@@ -222,6 +224,27 @@ export class Hud {
     return this.state?.delve?.heroes.find((x) => x.heroId === this.selectedId);
   }
 
+  /** 24.4: enemies the party has seen this delve (engine.seenEnemies; without it, what is visible now). */
+  private seenEnemies(): Set<string> {
+    const s = this.state;
+    const d = s?.delve;
+    if (!s || !d) return new Set();
+    try {
+      if (typeof this.engine.seenEnemies === 'function') return this.engine.seenEnemies(s);
+    } catch {
+      /* fall through */
+    }
+    const vis = this.vis?.visible ?? new Set<string>();
+    return new Set([...d.monsters.filter((m) => vis.has(posKey(m.at))).map((m) => m.id), ...(d.rivals?.members ?? []).filter((r) => vis.has(posKey(r.at))).map((r) => r.id)]);
+  }
+
+  /** 24.5: is this hero's back uncovered (no active hero's front half sees the hex behind them)? */
+  backExposed(heroId: string): boolean {
+    const d = this.state?.delve;
+    if (!d || !this.vis) return false;
+    return backExposed(this.engine.castle(), d, heroId, this.vis.visible);
+  }
+
   private heroDef(id: string): Hero | undefined {
     return this.state?.campaign.roster.find((x) => x.id === id);
   }
@@ -360,7 +383,17 @@ export class Hud {
     this.dio.clearHighlights();
     if (this.busy || !this.state?.delve) return;
     this.dio.showLanding(null, null, '', false);
-    this.dio.showBlindArcs(!this.pending && !this.pv && this.sneak && !!this.selected());
+    // V3.9 (24.5): with a Burglar selected, daggers on the rear hexes of seen, unaware enemies it could strike from.
+    {
+      const sel = this.selected();
+      const s = this.state;
+      const on = !this.pending && !this.pv && !this.facing && !!sel && sel.status === 'active' && !sel.acted && this.heroDef(sel.heroId)?.cls === 'burglar' && !!this.vis;
+      this.dio.showBackstab(on ? backstabSpots(s, sel!.heroId, this.reach.map((r) => r.to), this.seenEnemies(), this.vis!.visible) : []);
+    }
+    if (this.facing) {
+      this.applyHover();
+      return;
+    }
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
       const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
@@ -485,6 +518,26 @@ export class Hud {
     const at = this.hoverAt;
     const unitId = this.hoverUnit;
     const d = this.state.delve;
+    // V3.9 (24.5): hovering a seen awake enemy shows its rear half faintly.
+    {
+      const m = unitId ? d.monsters.find((x) => x.id === unitId) : undefined;
+      const r = unitId ? d.rivals?.members.find((x) => x.id === unitId) : undefined;
+      const u = m ?? r;
+      const awake = !!u && (m ? m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' : d.rivals?.stance !== 'hired');
+      this.dio.showRearHalf(awake && u && this.vis?.visible.has(posKey(u.at)) && facingOf(u) !== undefined ? u.id : null);
+    }
+    // V3.9 (24.2): Face mode: the wedge on the hero turns toward the hovered hex.
+    if (this.facing) {
+      const sel = this.selected();
+      const toward = at ?? (unitId ? this.targetPos({ id: unitId }) : null);
+      const f = sel && toward && toward.level === sel.at.level && !samePos(toward, sel.at) ? dirToward(sel.at, toward) : undefined;
+      this.dio.showPath(null);
+      this.dio.showRisks(null);
+      this.dio.showFacing(sel && f !== undefined ? sel.at : null, f);
+      if (sel && f !== undefined) this.showTip(`<b>Face ${this.facingWords(sel.at, f)}</b> · free<br><span class="dim">Click to turn ${this.heroDef(sel.heroId)?.name ?? ''}. Right-click or Esc: cancel.</span>`);
+      else this.hideTip();
+      return;
+    }
     if (this.pending && (this.pending.action === 'jump' || this.pending.action === 'shove')) {
       const t = this.pending.targets.find((x) => (unitId ? x.id === unitId : !!at && !!x.at && samePos(x.at, at)));
       this.dio.showLanding(null, null, '', false);
@@ -501,7 +554,7 @@ export class Hud {
     this.hoverLong = null;
     const free = this.freeMove();
     if (r && sel) {
-      this.dio.showPath(r.path);
+      this.dio.showPath(r.path, pathEndFacing(sel.at, r.path, sel.facing));
       const noise = this.engine.moveNoise(this.state, sel.heroId, this.sneak);
       this.dio.showRipple(r.to, noise);
       // V3.7 (20.1, 20.2): what the move risks, on the monsters.
@@ -509,7 +562,7 @@ export class Hud {
     } else if (free && at && !unitId && !this.pending && sel && this.vis) {
       // 20.5: free move: a long path to any explored hex.
       this.hoverLong = longPath(this.engine.castle(), this.state, this.vis, sel.heroId, at);
-      this.dio.showPath(this.hoverLong);
+      this.dio.showPath(this.hoverLong, this.hoverLong ? pathEndFacing(sel.at, this.hoverLong, sel.facing) : undefined);
       this.dio.showRipple(null, 0);
       this.dio.showRisks(null);
     } else if (!this.pending) {
@@ -527,6 +580,9 @@ export class Hud {
       else if (hero) {
         const def = this.heroDef(hero.heroId);
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
+        const hf = facingOf(hero);
+        if (hf !== undefined && hero.status === 'active') lines.push(`<span class="dim">Faces ${this.facingWords(hero.at, hf)}: sees only that half. Turn with Face (F).</span>`);
+        if (this.backExposed(hero.heroId)) lines.push('<span class="neg">Back exposed: nobody covers the hex behind them.</span>');
       } else if (rival && d.rivals) {
         const st = STANCE[d.rivals.stance];
         const line = crewMemberLine(rival);
@@ -542,7 +598,8 @@ export class Hud {
         if (rf !== undefined && d.rivals.stance !== 'hired') {
           const selH = this.selected();
           const behind = selH && this.inBlindArc(rival.at, rf, selH.at);
-          lines.push(`<span class="dim">Faces ${this.facingWords(rival.at, rf)}.${behind ? ' <span class="pos">You are behind them.</span>' : ''}</span>`);
+          const stab = selH && d.rivals.stance !== 'hostile' && this.heroDef(selH.heroId)?.cls === 'burglar';
+          lines.push(`<span class="dim">Faces ${this.facingWords(rival.at, rf)}: sees only that half.${behind ? ` <span class="pos">You are in their rear half${stab ? ': backstab from next to them' : ''}.</span>` : ' The faint hexes are their rear half.'}</span>`);
         }
         if ((rival.feared ?? 0) > 0) lines.push(`<span class="fear-word">Feared · ${rival.feared} turn${rival.feared === 1 ? '' : 's'}: runs from ${this.nameOf(rival.fearOf ?? '')}, drops any hold.</span>`);
         if (rival.dragging) lines.push(`<span class="neg">Dragging ${this.nameOf(rival.dragging)} toward the way out (3 a round). Kill, down or fear them to free ${this.nameOf(rival.dragging)}.</span>`);
@@ -574,6 +631,11 @@ export class Hud {
       } else if (free && !this.pending && !sel?.moved) {
         const why = this.longPathWhy(at);
         if (why) lines.push(`<span class="dim">${why}</span>`);
+      }
+      // V3.9 (24.5): a backstab spot under the mouse.
+      if (sel && this.heroDef(sel.heroId)?.cls === 'burglar' && this.vis && !this.pending) {
+        const spot = backstabSpots(this.state, sel.heroId, this.reach.map((x) => x.to), this.seenEnemies(), this.vis.visible).find((x) => samePos(x.at, at));
+        if (spot) lines.push(`<span class="tip-stab">🗡 <b>Backstab from here</b> · ${this.nameOf(spot.target)} has not noticed ${this.heroDef(sel.heroId)?.name}: +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit</span>`);
       }
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
@@ -661,7 +723,18 @@ export class Hud {
     if (m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' && mf !== undefined) {
       const sel = this.selected();
       const behind = sel && this.inBlindArc(m.at, mf, sel.at);
-      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}.${behind ? ` <span class="pos">You are behind it${this.sneak ? ': sneak up unseen' : ' (sneak to stay unseen)'}.</span>` : ' The dim hexes behind it are its blind arc.'}</span>`);
+      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}: sees only its front half.${behind ? ` <span class="pos">You are in its rear half${this.sneak ? ': it never notices you sneaking' : ': walking, it notices you only next to it'}.</span>` : ' The faint hexes are its rear half.'}</span>`);
+    }
+    // V3.9 (24.3): the Burglar's backstab, in words.
+    {
+      const sel = this.selected();
+      const s = this.state;
+      if (sel && s && this.heroDef(sel.heroId)?.cls === 'burglar' && m.kind !== 'dragon' && m.kind !== 'gloam' && mf !== undefined) {
+        const now = backstabFrom(s, sel.heroId, m.id, sel.at);
+        const unaware = m.awareness === 'asleep' || !((m as { noticedIds?: string[] }).noticedIds ?? []).includes(sel.heroId) && m.awareness !== 'hunting';
+        if (now) out.push(`<span class="pos">🗡 Backstab now: +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage.</span>`);
+        else if (unaware) out.push(`<span class="dim">🗡 Unaware of ${this.heroDef(sel.heroId)?.name}: strike from its rear half to backstab.</span>`);
+      }
     }
     if ((m.feared ?? 0) > 0) out.push(`<span class="fear-word">Feared · ${m.feared} turn${m.feared === 1 ? '' : 's'}: flees from ${this.nameOf(m.fearOf ?? '')}, attacks nobody, and your heroes swing free as it leaves them.</span>`);
     if (it) out.push(`<span class="neg">Next: ${intentText(this.state!, it)}</span>`);
@@ -839,6 +912,11 @@ export class Hud {
       return;
     }
     if (this.pv) return;
+    if (this.facing) {
+      const toward = at ?? (unitId ? this.targetPos({ id: unitId }) : null);
+      if (toward) this.faceToward(toward);
+      return;
+    }
     // Clicking the hex you stand on (or your own figure) takes the stairs or lift (15.7).
     const sel = this.selected();
     if (!this.pending && sel && ((unitId && unitId === this.selectedId) || (!unitId && at && samePos(at, sel.at))) && this.linkHere()) {
@@ -882,22 +960,45 @@ export class Hud {
     }
   }
 
-  /** V3.7 (20.2): a move that provokes free swings asks once, with the damage ranges (like the two-level jump). */
+  /** A move. V3.9 (24.4): no "are you sure?" for free swings; the preview's red sword says it. */
   private moveAlong(r: Reach): void {
     const sel = this.selected();
     if (!sel) return;
-    const swings = r.risks?.swings ?? [];
     const free = this.freeMove();
-    const go = () => void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak, follow: free ? this.follow : undefined });
-    if (!swings.length) return go();
-    const name = this.heroDef(sel.heroId)?.name ?? sel.heroId;
-    const list = swings.map((sw) => `${this.nameOf(sw.id)} gets a free swing: ${sw.damage[0]}–${sw.damage[1]}`).join('; ');
-    this.dio.showRisks(r.risks ?? null);
-    this.confirm(`${list}. ${swings.length === 1 ? 'It strikes' : 'They strike'} as ${name} leaves reach${this.sneak ? ' (sneaking does not avoid it)' : ''}. Move anyway?`, 'Move', go, { title: `${name} takes a swing?`, cancel: 'Stay', danger: true });
+    void this.host.send({ type: 'move', heroId: sel.heroId, path: r.path, sneak: this.sneak, follow: free ? this.follow : undefined });
+  }
+
+  /** V3.9 (24.2): Face mode on or off (key F, or the Face button). */
+  private setFacing(on: boolean): void {
+    const sel = this.selected();
+    const d = this.state?.delve;
+    if (on && (!sel || sel.status !== 'active' || !d || d.phase !== 'player' || this.busy)) return;
+    if (on) {
+      this.pending = null;
+      if (this.pv) this.closePreview();
+    }
+    this.facing = on;
+    if (!on) this.dio.showFacing(null);
+    this.renderBar();
+    this.drawHighlights();
+  }
+
+  /** Turn the selected hero toward `at` (free). */
+  private faceToward(at: Pos): void {
+    const sel = this.selected();
+    if (!sel || at.level !== sel.at.level || samePos(at, sel.at)) return;
+    const f = dirToward(sel.at, at);
+    this.facing = false;
+    this.dio.showFacing(null);
+    void this.host.send({ type: 'face', heroId: sel.heroId, facing: f });
   }
 
   private cancel(): void {
     this.fusePicked = false;
+    if (this.facing) {
+      this.setFacing(false);
+      return;
+    }
     if (this.confirmBox) {
       this.closeConfirm();
       return;
@@ -1506,6 +1607,8 @@ export class Hud {
       if (hd.nightEyes && hd.nightEyes > 0) chip('dark', 'In the dark · night-eye', `${name} stands outside all light, but the night-eye draught keeps sight (${darkSight}) and rolls whole.${hd.at.level === 3 ? '\nIn the Hollow the dark itself still hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
       else chip('dark', `In the dark · sight ${darkSight}`, `${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'}, and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}\nStep into the lantern's light, a brazier's or a torch's.`);
     }
+    // V3.9 (24.5): nobody's front half covers the hex behind this hero.
+    if (hd.status === 'active' && this.backExposed(hd.heroId)) chip('bad back-exposed', '◐ Back exposed', `${FACING_HELP.backExposed}`);
     if (hd.grabbedBy) {
       const by = d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul';
       chip('bad grab', '⛓ Held', `Held by ${by}: can't move or dash.\nBreak free (2 Might slots, 1 hit frees you) or kill it.`);
@@ -1562,13 +1665,14 @@ export class Hud {
       );
     }
     // Move group: walk/sneak, and the stairs or lift under the hero (15.7).
-    const usedKeys = new Set<string>(['s', 'e', 'c']);
+    const usedKeys = new Set<string>(['s', 'e', 'c', 'f']);
     const link = this.linkHere();
     const modes = h(
       'div',
       { class: 'bar-modes' },
       h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: `Walk · noise 1 per hex\n${MOVE_HELP.walk}` }, 'Walk'),
-      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}` }, 'Sneak ', h('kbd', null, 'S')),
+      h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}${def?.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}` }, 'Sneak ', h('kbd', null, 'S')),
+      h('button', { class: `btn btn-small btn-face ${this.facing ? 'on' : ''}`, onclick: () => this.setFacing(!this.facing), disabled: this.busy || !sel || sel.status !== 'active', 'data-action': 'face', title: `Face · free · key F\n${FACING_HELP.face}` }, 'Face ', h('kbd', null, 'F')),
     );
     const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
     // 20.5: free move while calm: the state line and the Follow toggle.
@@ -2161,7 +2265,7 @@ export class Hud {
         }),
         ' Lower walls near the camera',
       ),
-      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (shows blind arcs; hover a hex for wake, notice and swing risks) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
+      h('div', { class: 'menu-keys dim small' }, h('div', null, h('kbd', null, '1–4'), ' select · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' sneak (hover a hex for wake, notice and swing risks; hover an enemy for its rear half) · ', h('kbd', null, 'F'), ' face (then click a hex; free) · ', h('kbd', null, 'T'), ' take stairs or lift · ', h('kbd', null, 'Q'), ' leave the castle (on a way out) · ', h('kbd', null, 'L'), ' shutter/open the lantern (bearer) · ', h('kbd', null, 'B'), ' parley with a crew · ', h('kbd', null, 'E'), ' end turn'), h('div', null, 'Right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate 60° · wheel zoom · middle-drag or arrows pan'), h('div', null, 'Hold ', h('kbd', null, 'Space'), ' to hurry the world phase')),
       h('div', { class: 'menu-row' }, h('button', { class: 'btn btn-small btn-danger', onclick: () => this.confirm('Abandon the delve? Heroes standing on an exit get out. Everyone else is left behind and dies.', 'Abandon', () => this.host.abandonDelve()) }, 'Abandon delve'), h('button', { class: 'btn btn-small', onclick: () => this.host.toTitle() }, 'Title screen')),
     );
     m.classList.remove('hidden');
@@ -2317,6 +2421,7 @@ export class Hud {
       if (sel && this.dealsFor(sel.heroId).length) return this.openParley();
     }
     if (k === 's') return this.setSneak(!this.sneak);
+    if (k === 'f') return this.setFacing(!this.facing);
     if (k === 'e') return this.endTurn();
     // 16.2: L shutters/opens the lantern unless the selected hero has a Light/Oil button on L.
     if (k === 'l' && !this.bar.querySelector('button.act[data-key="l"]:not(.act-shutter)')) return this.toggleShutter();

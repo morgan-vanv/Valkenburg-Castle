@@ -26,9 +26,9 @@ import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { capture, rivalCaltropsStep, striker } from './crewai';
 import { parleyTargets } from './parley';
-import { fleePlan, forgetHeroes, hasNoticed, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
+import { dirIndex, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
-import { DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS } from './data';
+import { BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS } from './data';
 import {
   BRIAR_DMG, BRIAR_MANA, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS,
   HAMSTRING_SLOTS, NIGHTTHORN_DMG, NIGHTTHORN_MANA, NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SHIELD_BRACED_DMG, SMASH_GOLD, SMASH_GOLD_CHANCE, SMASH_ITEM_CHANCE,
@@ -40,9 +40,13 @@ import { calmWalk, isCalm } from './calm';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
-/** Mark everything in line of sight from `at` as explored (layout only). */
+/**
+ * Mark everything in line of sight from `at` as explored (layout only). V3.9 (spec 24.2): through the
+ * front half of the active hero standing there (no hero there: all round).
+ */
 export function glimpse(c: Ctx, at: Pos, ex: Set<string> = new Set(c.d.explored), lit?: Set<string>): void {
-  for (const p of glimpseSet(c.w, c.d, at, lit)) {
+  const eye = c.d.heroes.find((h) => h.status === 'active' && samePos(h.at, at));
+  for (const p of glimpseSet(c.w, c.d, at, lit, eye?.facing)) {
     const k = posKey(p);
     if (!ex.has(k)) {
       ex.add(k);
@@ -64,6 +68,7 @@ export function refreshSight(c: Ctx): void {
   const ex = new Set(c.d.explored);
   for (const k of vis) if (!ex.has(k)) c.d.explored.push(k);
   for (const h of c.d.heroes) if (h.status === 'active') glimpse(c, h.at, ex, lit);
+  noteSeen(c, vis);
 
   const cr = c.d.rivals;
   if (cr && !cr.spotted && rivalsOnMap(c).some((r) => (r.veil ?? 0) <= 0 && vis.has(posKey(r.at)))) {
@@ -85,6 +90,45 @@ export function refreshSight(c: Ctx): void {
     crewNotice(c);
     if (cr.stance !== 'waiting') crewAim(c);
   }
+}
+
+/** V3.9 (spec 24.4): every monster and crew member standing in the party's sight joins `seen` (veiled crew don't). */
+export function noteSeen(c: Ctx, vis: Set<string>): void {
+  const seen = (c.d.seen ??= []);
+  const add = (id: string) => {
+    if (!seen.includes(id)) seen.push(id);
+  };
+  for (const m of c.d.monsters) if (!m.buried && vis.has(posKey(m.at))) add(m.id);
+  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && vis.has(posKey(r.at))) add(r.id);
+}
+
+/** V3.9 (spec 24.4): ids of the enemies the party has seen this delve that are still about (with whoever is in sight now). */
+export function seenSet(c: Ctx, vis: Set<string> = visNow(c)): Set<string> {
+  const out = new Set<string>();
+  const was = new Set(c.d.seen ?? []);
+  for (const m of c.d.monsters) if (!m.buried && (was.has(m.id) || vis.has(posKey(m.at)))) out.add(m.id);
+  for (const r of rivalsOnMap(c)) if (was.has(r.id) || ((r.veil ?? 0) <= 0 && vis.has(posKey(r.at)))) out.add(r.id);
+  return out;
+}
+
+/** V3.9 (spec 24.2): turn a hero to `facing`, with a `faced` event when it changed. */
+export function setFacing(c: Ctx, h: HeroInDelve, facing: number): void {
+  if (h.facing === facing) return;
+  h.facing = facing;
+  c.visCache = undefined;
+  c.ev.push({ type: 'faced', id: h.heroId, facing });
+}
+
+/** The `face` command (spec 24.2): free and unlimited in the player phase. */
+export function doFace(c: Ctx, heroId: string, facing: number): string | undefined {
+  const h = hd(c, heroId);
+  if (!h) return 'No such hero.';
+  if (!Number.isInteger(facing) || facing < 0 || facing > 5) return 'Face one of the six sides.';
+  if (h.status !== 'active') return `${heroName(c, heroId)} can't turn.`;
+  if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
+  setFacing(c, h, facing);
+  refreshSight(c);
+  return undefined;
 }
 
 /** Active heroes on Level 3 standing in the dark (spec 16.2: the Gloam's quarry). */
@@ -157,12 +201,15 @@ export function reachable(c: Ctx, heroId: string, sneak: boolean) {
   const out = [];
   // V3.7 (spec 20.1, 20.2): what each path risks, for the preview (one lit set for the whole query).
   const lit = litSet(c.w, c.d);
+  // V3.9 (spec 24.4): risks only from enemies the party has seen.
+  const vis = visNow(c);
+  const seen = seenSet(c, vis);
   for (const n of nodes.values()) {
     if (samePos(n.p, h.at)) continue;
     const o = occupant(c, n.p);
     if (o) continue; // can't end on another hero or the prisoner
     const path = pathTo(nodes, n.p);
-    out.push({ to: n.p, cost: n.cost, path, risks: moveRisks(c, h, path, sneak, lit), ...(mk === 'dash' ? { dash: true } : {}) });
+    out.push({ to: n.p, cost: n.cost, path, risks: moveRisks(c, h, path, sneak, lit, seen, vis), ...(mk === 'dash' ? { dash: true } : {}) });
   }
   return out;
 }
@@ -216,6 +263,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
   const lit = litSet(c.w, c.d);
   const swung = new Set<string>();
   let lastNoise = 0;
+  const faceBefore = h.facing;
   for (const [i, p] of path.entries()) {
     if (kindAt(c.w, c.d, p) === 'door') {
       const door = doorAt(c.d, p);
@@ -235,8 +283,11 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
       h.at = { ...p };
       levelHeal(c, h);
     }
+    // V3.9 (spec 24.2): a walking hero faces the way of each step (stairs keep the facing).
+    if (p.level === from.level) h.facing = dirIndex(from, p);
     h.at = { ...p };
     from = p;
+    c.visCache = undefined;
     glimpse(c, p);
     // V3.7 (spec 20.1): noise at every hex (1, 2 on rubble; sneaking silent), and sleepers within 2 roll to wake.
     lastNoise = stepNoise(c, p, sneak);
@@ -257,6 +308,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
     }
   }
   if (walked.length) c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
+  if (h.facing !== undefined && h.facing !== faceBefore) c.ev.push({ type: 'faced', id: heroId, facing: h.facing });
   if (lastNoise && h.status === 'active') c.ev.push({ type: 'noise', at: { ...h.at }, radius: lastNoise });
   ventCheck(c, h);
   afterHeroMove(c, h, sneak, true);
@@ -353,10 +405,12 @@ function aroundAndSelf(p: Pos): Pos[] {
   return [p, ...posNeighbors(p)];
 }
 
+/** Adjacent enemies the party can see (V3.9, spec 24.2: one in a rear hex nobody covers is turned to first). */
 function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] {
+  const vis = visNow(c);
   const out: ActionTarget[] = [];
-  for (const m of onMap(c)) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at)) out.push({ id: m.id, at: m.at });
-  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && adjacent(r.at, h.at)) out.push({ id: r.id, at: r.at });
+  for (const m of onMap(c)) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at) && vis.has(posKey(m.at))) out.push({ id: m.id, at: m.at });
+  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && adjacent(r.at, h.at) && vis.has(posKey(r.at))) out.push({ id: r.id, at: r.at });
   return out;
 }
 
@@ -881,6 +935,19 @@ function areaOf(c: Ctx, at: Pos, radius: number): Pos[] {
   return range(at, radius).map((x) => ({ level: at.level, ...x })).filter((p) => !!c.w.tile(p));
 }
 
+/**
+ * V3.9 (spec 24.3): can this hero backstab `id` now? A Burglar with a melee weapon, adjacent, in the
+ * target's rear half, the target unaware of them; monsters and crew members, not the Dragon or the Gloam.
+ */
+export function canBackstab(c: Ctx, h: HeroInDelve, id: string, unnoticed = unnoticedBy(c, id, h.heroId)): boolean {
+  const def = heroDef(c, h.heroId);
+  if (!def || def.cls !== 'burglar' || CLASSES[def.cls].weapon.range || !unnoticed) return false;
+  const m = c.d.monsters.find((x) => x.id === id);
+  const f = m ?? rivalsOnMap(c).find((x) => x.id === id);
+  if (!f || (m && (m.kind === 'dragon' || m.kind === 'gloam'))) return false;
+  return adjacent(h.at, f.at) && inRearHalf(f, h.at);
+}
+
 function foe(c: Ctx, id?: string) {
   if (!id) return undefined;
   const m = c.d.monsters.find((x) => x.id === id);
@@ -981,8 +1048,11 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       // V3.7 (spec 20.1): the first blow on an enemy that hasn't noticed you; the Burglar's backstab stacks.
-      if (unnoticedBy(c, t.id!, heroId)) { slots += SNEAK_ATTACK_SLOTS; mods.push('Sneak attack +1 slot'); }
-      if (def.cls === 'burglar' && f.monster && !f.hunting) { slots += 1; mods.push('Backstab +1 slot'); }
+      const unnoticed = unnoticedBy(c, t.id!, heroId);
+      if (unnoticed) { slots += SNEAK_ATTACK_SLOTS; mods.push('Sneak attack +1 slot'); }
+      // V3.9 (spec 24.3): the Burglar's backstab: melee from the target's rear half, unnoticed: +1 slot, double damage before armor.
+      const stab = canBackstab(c, h, t.id!, unnoticed);
+      if (stab) { slots += BACKSTAB_SLOTS; mods.push('Backstab: +1 slot, double damage'); }
       const ranged = !!cls.weapon.range;
       if (ranged && c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
@@ -990,7 +1060,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (adjacent(h.at, f.at) && c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
       const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
       const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
-      const dmg = Math.max(0, Math.max(1, cls.weapon.dmg - armor) - (rd?.ward ?? 0));
+      const dmg = Math.max(0, Math.max(1, cls.weapon.dmg * (stab ? BACKSTAB_DMG_MULT : 1) - armor) - (rd?.ward ?? 0));
       const outcomes = [];
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? 'Miss' : `${i * dmg + (i === slots ? 1 : 0)} dmg`);
       return base(cls.weapon.stat, slots, p, outcomes, cls.weapon.noise ?? 2, dmg);
@@ -1288,6 +1358,12 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
   const def = heroDef(c, heroId)!;
   const name = def.name;
   if (focus < 0 || focus > Math.min(h.focus, sp.slots)) return 'Not that much Focus.';
+  // V3.9 (spec 24.2): an action aimed at a hex or a figure turns the hero that way.
+  const aim = t.at ?? (t.id ? figurePos(c, t.id) : undefined);
+  if (aim && aim.level === h.at.level && !samePos(aim, h.at)) {
+    setFacing(c, h, dirIndex(h.at, aim));
+    if (!c.visCache) refreshSight(c);
+  }
   if (!FREE.includes(action)) h.acted = true;
   if (action === 'open' && t.id && def.cls !== 'burglar') h.acted = true;
   if (WHOLE_TURN.includes(action)) h.moved = true;
@@ -1532,7 +1608,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         wakeTarget(c, tid, h.at, heroId);
       } else {
         const dmg = r.hits * (sp.dmg ?? 1) + (r.perfect ? 1 : 0);
-        hurtAny(c, tid, dmg, heroId, { crit: r.perfect });
+        // V3.9 (spec 24.3): name the backstab in the log (the view reads the hit's `backstab` flag too).
+        const stab = action === 'attack' && sp.modifiers.some((m) => m.startsWith('Backstab'));
+        if (stab) say(c, `${heroName(c, heroId)} backstabs ${c.d.monsters.find((m) => m.id === tid)?.name ?? c.d.rivals?.members.find((m) => m.id === tid)?.name ?? 'it'}: ${dmg}.`);
+        hurtAny(c, tid, dmg, heroId, { crit: r.perfect, backstab: stab });
       }
       break;
     }

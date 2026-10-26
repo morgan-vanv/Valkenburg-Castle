@@ -34,6 +34,11 @@
 // drinks a potion below half, and takes "Bring back" contracts for captured heroes first. The report
 // prints crew fights won (every member dead) / lost (a hero dead or taken) / fled, heroes captured, rescues.
 //
+// V3.9 (spec 24): heroes see their front half only. At the end of the party's turn heroes standing
+// together face the lead's way and the last of them faces back; a hero turns to a seen enemy next to
+// it that nobody sees; a Burglar sneaks round behind a seen sleeper in reach and backstabs it. The
+// report prints enemy strikes from behind, unseen hits and backstabs.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -43,7 +48,8 @@ import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
 import { posKey, samePos, type Pos } from '../src/game/hex';
 import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '../src/game/types';
-import { World, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
+import { World, dirIndex, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
+import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
 import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
@@ -78,7 +84,9 @@ const evCount: Record<string, number> = {};
 let gloamStrikes = 0;
 /** V3.7 (spec 20.5): free movement while calm: moves, steps walked, castle turns taken on the way, walks that stopped for combat, braces. */
 const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, hamstrung: 0 };
+let stabbing = false;
 function run(s: GameState, cmd: Command): GameState {
+  stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
   const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
   if (cmd.type === 'move' && !r.error && s.delve?.calm) {
@@ -91,6 +99,22 @@ function run(s: GameState, cmd: Command): GameState {
     }
   }
   for (const ev of r.events) if (ev.type === 'rooted' && s.delve?.heroes.some((h) => h.heroId === ev.id)) calm.hamstrung++;
+  // V3.9 (spec 24.2, 24.3): blindsided strikes on heroes, unseen hits, backstab hits and kills.
+  for (const [j, ev] of r.events.entries()) {
+    if (ev.type === 'unseenHit') eyes.unseenHits++;
+    if (ev.type === 'faced' && cmd.type === 'face') eyes.faces++;
+    if (ev.type !== 'roll') continue;
+    const enemy = !s.delve?.heroes.some((h) => h.heroId === ev.who);
+    if (enemy && /^(Attack|Shot|Bite|Free swing|Overwatch|Firebolt|Hamstring)/.test(ev.what)) eyes.strikes++;
+    if (enemy && / from behind$/.test(ev.what)) {
+      eyes.blindsided++;
+      if (ev.roll.hits) eyes.blindHits++;
+    }
+    if (!enemy && cmd.type === 'act' && cmd.action === 'attack' && j === r.events.findIndex((x) => x.type === 'roll') && stabbing) {
+      if (ev.roll.hits) eyes.backstabHits++;
+      if (r.events.some((x) => x.type === 'monsterDied' && x.id === cmd.target.id) || r.events.some((x) => x.type === 'downed' && 'id' in x && x.id === cmd.target.id)) eyes.backstabKills++;
+    }
+  }
   for (const ev of r.events) {
     const key = ev.type === 'hit' ? (ev.target.startsWith('m') || ev.target.startsWith('r') ? 'hit:monster' : 'hit:hero') : ev.type === 'awake' ? `awake:${ev.awareness}` : ev.type;
     evCount[key] = (evCount[key] ?? 0) + 1;
@@ -122,8 +146,16 @@ function run(s: GameState, cmd: Command): GameState {
   return r.state;
 }
 
+/** V3.9 (spec 24): fields of view: blindsided enemy strikes, unseen hits, backstabs, face commands. */
+const eyes = { strikes: 0, blindsided: 0, blindHits: 0, unseenHits: 0, backstabs: 0, backstabHits: 0, backstabKills: 0, sleeperStabs: 0, faces: 0, turnedToFoe: 0 };
 function act(s: GameState, heroId: string, action: ActionKind, target: ActionTarget, focus = 0): GameState {
-  return run(s, { type: 'act', heroId, action, target, focus });
+  const stab = action === 'attack' && e.preview(s, heroId, action, target).modifiers.some((m) => m.startsWith('Backstab'));
+  const r = run(s, { type: 'act', heroId, action, target, focus });
+  if (stab && r !== s) {
+    eyes.backstabs++;
+    if (s.delve?.monsters.find((m) => m.id === target.id)?.awareness === 'asleep') eyes.sleeperStabs++;
+  }
+  return r;
 }
 
 function option(s: GameState, heroId: string, a: ActionKind) {
@@ -367,9 +399,79 @@ function nearSleeper(s: GameState, at: Pos): boolean {
 let sneakMoves = 0;
 let walkMoves = 0;
 
+/** V3.9 (spec 24.2): a hero with a seen enemy next to them that nobody sees now turns to face it (free). */
+function turnToFoe(s: GameState, id: string): GameState {
+  const d = s.delve as DelveX;
+  const me = d.heroes.find((x) => x.heroId === id);
+  if (!me || me.status !== 'active') return s;
+  const seen = e.seenEnemies(s);
+  const vis = e.visibility(s).visible;
+  const foes = [...d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep'), ...(d.rivals?.stance === 'hostile' ? d.rivals.members.filter((r) => r.hp > 0 && !r.goneOut) : [])];
+  const f = foes.find((m) => m.at.level === me.at.level && hexDistance(m.at, me.at) === 1 && seen.has(m.id) && !vis.has(posKey(m.at)));
+  if (!f) return s;
+  const r = run(s, { type: 'face', heroId: id, facing: dirIndex(me.at, f.at) });
+  if (r !== s) eyes.turnedToFoe++;
+  return r;
+}
+
+/**
+ * V3.9 (spec 24.3): a Burglar who hasn't moved sneaks round behind a seen sleeper in reach and backstabs it:
+ * a reachable hex next to it in its rear half (sneaking), then the attack (which turns the Burglar to it).
+ */
+function backstabCheck(s: GameState, id: string): GameState {
+  const d = s.delve as DelveX;
+  const me = d.heroes.find((x) => x.heroId === id);
+  if (!me || me.status !== 'active' || me.moved || me.acted || e.heroById(s, id)?.cls !== 'burglar') return s;
+  const seen = e.seenEnemies(s);
+  const sleepers = d.monsters.filter((m) => m.awareness === 'asleep' && !m.buried && m.kind !== 'dragon' && m.kind !== 'gloam' && seen.has(m.id) && m.at.level === me.at.level && hexDistance(m.at, me.at) <= 5);
+  for (const m of sleepers) {
+    const spot = e.reachable(s, id, true).filter((r) => !r.dash && r.to.level === m.at.level && hexDistance(r.to, m.at) === 1 && inRearHalf(m, r.to) && !r.risks?.wake.some((x) => x.id === m.id && x.chance > 10))
+      .sort((a, b) => a.cost - b.cost)[0];
+    if (!spot) continue;
+    sneakMoves++;
+    s = run(s, { type: 'move', heroId: id, path: spot.path, sneak: true });
+    if (s.stage !== 'delve') return s;
+    const t = option(s, id, 'attack')?.targets.find((x) => x.id === m.id);
+    if (t) {
+      const p = e.preview(s, id, 'attack', t);
+      s = act(s, id, 'attack', t, p.maxFocus);
+    }
+    return s;
+  }
+  return s;
+}
+
+/**
+ * V3.9 (spec 24.2): at the end of the party's turn, heroes standing together (within 2 of another) cover
+ * each other: everyone faces the lead's way, the last of the group faces back.
+ */
+function faceParty(s: GameState): GameState {
+  const d = s.delve as DelveX;
+  const act = d.heroes.filter((h) => h.status === 'active' && !(h as { dozing?: boolean }).dozing);
+  const done = new Set<string>();
+  for (const h of act) {
+    if (done.has(h.heroId)) continue;
+    const group = act.filter((o) => o.at.level === h.at.level && hexDistance(o.at, h.at) <= 2);
+    if (group.length < 2) continue;
+    for (const g of group) done.add(g.heroId);
+    const lead = group.find((g) => g.heroId === d.lanternBearer) ?? group[0]!;
+    const fwd = lead.facing ?? 0;
+    const back = group.filter((g) => g !== lead).at(-1)!;
+    for (const g of group) {
+      const want = g === back ? (fwd + 3) % 6 : fwd;
+      const cur = s.delve!.heroes.find((x) => x.heroId === g.heroId)!;
+      if (cur.facing !== want) s = run(s, { type: 'face', heroId: g.heroId, facing: want });
+    }
+  }
+  return s;
+}
+
 function heroTurn(s: GameState, h: HeroInDelve): GameState {
   const id = h.heroId;
   s = parleyCheck(s, id);
+  if (s.stage !== 'delve') return s;
+  s = turnToFoe(s, id);
+  s = backstabCheck(s, id);
   if (s.stage !== 'delve') return s;
   const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
   const alive = () => s.stage === 'delve' && hero()?.status === 'active';
@@ -699,6 +801,7 @@ for (let i = 0; i < N; i++) {
       s = run(s, { type: 'abandon' });
       break;
     }
+    s = faceParty(s);
     s = run(s, { type: 'endTurn' });
   }
   const sum = s.summary!;
@@ -793,6 +896,7 @@ for (const kd of kinds) {
 }
 if (DRAGON) console.log(`dragon: slain ${rows.filter((r) => r.dragonDead).length}/${rows.length}, reached L3 ${rows.filter((r) => r.reachedL3).length}/${rows.length}`);
 console.log(`stealth (spec 20.1, 20.2): moves ${walkMoves} walked / ${sneakMoves} sneaked; sleepers woken by passers-by ${evCount.woke ?? 0}; heroes noticed ${evCount.noticed ?? 0}; free swings ${evCount.swing ?? 0} (awake events: ${Object.entries(evCount).filter(([k]) => k.startsWith('awake:')).map(([k, v]) => `${k.slice(6)} ${v}`).join(', ') || 'none'})`);
+console.log(`eyes front (spec 24): enemy strikes on heroes ${eyes.strikes}, from behind ${eyes.blindsided} (${eyes.blindHits} hit), unseen hits ${eyes.unseenHits}; backstabs ${eyes.backstabs} (${eyes.sleeperStabs} on sleepers, ${eyes.backstabHits} hit, ${eyes.backstabKills} kills); face commands ${eyes.faces}, turned to a foe ${eyes.turnedToFoe}`);
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
 if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);

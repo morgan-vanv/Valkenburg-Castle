@@ -3,15 +3,15 @@
 
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent } from './types';
-import { CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
+import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
 import { say, type Ctx, type MonsterX } from './state';
 import {
   armorOf, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
   rangedLabel, roll, rootFigure,
 } from './common';
-import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, within } from './world';
+import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
-import { dirIndex, heroSwings } from './stealth';
+import { dirIndex, heroSwings, inRearHalf } from './stealth';
 
 // ---------------------------------------------------------------- perception
 
@@ -183,7 +183,10 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   // V3.7 (spec 20.5): a braced hero is harder to hit; brace and the shield take damage off each hit.
   const h = hd(c, tid);
   const gm = h ? guardMods(c, h, rangedLabel(what)) : { dmg: 0, chance: 0 };
-  const r = roll(c, attacker, what, slots, p + gm.chance);
+  // V3.9 (spec 24.2): from the hero's rear half, +1 slot; unseen, it stands out to the party.
+  const bs = h ? blindside(c, attacker, h) : NOT_BLINDSIDED;
+  const r = roll(c, attacker, bs.extra ? `${what} from behind` : what, slots + bs.extra, p + gm.chance);
+  if (bs.unseen) unseenStrike(c, attacker, tid, r.hits > 0);
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: tid });
     return { hit: null, hits: 0, damage: 0 };
@@ -193,6 +196,29 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
   return { hit: tid, hits: r.hits, damage: total };
+}
+
+// ---------------------------------------------------------------- blindsided (spec 24.2)
+
+const NOT_BLINDSIDED = { extra: 0, unseen: false };
+
+/**
+ * An attack on hero `h` by `attacker`: from the hero's rear half it is blindsided (+1 slot); `unseen`
+ * when no hero can see the attacker either. Monsters, crews, free swings and overwatch shots alike.
+ */
+export function blindside(c: Ctx, attacker: string, h: HeroInDelve): { extra: number; unseen: boolean } {
+  const at = figurePosOf(c, attacker);
+  if (!at || !inRearHalf(h, at)) return NOT_BLINDSIDED;
+  const vis = (c.visCache ??= visibleSet(c.w, c.d));
+  return { extra: BLINDSIDE_SLOTS, unseen: !vis.has(posKey(at)) };
+}
+
+/** Something the party can't see strikes from behind: the log line, `unseenHit` on a hit, and the attacker shows until the next player phase ends. */
+export function unseenStrike(c: Ctx, attacker: string, heroId: string, hit: boolean): void {
+  (c.d.revealed ??= {})[attacker] = c.d.round + 1;
+  c.visCache = undefined;
+  if (hit) c.ev.push({ type: 'unseenHit', target: heroId });
+  say(c, hit ? `Something strikes ${heroName(c, heroId)} from behind.` : `Something lunges at ${heroName(c, heroId)} from behind and misses.`);
 }
 
 // ---------------------------------------------------------------- hamstring (spec 20.5: orc archers, rival Rangers)
@@ -217,8 +243,10 @@ export function hamstringIntent(c: Ctx, from: Pos, t: Target): Intent | null {
 export function hamstringShot(c: Ctx, attacker: string, t: Target, chance: number): boolean {
   if (!t.hero || t.hero.status !== 'active') return false;
   const gm = guardMods(c, t.hero, true);
+  const bs = blindside(c, attacker, t.hero);
   say(c, `${nameOf(c, attacker)} aims low at ${heroName(c, t.id)}'s legs.`);
-  const r = roll(c, attacker, 'Hamstring', HAMSTRING_SLOTS, chance + HAMSTRING_PENALTY + gm.chance);
+  const r = roll(c, attacker, bs.extra ? 'Hamstring from behind' : 'Hamstring', HAMSTRING_SLOTS + bs.extra, chance + HAMSTRING_PENALTY + gm.chance);
+  if (bs.unseen) unseenStrike(c, attacker, t.id, r.hits > 0);
   const at = figurePosOf(c, attacker);
   if (at) makeNoise(c, at, HAMSTRING_NOISE);
   if (!r.hits) {
@@ -245,7 +273,8 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
   for (const h of c.d.heroes) {
     if (h.status !== 'active' || !h.overwatch) continue;
     const def = heroDef(c, h.heroId)!;
-    if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit)) continue;
+    // V3.9 (spec 24.2): only at enemies in the watcher's front half.
+    if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit, h.facing)) continue;
     h.overwatch = false;
     const cls = CLASSES[def.cls];
     let slots = cls.weapon.slots;

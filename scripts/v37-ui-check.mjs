@@ -1,6 +1,6 @@
 // V3.7 presentation check (spec 20), headless, by DOM text and state; screenshots only with SHOTS.
 // Covers: move-preview risks (tags on the monsters, lines in the hover tip, walk vs sneak), facing
-// wedges and blind arcs while sneaking, the free-swing confirm, Dread (bar, preview, feared tag),
+// wedges (V3.9: no blind-arc wash, no free-swing confirm), Dread (bar, preview, feared tag),
 // the set-charge flow (aim with breakable walls outlined, fuse picker, fuse marker and hover), the
 // blast (wall to rubble, log line, hover "Blast rubble"), crew member info (hover, parley card,
 // intents, dragging), the captured banner, camp captives and "Bring back" contracts; no console errors.
@@ -176,17 +176,17 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     if (wake && wakeS) check('...with the lower sneaking wake chance', wakeS.chance < wake.chance, `${wake.chance}% → ${wakeS.chance}%`);
     // Blind arcs and facing.
     check('facing wedges drawn on awake enemies', await p.evaluate(() => window.vc.dio.facingMarks.children.length > 0), `${await p.evaluate(() => window.vc.dio.facingMarks.children.length)}`);
+    // V3.9 (24.5): the sneaking blind-arc wash is gone (rear halves show on hovering an enemy; see v39-ui-check).
     const blind = await p.evaluate(() => ({ fill: window.vc.dio.blindFill.count, tags: document.querySelectorAll('.blind-tag').length }));
-    check('sneaking: blind-arc hexes shaded behind awake enemies', blind.fill > 0, JSON.stringify(blind));
+    check('sneaking: no blind-arc wash (V3.9)', blind.fill === 0 && blind.tags === 0, JSON.stringify(blind));
     await p.keyboard.press('s');
     await p.waitForTimeout(100);
-    check('walking again: blind arcs gone', (await p.evaluate(() => window.vc.dio.blindFill.count)) === 0);
     await unhover();
   } else skip('risk tags', 'no reachable hex with risks from here');
   check('Walk button help carries the wake and notice numbers', /per hex|roll to wake|notice you/.test(await p.$eval('.bar-modes button', (e) => e.dataset.tip ?? e.title)));
 }
 
-// ---- 2. the free-swing confirm: the lead next to a hunting monster, moving away
+// ---- 2. free swings (V3.9: no confirm): the lead next to a hunting monster, moving away
 {
   const lead = s.delve.heroes[0];
   const hunter = s.delve.monsters.find((m) => m.awareness === 'hunting' && m.at.level === lead.at.level && m.kind !== 'dragon') ?? s.delve.monsters.find((m) => m.at.level === lead.at.level && m.kind !== 'dragon' && m.kind !== 'gloam' && m.kind !== 'rats');
@@ -204,13 +204,13 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       await p.evaluate((at) => window.vc.hud.onClick(at, null, { button: 0 }), away.to);
       await p.waitForTimeout(150);
       const modal = await p.$eval('.hud-modal', (e) => (e.classList.contains('hidden') ? '' : e.innerText)).catch(() => '');
-      check('clicking it asks once, naming the swing and the damage', /free swing: \d+–\d+/.test(modal) && /Move anyway/.test(modal), modal.replace(/\n/g, ' | ').slice(0, 120));
-      await p.keyboard.press('Enter');
+      // V3.9 (24.4): no "are you sure?" any more; the red sword in the preview says it.
+      check('clicking it moves at once (no swing confirm, V3.9)', !/Move anyway/.test(modal), modal.replace(/\n/g, ' | ').slice(0, 120));
       await idle();
       await p.waitForTimeout(200);
       s = await state();
       const moved = s.delve.heroes.find((h) => h.heroId === lead.heroId);
-      check('Enter moves anyway', moved.at.q === away.to.q && moved.at.r === away.to.r);
+      check('...the hero moved', moved.at.q === away.to.q && moved.at.r === away.to.r);
       const log = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
       check('a swing log line ("free swing")', /free swing/i.test(log), log.split('\n').slice(-3).join(' | '));
     } else skip('free-swing confirm', 'no reachable hex leaves the hunter (engine risks.swings empty)');
@@ -583,7 +583,17 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     const fx = await import('/src/view/fixtures.ts');
     let st = window.vc.state();
     if (location.search.includes('fixture')) st = fx.fixtureDelve(window.vcEngine.castle());
-    window.vc.load(fx.fixtureCrew(st, 'hostile'));
+    const cs = fx.fixtureCrew(st, 'hostile');
+    // V3.9 (24.2): heroes see only their front half; the crew stands all round them. No facing = sees all round (old saves).
+    for (const h of cs.delve.heroes) delete h.facing;
+    // 24.2: only active heroes see; an earlier scene may have left the lead downed.
+    const lead = cs.delve.heroes[0];
+    if (lead.status === 'downed') Object.assign(lead, { status: 'active', hp: Math.max(lead.hp, 5) });
+    // ...and 24.2 intents show only for enemies in sight: light the room so the crew is seen.
+    cs.delve.light = 60;
+    cs.delve.lanternOpen = true;
+    cs.delve.lanternBearer = cs.delve.heroes.find((h) => h.status === 'active')?.heroId ?? cs.delve.lanternBearer;
+    window.vc.load(cs);
   });
   await p.waitForTimeout(300);
   s = await state();

@@ -19,6 +19,7 @@ import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
 import { isKit, satchelName } from './charges';
+import { facingInto } from './stealth';
 import { canEnter, kindAt, type World } from './world';
 
 export interface ContractX extends Contract {
@@ -564,6 +565,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
     // V3.7.1 (spec 21.4): every Burglar brings one improvised pick, outside the 4 slots like the satchel.
     if (h.cls === 'burglar') hid.pack.push({ ...makeItem({ s }, 'improvised'), slots: 0 });
+    // V3.9 (spec 24.2): everyone starts facing into the castle.
+    hid.facing = facingInto(w, d, hid.at);
     d.heroes.push(hid);
   });
   s.delve = d;
