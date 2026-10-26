@@ -786,4 +786,56 @@ Owner-approved; design pillar 16 (intuitive rules, creative approaches). Superse
 
 ### 27.6 Hooks for crew parity (pillar 17, a later pass)
 
-- `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only.
+- `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only. (Used by spec 28: crew members are in `sightedHeroes`, `lookAll` runs after their steps, `noticeFigure` covers them.)
+
+## 28. V4.0 crews play by the party's rules (owner, 2026-10-26)
+
+Design pillar 17 (owner): "Rivals play by the party's rules. Rival crews can do anything the party can: sneak, use their class abilities and kit, climb, jump and rope down levels, dig, blast, pick locks, light the way. They are the game's best teachers: a player who watches a Burglar sister sneak past a sleeping orc, a Sapper blow a new door, or a crew rope down into the pit learns what their own heroes can do. When a hero gains a verb, crews should get it too, and what they do should be visible and named in the log." This is the first pass (owner-approved cut); pass 2 is parked in docs/ideas-later.md ("Crew parity, pass 2"). Code: `src/game/crewmove.ts` (new), rivals.ts, crewai.ts, ai.ts (`foes`, `crewTargets`, `strikeCrew`), stealth.ts (`sightedHeroes`, `perceivable`, `noticeFigure`), world-phase.ts, parley.ts. Tests: `src/game/crews.test.ts`.
+
+Contract changes (types.ts): `Rival.sneaked` (last move a sneak); `Intent.kind` gains `pick`, `smash`, `disarm`, `dig` and `Intent.sneak` (a sneaking move); `Delve.traps[k].crewSpotted`; `RivalCrew.job.price`/`by`; the `noticed` event's `hero` may be a crew member's id (sent only when the party sees the monster or the member); `Heard.what` gains `lock` and `dig`. Engine-private: `RivalX.seenBy`, `RivalX.attackedBy`.
+
+### 28.1 Crews move like heroes
+
+- Level-built members move as heroes of their class (`crewBudget`): walk 4 (Burglar 5), sneak 2 (Burglar 4). Supersedes V4.0's "crews keep `RIVAL_MOVE` 4" (legacy members without a level still walk 4). `rivalStats().move` is the walk.
+- **Dash:** a member that moves and doesn't act may move again as far (one path up to twice the budget): prospectors toward loot, a job, the way out; a truce crew back to its post; hired members keeping up; hostile members that can't strike this round. A hostile member's dash stops short of any hex next to an active hero (it doesn't walk up to hand the party the first blow). Not when feared or dragging.
+- **Walk or sneak** (`wantSneak`, chosen each time it plans a walk; `Rival.sneaked` keeps the last move's mode, as `HeroX.sneaked`): feared or dragging: walk. Hostile: walk, unless it stalks: the party can't see it, its target is within `CREW_STALK_RANGE` (6) and hasn't noticed it (28.5): sneak. Hired: as the hero who hired them last moved. At peace (prospectors, truce, bribed, a job): sneak when a monster it can see (within `CREW_LOOKOUT` 8, line of sight) that isn't hunting (asleep, unaware or searching) is within `CREW_CAUTION` (3) of its path, or an active hero within `CREW_PARTY_CAUTION` (5) of it. Waiting cutthroats don't move.
+- **Every step, by the heroes' rules** (`crewWalk`): it faces the step; heroes it leaves swing at a hostile member (unchanged); hunting monsters that noticed it swing as it leaves their reach (one slot fewer, 20.2); unlocked doors open; walking, its footsteps are heard by the party (6.5; sneaking: silent, `stepRangeOf` 0); every awake monster looks (`lookAll` with the member first, also in the world phase: 28.2); heroes who see it notice it (28.5); walking makes step noise (1, rubble 2: wakes sleepers within path distance 1 for sure, turns heads, sends monsters searching); sleepers within 2 roll the heroes' wake chances (walking 50%, sneaking 10%, a crew Burglar 5%; ending adjacent 100/25/10; halved unlit); a trap on the hex springs (28.4). It looks for traps when the walk ends.
+- Pathing keeps out of traps the crew knows and of live charges' blasts (within 2) when another way gets anywhere; else the plain walk.
+- **Named:** "Sister Brisk sneaks past the sleeping rats." (once a walk, only when the party sees her); a sleeper it wakes: "The orc stirs as Ferryman Joost passes." when seen. Unseen, walking footsteps are heard.
+- View: a figure whose last move was a sneak (crew member or hero) is drawn crouched (`UnitView.crouch`, 80% height). The intent's tag says "sneaks" for a sneaking move.
+
+### 28.2 Monsters treat crew members like heroes
+
+- Monsters look for crew members (on the map, unveiled, hired or not) with the heroes' sight-by-mood rules (spec 27): `sightedHeroes` lists them after the heroes (`sneaking`: last move a sneak; `quiet`: a crew Burglar); `perceivable` reads a crew `Target` like a hero (plain sight once noticed). Monsters look whenever anything moves: at every hero step (as before; crew members standing are looked at too) and every crew step (`lookAll(c, id, before, anyPhase)`), cascade included. A woken or turned monster goes after what it then sees.
+- Monsters go for the nearest figure they make out, hero or crew member (`foes(c)` = `targets(c)` + `crewTargets(c)`; owner default: no preference for heroes). Their quarry, intents, `honored` checks, attacks, free swings and the orc's or archer's edge shove work on crew members; grab, web, drag, steal and hamstring stay hero-only (a ghoul or spider attacks a crew member instead). The captain's shout makes orcs notice a crew quarry.
+- A crew member struck (`strikeCrew`): +1 slot from its blind cone, damage per hit max(1, dmg − armor) − ward, Perfect +1; a hit turns it; heard as a clash when neither is seen; the Sellsword guarding it takes the hit (as before). A crew member's hit on a monster makes it hunt and notice the member (`noticeFigure`).
+- `noticed` events for crew members go out only when the party sees the monster or the member; `noticeFigure` generalizes `noticeHero`.
+- **Crews defend themselves** (`defendTarget`, `defendAct`): a member a monster attacked this world phase (`attackedBy`) fights it (any stance but hired, who fight monsters anyway); a crew at peace also fights a hunting monster next to it that has noticed it. It closes in (a walk) and strikes with `hitMonster` (28.5's sneak attack and backstab included). Prospectors stay neutral to the party; the intent shows "attacks the orc".
+- Later (ideas-later): the Gloam hunting unlit crew members (crews carry their own light in the fiction; crew light sources are pass 2), the Dragon going for crews.
+
+### 28.3 Locks the honest way
+
+- `crewWorkLock`: with lockpicks (the Burglar sister and Little Mags carry them) a member picks: a Burglar 3 Finesse slots, anyone else 2 (Finesse +5 a level for Finesse classes). Every slot: open, silent; one short: open, noise 2 (heard as "Something forcing a lock"); 1 hit of 3: holds; none: jammed. No picks, or a jammed lock: Smash, 2 Might slots, a chest opens on 1 hit, a door on 2, noise 4 (heard as a crash). Named when seen ("Little Mags picks the chest's lock without a sound.").
+- Prospectors: a locked chest is a goal only for a member with picks while one is on the map (the others leave it to her); without one they smash it. A jammed chest is left alone. A lock that holds is tried again next round; the loot is taken the round it opens.
+- **The paid "open" job** keeps its promise as the picker's best attempt: the job goes to the crew's lockpicker; every slot: "works the lock open without a sound"; one short: "Clunk: not quite silent"; holds: tried again next round; jammed: the job can't be done and the price is handed back to the hero who paid (`job.price`, `job.by`). The job is offered only to a crew with lockpicks ("None of them carries lockpicks.") and never for a jammed lock.
+
+### 28.4 Traps
+
+- Stepping onto a trap (spotted or not): 3 damage, no armor, the trap is gone, noise 2 (heard as a crash); the party sees it ("A trap bites Ferryman Sil.", the `trap` event) only when the member or hex is seen.
+- Ending a walk, a member rolls 1 Wits slot for each trap within 1 the crew doesn't know (no darkness penalty: crews carry their own light): a hit marks it `crewSpotted` and the crew walks round it. If the party sees her mark it, they know it too (`spotted`, `trapSpotted` event): watching teaches.
+- A crew Burglar whose way round a known trap is longer (or none) walks up to it and disarms it (2 Finesse slots: any hit removes it, none sets it off on her), shown as a `disarm` intent.
+
+### 28.5 The Burglar sister: sneak attack and backstab
+
+- Heroes notice crew members (`RivalX.seenBy`): a hero who sees a member's hex with their own eyes (facing, light; `seesHex`) has noticed her, updated whenever sight is refreshed and at every crew step. Once no hero sees her at the crew's turn, the party has lost her and every hero forgets (as a monster that loses its quarry).
+- A hostile member's weapon attack on a hero who hasn't noticed it: +1 slot (`SNEAK_ATTACK_SLOTS`, the heroes' sneak attack; any member, bows too). A crew Burglar's melee strike from the hero's blind cone (straight behind) on a hero who hasn't noticed her is a **backstab**: double weapon damage before armor; its extra slot is the blindside slot from behind (so +2 slots in all, as a hero's backstab on a monster). Named: "Little Mags slips behind Fenna and backstabs." / "... strikes before Fenna sees it coming." when seen; unseen, "Something strikes Fenna from behind" as before.
+- Crew members striking monsters (`hitMonster`, hired or fighting back): +20 on a sleeper, +1 slot on a monster that hasn't noticed the member, and a crew Burglar's backstab from outside its front (not the Dragon).
+
+### 28.6 The Sapper reshapes the way
+
+- Crew Sappers bring **improvised explosives** like hero Sappers: 3, slotless, their own kit (spent before bought charges, not dropped when they die). The Ferrymen's Brecht and the Wake's Spade so carry 5 and 6 charges.
+- On any walk (`crewApproach`; hostile approach included), a crew Sapper looks (`sapperWay`) at the hexes next to where its walk can reach: a cracked wall or rubble heap it can dig, or a locked door (not the barred gate) or breakable wall it can blast with a charge. If going through saves `SAPPER_SHORTCUT` (6) hexes of walking to its goal, or opens a way where there was none, it walks there and digs (noise 4, heard as "Something digging"; the `dug` event; ways checked) or sets a charge (fuse 1; "sets a charge on the locked door and steps clear"). Digging is preferred to blasting. While its own fuse burns it waits; crewmates keep out of the blast (pathing). Intents: `dig`, or `fuse` with the blast hexes.
+
+### 28.7 Not in this pass
+
+Rope, jump, climb and grapple; crew light sources and lighting braziers; Focus, flanking and brace for crews; the missing spells (sleep, dread, night thorn, briar, kindle); revive. See docs/ideas-later.md.

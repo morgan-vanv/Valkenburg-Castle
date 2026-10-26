@@ -86,6 +86,8 @@ let gloamStrikes = 0;
 /** V3.7 (spec 20.5): free movement while calm: moves, steps walked, castle turns taken on the way, walks that stopped for combat, braces. */
 const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, hamstrung: 0 };
 let stabbing = false;
+/** V4.0 (spec 28): crews play by the party's rules: what crew members did, and what monsters did to them. */
+const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarms: 0, trapsSprung: 0, trapsSpotted: 0, woke: 0, fuses: 0, backstabs: 0, sneakAttacks: 0, killedByMonsters: 0, lootedPiles: 0, leftWithLoot: 0, members: 0 };
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
@@ -100,6 +102,27 @@ function run(s: GameState, cmd: Command): GameState {
     }
   }
   for (const ev of r.events) if (ev.type === 'rooted' && s.delve?.heroes.some((h) => h.heroId === ev.id)) calm.hamstrung++;
+  {
+    const crewIds = new Set((s.delve?.rivals?.members ?? []).map((m) => m.id));
+    const monIds = new Set((r.state.delve?.monsters ?? s.delve?.monsters ?? []).map((m) => m.id).concat((s.delve?.monsters ?? []).map((m) => m.id)));
+    for (const ev of r.events) {
+      if ((ev.type === 'hit' || ev.type === 'miss') && monIds.has(ev.attacker) && crewIds.has(ev.target)) parity.monsterHits++;
+      if ((ev.type === 'hit' || ev.type === 'miss') && crewIds.has(ev.attacker) && monIds.has(ev.target)) parity.hitsOnMonsters++;
+      if (ev.type === 'roll' && crewIds.has(ev.who)) {
+        if (ev.what === 'Pick') parity.picks++;
+        if (ev.what === 'Smash') parity.smashes++;
+        if (ev.what === 'Disarm') parity.disarms++;
+        if (ev.what.startsWith('Backstab')) parity.backstabs++;
+        if (ev.what.startsWith('Sneak attack')) parity.sneakAttacks++;
+      }
+      if (ev.type === 'woke' && crewIds.has(ev.by)) parity.woke++;
+      if (ev.type === 'fuseSet' && crewIds.has(ev.by)) parity.fuses++;
+      if (ev.type === 'looted' && crewIds.has(ev.id)) parity.lootedPiles++;
+    }
+    const after = r.state.delve?.traps ?? {};
+    for (const [k, t] of Object.entries(after)) if (t.crewSpotted && !s.delve?.traps[k]?.crewSpotted) parity.trapsSpotted++;
+    for (const x of r.events) if (x.type === 'trap' && crewIds.has(x.id)) parity.trapsSprung++;
+  }
   for (const ev of r.events) {
     if (ev.type !== 'heard') continue;
     if (ev.sound.kind === 'steps') hearing.steps++;
@@ -826,7 +849,11 @@ for (let i = 0; i < N; i++) {
   if (isRescue && sum.contractDone) crewStats.rescuesDone++;
   if (d.rivals && (d.rivals as { entered?: boolean }).entered) {
     const cr = d.rivals;
-    const fought = everHostile || cr.stance === 'hostile' || cr.members.some((m) => m.hp <= 0) || d.heroes.some((h) => h.status === 'captured');
+    // V4.0 (spec 28): members can now die to monsters too; a fight with the party is a crew that turned hostile (or took a hero).
+    const fought = everHostile || cr.stance === 'hostile' || d.heroes.some((h) => h.status === 'captured');
+    parity.members += cr.members.length;
+    if (!fought) parity.killedByMonsters += cr.members.filter((m) => m.hp <= 0).length;
+    parity.leftWithLoot += cr.members.filter((m) => m.goneOut && m.loot.length).length;
     const taken = d.heroes.filter((h) => h.status === 'captured').length;
     crewStats.captured += taken;
     if (fought) {
@@ -892,6 +919,7 @@ console.log(`crews (spec 18.5): ${crews.length} delves with a crew; ${Object.ent
 console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).length}, refused ${crews.filter((r) => r.crew.includes('refused toll')).length}; deaths in crew delves ${crews.reduce((a, r) => a + r.deaths, 0)}`);
 console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
 for (const f of fightLog) console.log(`  ${f}`);
+console.log(`crew parity (spec 28): members ${parity.members}, killed by monsters (no party fight) ${parity.killedByMonsters}, left with loot ${parity.leftWithLoot}, piles/chests looted ${parity.lootedPiles}; monster strikes on crew ${parity.monsterHits}, crew strikes on monsters ${parity.hitsOnMonsters}; picks ${parity.picks}, smashes ${parity.smashes}, traps spotted ${parity.trapsSpotted} / disarmed ${parity.disarms} / sprung in sight ${parity.trapsSprung}; sleepers woken by crews ${parity.woke}; crew fuses ${parity.fuses}; crew backstabs ${parity.backstabs}, sneak attacks ${parity.sneakAttacks}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
 console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
 for (const lv of [1, 2, 3]) {

@@ -3142,7 +3142,7 @@ export function intentText(s: GameState, it: Intent): string {
     case 'attack':
       return `strikes ${name(it.targetId)}${dmg}`;
     case 'move':
-      return 'moves';
+      return it.sneak ? 'sneaks' : 'moves';
     case 'web':
       return `webs ${name(it.targetId)}`;
     case 'steal':
@@ -3201,6 +3201,8 @@ export function intentText(s: GameState, it: Intent): string {
       return 'blinks away';
     case 'hamstring':
       return `shoots ${name(it.targetId)} in the legs (1 Finesse slot at −20%: a hit roots them 2 rounds)`;
+    case 'pick': case 'smash': case 'disarm': case 'dig': // V4.0 (spec 28): crews play by the party's rules
+      return { pick: 'picks a lock (silent when every slot hits)', smash: 'smashes a lock (noise 4)', disarm: 'disarms a trap (2 Finesse slots)', dig: 'digs through (noise 4)' }[it.kind];
     default:
       return 'waits';
   }

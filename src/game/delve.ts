@@ -25,6 +25,7 @@ import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isKit, 
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { capture, rivalCaltropsStep, striker } from './crewai';
+import { noteSeenBy } from './crewmove';
 import { parleyTargets } from './parley';
 import { dirIndex, faceToward, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
@@ -72,6 +73,8 @@ export function refreshSight(c: Ctx): void {
   for (const k of vis) if (!ex.has(k)) c.d.explored.push(k);
   for (const h of c.d.heroes) if (h.status === 'active') glimpse(c, h.at, ex, lit);
   noteSeen(c, vis);
+  // V4.0 (spec 28.5): heroes who see a crew member have noticed her (no sneak attack on them from her).
+  for (const r of rivalsOnMap(c)) noteSeenBy(c, r, lit);
 
   const cr = c.d.rivals;
   if (cr && !cr.spotted && rivalsOnMap(c).some((r) => (r.veil ?? 0) <= 0 && vis.has(posKey(r.at)))) {
@@ -1408,6 +1411,20 @@ function unlockAt(c: Ctx, at: Pos, by: string): void {
   if (ch) openChest(c, ch.id, by);
 }
 
+/**
+ * Dig at `at` (a hero Sapper's Dig, Mole's Brown, V4.0 a crew Sapper): rubble or a cracked wall becomes floor (V3.7, spec
+ * 20.3: blast rubble already in `blown` is dug to floor). A `dug` event. Returns true when it was rubble (or a heap).
+ * Noise and the ways check are the caller's.
+ */
+export function digOut(c: Ctx, at: Pos): boolean {
+  const k = kindAt(c.w, c.d, at);
+  const key = posKey(at);
+  if (k === 'rubble' && c.w.tile(at)?.kind !== 'rubble') (c.d.dug ??= []).push(key);
+  else c.d.blown.push(key);
+  c.ev.push({ type: 'dug', at: { ...at } });
+  return k === 'rubble' || !!c.w.tile(at)?.heap;
+}
+
 export function doAct(c: Ctx, heroId: string, action: ActionKind, target: ActionTarget, focus: number): string | undefined {
   const sp = spec(c, heroId, action, target);
   if (!sp.ok) return sp.reason;
@@ -1473,13 +1490,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'dig': {
-      const k = kindAt(c.w, c.d, t.at!);
-      const key = posKey(t.at!);
-      // V3.7 (spec 20.3): blast rubble (a broken wall or blasted floor already in `blown`) is dug to floor.
-      if (k === 'rubble' && c.w.tile(t.at!)?.kind !== 'rubble') (c.d.dug ??= []).push(key);
-      else c.d.blown.push(key);
-      c.ev.push({ type: 'dug', at: t.at! });
-      say(c, k === 'rubble' || c.w.tile(t.at!)?.heap ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
+      const rubble = digOut(c, t.at!);
+      say(c, rubble ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
       makeNoise(c, t.at!, DIG_NOISE);
       checkWays(c); // V4.0 (spec 25.3): the east breach's rubble
       break;

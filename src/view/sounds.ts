@@ -12,6 +12,7 @@ export const HEARD_ICON: Record<string, string> = {
   blast: '✹',
   roar: '♨',
   scream: '!',
+  lock: '🔓', dig: '⛏', // V4.0 (spec 28): a lock forced, digging
 };
 
 const NOUN: Record<string, string> = {
@@ -21,6 +22,7 @@ const NOUN: Record<string, string> = {
   blast: 'a blast',
   roar: 'a roar',
   scream: 'a scream',
+  lock: 'something forcing a lock', dig: 'something digging', // V4.0 (spec 28)
 };
 
 function cap(s: string): string {

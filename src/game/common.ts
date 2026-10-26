@@ -9,7 +9,7 @@ import {
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX, type RivalX } from './state';
 import { brightnessOf, litSet, noiseField, within, type World } from './world';
-import { faceToward, forgetHeroes, noticeHero } from './stealth';
+import { faceToward, forgetHeroes, noticeFigure } from './stealth';
 import { CLASH_HEAR, hearLoud, type LoudWhat } from './hearing';
 
 // ---------------------------------------------------------------- lookups
@@ -390,12 +390,14 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     if (m.kind === 'gloam') return;
     m.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
+    // V4.0 (spec 28.2): a crew member's hit counts like a hero's: it hunts and knows the striker.
+    const crewBy = by ? rivalsOnMap(c).find((x) => x.id === by) : undefined;
     if (m.awareness !== 'hunting') {
       const src = by ? hd(c, by) : undefined;
-      goHunting(c, m, src?.at);
+      goHunting(c, m, src?.at ?? crewBy?.at);
     }
     // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
-    if (by && hd(c, by)) noticeHero(c, m, by);
+    if (by && (hd(c, by) || crewBy)) noticeFigure(c, m, by);
     if (opts.noise !== false) hearLoud(c, m.at, CLASH_HEAR, 'scream');
     if (m.hp <= 0) {
       killMonster(c, m, by);
@@ -420,7 +422,8 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       c.ev.push({ type: 'monsterDied', id: r.id });
       say(c, `${r.name} falls.`);
       // Spec 20.4: spoils: the purse and loot, and the pack. A dragged hero is dropped where they lie.
-      putOnGround(c, r.at, [...r.loot, ...(r.pack ?? [])]);
+      // V4.0 (spec 28.6): class kit (a crew Sapper's improvised explosives) goes with the member, as with a hero.
+      putOnGround(c, r.at, [...r.loot, ...(r.pack ?? []).filter((i) => !isKit(i))]);
       r.loot = [];
       r.pack = r.pack ? [] : r.pack;
       dropCaptive(c, r, 'falls');
