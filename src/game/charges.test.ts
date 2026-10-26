@@ -29,6 +29,7 @@ function delve(opts: { heroes?: string[]; castle?: CastleDef } = {}): GameState 
   s.delve!.rivals = null;
   s.delve!.traps = {};
   s.delve!.light = 20;
+  delete s.delve!.mode; // V3.8: in turns (the sapper's rules are combat rules)
   return s;
 }
 

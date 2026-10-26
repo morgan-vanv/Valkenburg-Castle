@@ -5,6 +5,7 @@
 //   ONLY_SHOT=1 skips the assertions (for the "before" shot).
 
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base] = process.argv.slice(2);
 const shotPath = process.env.SHOT;
@@ -36,6 +37,7 @@ await p.evaluate(() => localStorage.clear());
 await p.evaluate(() => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, reduceFlashes: false, noEndTurnAsk: true })));
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
+await inTurns(p);
 await p.fill('input.seed', '7');
 await p.click('text=New campaign');
 await p.waitForTimeout(200);

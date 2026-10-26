@@ -506,6 +506,8 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
       m.focusAt = { ...at };
       m.returning = undefined;
       m.searchRounds = SEARCH_ROUNDS;
+      // V3.8 (spec 22.3): exploring, it goes to look.
+      if (c.d.mode === 'explore') c.ev.push({ type: 'investigate', id: m.id, at: { ...at } });
     } else if (m.kind === 'berserker' && !m.focusAt) {
       m.focusAt = { ...at };
     }
@@ -528,12 +530,15 @@ export function goHunting(c: Ctx, m: MonsterX, at?: Pos): void {
 
 /** A sleeper or patroller hears something: alert at the source, searching for SEARCH_ROUNDS (berserkers hunt). */
 export function goAlert(c: Ctx, m: MonsterX, at: Pos): void {
-  m.awareness = m.kind === 'berserker' ? 'hunting' : 'alert';
+  // V3.8 (spec 22.3): exploring, even a berserker only goes to look (it hunts once it notices someone).
+  const explore = c.d.mode === 'explore';
+  m.awareness = m.kind === 'berserker' && !explore ? 'hunting' : 'alert';
   m.focusAt = { ...at };
   m.returning = undefined;
   faceToward(m, at);
   if (m.awareness === 'alert') m.searchRounds = SEARCH_ROUNDS;
   c.ev.push({ type: 'awake', id: m.id, awareness: m.awareness });
+  if (explore && m.awareness === 'alert') c.ev.push({ type: 'investigate', id: m.id, at: { ...at } });
 }
 
 /**

@@ -565,3 +565,60 @@ Core tenet (owner): **we want to offer flexibility in approach, but tradeoffs co
 ### 21.5 Noticing a walking hero from farther
 
 - Noticing ranges for a **walking** hero go up by 2: lit walking 8 (was 6), unlit walking 5 (was 3), Hollow walking 8 (was 6). Sneaking unchanged (lit 4, unlit 1, Hollow 3). Blind arc: walking still at half range (4 lit, 2 unlit).
+
+## 22. V3.8: exploration mode (owner-approved 2026-10-25 evening, https://claude.ai/artifact/Dw2vU6Hixgak3UeBYd8w8T)
+
+Replaces V3.7's free movement (20.5's calm walk, `CALM_STEPS`, Follow, `calmReach`). Combat is unchanged. Overrides earlier sections where they disagree. Contract: `git diff main -- src/game/types.ts src/game/api.ts`.
+
+### 22.1 Two modes (`Delve.mode`)
+
+- **explore**: every hero moves freely and independently; the world advances in ticks. **combat**: the turn-based game (player phase, world phase) exactly as in sections 1–21.
+- A delve starts in explore. `mode` events announce every switch with the reason and who acts first.
+
+### 22.2 The tick (explore only)
+
+- `tick` advances the world by half a second of game time. The UI sends one every 500 ms while the mode is explore and the game isn't paused (speed setting: slow 750 ms, normal 500, fast 300; instant is treated as fast). Engine time is ticks, never wall-clock, so replays and tests are exact.
+- Order inside a tick: (1) heroes with a walk order step (walking: 1 hex per tick; sneaking: 1 hex every 2 ticks), each step with every per-hex rule (noise, sleeper wake rolls, traps, vents, doors opened by walking through, crew caltrops, ghouls rising, level changes by stairs/lift, Fireside Porter, heavy copper speed: 1 hex every 2 ticks); (2) patrols and investigating monsters step (1 hex every 4 ticks); prospector crews step at the same pace toward their loot; (3) noticing: every awake monster and crew member checks every active hero with the 21.5 ranges, facing and blind arc; (4) exploring rounds: every 8 ticks `round` +1 and round-based timers count down (Veil, Ward, night-eye, stuck/rooted, glue puddles, burning, smoke, Black Cask hiccups noise, rival entry `entersRound`, search rounds of investigators, ale effects); the lantern does NOT burn per round in explore.
+- **Lantern by distance:** while the lantern is open, the bearer's every 4 hexes walked (`Delve.lanternSteps`) burn 1 light; a lit torch burns 1 round for every 4 hexes its carrier walks. Standing still costs nothing.
+- Walk orders: `walk` sets `HeroInDelve.walk` (path over explored hexes, any length, through other heroes, not through monsters or rivals except hired ones; it can't end on another figure). `stopWalk` clears it. Orders persist in saves.
+
+### 22.3 Hearing and investigating
+
+- Noise in explore wakes and alerts as in combat (6, 20.1), but an alerted monster **investigates** instead of hunting: it walks toward the noise at 1 hex every 4 ticks, searches there for 3 exploring rounds (24 ticks), then walks back to its post or its patrol route at the same pace. It only hunts (and starts combat) if it notices a hero. The UI shows ? over it.
+- Sleepers and posted guards stay where they are; a sleeper that wakes by a wake roll is alerted at the hero's hex (investigates).
+
+### 22.4 What starts combat
+
+| Trigger | Who acts first |
+| --- | --- |
+| An awake monster or crew member notices a hero (tick step 3, or right after a hero's action) | **Enemies first**: a world phase runs at once (everything acts as in combat; the noticer shouts, closes in or shoots), then the party's player phase with every hero fresh |
+| A hostile act by a hero: attack, firebolt, fireball, night thorn, briar, sleep, dread, dart, knockback shot, hamstring, shove, gust, glue/smoke/firecracker thrown at or onto an enemy's hex, set or thrown charge, an armed overwatch firing | **The party** (surprise): the act resolves; then the player phase continues with every other hero fresh (the actor has acted). In the first world phase, monsters and crew members that hadn't noticed any hero before the act do nothing (they turn to face and become hunting). Sneak attack applies to the first hits as usual |
+| A cutthroat crew demands a toll, Fight on the parley card, the Gloam rises, any fuse is lit (including a crew's) | The party |
+
+- Combat is party-wide: every hero on every level switches to turns where they stand. Walk orders are cleared.
+- Overwatch can be armed in explore (an action): the first enemy that steps in sight within range is shot, and that starts combat as a hostile act.
+
+### 22.5 What ends combat
+
+- Checked after every world phase and after every hero action in combat: no monster on any level with an active hero is hunting or alert (searching); no crew is hostile or demanding; the Gloam is gone; no fuse is lit; no hero is downed, grabbed or webbed; no hero is being dragged. Then mode → explore (`mode` event, "The castle quiets."); `moved`/`acted`/`dashed` are cleared; the exploring clock starts from 0 ticks.
+
+### 22.6 Actions while exploring
+
+- Every action available in combat is available in explore with no move/act limits (one at a time per hero; a hero who acts stops walking for 1 tick). Rolls, noise and Focus as in combat. Hostile acts start combat (22.4). Dash doesn't exist in explore.
+- Sneak is a per-hero stance in explore (`HeroInDelve.sneaking`, toggled by `sneak` command, free); walk orders use the hero's stance unless the command says otherwise.
+- Parley works in explore (free). Hiring a crew in explore: they follow the hirer at walking pace for 5 exploring rounds.
+
+### 22.7 Engine API
+
+- `mode(state)` → `{ mode, why? }`.
+- `explorePath(state, heroId, to, sneak)` → a `Reach` (path over explored hexes, any length, with `risks` along it) or null.
+- `vision(state)` → for each awake, non-hired monster and crew member on any level: `{ id, walk: Pos[], sneak: Pos[] }`, the hexes where it would notice a walking / sneaking hero right now (respecting light, facing, blind arc, line of sight). The UI draws cones from it near the selected heroes.
+
+### 22.8 Presentation
+
+- Mode label top-centre: "Exploring" (with a pause badge when paused) or "Combat · round N". Space pauses/unpauses (explore); a paused overlay says so; nothing ticks while a modal (parley card, menu, confirm) is open.
+- Selection: click a hero or 1–4; Shift-click or drag a box to select several; click a hex to walk the selection (each hero gets `explorePath` to the hex nearest the target keeping its offset from the leader; a hero with no path stays). Right-click or Esc stops. Heroes and patrols animate continuously between ticks (interpolated over the tick interval). S toggles sneak for the selection; sneaking heroes look crouched.
+- Vision cones (from `vision`) for enemies within 10 of any selected hero: walk-notice hexes tinted red, sneak-notice hexes darker red; blind arcs clear. Awareness icon per enemy: z asleep, → patrolling, ? investigating, ! hunting.
+- A red edge glow when a selected hero stands in a cone hex for their stance; the moment combat starts, a banner "Combat! The orc saw Pim" (enemies first) or "Ambush!" (party first), then the turn UI; the camera pans to the trigger. "The castle quiets" banner on the way back to explore.
+- In explore, the action bar shows only actions (no Move group, no End turn); the move preview shows the path and its risks on hover. In combat, the V3.7 bar.
+- Remove the V3.7 free-move UI (steps counter, Follow toggle).

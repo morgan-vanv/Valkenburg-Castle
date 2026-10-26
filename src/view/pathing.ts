@@ -1,6 +1,5 @@
-// V3.7 (spec 20.5): a long path for free movement while the party is calm. Pure: the HUD asks
-// for the path to any explored hex and sends it as one `move` command; the engine walks it hex
-// by hex with its own rules, so this only has to be a sensible route (shortest by cost,
+// V3.7 (spec 20.5), V3.8 (22): a long path over explored hexes. Pure. The HUD uses Engine.explorePath;
+// this is the fixture engine's stand-in for it, so it only has to be a sensible route (shortest by cost,
 // rubble 2, stairs 1, a working lift 1, through open doors only, round monsters).
 
 import type { Visibility } from '../game/api';
@@ -99,10 +98,4 @@ function parse(k: string): Pos {
   const [l, rest] = k.split(':');
   const [q, r] = (rest ?? '0,0').split(',').map(Number);
   return { level: Number(l), q: q ?? 0, r: r ?? 0 };
-}
-
-/** "the castle turns in N steps": steps left before the next world phase while calm. */
-export function stepsToTurn(calmSteps: number | undefined, per: number): number {
-  const n = calmSteps ?? 0;
-  return per - (n % per);
 }

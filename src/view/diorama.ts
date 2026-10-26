@@ -21,6 +21,9 @@ import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
 
 const MAX_LIGHTS = 12;
+/** V3.8 (22.8): vision cone tints. */
+const VISION_WALK_OPACITY = 0.2;
+const VISION_SNEAK_OPACITY = 0.42;
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
 const FLOAT_LIFT = 2.25;
 /** How far below the shown level we draw through pits. */
@@ -30,6 +33,8 @@ export interface DioramaHooks {
   hover(at: Pos | null, unitId: string | null): void;
   click(at: Pos | null, unitId: string | null, ev: PointerEvent): void;
   levelChanged(level: number): void;
+  /** V3.8 (22.8): a left-drag box picked these heroes (screen-space); `add` when Shift was held. */
+  boxSelect?(ids: string[], add: boolean): void;
 }
 
 export type HighlightStyle = 'walk' | 'sneak' | 'dash' | 'target' | 'ally' | 'danger' | 'area' | 'breakable' | 'collapse' | 'rubble';
@@ -187,6 +192,23 @@ export class Diorama {
   private brokenKey = new Map<number, string>();
   /** The state a playback is heading to (beginPlayback), for drags and fuses mid-animation. */
   private nextState: GameState | null = null;
+  // ---- V3.8 (22.8): exploring.
+  /** Seconds the next sync glides moved figures over (0: snap). Consumed by sync. */
+  private glideSec = 0;
+  private glides = new Map<string, { from: THREE.Vector3; to: THREE.Vector3; t0: number; dur: number }>();
+  /** Extra selection rings (multi-select); the leader keeps `ring`. */
+  private selIds: string[] = [];
+  private selRings = new THREE.Group();
+  /** Vision cones: walk-notice hexes (red tint) and sneak-notice hexes (darker red). */
+  private visionWalk: THREE.InstancedMesh;
+  private visionSneak: THREE.InstancedMesh;
+  /** The previous cones, fading out while the new ones fade in (over the monsters' slide). */
+  private visionWalkOld: THREE.InstancedMesh;
+  private visionSneakOld: THREE.InstancedMesh;
+  private visionFade: { t0: number; dur: number } | null = null;
+  private visionKey = '';
+  private boxEl: HTMLElement;
+  private boxFrom: { x: number; y: number } | null = null;
   /** Blast rubble dug back to floor (`dug` events; the engine keeps this privately: contract request). */
   private dugWalls = new Set<string>();
   /** 20.3a: loose stone round collapsed hexes, so the new pit edge reads ragged. */
@@ -279,6 +301,20 @@ export class Diorama {
     this.blindFill.count = 0;
     this.blindFill.renderOrder = 1;
     this.blindFill.frustumCulled = false;
+    // V3.8 (22.8): vision cones as hex tints: walking would be noticed (red), sneaking too (deeper red).
+    const visionMesh = (color: number, opacity: number) => {
+      const m = new THREE.InstancedMesh(new THREE.CircleGeometry(0.9, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }), 1200);
+      m.count = 0;
+      m.renderOrder = 1;
+      m.frustumCulled = false;
+      return m;
+    };
+    this.visionWalk = visionMesh(0xd0302a, VISION_WALK_OPACITY);
+    this.visionSneak = visionMesh(0x6a0a0c, VISION_SNEAK_OPACITY);
+    this.visionWalkOld = visionMesh(0xd0302a, 0);
+    this.visionSneakOld = visionMesh(0x6a0a0c, 0);
+    this.boxEl = document.createElement('div');
+    this.boxEl.className = 'select-box hidden';
     // Breakable-wall outlines sit on top of the wall and draw over it.
     {
       const bm = this.highlights.get('breakable')!.material as THREE.MeshBasicMaterial;
@@ -289,7 +325,7 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks, this.collapseDebris);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.visionWalkOld, this.visionSneakOld, this.visionWalk, this.visionSneak, this.selRings, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks, this.collapseDebris);
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -338,6 +374,7 @@ export class Diorama {
 
     this.fx.appendChild(this.landingTag);
     this.fx.appendChild(this.beaconTag);
+    this.fx.appendChild(this.boxEl);
     this.bindPointer(canvas);
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -512,8 +549,70 @@ export class Diorama {
     this.followId = id;
   }
 
-  select(id: string | null): void {
+  select(id: string | null, all: string[] = id ? [id] : []): void {
     this.selectedId = id;
+    const others = all.filter((x) => x !== id);
+    if (others.join(',') === this.selIds.join(',')) return;
+    this.selIds = others;
+    this.selRings.clear();
+    for (const o of others) {
+      const r = new THREE.Mesh(new THREE.RingGeometry(0.66, 0.78, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }));
+      r.userData.unit = o;
+      r.renderOrder = 3;
+      this.selRings.add(r);
+    }
+  }
+
+  /** V3.8 (22.8): the next sync slides moved figures over `sec` seconds instead of snapping. */
+  glideNext(sec: number): void {
+    this.glideSec = sec;
+  }
+
+  /** Is this figure sliding between hexes right now? */
+  isGliding(id: string): boolean {
+    return this.glides.has(id);
+  }
+
+  /**
+   * V3.8 (22.7, 22.8): vision cones from Engine.vision, for the enemies given (the HUD picks those
+   * near a selected hero). Walk hexes in red, sneak hexes darker; the blind arcs stay clear.
+   */
+  showVision(list: { id: string; walk: Pos[]; sneak: Pos[] }[]): void {
+    const key = `${this.shownLevel}|` + list.map((v) => `${v.id}:${v.walk.length}:${v.sneak.length}:${v.walk[0] ? posKey(v.walk[0]) : ''}:${v.walk.length ? posKey(v.walk[v.walk.length - 1]!) : ''}`).join('|');
+    if (key === this.visionKey) return;
+    const first = !this.visionKey || !list.length;
+    this.visionKey = key;
+    // Cross-fade: what was drawn becomes the old layer; the new cones fade in over the longest
+    // slide in flight (a patrol's 4 ticks), so the cone turns and moves with the figure, not ahead of it.
+    [this.visionWalk, this.visionWalkOld] = [this.visionWalkOld, this.visionWalk];
+    [this.visionSneak, this.visionSneakOld] = [this.visionSneakOld, this.visionSneak];
+    let dur = 0;
+    const nowS = performance.now() / 1000;
+    for (const [id, g] of this.glides) if (this.units.get(id)?.side !== 'hero') dur = Math.max(dur, g.t0 + g.dur - nowS);
+    this.visionFade = first ? null : { t0: nowS, dur: Math.max(0.2, dur) };
+    if (first) this.visionWalkOld.count = this.visionSneakOld.count = 0;
+    this.applyVisionFade(nowS);
+    const sneak = new Set<string>();
+    const walk = new Set<string>();
+    for (const v of list) {
+      for (const p of v.sneak) if (p.level === this.shownLevel) sneak.add(posKey(p));
+      for (const p of v.walk) if (p.level === this.shownLevel) walk.add(posKey(p));
+    }
+    const fill = (mesh: THREE.InstancedMesh, keys: Iterable<string>, lift: number) => {
+      const m = new THREE.Matrix4();
+      let n = 0;
+      for (const k of keys) {
+        if (n >= 1200) break;
+        const [l, rest] = k.split(':');
+        const h = parseHexKey(rest!);
+        m.makeTranslation(this.worldOf({ level: Number(l), ...h }, lift));
+        mesh.setMatrixAt(n++, m);
+      }
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    fill(this.visionWalk, [...walk].filter((k) => !sneak.has(k)), 0.022);
+    fill(this.visionSneak, sneak, 0.024);
   }
 
   setActive(on: boolean): void {
@@ -536,6 +635,8 @@ export class Diorama {
     this.lastTime = now;
     this.clock.tick(dtReal);
     const t = this.clock.real;
+    this.updateGlides(now / 1000);
+    if (this.visionFade) this.applyVisionFade(now / 1000);
     if (this.followId) {
       const v = this.units.get(this.followId);
       if (v && v.at.level === this.shownLevel) {
@@ -546,7 +647,7 @@ export class Diorama {
     this.rig.update(dtReal, t);
     this.updateCutaway();
     if (this.active) {
-      for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
+      for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id) || this.glides.has(v.id));
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
       this.effects.update(t);
@@ -555,6 +656,40 @@ export class Diorama {
     }
     requestAnimationFrame(this.loop);
   };
+
+  private applyVisionFade(now: number): void {
+    const f = this.visionFade;
+    const k = f ? Math.min(1, (now - f.t0) / f.dur) : 1;
+    (this.visionWalk.material as THREE.MeshBasicMaterial).opacity = VISION_WALK_OPACITY * k;
+    (this.visionSneak.material as THREE.MeshBasicMaterial).opacity = VISION_SNEAK_OPACITY * k;
+    (this.visionWalkOld.material as THREE.MeshBasicMaterial).opacity = VISION_WALK_OPACITY * (1 - k);
+    (this.visionSneakOld.material as THREE.MeshBasicMaterial).opacity = VISION_SNEAK_OPACITY * (1 - k);
+    if (k >= 1) {
+      this.visionFade = null;
+      this.visionWalkOld.count = this.visionSneakOld.count = 0;
+    }
+  }
+
+  /** Ticks a step onto this hex takes (rubble and blast rubble cost 2). */
+  private hexCost(p: Pos): number {
+    const t = this.levels.get(p.level)?.def.tiles[hexKey(p)];
+    const blown = this.state?.delve?.blown.includes(posKey(p));
+    return t?.kind === 'rubble' || (blown && (t?.kind === 'wall' || t?.kind === 'floor' || t?.kind === 'cracked')) ? 2 : 1;
+  }
+
+  /** V3.8 (22.8): slide figures between hexes over their step interval. */
+  private updateGlides(now: number): void {
+    for (const [id, g] of this.glides) {
+      const v = this.units.get(id);
+      if (!v || v.busy) {
+        this.glides.delete(id);
+        continue;
+      }
+      const k = Math.min(1, (now - g.t0) / g.dur);
+      v.root.position.lerpVectors(g.from, g.to, k);
+      if (k >= 1) this.glides.delete(id);
+    }
+  }
 
   /**
    * V3.4 (owner: "see all walls at their full height"): the cutaway that lowered walls between the
@@ -684,6 +819,11 @@ export class Diorama {
       this.ring.position.set(sel.root.position.x, sel.root.position.y + 0.03, sel.root.position.z);
       this.ring.scale.setScalar(1 + Math.sin(t * 4) * 0.04);
     } else this.ring.visible = false;
+    for (const r of this.selRings.children) {
+      const u = this.units.get(r.userData.unit as string);
+      r.visible = !!u && u.shown && u.root.visible;
+      if (u) r.position.set(u.root.position.x, u.root.position.y + 0.03, u.root.position.z);
+    }
     const tm = this.highlights.get('target')!.material as THREE.MeshBasicMaterial;
     tm.opacity = 0.55 + 0.35 * Math.sin(t * 6);
     for (const g of this.breathMarks.children) {
@@ -1050,7 +1190,8 @@ export class Diorama {
     this.lanternOpen = d.lanternOpen !== false;
     this.liftWorking = !!d.liftWorking;
     this.torches = new Set(d.heroes.filter((h) => h.torch > 0 && h.status === 'active').map((h) => h.heroId));
-    this.syncUnits(state);
+    this.syncUnits(state, this.glideSec);
+    this.glideSec = 0;
     this.syncWorld(state);
     this.refreshUnits();
     this.refreshProps();
@@ -1132,13 +1273,28 @@ export class Diorama {
     this.intentTags.delete(id);
   }
 
-  private syncUnits(state: GameState): void {
+  private syncUnits(state: GameState, glide = 0): void {
     const d = state.delve!;
     const keep = new Set<string>();
-    const place = (v: UnitView, at: Pos) => {
+    const nowS = performance.now() / 1000;
+    /** `pace`: how many tick intervals this figure's step should take to slide (sneaking 2, patrols 2). */
+    const place = (v: UnitView, at: Pos, pace = 1) => {
       if (v.busy) return;
+      const to = this.worldOf(at).add(v.offset);
+      const near = glide > 0 && v.at.level === at.level && !samePos(v.at, at) && Math.abs(v.at.q - at.q) + Math.abs(v.at.r - at.r) <= 4;
       v.at = { ...at };
-      v.root.position.copy(this.worldOf(at)).add(v.offset);
+      if (near) {
+        const from = v.root.position.clone();
+        if (v.side === 'hero') v.face(to.x - from.x, to.z - from.z);
+        this.glides.set(v.id, { from, to, t0: nowS, dur: glide * pace });
+        return;
+      }
+      if (this.glides.has(v.id)) {
+        const g = this.glides.get(v.id)!;
+        if (g.to.distanceToSquared(to) < 1e-6) return;
+        this.glides.delete(v.id);
+      }
+      v.root.position.copy(to);
     };
     const draggers = new Map<string, string>();
     for (const r of d.rivals?.members ?? []) if (r.dragging && r.hp > 0 && !r.goneOut) draggers.set(r.dragging, r.name);
@@ -1147,8 +1303,11 @@ export class Diorama {
       const hero = state.campaign.roster.find((r) => r.id === h.heroId);
       const v = this.ensureUnit(h.heroId, (hero?.cls ?? 'sellsword') as ModelKey, 'hero', h.at, hero?.name ?? h.heroId);
       keep.add(h.heroId);
-      place(v, h.at);
+      // V3.8 (22.2): a step lasts the hero's own interval: walking 1 tick, sneaking or heavy 2, rubble doubles.
+      place(v, h.at, Math.max(h.walk?.sneak ? 2 : 1, h.pack.some((i) => i.heavy) ? 2 : 1) * this.hexCost(h.at));
       v.lieDown(h.status === 'downed');
+      // V3.8 (22.8): sneaking heroes crouch while exploring.
+      v.crouch(h.status === 'active' && !!h.sneaking && d.mode === 'explore');
       v.dead = false;
       v.setOpacity(1);
       this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId), !!hero?.shield));
@@ -1167,7 +1326,8 @@ export class Diorama {
       if (have && have.key !== want && !have.busy) this.removeUnit(m.id);
       const v = this.ensureUnit(m.id, want, 'monster', m.at, m.name);
       keep.add(m.id);
-      place(v, m.at);
+      // Patrols, investigators and monsters walking home step every 4 ticks: they slide the whole 4.
+      place(v, m.at, 4 * this.hexCost(m.at));
       turn(v, m);
       v.dead = false;
       v.setOpacity(1);
@@ -1186,7 +1346,8 @@ export class Diorama {
         if (have && have.key !== want && !have.busy) this.removeUnit(r.id);
         const v = this.ensureUnit(r.id, want, 'rival', r.at, r.name);
         keep.add(r.id);
-        place(v, r.at);
+        // Prospector crews step every 4 ticks; hired crews keep up with the hirer (1 a tick).
+        place(v, r.at, st === 'hired' ? 1 : 4 * this.hexCost(r.at));
         turn(v, r);
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
         const tagEl = this.tags.get(r.id)?.el;
@@ -3290,6 +3451,29 @@ export class Diorama {
     });
     canvas.addEventListener('pointerdown', (e) => {
       this.downAt = { x: e.clientX, y: e.clientY, button: e.button };
+      if (e.button === 0 && this.hooks.boxSelect) this.boxFrom = { x: e.clientX, y: e.clientY };
+    });
+    // V3.8 (22.8): left-drag draws a box; heroes inside are selected on release.
+    addEventListener('pointermove', (e) => {
+      const b = this.boxFrom;
+      if (!b) return;
+      if (!(e.buttons & 1)) {
+        this.boxFrom = null;
+        this.boxEl.classList.add('hidden');
+        return;
+      }
+      if (Math.abs(e.clientX - b.x) + Math.abs(e.clientY - b.y) <= 6) return;
+      const rect = this.fx.getBoundingClientRect();
+      Object.assign(this.boxEl.style, { left: `${Math.min(b.x, e.clientX) - rect.left}px`, top: `${Math.min(b.y, e.clientY) - rect.top}px`, width: `${Math.abs(e.clientX - b.x)}px`, height: `${Math.abs(e.clientY - b.y)}px` });
+      this.boxEl.classList.remove('hidden');
+    });
+    addEventListener('pointerup', (e) => {
+      const b = this.boxFrom;
+      this.boxFrom = null;
+      if (!b || e.button !== 0) return;
+      this.boxEl.classList.add('hidden');
+      if (Math.abs(e.clientX - b.x) + Math.abs(e.clientY - b.y) <= 6) return;
+      this.hooks.boxSelect?.(this.heroesInBox(b.x, b.y, e.clientX, e.clientY), e.shiftKey);
     });
     canvas.addEventListener('pointerup', (e) => {
       const d = this.downAt;
@@ -3300,6 +3484,31 @@ export class Diorama {
       const { at, unitId } = this.pick(e);
       this.hooks.click(at, unitId, e);
     });
+  }
+
+  /** Heroes whose figure (at mid-height) projects inside the client-space box. */
+  heroesInBox(x0: number, y0: number, x1: number, y1: number): string[] {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)];
+    const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)];
+    const out: string[] = [];
+    for (const v of this.units.values()) {
+      if (v.side !== 'hero' || !v.root.visible || v.dead) continue;
+      const p = this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)));
+      const sx = p.x + rect.left;
+      const sy = p.y + rect.top;
+      if (!p.behind && sx >= ax && sx <= bx && sy >= ay && sy <= by) out.push(v.id);
+    }
+    return out;
+  }
+
+  /** Screen position (client px) of a figure, or null when it isn't on screen. */
+  screenOf(id: string): { x: number; y: number } | null {
+    const v = this.units.get(id);
+    if (!v || !v.root.visible) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const p = this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.5, 0)));
+    return p.behind ? null : { x: p.x + rect.left, y: p.y + rect.top };
   }
 
   pick(e: { clientX: number; clientY: number }): { at: Pos | null; unitId: string | null } {
@@ -3484,7 +3693,8 @@ function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, dra
 }
 
 function monsterTag(m: Monster): string {
-  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
+  // V3.8 (22.8): z asleep, → patrolling, ? investigating (alert), ! hunting.
+  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep" title="Asleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert" title="Investigating a noise">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">→</b>' : m.awareness === 'hunting' ? '<b class="tag-hunt" title="Hunting">!</b>' : '';
   const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
   const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
   const stuck = (m.stuck ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted or glued: can't move for ${m.stuck} more round${m.stuck === 1 ? '' : 's'}; it can still act">rooted · ${m.stuck}</b>` : '';
