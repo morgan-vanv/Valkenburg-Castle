@@ -14,6 +14,7 @@ import { say, type Ctx, type DelveX, type HeroX, type MonsterX, type RivalX } fr
 import { activeHeroes, armorOf, goAlert, hd, heroDef, heroName, hurtAny, lightPenaltyFor, monsterArmor, monsterStats, occupant, rivalsOnMap, roll, turnOnHit } from './common';
 import { blindCone, dijkstra, dirIndex, inFrontHalf, isFloorish, kindAt, litSet, los, noiseField, pathTo, smoky, type World } from './world';
 import { blocked, hitRange, strikeDetailed, wardOf, type Target } from './ai';
+import { partySees } from './hearing';
 import { figure } from './falls';
 import { rivalStats } from './rivals';
 
@@ -194,9 +195,14 @@ export interface Look {
   noticed: string[];
 }
 
-/** The figures monsters look for, as they stand now (spec 27): active, unveiled heroes (crew members are a later hook). */
+/**
+ * The figures monsters look for, as they stand now (spec 27): active, unveiled heroes, then (V4.0, spec 28.2, pillar 17)
+ * the crew members on the map, unveiled, hired or not: their last move mode, a crew Burglar's quiet feet.
+ */
 export function sightedHeroes(c: Ctx): Sighted[] {
-  return c.d.heroes.filter((h) => h.status === 'active' && h.veil <= 0).map((h) => ({ id: h.heroId, at: h.at, sneaking: isSneaking(h), quiet: quietFeet(c, h.heroId) }));
+  const out: Sighted[] = c.d.heroes.filter((h) => h.status === 'active' && h.veil <= 0).map((h) => ({ id: h.heroId, at: h.at, sneaking: isSneaking(h), quiet: quietFeet(c, h.heroId) }));
+  for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0) out.push({ id: r.id, at: r.at, sneaking: isSneaking(r), quiet: r.cls === 'burglar' });
+  return out;
 }
 
 /**
@@ -231,6 +237,11 @@ export function lookRound(c: Ctx, look: Look, heroes: Sighted[], lit: Set<string
 
 /** Who a monster can make out now: heroes it has noticed by plain sight (16.1), others by the noticing rule (20.1); the prisoner by sight. */
 export function perceivable(c: Ctx, m: MonsterX, t: Target, lit: Set<string>, sees: (from: Pos, to: Pos, lit: Set<string>) => boolean): boolean {
+  // V4.0 (spec 28.2): a crew member as a hero: tracked by plain sight once noticed, else the noticing rule (its move mode, a Burglar's feet).
+  if (t.rival) {
+    if ((m.noticedIds ?? []).includes(t.id)) return sees(m.at, t.at, lit);
+    return wouldNotice(c, m, t.at, isSneaking(t.rival), lit, t.rival.cls === 'burglar');
+  }
   if (!t.hero) return sees(m.at, t.at, lit);
   if ((m.noticedIds ?? []).includes(t.id)) return sees(m.at, t.at, lit);
   return wouldNotice(c, m, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id));
@@ -250,6 +261,22 @@ export function noticeHero(c: Ctx, m: MonsterX | RivalX, heroId: string, turn = 
   if (ids.includes(heroId)) return;
   ids.push(heroId);
   c.ev.push({ type: 'noticed', by: m.id, hero: heroId, at: { ...h.at }, faced: turn });
+}
+
+/**
+ * V4.0 (spec 28.2, pillar 17): a monster takes note of a hero or a crew member (`noticeHero` for a hero). A crew
+ * member is remembered the same way (`noticedIds`); its `noticed` event goes out only when the party sees the
+ * monster or the member (what the party can't see stays unknown).
+ */
+export function noticeFigure(c: Ctx, m: MonsterX, id: string, turn = m.awareness !== 'hunting'): void {
+  if (hd(c, id)) return noticeHero(c, m, id, turn);
+  const r = rivalsOnMap(c).find((x) => x.id === id);
+  if (!r) return;
+  const ids = (m.noticedIds ??= []);
+  if (turn) faceToward(m, r.at);
+  if (ids.includes(id)) return;
+  ids.push(id);
+  if (partySees(c, m.at) || partySees(c, r.at)) c.ev.push({ type: 'noticed', by: m.id, hero: id, at: { ...r.at }, faced: turn });
 }
 
 export function forgetHeroes(m: MonsterX): void {

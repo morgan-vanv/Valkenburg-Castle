@@ -9,18 +9,22 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Intent, Item } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CLASSES, CREW_PURSE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
-  HIRE_KEEP, PROSPECTOR_CHANCE, PROSPECTOR_ENTERS, PROSPECTOR_KEEP_OFF, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_MOVE,
-  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, type CrewDef, type RivalStats,
+  HIRE_KEEP, PROSPECTOR_CHANCE, PROSPECTOR_ENTERS, PROSPECTOR_KEEP_OFF, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES,
+  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, BURGLAR_WALK, SAPPER_CHARGES, SNEAK_ATTACK_SLOTS, WALK_MOVE, type CrewDef, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
-import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type RivalX } from './state';
+import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type MonsterX, type RivalX } from './state';
 import {
-  chestLoot, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
+  addToPack, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
   rivalsOnMap, roll, turnOnHit, valueOf, activeHeroes,
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
-import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, walk, type Target } from './ai';
-import { faceToward, fleePlan, inFrontHalf, isSneaking, quietFeet, wouldNotice } from './stealth';
+import { adjacentTo, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, type Target } from './ai';
+import { faceToward, fleePlan, inFrontHalf, inRearHalf, isSneaking, quietFeet, wouldNotice } from './stealth';
+import {
+  crewApproach, crewGo, crewOpenChest, crewPickSlots, crewPicker, crewWalk, crewWorkLock, forgetSeenBy, routeIntent, tell, type CrewRoute,
+} from './crewmove';
+import { satchelName } from './charges';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
 import { blast } from './charges';
@@ -39,7 +43,9 @@ export function rivalStats(r: RivalX): RivalStats {
     const def = CLASSES[r.cls];
     const w = def.weapon;
     const chance = def.stats[w.stat] + (w.stat === def.main ? 5 * (r.level - 1) : 0) + 10 * (r.weaponTier ?? 0);
-    return { hp: def.hp + 2 * (r.level - 1), slots: w.slots, chance, dmg: w.dmg, move: RIVAL_MOVE, armor: def.armor + (r.armorTier ?? 0), range: w.range ?? 1 };
+    // V4.0 (spec 28.1): a member walks as a hero of its class (the Burglar 5); sneaking and dashing: crewmove.ts `crewBudget`.
+    const move = r.cls === 'burglar' ? BURGLAR_WALK : WALK_MOVE;
+    return { hp: def.hp + 2 * (r.level - 1), slots: w.slots, chance, dmg: w.dmg, move, armor: def.armor + (r.armorTier ?? 0), range: w.range ?? 1 };
   }
   const base = RIVAL_CLASSES[r.cls];
   return (r.tier ?? 1) > 1 ? { ...base, chance: base.chance + CUTTHROAT_TIER.chance } : base;
@@ -62,6 +68,8 @@ function member(s: GameStateX, id: string, def: CrewDef, m: CrewDef['members'][n
     ...(cls.mana ? { charges: cls.mana } : {}),
     ...(m.cls === 'shadowmancer' ? { veil: 0 } : {}),
   };
+  // V4.0 (spec 28.6): a crew Sapper brings improvised explosives like a hero Sapper (3, slotless, its own kit).
+  if (m.cls === 'sapper') r.pack!.unshift({ ...makeItem({ s }, 'improvised-charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
   return r;
 }
 
@@ -230,7 +238,13 @@ interface LootGoal {
 function lootGoals(c: Ctx, r: RivalX): LootGoal[] {
   const cr = c.d.rivals!;
   const out: LootGoal[] = [];
-  for (const ch of c.d.chests) if (!ch.opened && !ch.jammed) out.push({ at: ch.at, chestId: ch.id, objective: false });
+  // V4.0 (spec 28.3): a locked chest is no longer free: it is left to the crew's lockpicker while one is about (others smash).
+  const picker = crewPicker(c);
+  for (const ch of c.d.chests) {
+    if (ch.opened || ch.jammed) continue;
+    if (ch.locked && picker && crewPickSlots(r) === null) continue;
+    out.push({ at: ch.at, chestId: ch.id, objective: false });
+  }
   for (const g of c.d.ground) {
     // V4.0 (spec 25.2): a pile holding only the sally port key is worth nothing to a prospector.
     if (!g.items.length || g.items.every((i) => i.kind === 'gatekey')) continue;
@@ -409,29 +423,29 @@ function keepSpots(c: Ctx, r: RivalX): Pos[] {
     .filter((p) => canEnter(c.w, c.d, p) && kindAt(c.w, c.d, p) !== 'door' && !blocked(c, p, r.id));
 }
 
-/** A hired member's plan: hit a monster in reach, else close in on one near the hirer, else keep up. */
-function hiredPlan(c: Ctx, r: RivalX): { intent: Intent; path: Pos[] } {
+/** A hired member's plan: hit a monster in reach, else close in on one near the hirer, else keep up (dashing if need be). */
+function hiredPlan(c: Ctx, r: RivalX): { intent: Intent; route: CrewRoute } {
   const st = rivalStats(r);
+  const stay: CrewRoute = { path: [], sneak: false, dash: false };
   // Spec 20.4: hired members use their packs for the party.
   const kit = hiredKit(c, r);
-  if (kit) return { intent: kit, path: [] };
+  if (kit) return { intent: kit, route: stay };
   const now = monstersInReach(c, r, r.at)[0];
-  if (now) return { intent: { kind: 'attack', targetId: now.id, to: { ...r.at } }, path: [] };
+  if (now) return { intent: { kind: 'attack', targetId: now.id, to: { ...r.at } }, route: stay };
   const cr = c.d.rivals!;
   const h = cr.hiredBy ? hd(c, cr.hiredBy) : undefined;
   const near = h ? onMap(c).filter((m) => m.kind !== 'gloam' && m.awareness !== 'asleep' && within(m.at, h.at, 3)) : [];
   if (near.length) {
     const spots = near.flatMap((m) => (st.range > 1 ? shootingSpots(c, r, m, st.range) : attackSpots(c, m.at, r.id)));
-    const path = approach(c, r.id, r.at, spots, st.move, true) ?? [];
-    const end = path[path.length - 1] ?? r.at;
+    const route = crewApproach(c, r, spots);
+    const end = route.path[route.path.length - 1] ?? r.at;
     const m = monstersInReach(c, r, end)[0];
-    if (m) return { intent: { kind: 'attack', targetId: m.id, to: end }, path };
+    if (m) return { intent: { kind: 'attack', targetId: m.id, to: end }, route };
   }
   const keep = keepSpots(c, r);
-  if (keep.some((p) => samePos(p, r.at)) || !keep.length) return { intent: { kind: 'wait' }, path: [] };
-  const path = approach(c, r.id, r.at, keep, st.move, true) ?? [];
-  const end = path[path.length - 1];
-  return end ? { intent: { kind: 'move', to: end }, path } : { intent: { kind: 'wait' }, path: [] };
+  if (keep.some((p) => samePos(p, r.at)) || !keep.length) return { intent: { kind: 'wait' }, route: stay };
+  const route = crewApproach(c, r, keep, { dash: true });
+  return { intent: routeIntent(c, route), route };
 }
 
 /** Where the paid job takes the crew: next to the winch, or to the locked thing. */
@@ -441,12 +455,60 @@ function jobSpots(c: Ctx, r: RivalX): Pos[] {
   return posNeighbors(job.at).filter((p) => canEnter(c.w, c.d, p) && kindAt(c.w, c.d, p) !== 'door' && !blocked(c, p, r.id));
 }
 
-/** The member who walks to the job: the one nearest to it. */
+/** The member who does the job: for a lock, the crew's lockpicker (spec 28.3); else the one nearest to it. */
 function jobber(c: Ctx): RivalX | undefined {
   const job = c.d.rivals?.job;
   if (!job?.at) return undefined;
+  if (job.kind === 'open') {
+    const p = crewPicker(c);
+    if (p) return p;
+  }
   const field = distField(c.w, c.d, posNeighbors(job.at), { stairs: true });
   return [...rivalsOnMap(c)].sort((a, b) => (field.get(posKey(a.at)) ?? 999) - (field.get(posKey(b.at)) ?? 999) || (a.id < b.id ? -1 : 1))[0];
+}
+
+/**
+ * V4.0 (spec 28.2): the monster a member fights back against: the one that attacked it this world phase (any
+ * stance), or, for a crew at peace (not hired: they fight monsters anyway), a hunting monster next to it that has
+ * noticed it. Prospectors stay neutral to the party while they do.
+ */
+function defendTarget(c: Ctx, r: RivalX): MonsterX | undefined {
+  const cr = c.d.rivals!;
+  if (cr.stance === 'hired') return undefined;
+  const by = r.attackedBy ? onMap(c).find((m) => m.id === r.attackedBy && m.kind !== 'gloam') : undefined;
+  if (by && by.at.level === r.at.level) return by;
+  if (cr.stance === 'hostile') return undefined;
+  return onMap(c)
+    .filter((m) => m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness === 'hunting' && adjacentTo(m.at, r.at) && (m.noticedIds ?? []).includes(r.id))
+    .sort((a, b) => a.hp - b.hp || (a.id < b.id ? -1 : 1))[0];
+}
+
+/** Can the member hit `m` from `from` (its weapon's reach and a line for a bow)? */
+function canHitMonster(c: Ctx, r: RivalX, m: MonsterX, from: Pos): boolean {
+  const reach = rivalStats(r).range;
+  return m.at.level === from.level && within(m.at, from, reach) && (reach === 1 || los(c.w, c.d, from, m.at));
+}
+
+/** V4.0 (spec 28.2): fight back: close in if need be (a walk, no dash) and strike. */
+function defendAct(c: Ctx, r: RivalX, m: MonsterX): void {
+  if (!canHitMonster(c, r, m, r.at)) {
+    const st = rivalStats(r);
+    const spots = st.range > 1 ? shootingSpots(c, r, m, st.range) : attackSpots(c, m.at, r.id);
+    const route = crewApproach(c, r, spots, { sneak: false });
+    crewWalk(c, r, route.path, false);
+    if (r.hp <= 0 || r.goneOut) return;
+  }
+  if (c.d.monsters.includes(m) && canHitMonster(c, r, m, r.at)) {
+    tell(c, r, `${r.name} turns on ${m.name}.`, m.at);
+    hitMonster(c, r, m.id);
+  }
+}
+
+/** The loot goal's lock: pick (with lockpicks) or smash, as the intent to show (spec 28.3). */
+function lockIntent(c: Ctx, r: RivalX, chestId: string | undefined): Intent | null {
+  const ch = chestId ? c.d.chests.find((x) => x.id === chestId) : undefined;
+  if (!ch || ch.opened || !ch.locked) return null;
+  return { kind: crewPickSlots(r) !== null && !ch.jammed ? 'pick' : 'smash', to: { ...ch.at } };
 }
 
 /** The intent a member shows for the coming world phase. */
@@ -455,6 +517,8 @@ export function planRival(c: Ctx, r: RivalX): Intent {
   const st = rivalStats(r);
   if ((r.feared ?? 0) > 0) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
   if (r.intent?.kind === 'veil' && !r.veiled && cr.stance !== 'hostile') return r.intent;
+  const foe = defendTarget(c, r);
+  if (foe) return { kind: 'attack', targetId: foe.id, to: { ...r.at } };
   if (cr.stance === 'hostile') return hostilePlan(c, r).intent;
   if (cr.stance === 'hired') return hiredPlan(c, r).intent;
   if (cr.stance === 'demanding') {
@@ -464,32 +528,29 @@ export function planRival(c: Ctx, r: RivalX): Intent {
   }
   if (cr.job && r === jobber(c)) {
     const spots = jobSpots(c, r);
-    if (spots.some((p) => samePos(p, r.at))) return { kind: 'wait' };
-    const path = approach(c, r.id, r.at, spots, st.move, true) ?? [];
-    const end = path[path.length - 1];
-    return end ? { kind: 'move', to: end } : { kind: 'wait' };
+    if (spots.some((p) => samePos(p, r.at)) || (cr.job.at && adjacentTo(cr.job.at, r.at))) {
+      return cr.job.kind === 'open' && cr.job.at ? { kind: 'pick', to: { ...cr.job.at } } : { kind: 'wait' };
+    }
+    return routeIntent(c, crewApproach(c, r, spots, { dash: true }));
   }
   if (cr.stance === 'waiting') return { kind: 'wait' };
   if (cr.goal === 'leave') {
     const ex = exitsBy(c, r.at)[0];
     if (!ex) return { kind: 'wait' };
-    const path = approach(c, r.id, r.at, [ex], st.move, true) ?? [];
-    return { kind: 'flee', to: path[path.length - 1] ?? r.at };
+    const route = crewApproach(c, r, [ex], { dash: true });
+    const it = routeIntent(c, route, { kind: 'flee', to: { ...r.at } });
+    return it.kind === 'move' ? { ...it, kind: 'flee' } : it;
   }
   if (cr.temperament === 'cutthroat') {
     // Truce: back to the post and stand.
     if (!r.post || samePos(r.post, r.at)) return { kind: 'wait' };
-    const path = approach(c, r.id, r.at, [r.post], st.move, true) ?? [];
-    const end = path[path.length - 1];
-    return end ? { kind: 'move', to: end } : { kind: 'wait' };
+    return routeIntent(c, crewApproach(c, r, [r.post], { dash: true }));
   }
   const g = bestLoot(c, r);
   if (!g) return { kind: 'wait' };
-  if (within(r.at, g.at, 1)) return { kind: 'steal', to: { ...r.at } };
+  if (within(r.at, g.at, 1)) return lockIntent(c, r, g.chestId) ?? { kind: 'steal', to: { ...r.at } };
   const spots = [g.at, ...posNeighbors(g.at)].filter((p) => canEnter(c.w, c.d, p) && !blocked(c, p, r.id));
-  const path = approach(c, r.id, r.at, spots, st.move, true) ?? [];
-  const end = path[path.length - 1];
-  return end ? { kind: 'move', to: end } : { kind: 'wait' };
+  return routeIntent(c, crewApproach(c, r, spots, { dash: true }));
 }
 
 export function computeRivalIntents(c: Ctx): void {
@@ -511,34 +572,49 @@ function leaveAct(c: Ctx, r: RivalX): void {
   const ex = exitsBy(c, r.at)[0];
   if (!ex) return;
   if (samePos(ex, r.at)) return goOut(c, r);
-  const path = approach(c, r.id, r.at, [ex], rivalStats(r).move, true) ?? [];
-  walk(c, r.id, r, path);
-  if (samePos(r.at, ex)) goOut(c, r);
+  crewGo(c, r, crewApproach(c, r, [ex], { dash: true }));
+  if (r.hp > 0 && samePos(r.at, ex)) goOut(c, r);
 }
 
 /** V3.7 (spec 20.2): a feared member runs from the caster with its whole move and does nothing else. */
 function fleeAct(c: Ctx, r: RivalX): void {
   const f = fleePlan(c, r, rivalStats(r).move);
   r.intent = { kind: 'flee', to: f.to };
-  walk(c, r.id, r, f.path);
+  crewWalk(c, r, f.path, false);
 }
 
-/** A hired member strikes a monster: its own numbers against the monster's armor. */
-function hitMonster(c: Ctx, r: RivalX, id: string): void {
+/**
+ * A crew member strikes a monster (hired, or fighting back): its own numbers against the monster's armor. V4.0 (spec
+ * 28.5): the heroes' rules: +20 on a sleeper, +1 slot sneak attack on a monster that hasn't noticed it, and a Burglar's
+ * backstab from outside its front (+1 slot, double damage before armor; not the Dragon).
+ */
+export function hitMonster(c: Ctx, r: RivalX, id: string): void {
   const m = c.d.monsters.find((x) => x.id === id);
   if (!m) return;
   const st = rivalStats(r);
   const bolt = r.cls === 'pyromancer' && manaOf(r) > 0 && distance(m.at, r.at) <= PYRO_BOLT_RANGE && los(c.w, c.d, r.at, m.at);
-  const slots = bolt ? PYRO_BOLT_SLOTS : st.slots;
-  const dmg = bolt ? PYRO_BOLT_DMG : st.dmg;
+  let slots = bolt ? PYRO_BOLT_SLOTS : st.slots;
+  let dmg = bolt ? PYRO_BOLT_DMG : st.dmg;
+  let p = bolt ? spellChance(r) : st.chance;
   if (bolt) r.charges = (r.charges ?? 1) - 1;
-  const rr = roll(c, r.id, bolt ? 'Firebolt' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, bolt ? spellChance(r) : st.chance);
+  faceToward(r, m.at);
+  const unnoticed = m.awareness === 'asleep' || !(m.noticedIds ?? []).includes(r.id);
+  if (m.awareness === 'asleep') p += 20;
+  if (!bolt && unnoticed) slots += SNEAK_ATTACK_SLOTS;
+  const stab = !bolt && unnoticed && r.cls === 'burglar' && st.range === 1 && m.kind !== 'dragon' && adjacentTo(m.at, r.at) && inRearHalf(m, r.at);
+  if (stab) {
+    slots += BACKSTAB_SLOTS;
+    dmg *= BACKSTAB_DMG_MULT;
+  }
+  const rr = roll(c, r.id, bolt ? 'Firebolt' : stab ? 'Backstab' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, p);
   makeNoise(c, r.at, bolt ? PYRO_BOLT_NOISE : 2, { what: 'clash' });
   if (!rr.hits) {
     c.ev.push({ type: 'miss', attacker: r.id, target: m.id });
     return;
   }
-  hurtAny(c, m.id, rr.hits * Math.max(1, dmg - monsterArmor(c, m)) + (rr.perfect ? 1 : 0), r.id, { crit: rr.perfect });
+  const total = rr.hits * Math.max(1, dmg - monsterArmor(c, m)) + (rr.perfect ? 1 : 0);
+  if (stab) tell(c, r, `${r.name} backstabs ${m.name}: ${total}.`, m.at);
+  hurtAny(c, m.id, total, r.id, { crit: rr.perfect, backstab: stab });
   turnOnHit(c, m.id, r.id); // V4.0 (spec 26.3)
 }
 
@@ -548,7 +624,8 @@ function hiredAct(c: Ctx, r: RivalX): void {
   if (plan.intent.kind === 'potion' || plan.intent.kind === 'mend') {
     if (hiredUse(c, r, plan.intent)) return;
   }
-  walk(c, r.id, r, plan.path);
+  crewWalk(c, r, plan.route.path, plan.route.sneak);
+  if (r.hp <= 0 || r.goneOut) return;
   if (plan.intent.kind === 'attack') {
     const ms = monstersInReach(c, r, r.at);
     const m = ms.find((x) => x.id === plan.intent.targetId) ?? ms[0];
@@ -556,16 +633,33 @@ function hiredAct(c: Ctx, r: RivalX): void {
   }
 }
 
-/** The paid job (spec 18.6): walk there, then work the winch or open the lock silently. Returns true if this member did it. */
+/** V4.0 (spec 28.3): give the job's price back to the hero who paid (gold in their pack, else at their feet). */
+function refundJob(c: Ctx): number {
+  const job = c.d.rivals?.job;
+  const h = job?.by ? hd(c, job.by) : undefined;
+  const n = job?.price ?? 0;
+  if (!n || !h) return 0;
+  const left = addToPack(c, h.pack, makeItem(c, 'gold', n));
+  if (left) putOnGround(c, h.at, [left]);
+  return n;
+}
+
+/**
+ * The paid job (spec 18.6): walk there, then work the winch or open the lock. V4.0 (spec 28.3): the lock is the
+ * crew lockpicker's best attempt by the heroes' rules: every slot: silent, as promised; one short: open, but a clunk
+ * (noise 2, said honestly); it holds: they try again next round; it jams: the job can't be done, and the price is
+ * handed back. Returns true if this member did it.
+ */
 function jobAct(c: Ctx, r: RivalX): boolean {
   const cr = c.d.rivals!;
   const job = cr.job;
   if (!job?.at || r !== jobber(c)) return false;
   if (!within(r.at, job.at, 1)) {
-    const path = approach(c, r.id, r.at, jobSpots(c, r), rivalStats(r).move, true) ?? [];
-    walk(c, r.id, r, path);
+    const route = crewApproach(c, r, jobSpots(c, r), { dash: true });
+    crewGo(c, r, route);
+    if (route.dash) return true;
   }
-  if (!within(r.at, job.at, 1)) return true;
+  if (!within(r.at, job.at, 1) || r.hp <= 0) return true;
   if (job.kind === 'winch') {
     if (!c.d.liftWorking) {
       c.d.liftWorking = true;
@@ -575,26 +669,28 @@ function jobAct(c: Ctx, r: RivalX): boolean {
     }
   } else if (job.kind === 'open') {
     const at = job.at;
-    if (kindAt(c.w, c.d, at) === 'door') {
-      const door = doorAt(c.d, at);
-      if (door) {
-        door.open = true;
-        door.locked = false;
-        door.jammed = false;
-        c.ev.push({ type: 'doorChanged', at, open: true, locked: false });
-      }
+    const door = kindAt(c.w, c.d, at) === 'door';
+    if (crewPickSlots(r) === null) {
+      const back = refundJob(c);
+      say(c, `${r.name} has no picks to do it quietly. ${cr.name} hand back your ${back} gold.`);
     } else {
-      const ch = c.d.chests.find((x) => samePos(x.at, at) && !x.opened);
-      if (ch) {
-        ch.opened = true;
-        ch.locked = false;
-        const items = chestLoot(c, ch.tier);
-        putOnGround(c, ch.at, items);
-        (cr.spare ??= []).push(ch.id);
-        c.ev.push({ type: 'chestOpened', id: ch.id, items });
+      const res = crewWorkLock(c, r, at, false, false);
+      if (res === 'holds' || res === 'stuck') {
+        say(c, `The lock holds against ${r.name}'s picks. They'll try again.`);
+        return true;
+      }
+      if (res === 'jammed') {
+        const back = refundJob(c);
+        say(c, `${r.name}'s pick snaps in the lock: it's jammed. ${cr.name} hand back your ${back} gold.`);
+      } else {
+        const ch = door ? undefined : c.d.chests.find((x) => samePos(x.at, at) && !x.opened);
+        if (ch) {
+          crewOpenChest(c, ch.id, true);
+          (cr.spare ??= []).push(ch.id);
+        }
+        say(c, res === 'clunk' ? `${r.name} works the lock open. Clunk: not quite silent.` : `${r.name} works the lock open without a sound.`);
       }
     }
-    say(c, `${r.name} works the lock open without a sound.`);
   }
   cr.job = undefined;
   return true;
@@ -612,8 +708,9 @@ function lootAct(c: Ctx, r: RivalX): void {
   if (!within(r.at, g.at, 1)) {
     const spots = [g.at, ...posNeighbors(g.at)].filter((p) => canEnter(c.w, c.d, p) && !blocked(c, p, r.id));
     const before = r.at;
-    const path = approach(c, r.id, r.at, spots, rivalStats(r).move, true);
-    walk(c, r.id, r, path ?? []);
+    const route = crewApproach(c, r, spots, { dash: true });
+    crewGo(c, r, route);
+    if (r.hp <= 0 || r.goneOut) return;
     if (samePos(before, r.at) && !within(r.at, g.at, 1)) {
       // Stuck: a hero in the way two rounds running makes them angry (not under a truce).
       cr.blocked = (cr.blocked ?? 0) + 1;
@@ -623,15 +720,18 @@ function lootAct(c: Ctx, r: RivalX): void {
         say(c, `"Move, or be moved." ${cr.name} draw steel.`);
       }
     } else cr.blocked = 0;
+    if (route.dash) return; // a dash spends the action
   }
   if (within(r.at, g.at, 1)) {
     let items: Item[] = [];
     if (g.chestId) {
       const ch = c.d.chests.find((x) => x.id === g.chestId)!;
-      ch.opened = true;
-      ch.locked = false;
-      items = chestLoot(c, ch.tier);
-      c.ev.push({ type: 'chestOpened', id: ch.id, items: [] });
+      // V4.0 (spec 28.3): a locked chest is picked (or smashed) first, by the heroes' rules.
+      if (ch.locked) {
+        const res = crewWorkLock(c, r, ch.at, crewPickSlots(r) === null);
+        if (res !== 'silent' && res !== 'clunk' && res !== 'smashed') return;
+      }
+      items = crewOpenChest(c, ch.id, false);
       noteOnce(c, `${cr.name} took the ${c.w.roomName(ch.at).toLowerCase()} chest.`);
     } else {
       const pile = c.d.ground.find((x) => samePos(x.at, g.at));
@@ -655,8 +755,7 @@ function lootAct(c: Ctx, r: RivalX): void {
 
 function postAct(c: Ctx, r: RivalX): void {
   if (!r.post || samePos(r.post, r.at)) return;
-  const path = approach(c, r.id, r.at, [r.post], rivalStats(r).move, true) ?? [];
-  walk(c, r.id, r, path);
+  crewGo(c, r, crewApproach(c, r, [r.post], { dash: true }));
 }
 
 /** Spec 18.6: the hired rounds are up. Rich parties may be betrayed; otherwise back to their business. */
@@ -682,6 +781,7 @@ export function rivalsAct(c: Ctx): void {
   if (!cr) return;
   rivalEnter(c);
   if (!cr.entered) return;
+  forgetSeenBy(c); // V4.0 (spec 28.5): heroes who no longer see a member lose track of her
   crewNotice(c);
   // Spec 18.5: a toll not paid by the next world phase is paid in blood.
   if (cr.stance === 'demanding' && (cr.demandRound ?? c.d.round) < c.d.round) {
@@ -700,9 +800,17 @@ export function rivalsAct(c: Ctx): void {
   }
   let jobDone = false;
   for (const r of rivalsOnMap(c)) {
+    if (!rivalsOnMap(c).includes(r)) continue;
     if ((r.feared ?? 0) > 0) {
       r.overwatch = false;
       fleeAct(c, r);
+      continue;
+    }
+    // V4.0 (spec 28.2): a member a monster attacked (or, at peace, one a hunting monster stands over) fights it.
+    const foe = defendTarget(c, r);
+    if (foe) {
+      r.overwatch = false;
+      defendAct(c, r, foe);
       continue;
     }
     if (cr.stance === 'hostile') {
@@ -739,6 +847,7 @@ export function rivalsAct(c: Ctx): void {
     cr.hiredRounds -= 1;
     if (cr.hiredRounds <= 0) hireEnds(c);
   }
+  for (const r of cr.members) r.attackedBy = undefined;
   // Gone?
   for (const r of cr.members) if (r.goneOut && r.loot.length) {
     noteOnce(c, `${cr.name} left with ${valueOf(r.loot)} gold in loot.`);

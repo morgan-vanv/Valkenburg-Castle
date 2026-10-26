@@ -12,6 +12,7 @@ import { hd, heroName, makeHostile, partyValue, putOnGround, rivalsOnMap, round5
 import { distance } from './hex';
 import { doorAt, kindAt, los, within } from './world';
 import { computeRivalIntents } from './rivals';
+import { crewPicker } from './crewmove';
 import { visNow } from './delve';
 
 /** Crew members this hero can talk to: visible, unveiled, within 4, in line of sight. */
@@ -116,14 +117,14 @@ function lockFor(c: Ctx): Pos | undefined {
   const seen = new Set(c.d.explored);
   const cands: Pos[] = [];
   for (const [k, door] of Object.entries(c.d.doors)) {
-    if (!door.locked || door.open || !seen.has(k)) continue;
+    if (!door.locked || door.open || door.jammed || !seen.has(k)) continue; // V4.0 (spec 28.3): a jammed lock can't be picked
     // V4.0 (spec 25.2): no crew job opens a barred gate.
     if (c.w.tile(parsePosKey(k))?.barred) continue;
     const [lv, rest] = k.split(':');
     const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
     cands.push({ level: Number(lv), q, r });
   }
-  for (const ch of c.d.chests) if (!ch.opened && ch.locked && seen.has(posKey(ch.at))) cands.push(ch.at);
+  for (const ch of c.d.chests) if (!ch.opened && ch.locked && !ch.jammed && seen.has(posKey(ch.at))) cands.push(ch.at);
   return cands
     .filter((p) => p.level === lead.at.level)
     .sort((a, b) => distance(a, lead.at) - distance(b, lead.at) || posKey(a).localeCompare(posKey(b)))[0];
@@ -131,7 +132,7 @@ function lockFor(c: Ctx): Pos | undefined {
 
 const JOB_TEXT: Record<JobKind, string> = {
   winch: 'They walk to the winch and work it: the lift runs.',
-  open: 'They open the nearest locked door or chest you have seen, silently.',
+  open: 'Their lockpicker opens the nearest locked door or chest you have seen, silently if every slot hits; a lock that holds is tried again, a jammed one gets your coin back.',
   scout: `Everything within ${SCOUT_RANGE} of each of them is mapped for you, now.`,
 };
 
@@ -171,7 +172,8 @@ export function deals(c: Ctx, heroId: string): DealOption[] {
   const jobWhy = cr.job ? 'They are still on the last job.' : !jobOk ? (st === 'hired' ? 'They work for you now: no extra jobs.' : st === 'demanding' ? 'Pay the toll first.' : 'Only for a crew at peace with you.') : undefined;
   const jobPrice = priced(DEAL_PRICE.job, lv);
   offer('job', 'Job: work the winch', jobPrice, JOB_TEXT.winch, jobWhy ?? (winchFor(c) ? undefined : c.d.liftWorking ? 'The lift already runs.' : 'No winch on their level.'), {}, 'winch');
-  offer('job', 'Job: open a lock', jobPrice, JOB_TEXT.open, jobWhy ?? (lockFor(c) ? undefined : 'No locked door or chest seen on their level.'), {}, 'open');
+  // V4.0 (spec 28.3): a lock is opened by the heroes' rules: only a crew with lockpicks can promise silence.
+  offer('job', 'Job: open a lock', jobPrice, JOB_TEXT.open, jobWhy ?? (!crewPicker(c) ? 'None of them carries lockpicks.' : lockFor(c) ? undefined : 'No locked door or chest seen on their level.'), {}, 'open');
   offer('job', 'Job: scout', jobPrice, JOB_TEXT.scout, jobWhy, {}, 'scout');
   // hire
   const carried = partyValue(c);
@@ -241,7 +243,7 @@ export function doDeal(c: Ctx, heroId: string, deal: DealKind, job?: JobKind): s
         say(c, `${name} sketch you a map of everything around them.`);
       } else {
         const at = job === 'winch' ? winchFor(c)! : lockFor(c)!;
-        cr.job = { kind: job!, at: { ...at } };
+        cr.job = { kind: job!, at: { ...at }, price: opt.price, by: heroId };
         say(c, job === 'winch' ? `${name} agree to work the winch.` : `${name} agree to open the ${kindAt(c.w, c.d, at) === 'door' && doorAt(c.d, at) ? 'door' : 'chest'} for you.`);
       }
       break;

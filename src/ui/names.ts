@@ -77,7 +77,7 @@ export const FACING_HELP = {
   blindsided: `Blindsided: an attack from the cone straight behind a hero gets +${V39.blindsideSlots} slot (monsters, crews, free swings, overwatch shots alike). If no hero can see the attacker, it strikes unseen ("Something strikes … from behind") and stays visible until your next turn ends.`,
   backstab: `Backstab (Burglar): a melee strike from a monster's side or from straight behind it (straight behind a crew member) on a monster or crew member that has not noticed the Burglar (asleep, or awake without having noticed them): +${V39.backstabSlots} slot and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit (before armor), on top of the sneak attack's +${V37.sneakSlots}. Not the Dragon or the Gloam. With a Burglar selected, a 🗡 marks the hexes to strike from.`,
   quietFeet: `Quietest feet (Burglar): walks 5 (dash 5) and sneaks 4 (dash 4), rubble no louder. Sleepers roll only ${V39.burglarWakeSneak}% per hex a sneaking Burglar passes (others ${V37.wakeSneak}%), ${V39.burglarWakeEndSneak}% for ending next to one (others ${V37.wakeEndSneak}%). Awake enemies notice a sneaking Burglar ahead of them only within ${V39.burglarNoticeLitSneak} lit (others ${V37.noticeLitSneak}), when adjacent unlit, ${V39.burglarNoticeHollowSneak} in the Hollow (others ${V37.noticeHollowSneak}); an unaware monster misses one sneaking right beside it.`,
-  hearing: 'Hearing: your heroes hear what they can\'t see. In the castle\'s turn, footsteps of unseen monsters and crews within earshot (a few hexes by path, closed doors count double; rats and spiders quietest, the Dragon loudest) show as 👣 trails, and fights, shouts, smashes and blasts out of sight as pulsing rings. Where, not who: they stay unseen. The marks last until the castle moves again. Monsters gain nothing from this.',
+  hearing: 'Hearing: your heroes hear what they can\'t see. In the castle\'s turn, footsteps of unseen monsters and walking crews (a sneaking crew member is silent) within earshot (a few hexes by path, closed doors count double; rats and spiders quietest, the Dragon loudest) show as 👣 trails, and fights, shouts, smashes and blasts out of sight as pulsing rings. Where, not who: they stay unseen. The marks last until the castle moves again. Monsters gain nothing from this.',
   rear: `Monster sight by mood (the mark over its head). Unaware (at its post, on patrol): sees ahead; at its sides only a walker within ${V37.sideWalk} or anyone right beside it; nothing straight behind. Searching (?) and hunting (!): sees ahead and at its sides. Straight behind, any monster notices only a walker right behind it, a sneaking hero never. Heroes and crew members are blind only straight behind. Sleepers see nothing; they wake by sound. Monsters look whenever anything moves; one that spots a hero turns to them and looks again, so a careless hero can give away friends near them. An unaware monster turns toward a noise; one already hunting keeps facing its quarry, but any hit that lands turns it to face the attacker.`,
 };
 
@@ -766,9 +766,9 @@ export const CREW: Record<CrewId, { name: string; blurb: string; colour: string;
 export const CREW_KIT: Record<string, string> = {
   ranger: 'Longbow at range 6. Caltrops on the hex you would charge through; overwatch when nobody is in reach.',
   shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half.',
-  burglar: 'Darts the lantern bearer first; smoke when two of you have a line on a wounded friend. Picks locks.',
+  burglar: 'Walks 5, sneaks 4 on quiet feet. Darts the lantern bearer first; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
   sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges.',
-  sapper: 'Hammer, and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge.',
+  sapper: 'Hammer, improvised explosives and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge. Digs through cracked walls and blasts locked doors when that\'s the short way.',
   pyromancer: 'Firebolt at range 5; fireball when three heroes stand within 1 of a hex.',
   hedgewitch: 'Mends the member below half, wards the striker, gusts a hero standing at an edge.',
 };
@@ -784,7 +784,7 @@ export function crewMemberLine(m: { level?: number; weaponTier?: number; armorTi
 }
 
 export const TEMPERAMENT: Record<RivalCrew['temperament'], { name: string; text: string }> = {
-  prospector: { name: 'Prospectors', text: 'They race you for loot, then leave. They fight only if attacked or blocked.' },
+  prospector: { name: 'Prospectors', text: 'They race you for loot, then leave, by your rules: they sneak past monsters and near you, pick locks, mind traps. They fight you only if attacked or blocked; monsters that come for them get a fight.' },
   cutthroat: { name: 'Cutthroats', text: 'They hold a choke point on Level 2 and demand a toll from anyone who comes close.' },
 };
 
@@ -802,7 +802,7 @@ export const DEAL_GLYPH: Record<DealKind, string> = { leave: '⇱', truce: '⚐'
 export const JOB_NAME: Record<JobKind, string> = { winch: 'Work the winch', open: 'Open a lock', scout: 'Scout ahead' };
 export const JOB_TEXT: Record<JobKind, string> = {
   winch: 'They walk to the winch on their level and work it: the lift runs.',
-  open: 'They open the nearest seen locked door or chest on their level, silently.',
+  open: 'Their lockpicker opens the nearest seen locked door or chest on their level: silent if every slot hits; a lock that holds is tried again, a jammed one gets your coin back.',
   scout: 'Every hex within 8 of each of them is explored now.',
 };
 

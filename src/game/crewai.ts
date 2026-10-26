@@ -6,7 +6,7 @@
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
 import {
-  BLAST_INNER_DMG, BLAST_OUTER_DMG, BOW_RANGE, CALTROPS_DMG, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
+  BACKSTAB_DMG_MULT, BLAST_INNER_DMG, BLAST_OUTER_DMG, BOW_RANGE, SNEAK_ATTACK_SLOTS, CALTROPS_DMG, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
   KNOCKBACK_RANGE, PYRO_BOLT_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_POTION_HEAL, SAPPER_CHARGE_RANGE,
   SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE, SPELL_RANGE, THROW_RANGE, VEIL_ROUNDS, WARD_ROUNDS, BLINK_RANGE,
 } from './data';
@@ -14,26 +14,31 @@ import { chance } from './rng';
 import { say, type Ctx, type HeroX, type RivalX } from './state';
 import { activeHeroes, hd, heroName, hurtAny, hurtHero, makeNoise, monsterArmor, occupant, onMap, rivalsOnMap, roll } from './common';
 import { canEnter, dijkstra, distField, isFloorish, kindAt, los, pathTo, standable, within } from './world';
-import { adjacentTo, approach, attackSpots, blocked, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, strike, targets, walk, type Target } from './ai';
+import { adjacentTo, approach, attackSpots, blocked, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, strike, targets, type Target } from './ai';
 import { push, pushOutcome } from './falls';
 import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
-import { faceToward } from './stealth';
+import { faceToward, inRearHalf } from './stealth';
 import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals';
+import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 
 // ---------------------------------------------------------------- the pack
 
 /** Does the member carry one (the pack; legacy saves keep counters for darts, smoke and charges)? */
 export function hasKit(r: RivalX, kind: ItemKind): boolean {
+  if (kind === 'charge') return crewCharges(r) > 0; // V4.0 (spec 28.6): improvised explosives count
   if (r.pack) return r.pack.some((i) => i.kind === kind);
   if (kind === 'dart') return (r.darts ?? 0) > 0;
   if (kind === 'smoke') return (r.smoke ?? 0) > 0;
-  if (kind === 'charge') return r.cls === 'sapper' && (r.charges ?? 0) > 0;
   return false;
 }
 
 /** Use one up. */
 export function spendKit(r: RivalX, kind: ItemKind): Item | undefined {
+  if (kind === 'charge') {
+    spendCrewCharge(r); // V4.0 (spec 28.6): improvised explosives first, as a hero Sapper
+    return undefined;
+  }
   if (r.pack) {
     const i = r.pack.findIndex((x) => x.kind === kind);
     if (i < 0) return undefined;
@@ -41,7 +46,6 @@ export function spendKit(r: RivalX, kind: ItemKind): Item | undefined {
   }
   if (kind === 'dart') r.darts = Math.max(0, (r.darts ?? 1) - 1);
   else if (kind === 'smoke') r.smoke = Math.max(0, (r.smoke ?? 1) - 1);
-  else if (kind === 'charge') r.charges = Math.max(0, (r.charges ?? 1) - 1);
   return undefined;
 }
 
@@ -179,9 +183,19 @@ function guardPrefer(c: Ctx, r: RivalX): ((p: Pos) => number) | undefined {
 export interface Plan {
   intent: Intent;
   path: Pos[];
+  /** V4.0 (spec 28.1): the walk is a sneak (stalking). */
+  sneak?: boolean;
+  /** V4.0 (spec 28.6): a Sapper's dig or blast at the walk's end. */
+  way?: CrewWay;
+  /** V4.0 (spec 28.1): the walk is a dash (as far again; it spends the action). */
+  dash?: boolean;
 }
 
-/** Attack the crew's target: from here when in reach, else from the best spot the walk allows. */
+/**
+ * Attack the crew's target: from here when in reach, else from the best spot the walk allows. V4.0 (spec 28.1): walking,
+ * or sneaking while it stalks a target that hasn't noticed it (`wantSneak`); a member that can't strike this round
+ * dashes (a second move, as far again); a crew Sapper digs or blasts a much shorter way (spec 28.6).
+ */
 export function attackPlan(c: Ctx, r: RivalX, t: Target): Plan {
   const st = rivalStats(r);
   const reach = st.range;
@@ -189,10 +203,23 @@ export function attackPlan(c: Ctx, r: RivalX, t: Target): Plan {
   const dmg = hitRange(st.slots, st.dmg, t.armor);
   if (canHit(r.at)) return { intent: { kind: 'attack', targetId: t.id, to: { ...r.at }, damage: dmg }, path: [] };
   const spots = reach > 1 ? shootingSpots(c, r, t) : attackSpots(c, t.at, r.id);
-  const path = pathToSpots(c, r, spots, st.move, t.id, guardPrefer(c, r));
+  if (r.cls === 'sapper' && sapperWay(c, r, spots)) {
+    const route = crewApproach(c, r, spots, { sneak: false });
+    if (route.way) return { intent: routeIntent(c, route), path: route.path, way: route.way };
+  }
+  const sneak = wantSneak(c, r, [], t.id);
+  const budget = crewBudget(r, sneak);
+  const path = pathToSpots(c, r, spots, budget, t.id, guardPrefer(c, r));
   const end = path[path.length - 1];
-  if (end && canHit(end)) return { intent: { kind: 'attack', targetId: t.id, to: end, damage: dmg }, path };
-  return end ? { intent: { kind: 'move', to: end, targetId: t.id }, path } : { intent: { kind: 'wait' }, path: [] };
+  if (end && canHit(end)) return { intent: { kind: 'attack', targetId: t.id, to: end, damage: dmg }, path, sneak };
+  // The dash stops short of the party's reach: a member that can't strike this round doesn't walk up to hand the heroes the first blow.
+  let far = pathToSpots(c, r, spots, 2 * budget, t.id, guardPrefer(c, r));
+  while (far.length > path.length && activeHeroes(c).some((h) => adjacentTo(h.at, far[far.length - 1]!))) far = far.slice(0, -1);
+  while (far.length > path.length && occupant(c, far[far.length - 1]!)) far = far.slice(0, -1);
+  const dash = far.length > path.length;
+  const go = dash ? far : path;
+  const stop = go[go.length - 1];
+  return stop ? { intent: { kind: 'move', to: stop, targetId: t.id, ...(sneak ? { sneak: true } : {}) }, path: go, sneak, dash } : { intent: { kind: 'wait' }, path: [] };
 }
 
 // ---------------------------------------------------------------- the kit (spec 20.4 per class)
@@ -520,8 +547,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       if (it.to && !samePos(it.to, r.at)) {
         if (occupant(c, it.to) || !adjacentTo(it.to, r.at)) {
           const step = freeStep(c, r, nearestHero(c, r)?.at);
-          if (step) walk(c, r.id, r, [step]);
-        } else walk(c, r.id, r, [it.to]);
+          if (step) crewWalk(c, r, [step]);
+        } else crewWalk(c, r, [it.to]);
         if (!rivalsOnMap(c).includes(r)) return true;
       }
       spendKit(r, 'potion');
@@ -547,7 +574,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
         if (!samePos(from, r.at)) {
           if (occupant(c, from)) return false;
           const path = approach(c, r.id, r.at, [from], st.move, true) ?? [];
-          walk(c, r.id, r, path);
+          crewWalk(c, r, path);
           if (!rivalsOnMap(c).includes(r)) return true;
         }
         if (!within(r.at, t.at, 1) || pushOutcome(c, r.at, t.at, t.id).kind !== 'fall') return false;
@@ -781,7 +808,7 @@ export function dragAct(c: Ctx, r: RivalX): void {
   const plan = dragPlan(c, r);
   if (plan.path.length) {
     const start = { ...r.at };
-    const stopped = walk(c, r.id, r, plan.path);
+    const stopped = crewWalk(c, r, plan.path);
     if (!rivalsOnMap(c).includes(r)) return; // a free swing killed it: dropped
     const walked = plan.path.findIndex((p) => samePos(p, r.at));
     // The hero trails one hex behind (the view hauls the figure along on the member's `moved`).
@@ -852,7 +879,7 @@ export function hostileAct(c: Ctx, r: RivalX): void {
       if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
       if (!adjacentTo(h.at, r.at)) {
         const path = approach(c, r.id, r.at, attackSpots(c, h.at, r.id), rivalStats(r).move, true) ?? [];
-        walk(c, r.id, r, path);
+        crewWalk(c, r, path);
         if (!rivalsOnMap(c).includes(r)) return;
       }
       if (adjacentTo(h.at, r.at)) {
@@ -874,13 +901,28 @@ export function hostileAct(c: Ctx, r: RivalX): void {
   if (!t) return;
   if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
   const plan = attackPlan(c, r, t);
-  walk(c, r.id, r, plan.path);
+  if (plan.way) {
+    crewGo(c, r, { path: plan.path, sneak: false, dash: false, way: plan.way });
+    guardCheck(c, r);
+    return;
+  }
+  crewWalk(c, r, plan.path, plan.sneak);
   if (!rivalsOnMap(c).includes(r)) return;
   const st = rivalStats(r);
   const canHit = t.at.level === r.at.level && within(t.at, r.at, st.range) && (st.range === 1 || los(c.w, c.d, r.at, t.at));
-  if (canHit && t.hero?.status === 'active') {
+  // A dash spends the action.
+  if (canHit && t.hero?.status === 'active' && !plan.dash) {
     faceToward(r, t.at);
-    const hit = strike(c, r.id, t.id, st.slots, st.chance, st.dmg, r.cls === 'ranger' ? 'Shot' : 'Attack');
+    // V4.0 (spec 28.5): the heroes' rules turned on the party: +1 slot on a hero who hasn't noticed the member (sneak
+    // attack, any weapon), and the Burglar's backstab from the hero's blind cone (double damage before armor; its
+    // extra slot is the blindside slot `strike` adds from behind).
+    const unnoticed = !heroNoticed(r, t.id);
+    const stab = unnoticed && r.cls === 'burglar' && st.range === 1 && inRearHalf(t.hero, r.at);
+    const slots = st.slots + (unnoticed ? SNEAK_ATTACK_SLOTS : 0);
+    const dmgPer = stab ? st.dmg * BACKSTAB_DMG_MULT : st.dmg;
+    if (stab) tell(c, r, `${r.name} slips behind ${heroName(c, t.id)} and backstabs.`, t.at);
+    else if (unnoticed) tell(c, r, `${r.name} strikes before ${heroName(c, t.id)} sees it coming.`, t.at);
+    const hit = strike(c, r.id, t.id, slots, st.chance, dmgPer, stab ? 'Backstab' : unnoticed ? 'Sneak attack' : r.cls === 'ranger' ? 'Shot' : 'Attack');
     // Spec 20.4: a hero this member downs is robbed on the spot and dragged from the next round.
     const downed = hit ? (hd(c, hit) as HeroX | undefined) : undefined;
     if (downed && downed.status === 'downed' && !downed.robbed && adjacentTo(downed.at, r.at)) rob(c, r, downed);

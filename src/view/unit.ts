@@ -141,6 +141,12 @@ export class UnitView {
     });
   }
 
+  /** V4.0 (spec 28.1): a figure whose last move was a sneak (hero or crew member) is drawn crouched, a little lower. */
+  crouch(on: boolean): void {
+    if (this.dead || this.busy) return;
+    this.fig.scale.set(this.scale, this.scale * (on ? 0.8 : 1), this.scale);
+  }
+
   /** Lie down (downed hero), without fading. */
   lieDown(down: boolean): void {
     this.fig.rotation.z = down ? 1.35 : 0;

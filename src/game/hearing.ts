@@ -21,7 +21,7 @@ export const CLASH_HEAR = 2;
 export const DOWNED_HEAR = 3;
 export const FORCED_DOOR_HEAR = 4;
 
-export type LoudWhat = 'clash' | 'shout' | 'crash' | 'blast' | 'roar' | 'scream';
+export type LoudWhat = 'clash' | 'shout' | 'crash' | 'blast' | 'roar' | 'scream' | 'lock' | 'dig';
 
 /** Does the party see hex `at` right now (hearing's own copy of the visible set)? */
 export function partySees(c: Ctx, at: Pos): boolean {
@@ -64,7 +64,8 @@ export function stepRangeOf(c: Ctx, id: string): number {
     return base && (m.feared ?? 0) > 0 ? base + FLEE_STEP_BONUS : base;
   }
   const r = c.d.rivals?.members.find((x) => x.id === id);
-  if (r) return (r.feared ?? 0) > 0 ? CREW_STEP_RANGE + FLEE_STEP_BONUS : CREW_STEP_RANGE;
+  // V4.0 (spec 28.1): a sneaking crew member is as silent as a sneaking hero.
+  if (r) return r.sneaked ? 0 : (r.feared ?? 0) > 0 ? CREW_STEP_RANGE + FLEE_STEP_BONUS : CREW_STEP_RANGE;
   return 0;
 }
 
