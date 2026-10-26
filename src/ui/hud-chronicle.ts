@@ -8,7 +8,7 @@ import { clear, h, icon } from './dom';
 
 const OPEN_KEY = 'vc.chronicle.open.v40';
 
-export type ChronKind = 'strike' | 'move' | 'heard' | 'shout' | 'item' | 'crew' | 'warn' | 'light' | 'pick' | 'smash' | 'dig' | 'disarm' | 'plain';
+export type ChronKind = 'strike' | 'move' | 'heard' | 'shout' | 'item' | 'crew' | 'warn' | 'light' | 'pick' | 'smash' | 'dig' | 'disarm' | 'venom' | 'carry' | 'plain';
 
 export interface ChronEntry {
   round: number;
@@ -32,6 +32,8 @@ const KIND_ICON: Record<ChronKind, IconName> = {
   smash: 'hammer',
   dig: 'dig',
   disarm: 'trap',
+  venom: 'venom',
+  carry: 'carry',
   plain: 'dot',
 };
 
@@ -39,6 +41,9 @@ const KIND_ICON: Record<ChronKind, IconName> = {
 export function chronKind(text: string, cls = ''): ChronKind {
   if (/log-heard/.test(cls) || /^(footsteps|a clash|a shout|a crash|a blast|a roar|a scream|something)/i.test(text)) return 'heard';
   if (/shout|bellow|horn/i.test(text)) return 'shout';
+  // V4.0 (spec 29): venom, paralysis and its cures; carrying a paralyzed friend.
+  if (/venom|antidote|paraly[sz]|limbs lock|can move again/i.test(text)) return 'venom';
+  if (/shoulders|carries .* out|sets .* down|hoists/i.test(text)) return 'carry';
   if (/lantern|gutters|pitch black|the dark/i.test(text)) return 'light';
   // V4.0 (spec 28): crews' and heroes' work on locks, rubble and traps.
   if (/\bpicks?\b.*\block|\bpicks the\b|lock (jams|opens)|unbar/i.test(text)) return 'pick';

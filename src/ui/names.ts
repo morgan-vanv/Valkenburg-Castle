@@ -6,6 +6,7 @@ import {
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
   VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, SAPPER_CHARGES,
+  VENOM_ROUNDS, PARALYSIS_ROUNDS, CARRY_MOVE, VENOM_TRAP_DMG,
 } from '../game/data';
 import * as DATA from '../game/data';
 
@@ -227,7 +228,7 @@ export const MONSTER_NAME: Record<MonsterKind | 'gloam', string> = {
 export const MONSTER_NOTE: Record<MonsterKind | 'gloam', string> = {
   rats: 'Weak but quick (moves 4). Runs off when down to 1 HP.',
   orc: 'Hits for 2. Shoves a hero standing on an unrailed edge.',
-  spider: 'Webs you from up to 3 away (you can\'t move next turn), then drags you one hex toward it (pits count).',
+  spider: `Webs you from up to 3 away (you can't move next turn), then drags you one hex toward it (pits count). Its bite is venomous: paralyzed ${VENOM_ROUNDS} turns after a bite that hits.`,
   cutpurse: 'Fast. A hit steals a pack item instead of hurting, then it runs for an exit. Kill it to get the item back.',
   berserker: 'Once awake it always hunts, even out of sight. 4 slots, hits hard, knocks heroes back.',
   dragon: `Armor 1. Sleeps on its hoard; noise ${DRAGON_WAKE_NOISE}+ wakes it. Breathes fire down a line (${BREATH_DMG} damage) and sweeps its tail.`,
@@ -326,6 +327,10 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   nightthorn: '✶',
   briar: '❃',
   smashProp: '✊',
+  venomdart: '➹',
+  antidote: '⚕',
+  shoulder: '⛟',
+  setDown: '⇩',
 };
 
 /**
@@ -341,7 +346,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   take: `Pick up loot next to you or underfoot. Free. Each item fills a pack slot (${PACK_SLOTS} per hero); heirlooms and hoard pieces fill 2.`,
   drop: 'Put a pack item down on this hex. Free.',
   give: 'Hand a pack item to a hero next to you who has room. Free.',
-  disarm: 'A spotted trap next to you: 2 Finesse slots. 1 hit disarms it; 0 sets it off (3 damage). Noise 2.',
+  disarm: `A spotted trap next to you: 2 Finesse slots. 1 hit disarms it; 0 sets it off (3 damage; a green-ringed venom trap: ${VENOM_TRAP_DMG} and venom). Noise 2.`,
   light: `Light a brazier next to you: +${BRAZIER_LIGHT} lantern light, and it lights the room around it for good.`,
   torch: `Light a torch from the pack: ${TORCH_ROUNDS} rounds of light around this hero (radius 2), whatever the lantern does.`,
   potion: 'Drink it, or give it to a hero next to you: heals 5. Gets a downed hero back up.',
@@ -391,6 +396,10 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   oil: `Pour a flask into the lantern: +${OIL_LIGHT} light, ${OIL_LIGHT} more rounds. Silent.`,
   grapple: 'From a pit landing, climb straight up to the level above. The hook is kept. Takes the whole turn.',
   nightsight: 'Drink the night-eye draught: 8 rounds without dark penalties to your sight or rolls. Silent. The dark still hides you from nothing, and the Gloam still comes.',
+  venomdart: `Throw ${THROW_RANGE.venomdart}, 1 Finesse slot, at a monster or crew member in sight (not the Dragon or the Gloam): a hit envenoms it. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: it can't move or act. Silent; a second dart takes a turn off the countdown.`,
+  antidote: 'Drink it while envenomed, or give it to a hero next to you who is envenomed or paralyzed (an action): the venom is drawn out and the paralyzed can move again.',
+  shoulder: `Lift a paralyzed hero next to you onto your shoulders (uses the action). They come along on every move; you move ${CARRY_MOVE} at most. Leave by an exit and they come out with you. Set them down for free.`,
+  setDown: 'Put down the hero you carry, next to you. Free.',
 };
 
 /** Attack help with the hero's own weapon numbers. Everything else: ACTION_HELP. */
@@ -404,7 +413,7 @@ export function actionHelp(action: ActionKind, cls?: string): string {
 }
 
 /** Actions that don't use the hero's action, and those that take the whole turn. */
-export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter', 'parley']);
+export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown']);
 export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'jump', 'grapple']);
 
 /** What the bar tooltip says it costs. */
@@ -476,6 +485,8 @@ export const ITEM_HELP: Record<string, string> = {
   improvised: 'A bent nail and a hairpin: one Pick at 2 Finesse slots, used up whatever happens. Every Burglar brings one each delve; it takes no pack slot.\nUse: next to a locked door or chest, Interact › Pick lock',
   'improvised-charge': `The Sapper's own: black powder in a tin with a fuse. Blasts like a blasting charge: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}. ${SAPPER_CHARGES} each delve, no pack slot, spent before bought charges; can't be given away.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge`,
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.\nUse: Items › Night-eye draught',
+  venomdart: `1 Finesse slot: a hit envenoms a monster or crew member. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: no moving, no acting. Not the Dragon or the Gloam. Silent.\nUse: click it in the pack, then a target within ${THROW_RANGE.venomdart}`,
+  antidote: 'Draws out venom: an envenomed hero is clean again, a paralyzed one can move again. Drink it, or give it to a hero next to you (an action).\nUse: click it in the pack, then yourself or the hero',
 };
 
 /** Tooltip for one pack socket. */
@@ -550,6 +561,10 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   nightthorn: 'n',
   briar: 'i',
   smashProp: 'x',
+  venomdart: 'z',
+  antidote: 'h',
+  shoulder: 'g',
+  setDown: 'g',
 };
 
 export const ITEM_GLYPH: Record<string, string> = {
@@ -575,6 +590,8 @@ export const ITEM_GLYPH: Record<string, string> = {
   improvised: '⌐',
   'improvised-charge': '⊛',
   nightsight: '◉',
+  venomdart: '➹',
+  antidote: '⚕',
 };
 
 /** Glyph for any item kind, tolerant of names the engine picks (smokeBomb, sleepDart, skeletonKey...). */
@@ -585,6 +602,7 @@ export function itemGlyph(kind: string): string {
 /** Normalise engine item kind names to the UI's short keys. */
 export function itemBase(kind: string): string {
   const k = kind.toLowerCase();
+  if (k === 'venomdart') return 'venomdart'; // before 'dart'
   if (k.includes('smoke')) return 'smoke';
   if (k.includes('glue')) return 'glue';
   if (k.includes('dart')) return 'dart';
@@ -618,6 +636,8 @@ export const ITEM_EFFECT: Record<string, string> = {
   improvised: 'One Pick at 2 Finesse slots, then it is spent. Every Burglar brings one each delve, outside the pack slots.',
   'improvised-charge': `The Sapper's own: ${SAPPER_CHARGES} each delve, outside the pack slots. Blasts like a blasting charge; spent first.`,
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
+  venomdart: `Throw 5, 1 Finesse slot: a hit envenoms a monster or crew member; ${VENOM_ROUNDS} turns later it is paralyzed for ${PARALYSIS_ROUNDS}. Silent.`,
+  antidote: 'Drink, or give to a hero next to you: draws out venom, even from the paralyzed.',
 };
 
 export function itemLabel(i: Item): string {
@@ -766,7 +786,7 @@ export const CREW: Record<CrewId, { name: string; blurb: string; colour: string;
 export const CREW_KIT: Record<string, string> = {
   ranger: 'Longbow at range 6. Caltrops on the hex you would charge through; overwatch when nobody is in reach.',
   shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half.',
-  burglar: 'Walks 5, sneaks 4 on quiet feet. Darts the lantern bearer first; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
+  burglar: 'Walks 5, sneaks 4 on quiet feet. A venom dart for a hero standing alone (the Gallows Choir\'s), sleep darts at the lantern bearer; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
   sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges.',
   sapper: 'Hammer, improvised explosives and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge. Digs through cracked walls and blasts locked doors when that\'s the short way.',
   pyromancer: 'Firebolt at range 5; fireball when three heroes stand within 1 of a hex.',
@@ -929,6 +949,7 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   torch: { group: 'light', short: 'A light of your own, for a while.' },
   oil: { group: 'light', short: 'Tops up the lantern.' },
   potion: { group: 'light', short: 'Heals, or gets a downed friend up.' },
+  antidote: { group: 'light', short: 'Draws out venom, even from the paralyzed.' },
   nightsight: { group: 'light', short: 'See in the dark for a while.' },
   rope: { group: 'around', short: 'Down a pit, and back up.' },
   charge: { group: 'around', short: 'Blows doors, chests and walls open. Loud.' },
@@ -936,6 +957,7 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   key: { group: 'around', short: 'Opens one lock, silently.' },
   lockpicks: { group: 'around', short: 'Pick locks quietly, as often as you like.' },
   dart: { group: 'quiet', short: 'Puts a monster to sleep, silently.' },
+  venomdart: { group: 'quiet', short: 'Envenoms a monster: in 3 turns it locks up.' },
   smoke: { group: 'quiet', short: 'Blinds both ways. Hunters lose you.' },
   glue: { group: 'quiet', short: 'Sticks monsters where they stand.' },
   firecracker: { group: 'quiet', short: 'A loud bang, somewhere else.' },
