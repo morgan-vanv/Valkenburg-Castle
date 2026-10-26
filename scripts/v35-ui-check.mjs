@@ -2,6 +2,8 @@
 // title intro, Lowgate (V4.0: the four steps) and its locks, pinned story contracts, drinking a
 // potion in the party slot, the Flagon and ales, the won-back moment, the parley card (deals, toll, Fight, a deal made), hired crew
 // tags, ale chips on delve cards, the game-over line; no console errors.
+// V4.0 HUD: the crew panel under the Chronicle, the parley card as tiles, Parley in More (B), the ale on the
+// party card's "also" icon.
 //   node scripts/v35-ui-check.mjs <baseUrl>   (use ?fixture=1 until the engine lands)
 //   Optional 2nd arg: a directory to save the camp and parley screenshots in.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -186,45 +188,45 @@ async function crewScene(stance) {
 // ---- delve: ale chip, crew, parley
 await crewScene('demanding');
 await p.waitForTimeout(400);
-check('delve card: ale chip on Keven', /Hobart's Reserve/.test(await p.textContent('.hcard[data-hero="keven"]')));
-check('rival panel: crew name and Demanding', /The Ferrymen/.test(await p.textContent('.hud-rivals')) && /Demanding/.test(await p.textContent('.hud-rivals')));
-check('rival panel: toll with the fuse', /Pay 75/.test(await p.textContent('.hud-rivals')) && /next turn/.test(await p.textContent('.hud-rivals')));
+check('party card: the ale on Keven', /Hobart's Reserve/.test(await p.$eval('.dl-rcard[data-hero="keven"] .dl-si.more', (e) => e.dataset.tip ?? '').catch(() => '')));
+check('crew panel: crew name and demanding', /The Ferrymen/.test(await p.textContent('.dl-crew')) && /demanding/i.test(await p.textContent('.dl-crew')));
+check('crew panel: the toll', /Pay 75/.test(await p.textContent('.dl-crew')) && /next turn/.test(await p.textContent('.dl-crew')));
 const tollTag = await p.$('.intent-toll');
 check('toll intent drawn with a fuse', !!tollTag && !!(await p.$('.intent-toll .intent-fuse')));
-check('parley on the action bar', !!(await p.$('button.act[data-action="parley"]')));
-await p.click('button.act[data-action="parley"]');
+check('Parley in the More menu (B) and on the crew panel', !!(await p.$('.dl-more [data-action="parley"]')) && !!(await p.$('.dl-crew button')));
+await p.click('.dl-crew button');
 await p.waitForTimeout(150);
-const card = await p.textContent('.hud-parley');
-check('card: crew, temperament, stance', /The Ferrymen/.test(card) && /Cutthroats/.test(card) && /Demanding/.test(card));
-check('card: members listed', (await p.$$('.pl-mem')).length === 3);
-check('card: aim (what, rounds, value)', /the chest by the bridge/.test(card) && /3 rounds away/.test(card) && /~60 gold/.test(card));
+const card = await p.textContent('.dl-parley');
+check('card: crew, temperament, stance', /The Ferrymen/.test(card) && /Cutthroats/.test(card) && /demanding/i.test(card));
+check('card: members listed', (await p.$$('.dl-pl-mem')).length === 3);
+check('card: aim (what, rounds, value)', /the chest by the bridge/.test(card) && /3 rounds away/.test(card) && /about 60 gold/.test(card));
 check('card: the toll reads as a demand', /Your gold or your blood/.test(card) && /Pay 75 or they attack next turn/.test(card));
-check('card: deals with prices', (await p.$$('.pl-deal')).length >= 4 && /Pay the toll/.test(card));
-check('card: pays text', /They take: .*gold/.test(card));
-check('card: hire shows risk', /⚠/.test(await p.textContent('.pl-deal[data-deal="hire"]')));
+check('card: deals as tiles with prices', (await p.$$('.dl-deal')).length >= 4 && /Pay the toll/.test(card));
+check('card: the honest payment line', /You'd hand over .*gold/.test(card));
+check('card: hire shows risk', !!(await p.$('.dl-deal[data-deal="hire"] .dl-deal-risk')));
 check('card: blocked reason shown (jobs while demanding)', /Pay the toll first/.test(card));
-check('card: Fight is a button', !!(await p.$('.pl-fight:not([disabled])')));
+check('card: Fight is a button', !!(await p.$('.dl-fight:not([disabled])')));
 if (shots) await p.screenshot({ path: `${shots}/v35-ui-parley.png` });
 await spyLog();
-await p.click('.pl-deal[data-deal="truce"] .btn');
+await p.click('.dl-deal[data-deal="truce"]');
 await p.waitForTimeout(400);
-check('deal made: truce, card closed', (await p.evaluate(() => window.vc.state().delve.rivals.stance)) === 'truce' && (await p.$eval('.hud-parley', (e) => e.classList.contains('hidden'))));
+check('deal made: truce, card closed', (await p.evaluate(() => window.vc.state().delve.rivals.stance)) === 'truce' && (await p.$eval('.dl-parley', (e) => e.classList.contains('hidden'))));
 check('deal log line', /A truce/.test(await lines()), await lines());
 
 // too poor: blocked
 await edit("s.delve.heroes.forEach((h) => (h.pack = h.pack.filter((i) => i.kind !== 'gold' && i.kind !== 'gem'))); s.delve.rivals.stance = 'neutral'; delete s.delve.rivals.dealRound;");
 await p.keyboard.press('b');
 await p.waitForTimeout(150);
-check('blocked: "You carry 0; they want 40."', /You carry 0; they want 40\./.test(await p.textContent('.hud-parley')));
+check('blocked: "You carry 0; they want 40."', /You carry 0; they want 40\./.test(await p.textContent('.dl-parley')));
 await p.keyboard.press('Escape');
 await p.waitForTimeout(80);
-check('Esc closes the card', await p.$eval('.hud-parley', (e) => e.classList.contains('hidden')));
+check('Esc closes the card', await p.$eval('.dl-parley', (e) => e.classList.contains('hidden')));
 
 // hired: allies
 await edit("s.delve.rivals.stance = 'hired'; s.delve.rivals.hiredRounds = 4;");
 await p.waitForTimeout(150);
 check('hired crew tagged as allies', (await p.$$('.unit-tag.tag-st-hired')).length >= 1 && /hired/.test(await p.evaluate(() => [...document.querySelectorAll('.unit-tag.tag-st-hired')].map((e) => e.textContent).join(' '))));
-check('rival panel: fighting beside you', /Fighting beside you/.test(await p.textContent('.hud-rivals')));
+check('rival panel: fighting beside you', /Fighting beside you/.test(await p.textContent('.dl-crew')));
 
 // hostile sapper: charge intent
 await edit("s.delve.rivals.stance = 'hostile'; s.delve.rivals.members[2].intent = { kind: 'charge', to: s.delve.heroes[0].at };");

@@ -372,3 +372,24 @@ describe('V4.0 sight by mood (spec 27)', () => {
     });
   });
 });
+
+describe('V4.0 HUD: the sight wash on hover (engine.sightWash)', () => {
+  const has = (list: Pos[], p: Pos) => list.some((q) => samePos(q, p));
+  it('unaware: ahead full, the sides faint within 2, nothing behind; searching: the sides full; asleep: nothing', () => {
+    const s = scene();
+    const m = monster(s, 'orc', M, 'unaware', 0);
+    s.delve!.light = 20;
+    let w8 = e.sightWash!(s, m.id);
+    expect(has(w8.front, L2(11, 2))).toBe(true);
+    expect(has(w8.side, L2(8, 1))).toBe(true); // side 2, walking
+    expect(has(w8.side, L2(8, 4)) || has(w8.front, L2(8, 4))).toBe(false); // side 3
+    expect(has(w8.front, L2(9, 2)) || has(w8.side, L2(9, 2))).toBe(false); // straight behind: never shaded
+    m.searchRounds = SEARCH_ROUNDS;
+    w8 = e.sightWash!(s, m.id);
+    expect(w8.side.length).toBe(0);
+    expect(has(w8.front, L2(8, 1))).toBe(true);
+    m.awareness = 'asleep';
+    w8 = e.sightWash!(s, m.id);
+    expect(w8.front.length + w8.side.length).toBe(0);
+  });
+});

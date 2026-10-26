@@ -20,6 +20,7 @@ import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, exitShut, linkEnds, linkMarker, prizeInHand } from './links';
 import { heardFade, heardIcon, heardTitle } from './sounds';
+import { INTENT_ICON, iconSvg, intentTone } from './icons';
 
 const MAX_LIGHTS = 12;
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
@@ -47,6 +48,8 @@ interface Floater {
 
 interface Tag {
   el: HTMLElement;
+  /** V4.0 HUD: the tag's own marks (awareness, health); the intent icon sits beside them in `el`. */
+  body: HTMLElement;
   unitId: string;
 }
 
@@ -96,6 +99,9 @@ export class Diorama {
   private ambient: THREE.AmbientLight;
   private hemi: THREE.HemisphereLight;
   private highlights = new Map<HighlightStyle, THREE.InstancedMesh>();
+  /** V4.0 HUD (spec 27): the floor a hovered monster sees: bright ahead, faint at an unaware monster's sides. */
+  private sightFront!: THREE.InstancedMesh;
+  private sightSide!: THREE.InstancedMesh;
   private pathDots: THREE.InstancedMesh;
   private pathEnd: THREE.Mesh;
   private hoverMesh: THREE.Mesh;
@@ -260,6 +266,19 @@ export class Diorama {
       m.frustumCulled = false;
       this.highlights.set(style, m);
       this.overlay.add(m);
+    }
+    {
+      const disc = () => new THREE.CircleGeometry(0.86, 6).rotateX(-Math.PI / 2).rotateY(Math.PI / 6);
+      const mk = (opacity: number) => {
+        const m = new THREE.InstancedMesh(disc(), new THREE.MeshBasicMaterial({ color: 0xffa640, transparent: true, opacity, depthWrite: false }), 300);
+        m.count = 0;
+        m.renderOrder = 1;
+        m.frustumCulled = false;
+        this.overlay.add(m);
+        return m;
+      };
+      this.sightFront = mk(0.34);
+      this.sightSide = mk(0.13);
     }
     this.pathDots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.11, 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.emberHot, transparent: true, opacity: 0.95, depthWrite: false }), 64);
     this.pathDots.count = 0;
@@ -977,16 +996,7 @@ export class Diorama {
       tag.el.style.display = p.behind ? 'none' : '';
       tag.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
-    for (const [id, el] of this.intentTags) {
-      const v = this.units.get(id);
-      if (!v || !v.root.visible || v.dead) {
-        el.style.display = 'none';
-        continue;
-      }
-      const p = this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0)));
-      el.style.display = p.behind ? 'none' : '';
-      el.style.transform = `translate(${p.x}px, ${p.y - 22}px) translate(-50%, -100%)`;
-    }
+    // V4.0 HUD: intent icons sit inside the unit tag (placed with it).
     for (const t of this.lootTags.values()) {
       const p = this.project(t.at);
       t.el.style.display = p.behind ? 'none' : '';
@@ -999,7 +1009,7 @@ export class Diorama {
         el.style.display = 'none';
         continue;
       }
-      const stack = this.intentTags.has(id) ? 46 : 22;
+      const stack = 24;
       const p = this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0)));
       el.style.display = p.behind ? 'none' : '';
       el.style.transform = `translate(${p.x}px, ${p.y - stack}px) translate(-50%, -100%)`;
@@ -1161,8 +1171,11 @@ export class Diorama {
       el.className = `unit-tag tag-${side}`;
       el.dataset.id = id;
       el.title = name;
+      const body = document.createElement('span');
+      body.className = 'tag-body';
+      el.appendChild(body);
       this.fx.appendChild(el);
-      this.tags.set(id, { el, unitId: id });
+      this.tags.set(id, { el, body, unitId: id });
     }
     return v;
   }
@@ -1199,7 +1212,8 @@ export class Diorama {
       v.dead = false;
       v.crouch(h.status === 'active' && (h as { sneaked?: boolean }).sneaked === true); // V4.0 (spec 28.1)
       v.setOpacity(1);
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId), !!hero?.shield));
+      // V4.0 HUD: a hero's tag is health only; statuses live on the party card.
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10));
       // V3.9 (24.2): heroes turn to their facing too.
       if (h.facing !== undefined && !v.busy && h.status === 'active') {
         const a = facingAngle(h.facing);
@@ -1263,7 +1277,9 @@ export class Diorama {
 
   private setTag(id: string, html: string): void {
     const t = this.tags.get(id);
-    if (t && t.el.innerHTML !== html) t.el.innerHTML = html;
+    if (t && t.body.innerHTML !== html) t.body.innerHTML = html;
+    // V4.0 HUD: a tag with nothing in it (no marks, no intent) takes no room.
+    if (t) t.el.classList.toggle('tag-empty', !html && !t.el.querySelector('.intent'));
   }
 
   private ensureProp(key: string, make: () => PropView, at: Pos, rot = 0): PropView {
@@ -1523,6 +1539,35 @@ export class Diorama {
     mesh.instanceMatrix.needsUpdate = true;
   }
 
+  /** V4.0 HUD (spec 27): shade the floor a hovered monster sees (null clears). Only hexes on the shown level. */
+  showSight(front: Pos[] | null, side: Pos[] = []): void {
+    const fill = (mesh: THREE.InstancedMesh, list: Pos[]) => {
+      const m = new THREE.Matrix4();
+      let n = 0;
+      for (const p of list) {
+        if (p.level !== this.shownLevel || n >= 300) continue;
+        m.makeTranslation(this.worldOf(p, 0.02));
+        mesh.setMatrixAt(n++, m);
+      }
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    fill(this.sightFront, front ?? []);
+    fill(this.sightSide, front ? side : []);
+  }
+
+  /** V4.0 HUD: where a hex is on screen (CSS pixels in the diorama's box), for cards placed beside it. */
+  screenOf(p: Pos, lift = 0.6): { x: number; y: number; behind: boolean } {
+    return this.project(this.worldOf(p, lift));
+  }
+
+  /** V4.0 HUD: where a figure's head is on screen, or null when it isn't drawn. */
+  unitScreen(id: string): { x: number; y: number; behind: boolean } | null {
+    const v = this.units.get(id);
+    if (!v || !v.root.visible) return null;
+    return this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0)));
+  }
+
   clearHighlights(): void {
     for (const m of this.highlights.values()) m.count = 0;
     this.showPath(null);
@@ -1591,6 +1636,7 @@ export class Diorama {
     this.breathMarks.clear();
     for (const el of this.intentTags.values()) el.remove();
     this.intentTags.clear();
+    for (const t of this.tags.values()) t.el.classList.toggle('tag-empty', !t.body.innerHTML);
   }
 
   showIntents(state: GameState, intents: Record<string, Intent>): void {
@@ -1609,14 +1655,18 @@ export class Diorama {
       }
     for (const { id, name, at, it } of list) {
       if (it.kind === 'wait') continue;
-      const el = document.createElement('div');
-      el.className = `intent intent-${it.kind}`;
+      // V4.0 HUD: the intent is an icon inside the unit tag, between the mood mark and the health; no damage numbers (the hover card has them).
+      const el = document.createElement('span');
+      el.className = `intent intent-${it.kind} tone-${intentTone(it.kind)}`;
       const target = it.targetId ? targetName(state, it.targetId) : '';
-      const glyph = INTENT_GLYPH[it.kind] ?? '?';
       const dmg = it.damage && it.damage[1] > 0 ? (it.damage[0] === it.damage[1] ? `${it.damage[1]}` : `${it.damage[0]}–${it.damage[1]}`) : '';
-      el.innerHTML = `<span class="intent-icon">${glyph}</span>${dmg ? `<span class="intent-dmg">${dmg}</span>` : ''}`;
+      el.innerHTML = intentIconHtml(it.kind);
       el.title = `${name}: ${INTENT_WORDS[it.kind] ?? it.kind}${target ? ` ${target}` : ''}${dmg ? ` for ${dmg}` : ''}`;
-      this.fx.appendChild(el);
+      const host = this.tags.get(id);
+      if (host) {
+        host.el.appendChild(el);
+        host.el.classList.remove('tag-empty');
+      }
       this.intentTags.set(id, el);
       if (it.kind === 'breath' && it.hexes?.length) {
         this.markBreath(it.hexes, id);
@@ -1661,7 +1711,7 @@ export class Diorama {
       if (it.kind === 'toll') {
         const crew = d.rivals;
         const toll = crew?.toll ?? 50;
-        el.innerHTML = `<span class="intent-icon">¤</span><span class="intent-dmg">${toll}</span><span class="intent-fuse">1</span>`;
+        el.innerHTML = `${intentIconHtml('toll')}<span class="intent-fuse">1</span>`;
         el.title = `${name}: "Your gold or your blood." Pay ${toll} or they attack next turn. Parley to pay or deal.`;
         this.markRadius(at, 1, id, 0xffb35c, 'ring');
         continue;
@@ -1679,7 +1729,7 @@ export class Diorama {
             this.intentLines.add(ring);
           }
         }
-        el.innerHTML = `<span class="intent-icon">✹</span><span class="intent-dmg">4</span><span class="intent-fuse">1</span>`;
+        el.innerHTML = `${intentIconHtml('fuse')}<span class="intent-fuse">1</span>`;
         el.title = `${name}: sets a charge on the marked hex with a 1-turn fuse. When it blows: 4 damage within 1 (and a shove), 2 within 2; it breaks walls within 1. Get out of the rings.`;
         continue;
       }
@@ -1720,7 +1770,7 @@ export class Diorama {
         const centre = it.to ?? (it.targetId ? targetPos(state, it.targetId) : null);
         const hexes = it.hexes?.length ? it.hexes : centre ? [centre, ...range(centre, 1).filter((h) => h.q !== centre.q || h.r !== centre.r).map((h) => ({ level: centre.level, ...h }))] : [];
         if (hexes.length) this.markBreath(hexes, id);
-        el.innerHTML = `<span class="intent-icon">✹</span><span class="intent-dmg">3</span>`;
+        el.innerHTML = intentIconHtml('charge');
         el.title = `${name}: lights a charge. Next turn it blows: 3 damage to everyone on the marked hexes, no roll. Noise 8. Get off them.`;
         continue;
       }
@@ -2009,7 +2059,7 @@ export class Diorama {
       this.fx.appendChild(el);
       this.riskTags.set(id, el);
     };
-    for (const w of risks.wake) mk(w.id, 'risk-wake', `<span class="risk-icon">☾</span><span class="risk-num">${Math.round(w.chance)}%</span>`, `${this.nameOf(w.id)} may wake as you pass (${Math.round(w.chance)}%).`, 0xffd040);
+    for (const w of risks.wake) mk(w.id, 'risk-wake', `<span class="risk-icon">${iconSvg('zz', 13)}</span>`, `${this.nameOf(w.id)} may wake as you pass (${Math.round(w.chance)}%).`, 0xffd040);
     // V4.0 (spec 27): one eye per watcher; its title names everyone it would see on this move ("you, then Fenna").
     const mover = risks.notice.length ? this.selectedId : null;
     const seers = new Map<string, string[]>();
@@ -2019,8 +2069,8 @@ export class Diorama {
       if (!l.includes(who)) l.push(who);
       seers.set(n.id, l);
     }
-    for (const [id, who] of seers) mk(id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(id)} would see ${who.join(', then ')} on this move (the walk goes on).`, COLORS.danger);
-    for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">⚔</span><span class="risk-num">${sw.damage[0]}–${sw.damage[1]}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
+    for (const [id, who] of seers) mk(id, 'risk-notice', `<span class="risk-icon">${iconSvg('eye', 13)}</span>`, `${this.nameOf(id)} would see ${who.join(', then ')} on this move (the walk goes on).`, COLORS.danger);
+    for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">${iconSvg('sword', 13)}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
   }
 
   private nameOf(id: string): string {
@@ -2920,7 +2970,6 @@ export class Diorama {
           if (e.open) this.flash(b.root.position.clone().add(new THREE.Vector3(0, b.height, 0)), 0xffb862, 4);
         }
         if (this.state?.delve) this.state.delve.lanternOpen = e.open;
-        for (const h of this.state?.delve?.heroes ?? []) if (h.heroId === this.lanternBearer) this.setTag(h.heroId, heroTag(h, this.state!.campaign.roster.find((r) => r.id === h.heroId)?.maxHp ?? 10, true, e.open));
         await clock.wait(0.2);
         return;
       }
@@ -3712,10 +3761,15 @@ function pipsHtml(hp: number, max: number, cls: string): string {
   return s + '</span>';
 }
 
-function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, draggedBy?: string, shield = false): string {
-  const status = draggedBy ? `<b class="tag-dragged" title="Dragged by ${draggedBy} toward the way out. Kill, down or fear the dragger to free them.">dragged!</b>` : h.status === 'downed' ? `<b class="tag-down">Downed · ${h.bleed}</b>` : h.grabbedBy ? '<b class="tag-grab">⛓ Held</b>' : h.webbed ? '<b class="tag-web">Webbed</b>' : (h.rooted ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted: can't move or dash for ${h.rooted} more round${h.rooted === 1 ? '' : 's'}">rooted · ${h.rooted}</b>` : '';
-  const braced = h.braced && h.status === 'active' ? '<b class="tag-braced" title="Braced: hits do 1 less, enemies roll −15%">⛨ braced</b>' : '';
-  return `${lantern ? `<span class="tag-lantern ${open ? '' : 'shut'}" title="${open ? 'Lantern, open' : 'Lantern, shuttered'}">${open ? '◆' : '◇'}</span>` : ''}${shield ? '<span class="tag-shield" title="Shield: ranged hits do 1 less (2 while braced)">◉</span>' : ''}${pipsHtml(h.hp, max, 'hero')}${status}${braced}`;
+/** V4.0 HUD: a hero's tag is their health only (lantern, braced, held and the rest are on the party card). */
+function heroTag(h: HeroInDelve, max: number): string {
+  return pipsHtml(h.hp, max, 'hero');
+}
+
+/** The intent's icon (its glyph when the kind has none yet). */
+function intentIconHtml(kind: Intent['kind']): string {
+  const name = INTENT_ICON[kind];
+  return name ? `<span class="intent-icon">${iconSvg(name, 14)}</span>` : `<span class="intent-icon">${INTENT_GLYPH[kind] ?? '?'}</span>`;
 }
 
 function monsterTag(m: Monster): string {

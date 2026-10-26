@@ -4,6 +4,8 @@
 // out is ..." once the heirloom is held, exit tags going gold, the hint naming the way out, the
 // night-eye badge and action, lockpicks text in the pack and on the peddler's wagon, the 19.2 locked
 // hover text, story briefs on the cards; no console errors. (V4.0: the Lowgate who-is-where panel is gone.)
+// V4.0 HUD: the job panel in the top strip replaces the goal box; its compass arrow replaces the hint line under
+// the old bar (retired); the night-eye shows on the card's "also" icon and in the hotbar's pack.
 //   node scripts/v36-ui-check.mjs <baseUrl>          (http://localhost:5183/?fixture=1 until the engine lands)
 //   SHOTS=<dir> saves two shots: a hero on an exit before and after the heirloom is picked up.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -24,7 +26,7 @@ const check = (name, ok, extra = '') => {
 const text = () => p.evaluate(() => document.body.innerText);
 const idle = () => p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 60000 });
 const edit = (fn, arg) => p.evaluate(([f, a]) => { const s = structuredClone(window.vc.state()); new Function('s', 'a', f)(s, a); window.vc.load(s); }, [fn, arg]);
-const hoverTip = (at) => p.evaluate((a) => { window.vc.hud.onHover(a, null); const t = document.querySelector('.hud-tip')?.textContent ?? ''; window.vc.hud.onHover(null, null); return t; }, at);
+const hoverTip = (at) => p.evaluate((a) => { window.vc.hud.onHover(a, null); const el = document.querySelector('.dl-card'); const t = el && !el.classList.contains('hidden') ? el.textContent : ''; window.vc.hud.onHover(null, null); return t; }, at);
 const visibleTags = (sel) => p.$$eval(sel, (els) => els.filter((e) => e.style.display !== 'none' && !e.classList.contains('hidden')).map((e) => ({ text: e.textContent, cls: e.className })));
 const fixture = /fixture=1/.test(base);
 
@@ -92,26 +94,24 @@ check('exit hover: "Way out · stand here, then Leave the castle"', /Way out/.te
 await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; s.delve.heroes.forEach((o) => { if (o !== h && o.at.q === a.at.q && o.at.r === a.at.r && o.at.level === a.at.level) o.at = { ...a.at, q: a.at.q + 1 }; });`, { id: hero.heroId, at: entrance });
 await p.evaluate((id) => window.vc.hud.select(id), hero.heroId);
 await p.waitForTimeout(200);
-let leave = await p.$('.hud-bar .act.act-leave');
-check('"Leave the castle" button in the bar when standing on a way out', !!leave);
-check('...with hotkey Q, in the Move group', !!leave && (await leave.evaluate((e) => e.querySelector('kbd')?.textContent === 'Q' && e.dataset.key === 'q' && !!e.closest('.bar-group'))));
-check('...and no second plain Leave button', (await p.$$('.hud-bar [data-action="leave"]')).length === 1);
+let leave = await p.$('.dl-hotbar [data-action="leave"]');
+check('"Leave" button in the hotbar when standing on a way out', !!leave);
+check('...with hotkey Q, glowing among the actions', !!leave && (await leave.evaluate((e) => e.querySelector('.dl-kb')?.textContent === 'Q' && e.dataset.key === 'q' && e.classList.contains('glow') && !!e.closest('.dl-acts'))));
+check('...and no second plain Leave button', (await p.$$('.dl-hotbar [data-action="leave"]')).length === 1);
 check('the exit hex pulses (showExitPulse visible)', await p.evaluate(() => window.vc.dio.exitPulse?.visible === true));
 tip = await hoverTip(entrance);
 check('hover on your own exit hex says Click: Leave the castle', /Click: Leave the castle/.test(tip), tip.slice(0, 120));
-const goal0 = await p.$eval('.hud-goal', (e) => e.innerText);
-check('goal box still names the objective before the prize is held', !/Get out/.test(goal0), goal0.replace(/\n/g, ' | '));
-let hint = await p.$eval('.hud-hint', (e) => e.innerText).catch(() => '');
-check('hint names the way out here', /Way out/.test(hint) && /here/.test(hint), hint);
+const goal0 = await p.$eval('.dl-job', (e) => e.innerText);
+check('the job panel still names the objective before the prize is held', !/Get out/.test(goal0), goal0.replace(/\n/g, ' | '));
 if (shots) await p.screenshot({ path: `${shots}/v36-exit-before.png` });
 
 // the heirloom goes into the pack
 await edit(`const h = s.delve.heroes.find((x) => x.heroId === a); const g = s.delve.ground.find((x) => x.items.some((i) => i.kind === 'heirloom')); if (g) { h.pack.push(...g.items.filter((i) => i.kind === 'heirloom')); g.items = g.items.filter((i) => i.kind !== 'heirloom'); } else h.pack.push({ id: 'hx', kind: 'heirloom', name: 'the Valkenburg Signet', amount: 60, slots: 2, contractId: s.delve.contract.id });`, hero.heroId);
 await p.evaluate((id) => window.vc.hud.select(id), hero.heroId);
 await p.waitForTimeout(200);
-const goal1 = await p.$eval('.hud-goal', (e) => e.innerText);
-check('goal box switches to "Get out: nearest way out is the main gate, here"', /Get out: nearest way out is the main gate, here/.test(goal1), goal1.replace(/\n/g, ' | '));
-check('the goal line is a click-to-pan button naming the exit hex', await p.$eval('.goal-where.goal-out', (e) => e.tagName === 'BUTTON' && !!e.dataset.exit));
+const goal1 = await p.$eval('.dl-job', (e) => e.innerText);
+check('the job panel switches to "Get out · The main gate, here"', /Get out/.test(goal1) && /main gate, here/i.test(goal1), goal1.replace(/\n/g, ' | '));
+check('the job panel is a click-to-pan button naming the exit hex', await p.$eval('.dl-job', (e) => e.tagName === 'BUTTON' && !!e.dataset.exit));
 tags = await visibleTags('.exit-tag');
 check('known exit markers go gold (.go) once the prize is in hand', tags.length > 0 && tags.every((t) => /\bgo\b/.test(t.cls)), JSON.stringify(tags));
 check('soft rings on known exits', await p.evaluate(() => window.vc.dio.exitRings?.children.length > 0));
@@ -128,12 +128,12 @@ const far = await p.evaluate((e) => {
 await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at;`, { id: hero.heroId, at: far });
 await p.evaluate((id) => window.vc.hud.select(id), hero.heroId);
 await p.waitForTimeout(200);
-const goal2 = await p.$eval('.hud-goal', (e) => e.innerText);
-check('away from the exit the goal counts hexes', /Get out: nearest way out is the main gate, [5-7] hexes/.test(goal2), goal2.replace(/\n/g, ' | '));
-hint = await p.$eval('.hud-hint', (e) => e.innerText).catch(() => '');
-check('the hint leads with the way out', /^(In the dark[^·]*·\s*)?Way out/.test(hint.trim()), hint);
-check('no "Leave the castle" button off the exit', !(await p.$('.hud-bar .act.act-leave')));
-await p.click('.goal-where.goal-out');
+const goal2 = await p.$eval('.dl-job', (e) => e.innerText);
+check('away from the exit the job panel counts hexes', /Get out/.test(goal2) && /main gate, [5-7] hexes/i.test(goal2), goal2.replace(/\n/g, ' | '));
+const compass = await p.$eval('.dl-job .dl-compass', (e) => e.innerText + ' ' + (e.dataset.tip ?? '')).catch(() => '');
+check('...with a compass arrow pointing the way', /^(N|NE|E|SE|S|SW|W|NW)\b/.test(compass.trim()), compass);
+check('no Leave button off the exit', !(await p.$('.dl-hotbar [data-action="leave"]')));
+await p.click('.dl-job');
 await p.waitForTimeout(100);
 
 // Give the party the new things when the state has none (the real engine's packs start as bought).
@@ -176,24 +176,24 @@ if (lockedDoor) {
 // 19.3 night-eye badge and action
 const nightHero = d1.heroes.find((x) => x.nightEyes > 0);
 if (nightHero) {
-  const chip = await p.$eval(`.hcard[data-hero="${nightHero.heroId}"] .chip.night`, (e) => ({ text: e.textContent, title: e.title })).catch(() => null);
-  check('hero card shows "Night-eye · n" with a tooltip', !!chip && new RegExp(`Night-eye · ${nightHero.nightEyes}`).test(chip.text) && /without dark penalties/.test(chip.title), chip?.text);
+  const chip = await p.$eval(`.dl-rcard[data-hero="${nightHero.heroId}"] .dl-si.more`, (e) => e.dataset.tip ?? e.title).catch(() => '');
+  check('hero card: the "also" icon says "Night-eye: n more rounds without dark penalties"', new RegExp(`Night-eye: ${nightHero.nightEyes} more rounds? without dark penalties`).test(chip), chip.slice(0, 120));
 } else console.log('skip: nobody has night-eye running in this state');
 const drinker = d1.heroes.find((x) => x.pack.some((i) => i.kind === 'nightsight'));
 if (drinker) {
-  const packTip = await p.$eval(`.hcard[data-hero="${drinker.heroId}"] .pk-item[title*="Night-eye"], .hcard[data-hero="${drinker.heroId}"] [title*="Night-eye"]`, (e) => e.title).catch(() => '');
-  check('pack tooltip for the draught has the 19.3 text', /8 rounds without dark penalties/.test(packTip), packTip.slice(0, 80));
   await edit(`const h = s.delve.heroes.find((x) => x.heroId === a); h.acted = false; h.moved = false;`, drinker.heroId);
   await p.evaluate((id) => window.vc.hud.select(id), drinker.heroId);
   await p.waitForTimeout(150);
-  const btn = await p.$('.hud-bar .bar-group-items .act[data-action="nightsight"]');
-  check('Night-eye draught button in the Items group', !!btn, (await p.$$eval('.hud-bar .act', (els) => els.map((e) => e.dataset.action))).join(','));
+  const btn = await p.$('.dl-pack-slots [data-action="nightsight"]');
+  const packTip = btn ? await btn.evaluate((e) => e.dataset.tip ?? e.title) : '';
+  check('pack slot tooltip for the draught has the 19.3 text', /8 rounds without dark penalties/.test(packTip), packTip.slice(0, 80));
+  check('the draught in the hotbar pack, ready to use (click to drink)', !!btn && (await btn.evaluate((e) => e.classList.contains('usable'))), (await p.$$eval('.dl-hotbar [data-action]', (els) => els.map((e) => e.dataset.action))).join(','));
   if (btn) {
     await btn.click();
     await idle();
     await p.waitForTimeout(200);
     const after = await p.evaluate((id) => window.vc.state().delve.heroes.find((x) => x.heroId === id), drinker.heroId);
-    check('drinking sets night-eye to 8 and the badge shows it', after.nightEyes === 8 && !!(await p.$(`.hcard[data-hero="${drinker.heroId}"] .chip.night`)), `nightEyes=${after.nightEyes}`);
+    check('drinking sets night-eye to 8 and the card says so', after.nightEyes === 8 && /Night-eye: 8 more rounds/.test(await p.$eval(`.dl-rcard[data-hero="${drinker.heroId}"] .dl-si.more`, (e) => e.dataset.tip ?? '').catch(() => '')), `nightEyes=${after.nightEyes}`);
   }
 } else console.log('skip: nobody carries a night-eye draught in this state');
 
