@@ -1,5 +1,7 @@
 // Minimal DOM helpers. No framework.
 
+import { iconSvg, type IconName } from '../view/icons';
+
 type Child = Node | string | number | null | undefined | false | Child[];
 type Attrs = Record<string, string | number | boolean | EventListener | undefined | null> & { class?: string };
 
@@ -41,4 +43,13 @@ export function pips(filled: number, total: number, cls = ''): HTMLElement {
   const row = h('span', { class: `pips ${cls}` });
   for (let i = 0; i < total; i++) row.appendChild(h('i', { class: i < filled ? 'on' : '' }));
   return row;
+}
+
+/** V4.0 HUD: a line icon from the shared set (src/view/icons.ts) as an element. */
+export function icon(name: IconName, size = 16, cls = '', color = 'currentColor'): HTMLElement {
+  const el = document.createElement('span');
+  el.className = `icw ${cls}`.trim();
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = iconSvg(name, size, color);
+  return el;
 }

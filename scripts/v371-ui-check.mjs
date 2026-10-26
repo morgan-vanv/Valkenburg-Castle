@@ -3,7 +3,7 @@
 // Set out warns when Keven goes alone and Delve is enabled; the night-eye draught is on the
 // wagon only once Wim is home, and buying it packs it;
 // a Burglar's pack shows the improvised pick (no slot), and the locked-door hover changes once
-// it is spent. Real engine only.
+// it is spent. Real engine only. V4.0 HUD: the party card's "own" mark and the hover card in place of the old sockets and tooltip.
 //   node scripts/v371-ui-check.mjs <baseUrl>
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
 
@@ -82,15 +82,15 @@ await p.waitForTimeout(300);
 const burg = await p.evaluate(() => { const s = window.vc.state(); const id = s.campaign.roster.find((h) => h.cls === 'burglar')?.id; return s.delve?.heroes.find((h) => h.heroId === id); });
 check('the Burglar starts with one improvised pick, no slot', !!burg && burg.pack.filter((i) => i.kind === 'improvised' && i.slots === 0).length === 1);
 if (burg) {
-  const sock = await p.$eval(`.hcard[data-hero="${burg.heroId}"] .pk-sock.pk-improvised`, (e) => ({ title: e.title, span: e.dataset.span, inKit: !!e.closest('.pk-kit'), inSlots: !!e.closest('.pk-socks') })).catch(() => null);
-  check('pack shows the improvised pick in its own socket with help', !!sock && sock.span === '0' && /Improvised pick · one Pick at 2 Finesse slots, used up/.test(sock.title), sock?.title.slice(0, 80));
-  // V4.0 (26.5): it sits in the kit mark after the slots, not in the slot boxes, and says whose it is.
-  check('...in the kit mark after the 4 slots, not inside them', !!sock && sock.inKit && !sock.inSlots);
-  check('...hover: "<name>\'s own: improvised pick. Doesn\'t take a slot; can\'t be given away."', !!sock && /^\S.*'s own: improvised pick\. Doesn't take a slot; can't be given away\./.test(sock.title), sock?.title.split('\n')[0]);
-  const slotBoxes = await p.$$eval(`.hcard[data-hero="${burg.heroId}"] .pk-socks .pk-sock`, (els) => els.length).catch(() => 0);
-  check('...the 4 slot boxes are all still there', slotBoxes === 4, `${slotBoxes}`);
-  const free = await p.$eval(`.hcard[data-hero="${burg.heroId}"] .pk-free`, (e) => e.textContent).catch(() => '');
-  check('it takes no slot: 4 free', /4 free/.test(free), free);
+  // V4.0 HUD: the kit is the "own" mark after the 4 mini slots on the party card; its hover says whose it is and what it does.
+  const sock = await p.$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-own`, (e) => ({ title: e.dataset.tip ?? e.title, inSlots: !!e.closest('.dl-minis') })).catch(() => null);
+  check('the card shows the improvised pick as its own mark, with help', !!sock && /One Pick at 2 Finesse tries, used up/.test(sock.title), sock?.title.slice(0, 120));
+  check('...after the 4 slots, not inside them', !!sock && !sock.inSlots);
+  check('...hover: "<name>\'s own · improvised pick", takes no slot, can\'t be given away', !!sock && /^\S.*'s own · improvised pick\nTakes no slot; can't be given away\./.test(sock.title), sock?.title.split('\n')[0]);
+  const minis = await p.$$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-minis .dl-mini`, (els) => els.map((e) => e.className)).catch(() => []);
+  check('...the 4 slot boxes are all still there', minis.length === 4, `${minis.length}`);
+  const free = await p.$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-minis`, (e) => e.dataset.tip ?? e.title).catch(() => '');
+  check('it takes no slot: 4 free', /4 free/.test(free), free.split('\n')[0]);
   // Locked-door hover: Pick while the pick lasts, the spent line after.
   const lockedDoor = await p.evaluate(() => {
     const s = window.vc.state();
@@ -105,7 +105,7 @@ if (burg) {
     const tip = async () => {
       await p.evaluate((id) => window.vc.hud.select(id), burg.heroId);
       await p.waitForTimeout(80);
-      return p.evaluate((a) => { window.vc.hud.onHover(a, null); const t = document.querySelector('.hud-tip')?.textContent ?? ''; window.vc.hud.onHover(null, null); return t; }, lockedDoor);
+      return p.evaluate((a) => { window.vc.hud.onHover(a, null); const el = document.querySelector('.dl-card'); const t = el && !el.classList.contains('hidden') ? el.textContent : ''; window.vc.hud.onHover(null, null); return t; }, lockedDoor);
     };
     const t1 = await tip();
     check('locked door hover with the improvised pick: Pick, Smash', /Locked door/.test(t1) && /Pick, Smash/.test(t1), t1.slice(0, 100));

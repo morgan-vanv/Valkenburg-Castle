@@ -8,6 +8,7 @@ import type { Ctx, DelveX, GameStateX } from './state';
 import { blastPreview, migrateSatchel } from './charges';
 import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
+import { sightWash } from './stealth';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
@@ -241,6 +242,11 @@ export function createEngine(castle: CastleDef): Engine {
       if (!c || state.stage !== 'delve') return { calm: false, why: 'Not in a delve.' };
       const why = calmReason(c);
       return why === undefined ? { calm: true } : { calm: false, why };
+    },
+    sightWash(state, watcherId, sneaking, quiet) {
+      const c = rctx(state);
+      if (!c || state.stage !== 'delve') return { front: [], side: [] };
+      return sightWash(c, watcherId, sneaking ?? false, quiet ?? false);
     },
     deals(state, heroId) {
       const c = rctx(state);

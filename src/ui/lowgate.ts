@@ -257,7 +257,7 @@ function tipHtml(text: string, nums?: string): string {
 }
 
 /** Every element with a data-tip (or title) in the camp gets the camp's own tooltip, on hover and on focus. */
-function installTips(root: HTMLElement): void {
+export function installTips(root: HTMLElement): void {
   const tip = h('div', { class: 'lg-tip hidden', role: 'tooltip', id: 'lg-tip' });
   root.append(tip);
   let on: HTMLElement | null = null;
