@@ -585,6 +585,17 @@ export interface RivalCrew {
   members: Rival[];
 }
 
+/** V3.9.3 (spec 24.8): a sound the heroes heard from something they can't see. Where, not who. */
+export interface Heard {
+  at: Pos;
+  /** steps: footsteps (a walking monster or crew member); loud: a fight, a shout, a smash, a blast, a roar. */
+  kind: 'steps' | 'loud';
+  /** For loud sounds, what it sounded like: 'clash' | 'shout' | 'crash' | 'blast' | 'roar' | 'scream'. */
+  what?: string;
+  /** Order heard within the world phase (for a footstep trail). */
+  n: number;
+}
+
 export interface Fuse {
   at: Pos;
   /** World phases left before it goes off (1 = the end of the coming world phase). */
@@ -653,6 +664,8 @@ export interface Delve {
   calmSteps?: number;
   /** Crates and barrels smashed, by posKey (the hex is floor now). */
   smashed?: string[];
+  /** V3.9.3 (spec 24.8): what the heroes heard during the last world phase (unseen enemies only); cleared when the next one starts. */
+  heard?: Heard[];
   /** V3.7 (spec 20.3): floor blown open next to a pit, by posKey: the hex is a pit now (the column widens). */
   collapsed?: string[];
   /** V3.7 (spec 20.3): rubble (natural, blast-made or a cracked wall's) dug out, by posKey: floor now. */
@@ -862,6 +875,7 @@ export type GameEvent =
   | { type: 'blast'; at: Pos; by: string; broke: Pos[]; collapsed?: Pos[]; rubbled?: Pos[] } // a charge went off; walls broken, floor dropped into the pit, floor turned to rubble
   | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
   | { type: 'robbed'; hero: string; by: string; items: Item[] }
+  | { type: 'heard'; sound: Heard } // V3.9.3 (spec 24.8): the heroes hear something they can't see
   | { type: 'faced'; id: string; facing: number } // V3.9: a hero turned (free) or turned by moving/acting
   | { type: 'unseenHit'; target: string } // V3.9 (spec 24.2): something the party can't see attacked this hero from behind
   | { type: 'calm'; calm: boolean; why?: string } // spec 20.5: free movement starts or ends ("An orc has seen Pim")
