@@ -16,6 +16,7 @@ import { backDirs, backExposed, backstabFrom, backstabSpots, blastPreview, break
 import { longPath, stepsToTurn } from '../view/pathing';
 import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE, FACING } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
+import { isKit } from '../game/charges';
 import type { Settings } from './settings';
 
 export interface HudHost {
@@ -1589,7 +1590,7 @@ export class Hud {
             h('span', { class: 'hc-res hc-focus', title: `Focus ${hd.focus} of ${FOCUS_MAX}\nIn a roll preview, spend Focus to turn slots into sure hits. ${FOCUS_MAX} per delve; Keven's Rally gives 1 back.${hd.ale === 'reserve' ? "\nHobart's Reserve: this hero's Focus is 4 for this delve." : hd.ale === 'heavyhead' ? '\nHeavy head: Focus started at 1.' : ''}` }, h('span', { class: 'hc-lab' }, 'Focus'), pips(hd.focus, hd.ale === 'reserve' ? 4 : FOCUS_MAX, 'focus')),
             manaMax > 0 ? h('span', { class: 'hc-res hc-mana', title: `Mana ${hd.mana} of ${manaMax}\nPays for spells: Fireball 2, every other spell 1. ${manaMax} per delve, no refills inside.` }, h('span', { class: 'hc-lab' }, 'Mana'), pips(hd.mana, manaMax, 'mana')) : '',
           ),
-          packRow(hd.pack),
+          packRow(hd.pack, def.name),
           h('div', { class: 'hc-status' }, ...this.statusChips(hd, def.name, risk, dark ? this.sightOf(hd.heroId) : null)),
         ),
       );
@@ -2600,23 +2601,16 @@ function hpBar(hp: number, max: number): HTMLElement {
 }
 
 /** V3.4: the pack as a first-class row: all sockets drawn, a 2-slot item spans two, free count in words. */
-function packRow(pack: Item[]): HTMLElement {
+function packRow(pack: Item[], owner = 'This hero'): HTMLElement {
   const socks: HTMLElement[] = [];
   let used = 0;
+  // V4.0 (spec 26.5): class kit (improvised explosives, the improvised pick) is the hero's own: drawn
+  // apart from the slots, after them, and never counted in them.
+  const kit = pack.filter(isKit);
   for (const it of pack) {
+    if (isKit(it)) continue;
     const span = Math.max(1, Math.min(it.slots, PACK_SLOTS - used));
     const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
-    // V3.7 (20.3): the Sapper's satchel takes no slot and shows its charge count.
-    const satchel = it.kind === 'charge' && it.slots === 0;
-    // V3.7.1 (21.4): the Burglar's improvised pick takes no slot either.
-    if (it.kind === 'improvised') {
-      socks.push(h('span', { class: 'pk-sock pk-improvised pk-satchel', 'data-span': '0', title: `Improvised pick · one Pick at 2 Finesse slots, used up whatever happens. No pack slot; a fresh one each delve.\nUse: next to a locked door or chest, Interact › Pick lock` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind))));
-      continue;
-    }
-    if (satchel) {
-      socks.push(h('span', { class: 'pk-sock pk-charge pk-satchel', 'data-span': '0', title: `Satchel · ${it.amount} charge${it.amount === 1 ? '' : 's'} left, no pack slot. ${PACK_SLOTS} slots stay free for loot.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge.` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), h('small', { class: 'num' }, `${it.amount}`)));
-      continue;
-    }
     socks.push(h('span', { class: `pk-sock pk-${itemBase(it.kind)} ${span > 1 ? 'wide' : ''}`, 'data-span': `${span}`, title: itemTip(it) }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)), val ? h('small', { class: 'num' }, `${it.amount}`) : ''));
     used += it.slots;
   }
@@ -2624,9 +2618,24 @@ function packRow(pack: Item[]): HTMLElement {
   const free = Math.max(0, PACK_SLOTS - used);
   return h(
     'div',
-    { class: 'hc-pack' },
+    { class: `hc-pack ${kit.length ? 'has-kit' : ''}` },
     h('span', { class: 'hc-lab', title: `Pack · ${PACK_SLOTS} slots per hero\nEverything a hero carries out of the castle. Take, Drop and Give are free.` }, 'Pack'),
     h('span', { class: 'pk-socks' }, ...socks),
+    kit.length ? h('span', { class: 'pk-kit' }, h('span', { class: 'pk-kit-lab', 'aria-hidden': 'true' }, 'kit'), ...kit.map((it) => kitSock(it, owner))) : '',
     h('span', { class: `pk-free ${free === 0 ? 'full' : ''}`, title: free === 0 ? 'Pack full: Drop or Give something (free) to take more.' : `${free} of ${PACK_SLOTS} pack slots free.` }, free === 0 ? 'Full' : `${free} free`),
+  );
+}
+
+/** V4.0 (spec 26.5): one piece of class kit on the party card, with whose it is. */
+function kitSock(it: Item, owner: string): HTMLElement {
+  if (it.kind === 'improvised') {
+    return h('span', { class: 'pk-sock pk-improvised pk-satchel', 'data-span': '0', title: `${owner}'s own: improvised pick. Doesn't take a slot; can't be given away.\nImprovised pick · one Pick at 2 Finesse slots, used up whatever happens. A fresh one each delve.\nUse: next to a locked door or chest, Interact › Pick lock` }, h('span', { class: 'pk-g' }, itemGlyph(it.kind)));
+  }
+  const n = it.amount;
+  return h(
+    'span',
+    { class: 'pk-sock pk-improvised-charge pk-satchel', 'data-span': '0', title: `${owner}'s own: ${n} improvised explosive${n === 1 ? '' : 's'}. ${n === 1 ? "Doesn't" : "Don't"} take a slot; can't be given away.\nImprovised explosives · blast like a blasting charge (${V37.blastInner} within 1, ${V37.blastOuter} within 2), spent before bought charges. ${V37.charges} each delve.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge.` },
+    h('span', { class: 'pk-g' }, itemGlyph('improvised-charge')),
+    h('small', { class: 'num' }, `${n}`),
   );
 }

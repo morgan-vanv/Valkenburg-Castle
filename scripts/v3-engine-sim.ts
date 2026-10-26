@@ -53,7 +53,7 @@ import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
 import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
-import { breakableWall } from '../src/game/charges';
+import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
 import { FACING } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 
@@ -354,7 +354,7 @@ function sapperCheck(s: GameState, id: string): GameState {
   if (!me || me.acted || me.webbed) return s;
   const def = e.heroById(s, id);
   const action: ActionKind = def?.cls === 'sapper' ? 'setCharge' : 'charge';
-  if (!option(s, id, action) && !(action === 'setCharge' && me.pack.some((i) => i.kind === 'charge'))) return s;
+  if (!option(s, id, action) && !(action === 'setCharge' && chargeCount(me) > 0)) return s; // V4.0: improvised explosives count
   if (action === 'charge' && !me.pack.some((i) => i.kind === 'charge')) return s;
   const goals = routeFor(s, me.at).goals;
   const F = distField(w, d, goals, { stairs: true, allowLocked: false });

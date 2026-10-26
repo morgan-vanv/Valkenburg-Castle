@@ -261,6 +261,7 @@ export type ItemKind =
   // V3.6 (spec 19.2, 19.3)
   | 'lockpicks' // the smith's proper lockpicks: reusable; Burglar picks at 3 slots, anyone else at 2 (spec 21.4)
   | 'improvised' // V3.7.1: the Burglar's improvised pick, 1 per delve, used up on any Pick (2 slots)
+  | 'improvised-charge' // V4.0 (spec 26.5): the Sapper's improvised explosives: slotless, `amount` left (3 per delve), blast like a blasting charge
   | 'nightsight' // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
   // V4.0 (spec 25.2)
   | 'gatekey'; // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.

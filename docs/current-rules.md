@@ -116,8 +116,8 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 - HP carries over. A delve starts each hero at their campaign HP (at least 1); a survivor's HP is written back. Nothing heals for free.
 - XP: kill XP by monster (`MONSTERS[kind].xp`: berserker 3, captain 2, ghoul 2, others 1); crew member killed 1; survive +1; contract done +3 to every survivor; Dragon slain: 10 split among every hero in the delve (remainder to the killer).
 - Level thresholds (total XP, `LEVEL_XP`): level 2 at 5, 3 at 12, 4 at 20, 5 at 30, 6 at 45 (max 6). Each level: +2 max HP and +2 HP, +5 to the class's main stat. Level-ups apply only to heroes who got out.
-- The dead go to `campaign.fallen`. Their pack drops where they died; non-heirloom, non-hoard items from fallen heroes persist as ground loot in later delves (`lostGear`).
-- Items taken in and not carried out are lost. Gold carried out goes to camp gold; other items to the stash. The satchel and the improvised pick never reach the stash.
+- The dead go to `campaign.fallen`. Their pack drops where they died (class kit goes with them, section 9.5); non-heirloom, non-hoard items from fallen heroes persist as ground loot in later delves (`lostGear`).
+- Items taken in and not carried out are lost. Gold carried out goes to camp gold; other items to the stash. Class kit (improvised explosives, the improvised pick) never reaches the stash.
 - Lit braziers stay lit for the campaign (`litBraziers`). Hoard pieces carried out never come back (`hoardTaken`).
 - V4.0: ways in opened during the delve (`Delve.ways`) are merged into `campaign.opened`; a hero who gets out carrying the sally port key opens the sally port for good ("With its key in hand, the sally port gate is yours. It stays open."). The key never reaches the stash and is never lost gear.
 - V4.0: every hex the delve explored is merged into `campaign.explored` (hex keys "q,r" by level), the campaign's memory of the castle (`castleMemory`).
@@ -150,7 +150,7 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 - Entrances (`castle.entrances`, index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21). Only an open one may be used (section 3.1); `startDelve` refuses a shut one: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate." Heroes are placed on the entrance and the nearest free hexes.
 - Ways already opened this campaign stand open (the gate open and unlocked, the rubble in `blown`). While the sally port is shut, its key lies in the library at L1 (3, 1).
 - Lantern: full (20), open; the bearer is Keven if he goes, else the first hero.
-- Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. The Sapper gets the satchel (3 charges, slotless). Every Burglar gets one improvised pick (slotless).
+- Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. The Sapper gets 3 improvised explosives (one slotless item, kind `improvised-charge`, `amount` 3). Every Burglar gets one improvised pick (slotless).
 - Every hero faces "into the castle": toward the centroid of floor hexes within 6.
 - Objective placed: a recover item at the site (heirloom value 60 / 120 / 180 by level, or the story item), or a shackled prisoner (5 HP; a captive hero 1 HP). The slay target is the Dragon spawn.
 - Hoard: up to 3 pieces (300 each, 2 slots) on free Lair hexes round the Dragon, minus those already carried out.
@@ -205,7 +205,7 @@ Code: world-phase.ts `worldPhase`, `computeIntents`; delve.ts `moveKind`, `canDo
 
 ### 5.1 Movement
 
-- Walk 4. Sneak 2 (Burglar 4; Smuggler's Mead 4). Escorting the prisoner: 3 at most. Carrying a heavy item: 3 at most.
+- Walk 4 (Burglar 5, V4.0). Sneak 2 (Burglar 4; Smuggler's Mead 4). A dash goes as far as a first move. Escorting the prisoner: 3 at most. Carrying a heavy item: 3 at most (both cap the Burglar too). Crew members move 4 whatever their class (section 12).
 - Walk or sneak is each hero's own setting for the delve (`HeroInDelve.moveMode`, V4.0): Burglars start on `sneak`, everyone else on `walk` (absent, as in older saves: walk). The free `setMoveMode` command (`{ heroId, sneak }`) changes it for that hero only. A `move` without `sneak` uses it, as do `reachable`, `moveNoise` and `calmReach` when their `sneak` argument is left out; an explicit `sneak` on a move wins and doesn't change the setting.
 - Rubble costs 2. Stairs: stepping from a stairs hex to its linked hex costs 1. Lift: the same, once the winch is worked.
 - Can't enter walls, pillars, props, tall props, braziers, pits, cracked walls, the sealed stair, locked closed doors, or a hex with a monster or non-hired crew member. Heroes pass through heroes, the prisoner and hired crew members; they can't end on anyone.
@@ -293,7 +293,7 @@ When (V4.0, spec 26.2): noticing happens the moment it would.
 
 Each reachable hex lists: wake rolls along the path for sleepers the party has seen, with chance; awake enemies currently visible that would notice the hero at any hex of the path (V4.0, `at`: the first such hex), taking watchers as they face now (a wake roll or a bellow on the way can turn one; the dice can't be previewed), a waiting crew within 6; free swings leaving provokes from seen enemies, with damage range (blindside slot included). Unseen enemies still roll and act; they are just not previewed.
 
-Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`; camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the `replan` pass); stealth.ts `wouldNotice`, `perceivable`, `isSneaking`, `noticeHero`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `HEAVY_MOVE`.
+Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`; camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the `replan` pass); stealth.ts `wouldNotice`, `perceivable`, `isSneaking`, `noticeHero`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
 
 ---
 
@@ -439,7 +439,7 @@ Damage to a monster or crew member per hit: max(1, weapon damage − armor), min
 - Monsters ignore downed heroes as targets (area damage still hits them).
 - Revive (action, adjacent downed hero): back up at 3 HP; the revived hero has used their move and action this round.
 - Potion on an adjacent downed hero: back up at 5 HP (move and action not spent).
-- A dead hero's pack drops on their hex; if they carried the lantern, the nearest active hero takes it.
+- A dead hero's pack drops on their hex (not their class kit); if they carried the lantern, the nearest active hero takes it.
 - Crew members have no downed state: at 0 HP they die and drop loot and pack.
 
 Code: common.ts `roll`, `clampChance`, `hurtHero`, `hurtAny`, `turnOnHit`, `killHero`, `killMonster`, `monsterArmor`, `shieldWalled`, `guardMods`, `rangedLabel`; delve.ts `spec` (attack, knockback, firebolt...), `doAct`, `canBackstab`, `unnoticedBy`; ai.ts `strike`, `strikeDetailed`, `guardFor`, `wardOf`; stealth.ts `swingersFor`, `provokeSwings`, `enemySwing`, `heroSwings`, `monsterCanSwing`; data.ts `FOCUS_MAX`, `MANA_MAX`, `BLEED_START`, `SNEAK_ATTACK_SLOTS`, `BACKSTAB_SLOTS`, `BACKSTAB_DMG_MULT`, `SWING_SLOT_PENALTY`, `SWING_BOW_SLOTS`, `BRACE_DMG`, `BRACE_CHANCE`, `SHIELD_DMG`, `SHIELD_BRACED_DMG`.
@@ -497,7 +497,7 @@ Nerve is not used by any rule.
 | Heir, Sellsword, Sapper | Brace | Action: until the next player phase, each hit on them does 1 less (after armor, min 0) and enemies roll −15; their free swings are at full slots |
 | Sellsword | Guard | Action: pick an adjacent active ally; until the next player phase, monster and crew strikes aimed at that ally hit the Sellsword (adjacency not rechecked) |
 | Sellsword | Strong shove | Shove at 3 slots |
-| Burglar | Quiet feet | Sneaks 4; quieter wake rolls and noticing (sections 5.3, 5.4); a sneaking Burglar next to the sleeping Dragon doesn't wake it |
+| Burglar | Quiet feet | Walks 5 and sneaks 4 (dash the same); quieter wake rolls and noticing (sections 5.3, 5.4); a sneaking Burglar next to the sleeping Dragon doesn't wake it |
 | Burglar | Backstab | Section 8.2 |
 | Burglar | Light fingers | Opens chests without using the action. Starts each delve with an improvised pick |
 | Ranger | Overwatch | Action: in the coming world phase, shoots the first monster or crew member that moves or acts within 6 that the Ranger can see (field of view counts). Full bow roll (adjacent −1 slot, asleep +20). Lapses at the end of the world phase |
@@ -506,7 +506,7 @@ Nerve is not used by any rule.
 | Sapper | Set charge | Action, 1 charge: an adjacent floor-like hex, cracked wall or breakable wall with no fuse; fuse 1 or 2 |
 | Sapper | Throw charge | Action, 1 charge: a hex within 3 the party can see; fuse 1 |
 | Sapper (and Mole's Brown) | Dig | Action: adjacent rubble or cracked wall becomes floor; noise 4; no roll |
-| Sapper | Satchel | 3 charges each delve (slotless); bought charges add to them; the satchel is spent first |
+| Sapper | Improvised explosives | 3 each delve (one slotless item, "Improvised explosives"; "Improvised explosive" with 1 left); the same blast, fuse, set and throw rules as a bought blasting charge; bought charges add to them; the improvised ones are spent first |
 | Pyromancer | Firebolt (1 mana) | 3 Wits slots, range 5, visible enemy in line of sight; 2 per hit minus armor; noise 3 |
 | Pyromancer | Fireball (2 mana) | A floor or pit hex within 5 the party can see: 3 Wits slots; every figure within 1 (allies too) takes hits × max(1, 2 − armor) (monster or hero armor; crew armor and ward are ignored), Perfect +1; floor hexes burn 2 world phases (1 damage per phase to whoever stands there; lit; monsters won't path into fire); noise 6 |
 | Pyromancer | Kindle (1 mana) | +6 light (only below 20); silent |
@@ -540,7 +540,7 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 
 ### 9.5 Items
 
-- Pack: 4 slots. Most items 1 slot; heirlooms and hoard pieces 2; the copper 2 and heavy; satchel and improvised pick 0. Gold stacks to 100 per slot.
+- Pack: 4 slots. Most items 1 slot; heirlooms and hoard pieces 2; the copper 2 and heavy; class kit (improvised explosives, improvised pick) 0. Gold stacks to 100 per slot.
 - Torch: action; 12 rounds of radius-2 light round the carrier.
 - Potion: action; heal 5 on self or an adjacent hurt active hero, or get an adjacent downed hero up at 5 HP.
 - Oil flask: action; +8 light.
@@ -553,9 +553,10 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 - Skeleton key, lockpicks: section 9.4.
 - Sally port key (V4.0): section 3.1.
 - Grappling hook, rope: section 13.1.
-- Blasting charge (bought): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw.
+- Blasting charge (bought, 1 slot): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw, after their improvised explosives.
+- Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised pick are the hero's own. No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives.
 
-Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `isKit`; common.ts `addToPack`, `rootFigure`.
+Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `migrateSatchel`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`.
 
 ---
 
@@ -598,7 +599,7 @@ Every special ability shows as the monster's intent the round before it goes off
 - **Rats**: at 1 HP they flee (move away from heroes).
 - **Orc**: the first time it notices a hero it bellows (noise 5), whenever that happens (V4.0: mid-move in the player phase too). Edge shove: if a hero it could hit has an unrailed pit straight behind them, the intent is `shove`; 60% to push them 1 hex (they fall).
 - **Spider**: not adjacent, a hero within 3 in plain sight: web (no damage, the hero can't move next turn) at most every 2 rounds. Next round, a webbed hero within 3 and not adjacent: `drag` 1 hex toward the spider with shove outcomes.
-- **Cutpurse**: its strike is `steal`: on a hit it takes a random pack item (not an heirloom; story items count as heirlooms) instead of damage (damage if nothing to take), then flees toward the farthest exit; on an exit it leaves with it; killed, it drops it.
+- **Cutpurse**: its strike is `steal`: on a hit it takes a random pack item (not an heirloom, story items count as heirlooms; not the sally port key or class kit) instead of damage (damage if nothing to take), then flees toward the farthest exit; on an exit it leaves with it; killed, it drops it.
 - **Berserker**: always hunting once awake; goes for heroes within 10 even unseen. Moving 2+ hexes then hitting knocks the target back 1 hex.
 - **Orc archer**: shoots at range 2–4 in line of sight, preferring 3, backing off when adjacent (shoots point-blank if it can't). `hamstring` a non-rooted hero within 3. Edge knockback shot like the orc's shove (60%).
 - **Orc captain**: armor 1. Shield wall: orcs and archers adjacent to it get +1 armor. Shout (cooldown 4, first one as soon as it has a quarry): every orc, archer and captain within 8 on its level hunts the shouter's target; noise 5.
@@ -638,7 +639,7 @@ Rival entrances: east breach, sally port. V4.0: the Sisters make their own entra
 
 ### 12.2 Members
 
-Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; move 4; range 6 with a bow else 1. Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
+Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; move 4 (a crew Burglar too: the hero Burglar's walk 5 is not theirs, V4.0); range 6 with a bow else 1. Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
 
 | Crew | Level | Tiers | Members (pack) |
 | --- | --- | --- | --- |
