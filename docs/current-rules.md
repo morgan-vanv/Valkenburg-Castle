@@ -2,7 +2,7 @@
 
 Current rules at V3.9.4 (2026-10-26). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
 
-Scope: the rules engine (src/game) and castle data (src/data/castle) as they stand on `main` at commit 0bccac6. Presentation is mentioned only where it carries a rule. Every number below was read from the code. Section 18 lists where the spec disagrees.
+Scope: the rules engine (src/game) and castle data (src/data/castle) as they stand on `main` at V3.9.4 (commit bc3f1fd). Presentation is mentioned only where it carries a rule. Every number below was read from the code. Section 18 lists where the spec disagrees.
 
 Conventions: "slot" is one die in a slot roll; "level" means a castle level (1 to 3) unless it says hero level; distances are hex steps on one level; "path distance" is walking distance where a closed door counts 2.
 
@@ -273,7 +273,7 @@ Code: delve.ts `doMove`, `reachable`, `moveBudget`, `blocksHero`; stealth.ts `wo
 
 - Every hero, monster and crew member has `facing` 0..5. Direction from a hex to another is the nearest of the six (`dirIndex`, ties to the lower index).
 - Heroes: face their last step; turn toward the target of any action aimed at a hex or figure on their level (`FACING.turnOnAction = true`). There is no Face command (`FACING.faceCommand = false`).
-- Monsters and crew members: face their last step, turn toward noise they hear, toward a hero they notice, and toward anything they strike or use an item, spell or ability on. Spawned monsters face the map's facing (default 0). A figure with no facing (a crew at its post) sees all round.
+- Monsters and crew members: face their last step, turn toward a hero they notice, and toward anything they strike or use an item, spell or ability on. Monsters also turn toward noise they hear; crew members don't. Spawned monsters face the map's facing (default 0). A figure with no facing (a crew at its post) sees all round.
 
 ### 6.2 Blind areas
 
@@ -295,7 +295,7 @@ Everything that says "behind" uses the figure's blind area: hero visibility, not
 ### 6.4 Blindsided and unseen hits
 
 - An enemy attack on a hero from the hero's blind cone gets +1 slot (`BLINDSIDE_SLOTS`): monster and crew strikes, free swings, overwatch shots, hamstring shots.
-- If no hero can see the attacker, the log says "Something strikes X from behind" (`unseenHit` on a hit), and the attacker is visible to the party through the end of the next player phase, hit or miss.
+- If the attack comes from the hero's blind cone and no hero can see the attacker, the log says "Something strikes X from behind" (`unseenHit` on a hit), and the attacker is visible to the party through the end of the next player phase, hit or miss.
 
 ### 6.5 Hearing (heroes only; `HEARING.enabled = true`)
 
@@ -474,7 +474,7 @@ Nerve is not used by any rule.
 | Sapper (and Mole's Brown) | Dig | Action: adjacent rubble or cracked wall becomes floor; noise 4; no roll |
 | Sapper | Satchel | 3 charges each delve (slotless); bought charges add to them; the satchel is spent first |
 | Pyromancer | Firebolt (1 mana) | 3 Wits slots, range 5, visible enemy in line of sight; 2 per hit minus armor; noise 3 |
-| Pyromancer | Fireball (2 mana) | A floor or pit hex within 5 the party can see: 3 Wits slots; every figure within 1 (allies too) takes hits × max(1, 2 − armor), Perfect +1; floor hexes burn 2 world phases (1 damage per phase to whoever stands there; lit; monsters won't path into fire); noise 6 |
+| Pyromancer | Fireball (2 mana) | A floor or pit hex within 5 the party can see: 3 Wits slots; every figure within 1 (allies too) takes hits × max(1, 2 − armor) (monster or hero armor; crew armor and ward are ignored), Perfect +1; floor hexes burn 2 world phases (1 damage per phase to whoever stands there; lit; monsters won't path into fire); noise 6 |
 | Pyromancer | Kindle (1 mana) | +6 light (only below 20); silent |
 | Shadowmancer | Veil (1 mana) | An active ally within 3 (or self): 2 rounds unseen by monsters and crews (not a target); hunting monsters that see no unveiled hero go alert. Broken by any attack, knockback, hamstring, damaging spell (firebolt, fireball, night thorn, briar), shove, gust, smash (lock or crate) or action of noise ≥ 4 the hero makes. Sleep, darts and Dread don't break it |
 | Shadowmancer | Sleep (1 mana) | 2 Wits slots, range 5, an awake visible monster (not the Dragon, not crew): 1+ hits puts it to sleep (forgets everyone); silent |
@@ -673,7 +673,7 @@ The Dragon and the Gloam can't be pushed.
 
 ### 13.3 Doors, locks, chests
 
-- Doors block sight and light when closed and halve noise reach (count 2). Locked doors: Pick, Smash, charge, key, crew job. A jammed lock: only Smash or a charge. A blasted door is open for good.
+- Doors block sight and light when closed and halve noise reach (count 2). Locked doors: Pick, Smash, charge, key, crew job. A jammed lock: only Smash or a charge. A blasted door is opened and unlocked (it can be closed again).
 - Monsters and crews path through unlocked doors (opening them); they can't pass locked ones (the Gloam can).
 - Chests: tier 1–3. Loot roll on opening (d6 + tier): 2–3 gold 15T–30T; 4–5 gold 25T–50T plus a torch or potion (50/50); 6–7 a gem worth 40T–80T; 8+ jewelry worth 80T–140T.
 - Locked chests: Pick, Smash (1 hit), charge, key.
@@ -706,8 +706,8 @@ The Dragon and the Gloam can't be pushed.
 ### 13.8 Charges and blasts
 
 - A charge is a fuse on a hex (`Delve.fuses`). At the end of each world phase fuses count down; at 0 it goes off. Fuse 1 = the end of the coming world phase. A fuse lit during a world phase (a crew's) skips that phase's countdown.
-- Blast at hex X: 4 damage to every figure within 1 (X included), 2 within 2, no armor; the setter takes 0; if a hero set it, other heroes take half (rounded down); if a crew member set it, crewmates take half; the prisoner takes full. Everything in the inner ring still standing there is pushed 1 hex away (all push outcomes). Kills credit a hero setter.
-- Within 1: locked or closed doors open for good; unopened chests open (loot rolled); cracked walls break; breakable walls become rubble.
+- Blast at hex X: 4 damage to every figure within 1 (X included), 2 within 2, no armor; the setter takes 0; if a hero set it, other heroes take half (rounded down); if a crew member set it, crewmates take half; the prisoner takes full. Figures in the ring around X (not on X) still standing are pushed 1 hex away (all push outcomes). Kills credit a hero setter.
+- Within 1: locked or closed doors are opened and unlocked (they can be closed again); unopened chests open (loot rolled); cracked walls break; breakable walls become rubble.
 - Floor within 1 on Levels 1 and 2: floor next to a pit hex collapses into the pit column (`collapsed`; anything on it falls; loot on it drops to the landing; ropes and fuses on it go). Other floor becomes rubble. On Level 3 floor only rubbles. Never affected: stairs, lift, exits, doors, braziers, props and tall props, chest hexes, hoard hexes, the sealed stair, `unbreakable` hexes (around the tower stair and lift ends).
 - Collapse and rubble are decided from the map before the blast (no chain collapse).
 - Noise 8, also heard on the levels above and below.
@@ -743,7 +743,7 @@ Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeN
 - Light: fungus in the grove, the pit glow on the Bone Pile, the Lair's two fires and three vents. Brazier in the grove. Everything else is dark (the Gloam hunts any unlit hero here). Monsters see heroes regardless of light here.
 - Chests: nest, drain (tier 3). Coins 40, 35, 50, 40. Traps: nest tunnel, drain tunnel.
 - Contract sites: l3-rescue-nest, l3-recover-grove, l3-recover-drain (also the cask book), l3-slay-dragon; hideouts for the Ferrymen (the Drain), Gallows Choir (Tunnels), the Wake (Bone Pile).
-- **The Dragon**: 30 HP, armor 1, bite 4 slots at 65% for 3, moves 3, never leaves the Lair. Not affected by shoves, falls, sleep, darts, dread, briar, hamstring, knockback, glue, backstab or free swings (it doesn't swing either). Starts asleep. Wakes when a hero walks (not sneaks) into the Lair, ends next to it (unless a sneaking Burglar), or noise ≥ 4 reaches it. Awake, it sees heroes within 10 in line of sight. Its first action awake is breath, then it alternates: a breath round (intent `breath`: a straight 5-hex line toward the nearest seen hero, stopped by walls; next world phase every hero on those hexes takes 4, no roll, no armor, no ward; noise 6), then a non-breath round: tail sweep if 2+ heroes are adjacent (each pushed 1 hex), else bite an adjacent hero, else close in. Hoard: 3 pieces worth 300, 2 slots each, around its spawn; taking is free and silent.
+- **The Dragon**: 30 HP, armor 1, bite 4 slots at 65% for 3, moves 3, never leaves the Lair. Not affected by shoves, falls, sleep, darts, dread, briar, hamstring, knockback, glue or backstab. It never takes free swings itself, but heroes get free swings at it when it steps out of their reach. Starts asleep. Wakes when a hero walks (not sneaks) into the Lair, ends next to it (unless a sneaking Burglar), or noise ≥ 4 reaches it. Awake, it sees heroes within 10 in line of sight. Its first action awake is breath, then it alternates: a breath round (intent `breath`: a straight 5-hex line toward the nearest seen hero, stopped by walls; next world phase every hero on those hexes takes 4, no roll, no armor, no ward; noise 6), then a non-breath round: tail sweep if 2+ heroes are adjacent (each pushed 1 hex), else bite an adjacent hero, else close in. Hoard: 3 pieces worth 300, 2 slots each, around its spawn; taking is free and silent.
 
 Code: src/data/castle/index.ts (`castle`: links, entrances, rivalEntrances, rivalPosts, spawns, chests, coins, traps, braziers, contractSites), level1.ts, level2.ts, level3.ts, regions.ts, shapes.ts, build.ts; dragon.ts (`lairCheck`, `planDragon`, `breathLine`, `dragonSpecial`, `placeHoard`); data.ts `BREATH_DMG`, `BREATH_LEN`, `BREATH_NOISE`, `DRAGON_WAKE_NOISE`, `HOARD_PIECES`, `HOARD_VALUE`.
 
@@ -773,7 +773,7 @@ Code: delve.ts `leaveCastle`, `afterHeroMove`; camp.ts `contractDone`, `buildSum
 | Flag / system | State | Notes |
 | --- | --- | --- |
 | `FREE_MOVE.enabled` (data.ts) | false | V3.7 calm free movement (spec 20.5's calm walk, Follow, `CALM_STEPS` 4). Engine always reports not calm; code in calm.ts stays. See docs/shelved/exploration-mode.md |
-| V3.8 exploration mode (spec section 22) | removed from main | Reverted; section 22 is no longer in docs/v3-spec.md. Code on branch `shelf/exploration-mode`; findings in docs/shelved/exploration-mode.md |
+| V3.8 exploration mode (spec section 22) | removed from main | Reverted; section 22 in docs/v3-spec.md is a stub pointing to the shelf branch. Code on branch `shelf/exploration-mode`; findings in docs/shelved/exploration-mode.md |
 | `FACING.faceCommand` | false | The free Face command; `face` returns a refusal. docs/ideas-later.md "Managed facing" |
 | `FACING.turnOnAction` | true | Heroes turn toward an action's target |
 | `HEARING.enabled` | true | Heroes hear unseen enemies (hearing.ts) |
@@ -787,38 +787,38 @@ Code: delve.ts `leaveCastle`, `afterHeroMove`; camp.ts `contractDone`, `buildSum
 
 ## 18. Spec vs code discrepancies found
 
-Each entry: what docs/v3-spec.md (latest applicable section) says, what the code does. The code is what this file describes.
+Each entry: what docs/v3-spec.md (latest applicable section) says, what the code does. The code is what this file describes. Spec references are by section; code line numbers are as of commit bc3f1fd and will drift. 28 are open (25 and 30 were fixed in V3.9.4); V4.0 should settle each one, either by changing the code or by accepting the code as the rule.
 
-1. **Orc, spider, berserker stats.** Spec 7 table (v3-spec.md:95, :96, :98; never revised later): orc 55%, spider 60%, berserker 9 HP, 2 damage. Code: orc 60%, spider 65%, berserker 10 HP, 3 damage (src/game/data.ts:198, :199, :201).
-2. **Monster sight.** Spec 16.1 (v3-spec.md:275) and spec 7 (v3-spec.md:101): monsters see within 6, and dark heroes within 3 (spec 7: 2). Code: `MONSTER_SIGHT` 8, `MONSTER_DARK_SIGHT` 5 (data.ts:220-221), recorded in decisions.md (V3.7.1) but not in the spec.
-3. **Sisters leave on low light.** Spec 10 (v3-spec.md:128): goal leave when light ≤ 18 (of the old 40). Code: `SISTERS_LEAVE_LIGHT` 9 (data.ts:329).
-4. **Sisters' tiers.** Spec 20.4 table (v3-spec.md:511): Lantern Sisters weapon tier 1 only. Code: weapon 1 and armor 1 (data.ts:605).
-5. **Sisters' purse.** Spec 20.4 (v3-spec.md:519): killed members drop their purse (30 gold at level 2–3). Code: only cutthroat crews get purses (rivals.ts:101, postCrew; :151 buildCrew); prospectors carry none.
-6. **Leave deal and the prisoner.** Spec 18.6 (v3-spec.md:417): on Leave they drop the heirloom or prisoner. Code drops heirlooms only (parley.ts:209-216); no crew code ever takes or holds the prisoner.
-7. **Prospectors turning hostile when blocked.** Spec 10 (v3-spec.md:130): blocked for a full round. Code: unable to move toward their goal 2 rounds running, and only while spotted and neutral (rivals.ts:564-571).
-8. **Rivals react to noise.** Spec 6 (v3-spec.md:87): neutral rivals avoid loud spots; hostile rivals come. Code: no crew reacts to noise except a waiting cutthroat crew hearing ≥ 4 in the player phase (common.ts:492). Not implemented.
-9. **"Perfect: other actions make no noise".** Spec 3 (v3-spec.md:46). Code has no general rule: Smash always makes noise 4 (delve.ts:1661), escape always 1 (delve.ts:1744), shove always 2 (delve.ts:1622); only Pick is silent on all hits (delve.ts:1643-1645).
-10. **Shove into a burning hex.** Spec 14.3 (v3-spec.md:172): into a fire (forge, vent, burning hex): 3 damage. Code: forge/solid fires 3 (falls.ts:189), vents 3 on landing (falls.ts:255-258); a burning hex is an ordinary move (no immediate damage; 1 burn damage at the next world phase).
-11. **Gloam rise anchor on Level 3.** Spec 16.2 (v3-spec.md:284): rises 4..6 from the nearest unlit hero. Code: 4..6 from the first unlit hero in party order (world-phase.ts:618).
-12. **Gloam in pitch black targets.** Spec 5 (v3-spec.md:80): moves toward the nearest active hero and hits when adjacent. Code: in every case it targets only heroes on unlit hexes and keeps to dark hexes (world-phase.ts:261-276, :512).
+1. **Orc, spider, berserker stats.** Spec 7 table (never revised later): orc 55%, spider 60%, berserker 9 HP, 2 damage. Code: orc 60%, spider 65%, berserker 10 HP, 3 damage (src/game/data.ts:198, :199, :201).
+2. **Monster sight.** Spec 16.1 and spec 7: monsters see within 6, and dark heroes within 3 (spec 7: 2). Code: `MONSTER_SIGHT` 8, `MONSTER_DARK_SIGHT` 5 (data.ts:220-221), recorded in decisions.md (V3.7.1) but not in the spec.
+3. **Sisters leave on low light.** Spec 10: goal leave when light ≤ 18 (of the old 40). Code: `SISTERS_LEAVE_LIGHT` 9 (data.ts:329).
+4. **Sisters' tiers.** Spec 20.4 table: Lantern Sisters weapon tier 1 only. Code: weapon 1 and armor 1 (data.ts:605).
+5. **Sisters' purse.** Spec 20.4: killed members drop their purse (30 gold at level 2–3). Code: only cutthroat crews get purses (rivals.ts:101, postCrew; :151 buildCrew); prospectors carry none.
+6. **Leave deal and the prisoner.** Spec 18.6: on Leave they drop the heirloom or prisoner. Code drops heirlooms only (parley.ts:209-216); no crew code ever takes or holds the prisoner.
+7. **Prospectors turning hostile when blocked.** Spec 10: blocked for a full round. Code: unable to move toward their goal 2 rounds running, and only while spotted and neutral (rivals.ts:564-571).
+8. **Rivals react to noise.** Spec 6: neutral rivals avoid loud spots; hostile rivals come. Code: no crew reacts to noise except a waiting cutthroat crew hearing ≥ 4 in the player phase (common.ts:492). Not implemented.
+9. **"Perfect: other actions make no noise".** Spec 3. Code has no general rule: Smash always makes noise 4 (delve.ts:1661), escape always 1 (delve.ts:1744), shove always 2 (delve.ts:1622); only Pick is silent on all hits (delve.ts:1643-1645).
+10. **Shove into a burning hex.** Spec 14.3: into a fire (forge, vent, burning hex): 3 damage. Code: forge/solid fires 3 (falls.ts:189), vents 3 on landing (falls.ts:255-258); a burning hex is an ordinary move (no immediate damage; 1 burn damage at the next world phase).
+11. **Gloam rise anchor on Level 3.** Spec 16.2: rises 4..6 from the nearest unlit hero. Code: 4..6 from the first unlit hero in party order (world-phase.ts:618).
+12. **Gloam in pitch black targets.** Spec 5: moves toward the nearest active hero and hits when adjacent. Code: in every case it targets only heroes on unlit hexes and keeps to dark hexes (world-phase.ts:261-276, :512).
 13. **Disarm noise in the preview.** Code-internal: the preview reports noise 2 for every disarm (delve.ts:1182), but noise is made only when the trap goes off (delve.ts:1668-1681). The spec doesn't say.
-14. **Captive's gear.** Spec 20.4 (v3-spec.md:518): a captured hero keeps level and gear, losing gold and gems. Code: gold, gems and jewelry are taken by the robbing (crewai.ts:749-752); the rest of their pack is never returned to the stash or the ground (backToCamp only banks packs of heroes who got out, camp.ts:697-706), so it is lost. Tiers and shield stay.
-15. **Freeing a dragged hero by "downing" the dragger.** Spec 20.4 (v3-spec.md:518). Crew members have no downed state; at 0 HP they die (common.ts:399-413). Killing or fearing is the only way.
-16. **Rival Sapper charge damage.** Spec 18.5 (v3-spec.md:403): 3 damage within 1. Superseded by 20.3 (v3-spec.md:502) in practice: crew charges use the standard 4/2 blast (charges.ts:259). `SAPPER_CHARGE_DMG` 3 and `SAPPER_CHARGE_NOISE` (data.ts:571-572) are unused.
-17. **XP by monster.** Spec 1 (v3-spec.md:20): kill +1, berserker +3. Code: also captain 2, ghoul 2 (data.ts:206-207), crew member 1 (common.ts:410). Not in the spec.
+14. **Captive's gear.** Spec 20.4: a captured hero keeps level and gear, losing gold and gems. Code: gold, gems and jewelry are taken by the robbing (crewai.ts:749-752); the rest of their pack is never returned to the stash or the ground (backToCamp only banks packs of heroes who got out, camp.ts:697-706), so it is lost. Tiers and shield stay.
+15. **Freeing a dragged hero by "downing" the dragger.** Spec 20.4. Crew members have no downed state; at 0 HP they die (common.ts:399-413). Killing or fearing is the only way.
+16. **Rival Sapper charge damage.** Spec 18.5: 3 damage within 1. Superseded by 20.3 in practice: crew charges use the standard 4/2 blast (charges.ts:259). `SAPPER_CHARGE_DMG` 3 and `SAPPER_CHARGE_NOISE` (data.ts:571-572) are unused.
+17. **XP by monster.** Spec 1: kill +1, berserker +3. Code: also captain 2, ghoul 2 (data.ts:206-207), crew member 1 (common.ts:410). Not in the spec.
 18. **Level 3 reputation and Level 3 numbers.** The spec never states that Level 3 contracts open at reputation 2 (data.ts:343), nor the Level 3 bounties (rescue 220, recover 260) and heirloom value 180 (data.ts:338-339).
 19. **Named elites.** Not in the spec: a named spawn (Grub the Jailer, Ugluk Red-Hand) gets +2 HP (camp.ts:593).
-20. **Burning damage.** Spec 15.3 (v3-spec.md:219) says fireball hexes burn 2 rounds but gives no damage. Code: 1 damage per world phase to anyone on a burning hex, armor ignored (data.ts:405 `BURN_DMG`, world-phase.ts:660-674); burning hexes also block monster paths (ai.ts:64) and are lit (world.ts:320).
+20. **Burning damage.** Spec 15.3 says fireball hexes burn 2 rounds but gives no damage. Code: 1 damage per world phase to anyone on a burning hex, armor ignored (data.ts:405 `BURN_DMG`, world-phase.ts:660-674); burning hexes also block monster paths (ai.ts:64) and are lit (world.ts:320).
 21. **Dread on a crew member makes the crew hostile.** Code (delve.ts:1493); not in spec 20.2.
 22. **Revive spends the revived hero's turn; potion revive doesn't.** Code: revive sets the revived hero's moved and acted (delve.ts:1780-1781); a potion revive leaves them free to act (delve.ts:1766-1770). Not in the spec.
 23. **Downed timing.** The spec never gives the bleed start. Code: `BLEED_START` 2 (data.ts:14): a downed hero dies in the second world phase; any damage to a downed hero kills them (common.ts:280-283).
-24. **Dragon and sneaking.** Spec 14.4 (v3-spec.md:178): wakes when a hero enters the Lair room. Code: only a walking hero entering wakes it; ending adjacent wakes it unless a sneaking Burglar (dragon.ts:41-50).
-25. **Burglar ability text** (fixed in V3.9.4: the text now reads "Opens chests without using the action."). data.ts:121 `ROLES.burglar`: "takes loot without using the action". Take is free for every hero (delve.ts:389 `FREE`), and opening chests is silent for everyone; the Burglar's real perk is opening chests without using the action (delve.ts:681, :1369).
-26. **Arrival next to sleepers ignores quiet feet.** Spec 24.3 (v3-spec.md:601) gives the Burglar 10% for ending adjacent. Code applies that to walks only; arrivals by fall, climb or grapple wake adjacent sleepers for sure and blink at 25% for anyone (common.ts:549-556).
+24. **Dragon and sneaking.** Spec 14.4: wakes when a hero enters the Lair room. Code: only a walking hero entering wakes it; ending adjacent wakes it unless a sneaking Burglar (dragon.ts:41-50).
+25. ~~Burglar ability text~~: fixed in V3.9.4 (data.ts `ROLES.burglar` now reads "Opens chests without using the action."; Take is free for everyone).
+26. **Arrival next to sleepers ignores quiet feet.** Spec 24.3 gives the Burglar 10% for ending adjacent. Code applies that to walks only; arrivals by fall, climb or grapple wake adjacent sleepers for sure and blink at 25% for anyone (common.ts:549-556).
 27. **Blink, throws and fireball target "in sight".** Spec 15.3/15.4 say "in sight". Code checks the party's visible set, not the caster's own line of sight (delve.ts:430-439 `hexesInSight`).
-28. **Cutpurse can steal hoard pieces.** Spec 7 (v3-spec.md:97): not heirloom. Code excludes only `heirloom` items (story items are heirlooms), so hoard pieces can be stolen (world-phase.ts:551).
-29. **Sounds the spec lists that never happen.** Spec 24.8 (v3-spec.md:636) lists the crew toll as a `shout` and smashing and digging as `crash`. Code: `crewDemand` makes no sound (common.ts:465-477), and no monster or crew member ever smashes or digs; the only `crash` sounds are a locked door forced open, a crew working the winch and a crew gust (ai.ts:148, rivals.ts:521, crewai.ts:713).
-30. **Section 22 missing.** Spec 23 (v3-spec.md:571) and decisions.md refer to section 22 (V3.8 exploration mode); it is not in docs/v3-spec.md at all (numbering jumps from 21 to 23).
+28. **Cutpurse can steal hoard pieces.** Spec 7: not heirloom. Code excludes only `heirloom` items (story items are heirlooms), so hoard pieces can be stolen (world-phase.ts:551).
+29. **Sounds the spec lists that never happen.** Spec 24.8 lists the crew toll as a `shout` and smashing and digging as `crash`. Code: `crewDemand` makes no sound (common.ts:465-477), and no monster or crew member ever smashes or digs; the only `crash` sounds are a locked door forced open, a crew working the winch and a crew gust (ai.ts:148, rivals.ts:521, crewai.ts:713).
+30. ~~Section 22 missing~~: fixed in V3.9.4 (a stub now points to the shelf branch).
 
 Rules I could not confirm in the engine (UI-only or unverified):
 
