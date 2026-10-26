@@ -626,11 +626,17 @@ export const STORY: Record<StoryId, {
   where: string;
   /** Contract kind word. */
   verb: 'Rescue' | 'Recover';
-  /** What it unlocks, short ("The infirmary heals for gold"). */
+  /** What it unlocks, short ("The infirmary: heal for gold"). */
   unlocks: string;
-  /** The station it lights up. */
-  station: 'infirmary' | 'tavern' | 'smithy' | 'quartermaster';
-  /** The line on return to camp. */
+  /** V4.0: the Lowgate step where its service now lives. */
+  step: 'party' | 'outfit';
+  /** V4.0: the won-back banner's headline ("Brother Aldric is home."). */
+  home: string;
+  /** V4.0: the won-back banner's second line: what changed and where it lives now. */
+  homeLine: string;
+  /** V4.0: the ribbon house's hover once home ("Heal the wounded when you pick the party."). */
+  service: string;
+  /** The line on return to camp (the summary). */
   line: string;
   /** Pack tooltip for story items. */
   itemTip: string;
@@ -642,7 +648,10 @@ export const STORY: Record<StoryId, {
     where: 'Level 1, the chapel',
     verb: 'Rescue',
     unlocks: 'The infirmary: heal for gold',
-    station: 'infirmary',
+    step: 'party',
+    home: 'Brother Aldric is home.',
+    homeLine: 'He sets up in the old chapel. From now on, wounded heroes can be healed for gold when you pick the party.',
+    service: 'Heal the wounded when you pick the party.',
     line: 'Brother Aldric sets up in the old chapel. The infirmary is open.',
     itemTip: '',
     when: 'from the start',
@@ -652,7 +661,10 @@ export const STORY: Record<StoryId, {
     where: 'Level 1, the kitchens',
     verb: 'Rescue',
     unlocks: 'The Gilded Flagon: four recruits, some seasoned',
-    station: 'tavern',
+    step: 'party',
+    home: 'Old Wim is home.',
+    homeLine: 'He lights the hearth of the Gilded Flagon. Better hands come looking for work: hire them when you pick the party.',
+    service: 'Better hands to hire when you pick the party.',
     line: 'Old Wim lights the hearth of the Gilded Flagon. Better hands come looking for work.',
     itemTip: '',
     when: 'at reputation 1',
@@ -662,7 +674,10 @@ export const STORY: Record<StoryId, {
     where: 'Level 2, the forge',
     verb: 'Rescue',
     unlocks: 'The forge, and metalwork at the peddler',
-    station: 'smithy',
+    step: 'outfit',
+    home: 'Gerda the smith is home.',
+    homeLine: 'She stokes the forge. Blades, mail and shields are on each hero when you outfit the party, and the peddler sells metalwork again.',
+    service: 'Blades, mail and shields when you outfit the party.',
     line: 'Gerda stokes the forge. Steel can be bought and mended again.',
     itemTip: '',
     when: 'at reputation 1',
@@ -672,7 +687,10 @@ export const STORY: Record<StoryId, {
     where: 'Level 2, the barracks',
     verb: 'Recover',
     unlocks: 'The first four ales at the Flagon',
-    station: 'tavern',
+    step: 'outfit',
+    home: 'The brewing copper is home.',
+    homeLine: 'Wim pours the first ales. Pour one for a hero when you outfit the party.',
+    service: 'Ales on tap when you outfit the party.',
     line: 'The brewing copper is back on its bricks. Wim pours the first ales.',
     itemTip: 'Heavy: whoever carries it moves 3 at most. Carry it out and it goes home to Lowgate, not the cart. It can\'t be sold.',
     when: 'once Old Wim is home',
@@ -682,14 +700,17 @@ export const STORY: Record<StoryId, {
     where: 'Level 3, the Drain',
     verb: 'Recover',
     unlocks: 'The rest of the ales, and level 3 recruits',
-    station: 'tavern',
+    step: 'outfit',
+    home: "Wim's cask book is home.",
+    homeLine: 'The old recipes are back, and so are the old hands: the strong ales when you outfit the party, seasoned recruits when you pick it.',
+    service: 'The strong ales when you outfit the party.',
     line: "Wim reads his cask book by the fire. The old recipes are back, and so are the old hands.",
     itemTip: 'Carry it out and it goes home to Lowgate, not the cart. It can\'t be sold.',
     when: 'once the copper is home and Level 3 is open',
   },
 };
 
-/** "Rescue Gerda the smith (Level 2, the cellblock)." */
+/** "Rescue Gerda the smith (Level 2, the forge)." */
 export function storyFix(id: StoryId): string {
   const st = STORY[id];
   return `${st.verb} ${st.who} (${st.where})`;
@@ -791,3 +812,152 @@ export function dealLine(crew: string, deal: DealKind, job: JobKind | undefined,
       return `You draw steel on ${crew.replace(/^The /, 'the ')}.`;
   }
 }
+
+// ------------------------------------------------------------ V4.0: Lowgate, the four steps before a delve
+
+/** V4.0: the plan tag and "Best at" line on a recruit card (pillar 15: what the hire is for, no numbers). */
+export const CLASS_PLAN: Record<AnyClass, { tag: string; best: string }> = {
+  heir: { tag: 'Leader', best: 'Keeping the squad sharp: Rally and Brace.' },
+  sellsword: { tag: 'Front line', best: 'Taking the hits meant for someone else.' },
+  burglar: { tag: 'Stealth', best: 'Sneaking at full pace and backstabbing for double damage.' },
+  ranger: { tag: 'Ranged', best: 'Knocking enemies into pits from across the room.' },
+  sapper: { tag: 'Loud', best: 'Blowing a new way through walls and doors.' },
+  pyromancer: { tag: 'Loud', best: 'Burning crowds and keeping the lantern lit.' },
+  shadowmancer: { tag: 'Stealth', best: "Getting the party past what it can't fight." },
+  hedgewitch: { tag: 'Support', best: 'Keeping everyone standing: mend, ward, gust.' },
+  mage: { tag: 'Spells', best: 'Fire, light and mending.' },
+};
+
+/** V4.0: one ability chip on a recruit card: its name, kind, a plain sentence, and its numbers (hover only). */
+export interface AbilityChip {
+  name: string;
+  kind: 'Ability' | 'Action' | 'Spell' | 'Passive' | 'Weapon';
+  plain: string;
+  nums: string;
+}
+
+const BRACE_CHIP: AbilityChip = { name: 'Brace', kind: 'Action', plain: 'Plants their feet: hits land softer and miss more often.', nums: `hits −1 · enemies −${V37.bracePenalty}% · until their next turn` };
+
+/** V4.0: ability chips per class (names on the card, the rest on hover). Numbers from data.ts. */
+export const CLASS_ABILITIES: Record<AnyClass, AbilityChip[]> = {
+  heir: [
+    { name: 'Rally', kind: 'Ability', plain: 'Shouts the others on: everyone near him gains Focus.', nums: `+1 Focus · allies within 3 · ready every 3 rounds · max ${FOCUS_MAX}` },
+    { ...BRACE_CHIP, plain: 'Plants his feet: hits land softer and miss more often.' },
+  ],
+  sellsword: [
+    { name: 'Guard', kind: 'Ability', plain: 'Steps in front of a friend and takes the blows meant for them.', nums: 'an ally next to you · until your next turn' },
+    { name: 'Strong shove', kind: 'Ability', plain: 'Shoves harder than anyone. Into a pit, it falls; into a wall, it hurts.', nums: '3 Might slots (others 2) · 2 hits push 1 hex · noise 2' },
+    BRACE_CHIP,
+  ],
+  burglar: [
+    { name: 'Pick locks', kind: 'Ability', plain: "Opens locked doors and chests quietly: a bent nail each delve, or the smith's proper picks.", nums: 'improvised: 2 Finesse slots, used up · lockpicks: 3 slots, kept' },
+    { name: 'Quietest feet', kind: 'Passive', plain: 'Sneaks at full pace and barely wakes anything.', nums: `sneak 4 · ${V39.burglarWakeSneak}% to wake a sleeper per hex (others ${V37.wakeSneak}%) · noticed at ${V39.burglarNoticeLitSneak} lit` },
+    { name: 'Backstab', kind: 'Passive', plain: "Strikes twice as hard from behind an enemy that hasn't noticed them.", nums: `+${V39.backstabSlots} slot · ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage · not the Dragon or the Gloam` },
+    { name: 'Light fingers', kind: 'Passive', plain: 'Opens chests without spending the action.', nums: 'free · silent' },
+  ],
+  ranger: [
+    { name: 'Longbow', kind: 'Weapon', plain: 'Shoots across the room. Clumsy up close.', nums: `3 Finesse slots · 2 dmg · range ${CLASSES.ranger.weapon.range ?? 6} · noise 1 · adjacent: 1 slot less` },
+    { name: 'Overwatch', kind: 'Action', plain: 'Waits for the first enemy to move, and shoots it.', nums: `range ${OVERWATCH_RANGE} · fires in the castle's turn` },
+    { name: 'Knockback shot', kind: 'Action', plain: 'A shot that shoves. Two hits push the target a hex straight back; off a ledge, it falls.', nums: `2 Finesse slots · range ${KNOCKBACK_RANGE} · noise 1` },
+    { name: 'Hamstring', kind: 'Action', plain: 'A shot at the legs: a hit pins the target where it stands.', nums: `1 Finesse slot at −${V37.hamstringPenalty}% · range ${V37.hamstringRange} · rooted ${V37.hamstringRounds} rounds · noise 1` },
+  ],
+  sapper: [
+    { name: 'Satchel', kind: 'Passive', plain: 'Brings charges of their own on every delve.', nums: `${SAPPER_CHARGES} charges · bought ones add to them` },
+    { name: 'Set charge', kind: 'Action', plain: 'Sets a charge on a fuse and blows walls, doors and anything near them open.', nums: `fuse 1 or 2 · ${V37.blastInner} dmg within 1, ${V37.blastOuter} within 2 · noise ${V37.blastNoise}` },
+    { name: 'Throw charge', kind: 'Action', plain: 'Lobs a lit charge.', nums: `range ${THROW_CHARGE_RANGE} · fuse 1` },
+    { name: 'Dig', kind: 'Action', plain: 'Clears rubble or a cracked wall, no charge needed.', nums: `next to you · noise ${DIG_NOISE}` },
+    BRACE_CHIP,
+  ],
+  pyromancer: [
+    { name: 'Firebolt', kind: 'Spell', plain: 'Hurls fire at range.', nums: '1 mana · 3 Wits slots · 2 dmg · range 5 · noise 3' },
+    { name: 'Fireball', kind: 'Spell', plain: 'Burns everyone in a small area, friends included.', nums: `2 mana · radius 1 · range ${FIREBALL_RANGE} · 3 Wits slots · 2 dmg · burns ${BURN_ROUNDS} rounds · noise ${FIREBALL_NOISE}` },
+    { name: 'Kindle', kind: 'Spell', plain: 'Feeds the lantern, silently.', nums: `1 mana · +${KINDLE_LIGHT} light` },
+  ],
+  shadowmancer: [
+    { name: 'Veil', kind: 'Spell', plain: 'Hides a friend from monsters for a while.', nums: `1 mana · within ${SPELL_RANGE} · ${VEIL_ROUNDS} rounds · broken by attacking or noise ${VEIL_BREAK_NOISE}+` },
+    { name: 'Sleep', kind: 'Spell', plain: 'Puts a monster to sleep.', nums: `1 mana · 2 Wits slots · range ${SLEEP_RANGE} · not the Dragon or the Gloam` },
+    { name: 'Blink', kind: 'Spell', plain: 'Steps through the dark to a spot in sight, even over a pit.', nums: `1 mana · up to ${BLINK_RANGE} hexes · silent` },
+    { name: 'Dread', kind: 'Spell', plain: 'Terrifies a monster into running, taking free swings as it goes.', nums: `1 mana · ${V37.dreadSlots} Wits slots · range ${V37.dreadRange} · ${V37.fearRounds} turns · not the Dragon or the Gloam` },
+    { name: 'Night thorn', kind: 'Spell', plain: 'A silent thorn that slips past armor.', nums: `1 mana · 2 Wits slots · range ${V37.thornRange} · 1 dmg, ignores armor` },
+  ],
+  hedgewitch: [
+    { name: 'Mend', kind: 'Spell', plain: "Closes wounds, their own or a friend's.", nums: `1 mana · heal 4 · within ${SPELL_RANGE} · silent` },
+    { name: 'Ward', kind: 'Spell', plain: 'A friend takes less from every hit for a while.', nums: `1 mana · within ${SPELL_RANGE} · −1 per hit · ${WARD_ROUNDS} rounds` },
+    { name: 'Gust', kind: 'Spell', plain: 'Blows everything near a spot one hex outward. Off a ledge, it falls.', nums: `1 mana · range ${GUST_RANGE} · radius 1 · noise ${GUST_NOISE}` },
+    { name: 'Briar', kind: 'Spell', plain: 'Thorns that sting and hold a target in place.', nums: `1 mana · 2 Wits slots · range ${V37.briarRange} · 1 dmg · rooted 1 round` },
+  ],
+  mage: [],
+};
+
+/** V4.0: a headstone's line per class (the graves). */
+export const EPITAPH: Record<AnyClass, string> = {
+  heir: 'The last of the Hobarts.',
+  sellsword: 'Held the line.',
+  burglar: 'Never heard coming.',
+  ranger: 'Kept watch to the end.',
+  sapper: 'Went out with a bang.',
+  pyromancer: 'Burned bright.',
+  shadowmancer: 'Gone into the dark.',
+  hedgewitch: 'Mended everyone but herself.',
+  mage: 'The light went out.',
+};
+
+/** V4.0: what a party can do, lit when someone brings it (step 2). `who` says which classes or kit provide it. */
+export const PARTY_CAN: { id: string; label: string; classes: AnyClass[]; who: string }[] = [
+  { id: 'melee', label: 'Fight up close', classes: [], who: 'Anyone with a blade, hammer or staff.' },
+  { id: 'rally', label: 'Rally the others', classes: ['heir'], who: 'Keven, the heir.' },
+  { id: 'range', label: 'Shoot from range', classes: ['ranger'], who: 'A Ranger.' },
+  { id: 'unseen', label: 'Slip past unseen', classes: ['burglar', 'shadowmancer'], who: 'A Burglar or a Shadowmancer.' },
+  { id: 'locks', label: 'Pick locks quietly', classes: ['burglar'], who: 'A Burglar, or anyone carrying the smith\'s lockpicks.' },
+  { id: 'heal', label: 'Heal in the castle', classes: ['hedgewitch'], who: 'A Hedgewitch.' },
+  { id: 'blast', label: 'Blast through walls', classes: ['sapper'], who: 'A Sapper.' },
+  { id: 'burn', label: 'Burn a crowd', classes: ['pyromancer'], who: 'A Pyromancer.' },
+];
+
+/** V4.0: the peddler's wares, short and without numbers (the full rule is on hover), in groups. */
+export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: string }> = {
+  torch: { group: 'light', short: 'A light of your own, for a while.' },
+  oil: { group: 'light', short: 'Tops up the lantern.' },
+  potion: { group: 'light', short: 'Heals, or gets a downed friend up.' },
+  nightsight: { group: 'light', short: 'See in the dark for a while.' },
+  rope: { group: 'around', short: 'Down a pit, and back up.' },
+  charge: { group: 'around', short: 'Blows doors, chests and walls open. Loud.' },
+  hook: { group: 'around', short: 'Climb out of a pit, again and again.' },
+  key: { group: 'around', short: 'Opens one lock, silently.' },
+  lockpicks: { group: 'around', short: 'Pick locks quietly, as often as you like.' },
+  dart: { group: 'quiet', short: 'Puts a monster to sleep, silently.' },
+  smoke: { group: 'quiet', short: 'Blinds both ways. Hunters lose you.' },
+  glue: { group: 'quiet', short: 'Sticks monsters where they stand.' },
+  firecracker: { group: 'quiet', short: 'A loud bang, somewhere else.' },
+  caltrops: { group: 'quiet', short: 'Stops the first monster across.' },
+};
+export const WARE_GROUP: Record<'light' | 'around' | 'quiet', string> = { light: 'Light and mending', around: 'Getting in and around', quiet: 'Quiet work' };
+
+/** V4.0: Mott the peddler's patter, one per delve in turn. */
+export const PEDDLER_PATTER = [
+  'Light, rope and a little luck. Two of those I can sell you.',
+  'Everything is fresh. Well. Most of it.',
+  'Torches burn out. Regrets don\'t. Take a spare.',
+  'Smoke is for leaving. Glue is for making sure nobody follows.',
+  'Back again? Then something I sold you worked.',
+  'The castle takes what you don\'t bring out. I only take coin.',
+];
+
+/** V4.0: an ale in one short line for the picker (the full text is on hover). */
+export const ALE_SHORT: Record<AleKind, string> = {
+  glowworm: 'Glows: a little light of their own.',
+  featherfoot: "The first fall doesn't hurt.",
+  mole: 'Can dig like a Sapper.',
+  reserve: 'An extra point of Focus.',
+  smuggler: 'Sneaks farther, and silently.',
+  fireside: 'Heals a little at every change of level.',
+  blackcask: 'Nobody knows. Usually good.',
+};
+
+/** V4.0: the known ways into the castle, in a line each (open ones; locked and blocked ones use the engine's hint). */
+export const ENTRANCE_LINE: Record<string, string> = {
+  'Main gate': 'South, through the gatehouse.',
+  Gatehouse: 'South, through the gatehouse.',
+  'Sally port': 'A side door in the west wall.',
+  'East breach': 'A gap in the east wall.',
+};
