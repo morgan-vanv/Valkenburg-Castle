@@ -24,6 +24,7 @@ import {
 } from './ai';
 import { HAMSTRING_RANGE } from './data';
 import { computeRivalIntents, rivalsAct } from './rivals';
+import { relockGate } from './ways';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, noticeHero, perceivable } from './stealth';
 
@@ -548,7 +549,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
         break;
       }
-      const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom');
+      const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom' && i.kind !== 'gatekey'); // V4.0: never the sally key
       if (!pool.length) {
         hurtHero(c, t.hero, Math.max(1, st.dmg - t.armor), m.id);
         break;
@@ -709,6 +710,7 @@ export function worldPhase(c: Ctx): void {
   }
   // 3. Rivals. 4. The Gloam.
   rivalsAct(c);
+  relockGate(c); // V4.0 (spec 25.4): a crew that came in by the sally port bars it behind itself
   gloamPhase(c);
   // V3.7 (spec 20.3): fuses count down; charges at 0 go off now, at the end of the world phase.
   tickFuses(c);

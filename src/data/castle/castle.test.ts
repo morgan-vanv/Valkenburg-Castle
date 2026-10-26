@@ -686,8 +686,10 @@ describe('castle V3.7: breakable walls (20.3)', () => {
   it('with every breakable wall broken, the shortest path from each entrance to each site is at least 60% of the normal one', () => {
     const cracked = allTiles().filter(([, t]) => t.kind === 'cracked').map(([p]) => p);
     const broken = new Set([...breakable, ...cracked].map(posKey));
+    // V4.0 (spec 25): "normal" is with the shut ways opened (the east breach's rubble cleared).
+    const ways = new Set((castle.shutWays ?? []).filter((x) => x.kind === 'rubble').flatMap((x) => x.at).map(posKey));
     for (const en of castle.entrances) {
-      const normal = walkCost(en, new Set());
+      const normal = walkCost(en, ways);
       const blown = walkCost(en, broken);
       for (const site of castle.contractSites) {
         const a = normal.get(posKey(site.at));
@@ -696,6 +698,89 @@ describe('castle V3.7: breakable walls (20.3)', () => {
         expect(b, `${show(en)} -> ${site.id}`).toBeDefined();
         expect(b! / a!, `${show(en)} -> ${site.id}: ${b} of ${a}`).toBeGreaterThanOrEqual(0.6);
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------- V4.0 (spec 25): shut ways in
+
+describe('castle V4.0: the shut ways in (spec 25)', () => {
+  const ways = castle.shutWays ?? [];
+  const sally = ways.find((x) => x.id === 'sally')!;
+  const breach = ways.find((x) => x.id === 'breach')!;
+
+  it('names the three entrances and shuts the sally port with a barred gate and the east breach with rubble', () => {
+    expect(castle.entranceNames).toEqual(['Main gate', 'Sally port', 'East breach']);
+    expect(sally.entrance).toBe(1);
+    expect(breach.entrance).toBe(2);
+    expect(sally.kind).toBe('gate');
+    expect(sally.at.length).toBe(1);
+    const gate = tile(sally.at[0]!);
+    expect(gate?.kind).toBe('door');
+    expect(gate?.locked && gate?.barred).toBe(true);
+    expect(breach.kind).toBe('rubble');
+    for (const p of breach.at) expect(tile(p)?.kind === 'cracked' && tile(p)?.heap, show(p)).toBe(true);
+    // The rival entrances are exactly the two shut ways.
+    expect(castle.rivalEntrances.map(posKey).sort()).toEqual([sally, breach].map((x) => posKey(castle.entrances[x.entrance]!)).sort());
+  });
+
+  /** Walk from the main gate: doors pass (locked ones too), but not the barred gate or the rubble. */
+  function fromMainGate(): Set<string> {
+    const shut = new Set(ways.flatMap((x) => x.at).map(posKey));
+    const seen = new Set<string>();
+    const queue: Pos[] = [castle.entrances[0]!];
+    while (queue.length) {
+      const p = queue.pop()!;
+      const k = posKey(p);
+      if (seen.has(k) || !passable(p) || shut.has(k)) continue;
+      seen.add(k);
+      queue.push(...posNeighbors(p));
+      for (const link of castle.links) {
+        if (samePos(link.a, p)) queue.push(link.b);
+        if (samePos(link.b, p)) queue.push(link.a);
+      }
+    }
+    return seen;
+  }
+
+  it('keeps every contract site, the key and the far side of each shut way reachable from the main gate', () => {
+    const seen = fromMainGate();
+    for (const s of castle.contractSites) expect(seen.has(posKey(s.at)), s.id).toBe(true);
+    expect(seen.has(posKey(sally.keyAt!)), 'the key').toBe(true);
+    for (const way of ways) {
+      // The exit is cut off, but the gate or rubble can be reached from inside.
+      expect(seen.has(posKey(castle.entrances[way.entrance]!)), `${way.id} exit`).toBe(false);
+      expect(way.at.some((p) => posNeighbors(p).some((n) => seen.has(posKey(n)))), `${way.id} from inside`).toBe(true);
+    }
+  });
+
+  it('lays the key on library floor away from spawns, chests, coins, traps and contract sites', () => {
+    const k = sally.keyAt!;
+    expect(tile(k)?.kind).toBe('floor');
+    expect(tile(k)?.room).toBe('library');
+    const others = [
+      ...castle.spawns.map((s) => s.at),
+      ...castle.chests.map((c) => c.at),
+      ...castle.coins.map((c) => c.at),
+      ...castle.traps.map((t) => t.at),
+      ...castle.contractSites.map((s) => s.at),
+    ];
+    for (const p of others) if (p.level === k.level) expect(distance(p, k), show(p)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('cuts each shut exit off by its obstacle alone (cleared, the exit joins the castle)', () => {
+    for (const way of ways) {
+      const seen = new Set<string>();
+      const queue: Pos[] = [castle.entrances[way.entrance]!];
+      const other = new Set(ways.filter((x) => x !== way).flatMap((x) => x.at).map(posKey));
+      while (queue.length) {
+        const p = queue.pop()!;
+        const k = posKey(p);
+        if (seen.has(k) || other.has(k) || !(passable(p) || way.at.some((a) => samePos(a, p)))) continue;
+        seen.add(k);
+        queue.push(...posNeighbors(p));
+      }
+      expect(seen.has(posKey(castle.entrances[0]!)), way.id).toBe(true);
     }
   });
 });

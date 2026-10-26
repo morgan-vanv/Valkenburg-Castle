@@ -3,7 +3,7 @@
 // wedges (V3.9: no blind-arc wash, no free-swing confirm), Dread (bar, preview, feared tag),
 // the set-charge flow (aim with breakable walls outlined, fuse picker, fuse marker and hover), the
 // blast (wall to rubble, log line, hover "Blast rubble"), crew member info (hover, parley card,
-// intents, dragging), the captured banner, camp captives and "Bring back" contracts; no console errors.
+// intents, dragging), the captured banner, "Bring back" contracts in camp (V4.0: on the Job step); no console errors.
 //   node scripts/v37-ui-check.mjs <baseUrl>     (http://localhost:5184/?fixture=1, or the real engine)
 //   SHOTS=<dir> saves v37-risks.png (move preview with risks) and v37-fuse.png / v37-blast.png.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -676,18 +676,16 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     window.vc.load(s);
   });
   await p.waitForTimeout(250);
-  await p.click('.station[data-station="board"]').catch(() => {});
+  // V4.0: the captives panel is gone; the "Bring back" card carries the captive's info.
+  const card = await p.$eval('.lg-card.captive', (e) => e.innerText).catch(() => '');
+  check('"Bring back <name>" contract with its own seal and look', /Bring back/.test(card) && /Taken by The Ferrymen/i.test(card) && /The prisoner is yours/i.test(card) && !!(await p.$('.lg-card.captive .lg-seal-cap')), card.replace(/\n/g, ' | ').slice(0, 160));
+  check('...under a "Taken by a crew" heading', !!(await p.$('.lg-captive-h')));
+  const tip = await p.$eval('.lg-card.captive .lg-prisoner', (e) => e.dataset.tip).catch(() => '');
+  check('...prisoner box hover: hideout, 1 HP, gold lost', /hideout/.test(tip) && /1 HP/.test(tip) && /gold and gems are gone/.test(tip), tip.slice(0, 120));
+  check('...no separate captives panel', !(await p.$('.captives-panel')));
+  await p.click('.lg-card.captive');
   await p.waitForTimeout(150);
-  const panel = await p.$eval('.captives-panel', (e) => e.innerText).catch(() => '');
-  check('camp: Captives panel under the roster', /Captives/i.test(panel) && /held by The Ferrymen/.test(panel), panel.replace(/\n/g, ' | ').slice(0, 100));
-  const row = await p.$eval('.cap-row', (e) => e.title).catch(() => '');
-  check('...row tooltip: hideout, HP 1, gold lost', /hideout/.test(row) && /1 HP/.test(row), row.slice(0, 120));
-  const card = await p.$eval('.contract.captive', (e) => e.innerText).catch(() => '');
-  check('"Bring back <name>" contract pinned first with its own look', /Bring back/.test(card) && /Taken by The Ferrymen/i.test(card) && /The prisoner is yours/i.test(card), card.replace(/\n/g, ' | ').slice(0, 160));
-  check('...under a "Taken by a crew" heading', !!(await p.$('.board-h.captive-h')));
-  await p.click('.cap-row .cap-go').catch(() => {});
-  await p.waitForTimeout(150);
-  check('"Bring back" opens the prepare screen on that job', /Bring back/.test(await p.evaluate(() => document.body.innerText)) && !!(await p.$('.prep-contracts .btn.on')));
+  check('choosing "Bring back" selects that job', (await p.$eval('.lg-card.captive', (e) => e.getAttribute('aria-pressed'))) === 'true' && /Bring back/.test(await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)));
 }
 
 console.log(`\n${failed ? `${failed} FAILED` : 'all passed'}, ${skipped} skipped, ${errors} console errors`);

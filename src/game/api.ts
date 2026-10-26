@@ -136,6 +136,20 @@ export interface Visibility {
   lit: Set<string>;
 }
 
+/** V4.0 (spec 25): one castle entrance as the Set out screen sees it. */
+export interface EntranceInfo {
+  /** Index into castle.entrances (the `entrance` of a startDelve command). */
+  index: number;
+  /** "Main gate", "Sally port", "East breach". */
+  name: string;
+  /** open: usable; locked: the sally port's barred gate is shut; blocked: the east breach is choked with rubble. */
+  state: 'open' | 'locked' | 'blocked';
+  /** Opened, or its exit hex or the gate/rubble in front of it is in the campaign's explored memory (or this delve's). */
+  known: boolean;
+  /** While shut: a short line on what it is, e.g. "Choked with rubble." */
+  hint?: string;
+}
+
 export interface Engine {
   castle(): CastleDef;
   newGame(seed: number): GameState;
@@ -183,6 +197,10 @@ export interface Engine {
   deals(state: GameState, heroId: string): DealOption[];
   /** V3.2: one-line role and the ability/spell lines for a class, for recruit cards. */
   classInfo(cls: HeroClass): ClassInfo;
+  /** V4.0 (spec 25): every entrance, index order, with whether it's open and whether the campaign knows it. startDelve refuses one that isn't open. */
+  entrances(s: GameState): EntranceInfo[];
+  /** V4.0 (spec 25.5): hexes the campaign has explored, as hex keys "q,r", one entry per castle level (empty arrays on a new campaign). */
+  castleMemory(s: GameState): { level: number; hexes: string[] }[];
   /** V3.2: why startDelve would refuse this party now (e.g. "Hire at least one hero at the tavern."), or null. */
   partyProblem(state: GameState, heroIds: string[]): string | null;
   heroById(state: GameState, id: string): Hero | undefined;

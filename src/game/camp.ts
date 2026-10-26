@@ -21,6 +21,7 @@ import { makeItem, packUsed, valueOf } from './common';
 import { isKit, satchelName } from './charges';
 import { facingInto } from './stealth';
 import { canEnter, kindAt, type World } from './world';
+import { applyOpenWays, entranceList, isGateKey, mergeDelve, shutWays, startWays, wayOpen } from './ways';
 
 export interface ContractX extends Contract {
   /** Prisoner or heirloom name. */
@@ -69,6 +70,8 @@ export function newGame(w: World, seed: number): GameStateX {
       lostGear: [],
       village: newVillage(),
       captives: [], // V3.7 (spec 20.4): filled by the crews rework
+      opened: {}, // V4.0 (spec 25): a new campaign goes in by the main gate only
+      explored: {},
     },
     delve: null,
     summary: null,
@@ -238,7 +241,8 @@ function storyBoard(w: World, s: GameStateX): Contract[] {
     const site = w.castle.contractSites.find((x) => x.id === st.siteId);
     if (!site) continue;
     const lvl = Math.min(3, site.at.level);
-    const warnings = ['Story', st.unlocks];
+    // V4.0: no "Story"/"Unlocks" lines: the board shows story status itself.
+    const warnings: string[] = [];
     if (lvl > 1) warnings.push(`Level ${lvl}`);
     if (st.heavy) warnings.push('Heavy: its carrier moves 3');
     const c: ContractX = {
@@ -287,6 +291,17 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       C.gold += v;
       C.stash = C.stash.filter((i) => !sell.includes(i));
       events.push({ type: 'say', text: `Sold ${sell.length} valuables for ${v} gold.` });
+      return { events };
+    }
+    case 'sell': {
+      // V4.0: one valuable at a time, from Keven's cart.
+      const it = C.stash.find((i) => i.id === cmd.itemId);
+      if (!it) return err('No such item on the cart.');
+      if (it.story || !(it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'heirloom' || it.kind === 'hoard')) return err(`${it.name} can't be sold.`);
+      const v = valueOf([it]);
+      C.gold += v;
+      C.stash = C.stash.filter((i) => i !== it);
+      events.push({ type: 'say', text: `Sold ${it.name} for ${v} gold.` });
       return { events };
     }
     case 'hire': {
@@ -442,6 +457,12 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   }
   const entrance = w.castle.entrances[cmd.entrance];
   if (!entrance) return err('No such entrance.');
+  // V4.0 (spec 25): a shut way in can't be used until it's opened.
+  const ent = entranceList(w, s)[cmd.entrance];
+  if (ent && ent.state !== 'open') {
+    const name = ent.name.charAt(0).toLowerCase() + ent.name.slice(1);
+    return err(`The ${name} is ${ent.state === 'locked' ? 'barred shut' : 'choked with rubble'}. Go in by the main gate.`);
+  }
   const site = w.castle.contractSites.find((x) => x.id === contract.siteId);
   if (!site) return err('The contract site is missing.');
   // Packs from the stash.
@@ -504,9 +525,16 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     notes: [],
     nextMonster: monsters.length + 1,
     taken: [...used],
+    // V4.0 (spec 25): the ways in already opened this campaign stand open in this delve.
+    ways: startWays(w, s),
   };
+  applyOpenWays(w, d);
   // Coins and lost gear.
   for (const coin of w.castle.coins) d.ground.push({ at: { ...coin.at }, items: [makeItem({ s }, 'gold', coin.gold)] });
+  // V4.0 (spec 25.2): while its gate is shut, a copy of the gate's key lies where the castle keeps it.
+  for (const way of shutWays(w.castle)) {
+    if (way.kind === 'gate' && way.keyAt && !wayOpen(s, way.id)) d.ground.push({ at: { ...way.keyAt }, items: [makeItem({ s }, 'gatekey')] });
+  }
   for (const lg of C.lostGear) {
     d.ground.push({ at: { ...lg.at }, items: lg.items.map((i) => ({ ...i })) });
     d.lostIds!.push(...lg.items.map((i) => i.id));
@@ -698,7 +726,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   for (const h of out) {
     s.hoardTaken = (s.hoardTaken ?? 0) + h.pack.filter((i) => i.kind === 'hoard').length;
     for (const it of h.pack) {
-      if (it.story) continue; // spec 18.3: to the village, below
+      if (it.story || isGateKey(it)) continue; // spec 18.3: to the village, below; V4.0: the sally key opens its gate (ways.ts)
       if (isKit(it)) continue; // spec 20.3, 21.4: the satchel and the improvised pick refill each delve
       if (it.kind === 'gold') C.gold += it.amount;
       else C.stash.push(it);
@@ -731,13 +759,15 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i));
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i) && !isGateKey(i));
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;
   C.litBraziers = [...d.lit];
   // Spec 18.3: a story contract done brings its villager or thing home.
   const events: GameEvent[] = [];
+  // V4.0 (spec 25): ways opened (or the sally key carried out) stay open; every hex seen is remembered.
+  for (const text of mergeDelve(w, s, d)) events.push({ type: 'say', text });
   const story = d.contract.story;
   C.village ??= newVillage();
   if (story && sum.contractDone && !C.village[story]) {

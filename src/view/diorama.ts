@@ -18,7 +18,7 @@ import { CLASS_COLORS, COLORS, FLOOR_TOP, HEX, WALL_HEIGHT, easeInOut, easeOutBa
 import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, facingOf, fuseSide } from './stealth';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
-import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
+import { exitList, exitMarker, exitShut, linkEnds, linkMarker, prizeInHand } from './links';
 import { heardFade, heardIcon, heardTitle } from './sounds';
 
 const MAX_LIGHTS = 12;
@@ -1035,7 +1035,8 @@ export class Diorama {
     }
     // 15.7: level markers over explored stairs and lift ends; the lift's is greyed until the winch runs.
     for (const l of this.linkTags) {
-      const show = l.level === this.shownLevel && this.vis.explored.has(l.key) && !!this.state?.delve;
+      // V4.0 (spec 25): no "Way out" over an exit whose way is still shut.
+      const show = l.level === this.shownLevel && this.vis.explored.has(l.key) && !!this.state?.delve && !(l.exit && this.castle && exitShut(this.castle, this.state, l.pos));
       if (!show) {
         l.el.style.display = 'none';
         continue;
@@ -1432,7 +1433,7 @@ export class Diorama {
   private refreshExitRings(): void {
     const d = this.state?.delve;
     const go = !!d && !!this.castle && prizeInHand(d);
-    const list = go ? exitList(this.castle!, this.entrance, this.shownLevel).filter((e) => e.entrance || this.vis.explored.has(posKey(e.at))) : [];
+    const list = go ? exitList(this.castle!, this.entrance, this.shownLevel).filter((e) => (e.entrance || this.vis.explored.has(posKey(e.at))) && !exitShut(this.castle!, this.state, e.at)) : [];
     const key = list.map((e) => posKey(e.at)).join('|');
     if (key === this.exitRingsKey) return;
     this.exitRingsKey = key;

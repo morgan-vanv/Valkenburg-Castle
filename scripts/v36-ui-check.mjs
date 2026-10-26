@@ -2,8 +2,8 @@
 // exit markers once explored (the entrance says you came in here), "Leave the castle" in the bar
 // with hotkey Q when a hero stands on a way out, the goal box switching to "Get out: nearest way
 // out is ..." once the heirloom is held, exit tags going gold, the hint naming the way out, the
-// night-eye badge and action, lockpicks text in the pack and at the peddler, the 19.2 locked
-// hover text, story briefs on the cards and the Lowgate panel; no console errors.
+// night-eye badge and action, lockpicks text in the pack and on the peddler's wagon, the 19.2 locked
+// hover text, story briefs on the cards; no console errors. (V4.0: the Lowgate who-is-where panel is gone.)
 //   node scripts/v36-ui-check.mjs <baseUrl>          (http://localhost:5183/?fixture=1 until the engine lands)
 //   SHOTS=<dir> saves two shots: a hero on an exit before and after the heirloom is picked up.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -36,20 +36,19 @@ await p.waitForFunction(() => !!window.vc);
 // ---- camp: a new campaign, then the peddler and the notice post
 await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });
 await p.waitForTimeout(150);
-const lowgate = await p.$$eval('.vp-row', (els) => els.map((e) => `${e.dataset.story}: ${e.title}`));
-check('Lowgate panel: surgeon row says the chapel', lowgate.some((t) => /^surgeon:.*chapel/i.test(t)), lowgate[0]);
-check('Lowgate panel: the surgeon row carries the story brief (physic garden)', lowgate.some((t) => /^surgeon:.*physic garden/i.test(t)));
-await p.click('.station[data-station="board"]');
-await p.waitForTimeout(120);
-const card = await p.$eval('.contract.story[data-story="surgeon"]', (e) => e.innerText).catch(() => '');
+// V4.0: the who-is-where panel is gone (owner); the story card keeps the brief, the wagon the rule text on hover.
+const card = await p.$eval('.lg-card.story[data-story="surgeon"]', (e) => e.innerText).catch(() => '');
 check('story card shows the one-line reason from the contract brief', /physic garden|chapel/i.test(card), card.slice(0, 80));
-await p.click('.station[data-station="quartermaster"]');
+await p.click('.lg-step[data-step="outfit"]');
 await p.waitForTimeout(120);
-const rows = await p.$$eval('.shop-row', (els) => els.map((e) => ({ kind: e.dataset.kind, text: e.innerText, locked: e.classList.contains('locked') })));
-const picks = rows.find((r) => r.kind === 'lockpicks');
-const night = rows.find((r) => r.kind === 'nightsight');
-check('peddler lists lockpicks with the 21.4 text, needing the smith', !!picks && /Proper picks, never used up\. A Burglar picks at 3 Finesse slots, anyone else at 2\./.test(picks.text) && picks.locked, picks?.text.slice(0, 60));
-check('peddler lists the night-eye draught locked: brewed at the Flagon (21.3)', !!night && /Drink: 8 rounds without dark penalties/.test(night.text) && night.locked && /Brewed at the Gilded Flagon: rescue Old Wim/.test(night.text), night?.text.slice(0, 90));
+check('the wagon hides lockpicks behind the metalwork tile until the smith is home', !(await p.$('[data-ware="lockpicks"]')) && !!(await p.$('[data-ware="metalwork"]')));
+check('the night-eye draught is not sold until Wim is home (locked stays quiet)', !(await p.$('[data-ware="nightsight"]')));
+await edit("Object.assign(s.campaign.village, { smith: true, innkeeper: true });");
+const picks = await p.$eval('[data-ware="lockpicks"]', (e) => e.dataset.tip).catch(() => '');
+check('with the smith home: lockpicks on the wagon, the 21.4 rule on hover', /Proper picks, never used up\. A Burglar picks at 3 Finesse slots, anyone else at 2\./.test(picks), picks.slice(0, 80));
+const night = await p.$eval('[data-ware="nightsight"]', (e) => e.dataset.tip).catch(() => '');
+check('with Wim home: the night-eye draught on the wagon, its rule on hover', /Drink: 8 rounds without dark penalties/.test(night), night.slice(0, 80));
+await edit("Object.assign(s.campaign.village, { smith: false, innkeeper: false });");
 
 // ---- into the castle (the real engine starts Keven alone: hire until the party is big enough)
 await p.evaluate(async () => {

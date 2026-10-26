@@ -14,6 +14,7 @@ import { say, type Ctx, type DelveX } from './state';
 import { chestLoot, hd, hurtAny, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
+import { checkWays, wayAtHex } from './ways';
 
 /** Engine-private: when a fuse was lit, so one set during a world phase isn't counted down in that same phase. */
 export interface FuseX extends Fuse {
@@ -227,6 +228,8 @@ export function blast(c: Ctx, at: Pos, by: string): void {
       c.d.blown.push(posKey(p));
     } else if (k === 'door') {
       const door = doorAt(c.d, p);
+      // V4.0 (spec 25.2): a blast at the sally port gate opens it for good, even one a crew holds open.
+      if (door && c.d.gateHeld && wayAtHex(c.w.castle, p)) c.d.gateHeld = false;
       if (door && (!door.open || door.locked)) {
         door.open = true;
         door.locked = false;
@@ -246,7 +249,10 @@ export function blast(c: Ctx, at: Pos, by: string): void {
   c.w.fixedCache = null;
   c.ev.push({ type: 'blast', at: { ...at }, by, broke, collapsed, rubbled });
   const setter = hd(c, by) ? nameOf(c, by) : c.d.rivals?.members.find((r) => r.id === by)?.name;
-  say(c, `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.${broke.length ? ' The wall comes down.' : ''}${collapsed.length ? ' The floor gives way.' : ''}`);
+  // V4.0 (spec 25.3): a heap of rubble (a cracked tile with `heap`) is blown clear rather than "a wall".
+  const walls = broke.filter((p) => !c.w.tile(p)?.heap);
+  const heaps = broke.length - walls.length;
+  say(c, `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.${walls.length ? ' The wall comes down.' : ''}${heaps ? ' The rubble is blown clear.' : ''}${collapsed.length ? ' The floor gives way.' : ''}`);
   // Damage: inner ring 4, outer ring 2; the shield for the setter's side.
   const hurt: [string, Pos][] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, m.at]);
@@ -294,4 +300,6 @@ export function blast(c: Ctx, at: Pos, by: string): void {
     push(c, id, at, credit);
   }
   makeNoise(c, at, BLAST_NOISE, { otherLevels: true, ...(isEnemy(c, by) ? { what: 'blast' as const } : {}) });
+  // V4.0 (spec 25): a blast at the sally port's gate or the east breach's rubble opens that way for good.
+  checkWays(c);
 }
