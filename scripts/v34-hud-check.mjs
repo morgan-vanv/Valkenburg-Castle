@@ -1,4 +1,6 @@
 // V3.4 HUD checks, headless, by DOM assertions (fixture engine, injected 4-hero state).
+// V4.0: updated to the rebuilt HUD (party rail, top strip, hotbar); the V3.4 card details it no longer
+// draws (free-slot words, Focus pips, status words) became hover text, so those checks read the tooltips.
 //
 //   node scripts/v34-hud-check.mjs <baseUrl>        SHOT=<path.png> also takes one 1440×900 shot
 //                                                    of the top-left HUD (clip 560×520).
@@ -85,7 +87,10 @@ if (onlyShot) {
   process.exit(0);
 }
 
-// 1. Layout: cards don't overlap the light panel or round at three viewport sizes.
+// V4.0 HUD (rebuilt): the same questions of the new DOM: the party rail clears the top strip, every
+// card shows the pack (4 slots, a 2-slot item spans two), every mark explains itself on hover.
+const tipOf = (e) => (e ? e.getAttribute('title') || e.dataset.tip || '' : '');
+// 1. Layout: cards don't overlap the top strip at three viewport sizes.
 for (const [w, hgt] of [
   [1200, 750],
   [1440, 900],
@@ -95,74 +100,84 @@ for (const [w, hgt] of [
   await p.waitForTimeout(150);
   const r = await p.evaluate(() => {
     const box = (e) => e.getBoundingClientRect();
-    const top = [...document.querySelectorAll('.hud-top > *')].map(box);
-    const cards = [...document.querySelectorAll('.hcard')].map(box);
+    const top = [...document.querySelectorAll('.dl-strip > *')].map(box);
+    const cards = [...document.querySelectorAll('.dl-rcard')].map(box);
     const over = (a, c) => a.left < c.right && c.left < a.right && a.top < c.bottom && c.top < a.bottom;
     let hits = 0;
     for (const c of cards) for (const t of top) if (over(c, t)) hits++;
-    // Light foot (second line) fully inside its panel and visible.
-    const foot = document.querySelector('.light-foot');
-    const light = document.querySelector('.light');
-    const footIn = foot && light ? box(foot).bottom <= box(light).bottom + 0.5 : false;
+    // The lantern's notched bar sits inside its panel.
+    const bar = document.querySelector('.dl-notches');
+    const light = document.querySelector('.dl-lantern');
+    const footIn = bar && light ? box(bar).bottom <= box(light).bottom + 0.5 : false;
     const last = cards[cards.length - 1];
     return { hits, footIn, n: cards.length, lastBottom: last?.bottom ?? 0, right: Math.max(...cards.map((c) => c.right)) };
   });
-  check(`${w}×${hgt}: hero cards clear the top panels`, r.hits === 0 && r.footIn, JSON.stringify(r));
-  check(`${w}×${hgt}: four cards fit above the bottom, left column only`, r.n === 4 && r.lastBottom < hgt - 90 && r.right < w * 0.3, `bottom ${Math.round(r.lastBottom)}, right ${Math.round(r.right)}`);
+  check(`${w}×${hgt}: hero cards clear the top strip`, r.hits === 0 && r.footIn, JSON.stringify(r));
+  check(`${w}×${hgt}: four cards fit above the hotbar, left column only`, r.n === 4 && r.lastBottom < hgt - 120 && r.right < w * 0.3, `bottom ${Math.round(r.lastBottom)}, right ${Math.round(r.right)}`);
 }
 await p.setViewportSize({ width: 1440, height: 900 });
 await p.waitForTimeout(150);
 
-// 2. Pack sockets: 4 per card, empty ones marked, the heirloom spans two, free count in words, tooltips.
+// 2. The pack row on each card: 4 slots, the heirloom spans two, empty ones marked, a tooltip naming what's in it.
 const pk = await p.evaluate(() => {
-  const cards = [...document.querySelectorAll('.hcard')];
+  const cards = [...document.querySelectorAll('.dl-rcard')];
   return cards.map((c) => {
-    const socks = [...c.querySelectorAll('.pk-sock')];
+    const minis = [...c.querySelectorAll('.dl-mini')];
+    const row = c.querySelector('.dl-minis');
     return {
-      name: c.querySelector('.hc-name')?.textContent ?? '',
-      span: socks.reduce((n, s) => n + Number(s.dataset.span || 1), 0),
-      empty: socks.filter((s) => s.classList.contains('empty')).length,
-      wide: socks.filter((s) => s.dataset.span === '2').length,
-      free: c.querySelector('.pk-free')?.textContent ?? '',
-      tips: socks.map((s) => s.getAttribute('title') || s.dataset.tip || ''),
+      span: minis.reduce((n, s) => n + (s.classList.contains('wide') ? 2 : 1), 0),
+      empty: minis.filter((s) => !s.classList.contains('full')).length,
+      wide: minis.filter((s) => s.classList.contains('wide')).length,
+      tip: row ? row.getAttribute('title') || row.dataset.tip || '' : '',
     };
   });
 });
-check('every card has 4 pack sockets', pk.every((c) => c.span === 4), pk.map((c) => c.span).join(','));
-check('free count in words', pk.every((c) => /^(\d free|Full)$/.test(c.free.trim())), pk.map((c) => c.free).join(' | '));
-check('heirloom spans two sockets, card reads Full', pk[2].wide === 1 && /Full/.test(pk[2].free), JSON.stringify(pk[2]));
-check('empty pack: 4 empty sockets', pk[3].empty === 4 && /4 free/.test(pk[3].free));
-check('every socket has a tooltip; filled ones say how to use', pk.every((c) => c.tips.every((t) => t.length > 8)) && /Use:/.test(pk[0].tips[0]), pk[0].tips[0]);
-check('torch tooltip names 12 rounds', /12 rounds/.test(pk[0].tips[0]), pk[0].tips[0]);
+check('every card shows 4 pack slots', pk.every((c) => c.span === 4), pk.map((c) => c.span).join(','));
+check('heirloom spans two slots, the pack reads full', pk[2].wide === 1 && pk[2].empty === 0 && /full/.test(pk[2].tip), JSON.stringify(pk[2]));
+check('empty pack: 4 empty slots', pk[3].empty === 4 && /empty/.test(pk[3].tip), JSON.stringify(pk[3]));
+check('the pack row names what is in it', /Torch/.test(pk[0].tip) && /34 gold/.test(pk[0].tip) && /2 free/.test(pk[0].tip), pk[0].tip);
+// The selected hero's pack in the hotbar: click to use; the torch says what it does.
+const slotTip = await p.evaluate(() => {
+  const d = window.vc.state().delve;
+  window.vc.hud.select(d.lanternBearer);
+  const s = [...document.querySelectorAll('.dl-pack-slots .dl-slot')];
+  return { n: s.length, torch: s[0] ? s[0].getAttribute('title') || s[0].dataset.tip || '' : '', empties: s.filter((x) => x.classList.contains('empty')).length };
+});
+check('the hotbar pack: 4 slots, the torch slot names 12 rounds', slotTip.n === 4 && /12 rounds/.test(slotTip.torch), slotTip.torch.split('\n')[0]);
+await p.evaluate(() => window.vc.hud.select('h-marek'));
 
-// 3. Names with class words; HP numbers; labelled focus/mana; status badges with titles.
-const cardText = await p.evaluate(() => [...document.querySelectorAll('.hcard')].map((c) => ({
-  name: c.querySelector('.hc-name')?.textContent ?? '',
-  hp: c.querySelector('.hc-hp')?.textContent ?? '',
-  res: [...c.querySelectorAll('.hc-res')].map((e) => `${e.textContent}|${e.getAttribute('title') ?? ''}`),
-  chips: [...c.querySelectorAll('.chip')].map((e) => ({ t: e.textContent, tip: e.getAttribute('title') ?? '' })),
-  turn: c.querySelector('.hc-turn')?.getAttribute('title') ?? '',
-})));
-check('names carry the class word and level', /Marek.*Ranger.*L2/.test(cardText[1].name) && /Eskil.*Pyromancer/.test(cardText[2].name), cardText.map((c) => c.name).join(' | '));
+// 3. Each card: HP numbers, mana diamonds for casters, status icons and turn pips that explain themselves.
+const cardText = await p.evaluate(() => [...document.querySelectorAll('.dl-rcard')].map((c) => {
+  const t = (e) => (e ? e.getAttribute('title') || e.dataset.tip || '' : '');
+  return {
+    who: t(c.querySelector('.dl-hexwrap')),
+    hp: c.querySelector('.dl-hpn')?.textContent ?? '',
+    mana: t(c.querySelector('.dl-mana')),
+    icons: [...c.querySelectorAll('.dl-si')].map((e) => ({ cls: e.className, tip: t(e) })),
+    pips: [...c.querySelectorAll('.dl-pip')].map(t),
+  };
+}));
+check('the badge names the class, level and Focus', /Marek · ranger, level 2/.test(cardText[1].who) && /Focus \d of \d/.test(cardText[1].who), cardText[1].who.split('\n')[0]);
 check('HP shown as numbers', /3\s*\/\s*8/.test(cardText[1].hp), cardText[1].hp);
-check('Focus and Mana labelled, with tooltips', /Focus/i.test(cardText[2].res.join()) && /Mana/i.test(cardText[2].res.join()) && cardText[2].res.every((r) => r.split('|')[1].length > 10), cardText[2].res.join(' ; '));
-const chips = cardText.flatMap((c) => c.chips);
-check('every status badge has a tooltip', chips.length >= 4 && chips.every((c) => c.tip.length > 12), chips.map((c) => `${c.t}=${c.tip.length}`).join(', '));
-check('turn state has a tooltip', cardText.every((c) => /move|Moved/i.test(c.turn)));
-check('lantern bearer badge', /lantern/i.test(chips.map((c) => c.t + c.tip).join()));
+check('mana diamonds with a tooltip on the caster', /Mana · 2 of/.test(cardText[2].mana), cardText[2].mana.split('\n')[0]);
+const icons = cardText.flatMap((c) => c.icons);
+check('every status icon has a tooltip', icons.length >= 3 && icons.every((c) => c.tip.length > 12), icons.map((c) => `${c.cls}=${c.tip.length}`).join(', '));
+check('turn pips have tooltips', cardText.every((c) => c.pips.length === 2 && c.pips.every((t) => /Move|Action/.test(t))));
+check('lantern bearer icon', icons.some((c) => /lantern/.test(c.cls) && /carries it/.test(c.tip)));
+check('webbed, warded and veiled show as icons', icons.some((c) => /Webbed/.test(c.tip)) && icons.some((c) => /Warded/.test(c.tip)) && icons.some((c) => /Veiled/.test(c.tip)));
 
-// 4. Action bar: every visible button has a title; Kindle mentions 6.
+// 4. The hotbar: every button has a tooltip; Kindle mentions 6.
 const bar = await p.evaluate(() => {
   const vc = window.vc;
   const out = [];
   for (const id of vc.state().delve.heroes.map((h) => h.heroId)) {
     vc.hud.select(id);
-    for (const btn of document.querySelectorAll('.hud-bar button')) out.push({ who: id, label: btn.textContent.trim(), title: btn.getAttribute('title') || btn.dataset.tip || '' });
+    for (const btn of document.querySelectorAll('.dl-hotbar button')) out.push({ who: id, label: btn.textContent.trim(), title: btn.getAttribute('title') || btn.dataset.tip || '' });
   }
   return out;
 });
 const untitled = bar.filter((x) => x.title.trim().length < 6);
-check('every action-bar button has a tooltip', untitled.length === 0, untitled.map((x) => `${x.who}:${x.label}`).join(', '));
+check('every hotbar button has a tooltip', bar.length > 8 && untitled.length === 0, untitled.map((x) => `${x.who}:${x.label}`).join(', '));
 const help = await p.evaluate(async () => {
   const n = await import('/src/ui/names.ts');
   return { ...n.ACTION_HELP, kindleTip: `Kindle · ${n.actionCost('kindle', 1, false)}\n${n.actionHelp('kindle', 'pyromancer')}` };
@@ -178,23 +193,27 @@ const missing = await p.evaluate(async () => {
 check('ACTION_HELP covers every action', missing.acts.length === 0, missing.acts.join(','));
 check('MONSTER_NOTE covers every monster', missing.mons.length === 0, missing.mons.join(','));
 
-// 5. Top panels explain themselves.
-const top = await p.evaluate(() => ({
-  light: document.querySelector('.light')?.getAttribute('title') ?? '',
-  round: document.querySelector('.hud-round')?.getAttribute('title') ?? '',
-  levels: [...document.querySelectorAll('.level-btn')].map((e) => e.getAttribute('title') ?? ''),
-  cam: [...document.querySelectorAll('.hud-cam button')].map((e) => e.getAttribute('title') ?? ''),
-}));
-check('light panel tooltip names stages and sight', /Bright/.test(top.light) && /sight/i.test(top.light), top.light.slice(0, 80));
+// 5. The top strip explains itself.
+const top = await p.evaluate(() => {
+  const t = (e) => (e ? e.getAttribute('title') || e.dataset.tip || '' : '');
+  return {
+    light: t(document.querySelector('.dl-lantern')),
+    round: t(document.querySelector('.dl-round')),
+    levels: [...document.querySelectorAll('.dl-lvl')].map(t),
+    cam: [...document.querySelectorAll('.dl-cam button')].map(t),
+  };
+});
+check('lantern tooltip names stages and sight', /Bright/.test(top.light) && /sight/i.test(top.light), top.light.slice(0, 80));
 check('round counter has a tooltip', top.round.length > 10, top.round);
-check('level buttons have tooltips', top.levels.every((t) => t.length > 6));
+check('level tabs have tooltips', top.levels.length === 3 && top.levels.every((t) => t.length > 6));
+check('camera buttons have tooltips', top.cam.length === 5 && top.cam.every((t) => t.length > 6));
 
 // 6. Settings: "Lower walls near the camera", default off, toggles the diorama.
 const st = await p.evaluate(async () => {
   const vc = window.vc;
-  document.querySelector('.hud-sys button[title^="Menu"]')?.click();
+  document.querySelector('.dl-menu-btn')?.click();
   await new Promise((r) => setTimeout(r, 50));
-  const lab = [...document.querySelectorAll('.menu-check')].find((l) => /Lower walls/.test(l.textContent));
+  const lab = [...document.querySelectorAll('.dl-check')].find((l) => /Lower walls/.test(l.textContent));
   const box = lab?.querySelector('input');
   const before = { checked: box?.checked, cut: vc.dio.cutaway };
   box?.click();

@@ -2969,3 +2969,4 @@ div.dl-deal { cursor: default; }
 .dl-card-l.rk { display: flex; align-items: center; gap: 7px; }
 .dl-card-l.rk.bad svg { color: var(--dl-red-soft); }
 .dl-card-l.rk.warn { color: #ffe39a; }
+.dl-who-calm { font-size: 12px; color: #9cc8ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

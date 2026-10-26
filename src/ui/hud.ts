@@ -762,7 +762,7 @@ export class Hud {
     // V3.9 (24.5): a backstab spot under the mouse.
     if (sel && this.heroDef(sel.heroId)?.cls === 'burglar' && this.vis && !this.pending) {
       const spot = backstabSpots(this.state!, sel.heroId, this.reach.map((x) => x.to), this.seenEnemies(), this.vis.visible).find((x) => samePos(x.at, at));
-      if (spot) out.push({ html: `🗡 Backstab ${esc(this.theName(spot.target))} from here${this.full ? `: +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit` : ''}`, cls: 'good' });
+      if (spot) out.push({ html: `🗡 Backstab from here: ${esc(this.theName(spot.target))}${this.full ? ` · +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit` : ''}`, cls: 'good' });
     }
     // V3.9.3 (24.8): a heard sound under the mouse.
     const heard = (d.heard ?? []).filter((x) => samePos(x.at, at));
@@ -963,8 +963,16 @@ export class Hud {
       seen = !sneaking && dist === 1;
     } else {
       if (bearing === 'side') where = 'at its side';
-      const w = this.washFor(id, sneaking, quiet);
-      seen = [...w.front, ...w.side].some((p) => samePos(p, sel.at));
+      if (typeof this.engine.sightWash === 'function') {
+        const w = this.washFor(id, sneaking, quiet);
+        seen = [...w.front, ...w.side].some((p) => samePos(p, sel.at));
+      } else {
+        // An engine without the sight query: the rule by distance alone (spec 27), no line of sight or light.
+        const m = s.delve!.monsters.find((x) => x.id === id);
+        const unaware = !!m && m.awareness !== 'hunting' && !(m.awareness === 'alert' && m.searchRounds !== undefined);
+        if (bearing === 'side' && unaware) seen = dist === 1 ? !(sneaking && quiet) : !sneaking && dist <= V37.sideWalk;
+        else seen = dist <= (sneaking ? V37.noticeLitSneak : V37.noticeLitWalk);
+      }
     }
     return { html: `You're ${where}, ${dist} away, ${sneaking ? 'sneaking' : 'walking'}: ${seen ? 'it will see you' : 'it won\'t see you'}.`, cls: seen ? 'bad' : 'good' };
   }
@@ -989,8 +997,8 @@ export class Hud {
     if (hero.status === 'downed') out.push({ html: `Down: dies in ${hero.bleed} turn${hero.bleed === 1 ? '' : 's'}. Revive or a potion, from next to them.`, cls: 'bad' });
     else out.push({ html: `HP ${hero.hp} of ${def?.maxHp ?? '?'}${this.full ? ` · Focus ${hero.focus}` : ''}${hero.moveMode === 'sneak' ? ' · sneaking' : ''}` });
     const hf = facingOf(hero);
+    if (hf !== undefined && hero.status === 'active' && this.full) out.push({ html: `Faces ${this.facingWords(hero.at, hf)} (the way they last moved or acted): blind only straight behind.`, cls: 'dim' });
     if (this.backExposed(hero.heroId)) out.push({ html: 'Back exposed: nobody covers the hex behind them.', cls: 'bad' });
-    else if (hf !== undefined && hero.status === 'active' && this.full) out.push({ html: `Faces ${this.facingWords(hero.at, hf)}: blind only straight behind.`, cls: 'dim' });
     return out;
   }
 
@@ -1008,6 +1016,8 @@ export class Hud {
       if (line) out.push({ html: esc(line), cls: 'dim' });
       out.push({ html: esc(CREW_KIT[rival.cls] ?? RIVAL_KIT[rival.cls] ?? ''), cls: 'dim' });
       if (cr.spotted && cr.stance !== 'hired') out.push({ html: `Goal: ${GOAL_TEXT[cr.goal]}${cr.aim ? ` · after ${esc(cr.aim.what)}` : ''}`, cls: 'dim' });
+      const rf = facingOf(rival);
+      if (rf !== undefined && cr.stance !== 'hired') out.push({ html: `Faces ${this.facingWords(rival.at, rf)}: blind only straight behind.`, cls: 'dim' });
     }
     if ((rival.feared ?? 0) > 0) out.push({ html: `Feared · ${rival.feared} turn${rival.feared === 1 ? '' : 's'}: runs from ${esc(this.nameOf(rival.fearOf ?? ''))}.`, cls: 'fear' });
     if (rival.dragging) out.push({ html: `Dragging ${esc(this.nameOf(rival.dragging))} toward the way out. Kill, down or fear them to free ${esc(this.nameOf(rival.dragging))}.`, cls: 'bad' });
@@ -2100,8 +2110,8 @@ export class Hud {
     if (go) {
       const near = sel ? nearestExit(this.engine.castle(), sel.at, (p) => this.exitKnown(p), this.host.entrance()) : null;
       title = k.kind === 'slay' ? 'The Dragon is dead: get out' : 'Get out';
-      where = near ? `${cap(near.exit.name)}${near.exit.entrance ? ', the way you came in' : ''}` : 'Find a way out';
-      state = near && sel ? exitWhere(near, sel.at) : '';
+      where = near && sel ? cap(exitWhere(near, sel.at)) : 'Find a way out';
+      state = near?.exit.entrance ? 'the way you came in' : '';
       toward = near?.exit.at ?? null;
     } else if (obj) {
       const lv = this.engine.castle().levels.find((l) => l.level === obj.at.level);
@@ -2118,7 +2128,7 @@ export class Hud {
     const tip = `${k.title} · ${k.bounty} gold\n${k.brief}${status ? `\n${status}` : ''}${toward ? '\nClick to look there.' : ''}`;
     return h(
       'button',
-      { type: 'button', class: `dl-job dl-pan dl-job-${k.kind} ${go ? 'go' : ''}`, 'data-tip': tip, onclick: () => (toward ? this.dio.lookAt(toward) : undefined) },
+      { type: 'button', class: `dl-job dl-pan dl-job-${k.kind} ${go ? 'go' : ''}`, 'data-tip': tip, 'data-exit': go && toward ? posKey(toward) : undefined, onclick: () => (toward ? this.dio.lookAt(toward) : undefined) },
       icon(go ? 'exit' : 'diamond', 18, 'dl-job-ic'),
       h('span', { class: 'dl-job-t' }, h('span', { class: 'dl-job-title' }, title), h('span', { class: `dl-job-where ${go ? 'out' : ''}` }, `${where}${state ? ` · ${state}` : ''}`)),
       arrow,
@@ -2174,11 +2184,15 @@ export class Hud {
     const tipLines = [`${def.name} · ${word}, level ${def.level}`, CLASS_ROLE[def.cls as keyof typeof CLASS_ROLE] ?? '', `Focus ${hd.focus} of ${hd.ale === 'reserve' ? 4 : FOCUS_MAX}: spent in the roll panel.`, `Click or press ${i + 1} to select.`];
     if (!active) {
       const fate = hd.status === 'downed' ? { tag: 'Down', line: `Dies in ${hd.bleed} turn${hd.bleed === 1 ? '' : 's'}. Revive or a potion, next to them.` } : hd.status === 'dead' ? { tag: 'Dead', line: 'Gone for good.' } : hd.status === 'out' ? { tag: 'Out', line: 'Safe outside, with what they carry.' } : { tag: 'Taken', line: `Dragged out by ${this.state?.delve?.rivals?.name ?? 'a crew'}.` };
+      // A crew member hauling a downed hero out: say so, and what stops it.
+      const dragger = hd.status === 'downed' ? this.state?.delve?.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut) : undefined;
+      if (dragger) fate.line = `${dragger.name} is hauling them out!`;
+      const drag = dragger ? h('span', { class: 'dl-si bad dragged', tabindex: 0, 'data-tip': `Dragged · ${dragger.name} is hauling ${def.name} toward the way out, ${3} a round. Kill, down or fear ${dragger.name} to free them.` }, icon('hand', 13)) : '';
       return h(
         'div',
         { class: `dl-rcard st-${hd.status} cls-${def.cls}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}` },
         badge,
-        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
+        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
       );
     }
     const pip = (on: boolean, what: string, tip: string) => h('span', { class: `dl-pip ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': `${what} ${on ? 'ready' : 'used'}` }, on ? icon(what === 'Move' ? 'move' : 'dot', 9) : '');
@@ -2295,6 +2309,7 @@ export class Hud {
       'div',
       { class: 'dl-who' },
       h('span', { class: 'dl-who-n' }, def.name, h('span', { class: 'dl-who-c' }, ` ${def.cls === 'heir' ? 'the heir' : className(def.cls).toLowerCase()}`)),
+      this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
       h(
         'span',
         { class: 'dl-seg', role: 'radiogroup', 'aria-label': `${def.name} moves by` },
@@ -2540,7 +2555,8 @@ export class Hud {
     this.crewEl.append(
       h('span', { class: 'dl-crew-top' }, icon('crew', 14), h('span', { class: 'dl-crew-n', tabindex: 0, 'data-tip': `${r.name} · ${tm.name.toLowerCase()}\n${CREW[r.crew]?.blurb ?? ''}\n${tm.text}` }, r.name), h('span', { class: `dl-crew-st st-${r.stance}`, tabindex: 0, 'data-tip': `${st.name} · ${st.text}` }, st.name.toLowerCase(), r.stance === 'hired' && r.hiredRounds ? ` · ${r.hiredRounds}` : '')),
       r.stance === 'demanding' ? h('span', { class: 'dl-crew-toll', tabindex: 0, 'data-tip': `The toll · pay ${r.toll ?? TOLL_MIN} (gold first, then gems) or they attack in the next castle turn. Parley to pay.` }, `Pay ${r.toll ?? TOLL_MIN} or they attack next turn`) : '',
-      h('span', { class: 'dl-crew-line' }, r.stance === 'hired' ? 'Fighting beside you' : `${GOAL_TEXT[r.goal]}${r.aim ? ` · ${r.aim.what}` : ''}`, ` · ${alive} on the map`),
+      h('span', { class: 'dl-crew-line' }, r.stance === 'hired' ? 'Fighting beside you' : `${cap(GOAL_TEXT[r.goal] ?? '')}${r.aim ? ` · ${r.aim.what}` : ''}`, ` · ${alive} on the map`),
+      r.members.some((m) => m.level) ? h('span', { class: 'dl-crew-line' }, `Level ${Math.max(...r.members.map((m) => m.level ?? 1))}, ${CREW[r.crew]?.tiers ?? ''}`) : '',
       r.members.some((m) => m.dragging) ? h('span', { class: 'dl-crew-line bad' }, `Dragging ${r.members.filter((m) => m.dragging).map((m) => this.nameOf(m.dragging!)).join(', ')} out!`) : '',
       canDeal ? h('button', { type: 'button', class: 'dl-btn dl-btn-s', 'data-tip': 'Parley · free · key B\nPay, hire, give a job, or fight.', onclick: () => this.openParley() }, icon('scales', 14), ' Parley ', h('kbd', null, 'B')) : '',
     );

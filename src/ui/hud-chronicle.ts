@@ -48,6 +48,8 @@ export class Chronicle {
   readonly el = h('section', { class: 'dl-chron', 'aria-label': 'Chronicle' });
   private entries: ChronEntry[] = [];
   private key = '';
+  /** How much of the state's log has been read: lines the playback never spoke are picked up from it. */
+  private logSeen = 0;
   private round = 1;
   private phase: 'player' | 'world' = 'player';
   open = false;
@@ -62,12 +64,19 @@ export class Chronicle {
 
   /** A new delve (or a reload): start over, seeding with the state's log lines when this session saw none of them. */
   sync(key: string, round: number, phase: 'player' | 'world', log: string[]): void {
+    this.round = round;
+    this.phase = phase;
     if (key !== this.key) {
       this.key = key;
       this.entries = log.slice(-40).map((text) => ({ round, phase: 'start' as const, text, kind: chronKind(text), cls: '' }));
+      this.logSeen = log.length;
+      return;
     }
-    this.round = round;
-    this.phase = phase;
+    // Lines the engine logged that the playback didn't speak (it speaks most of them as `say` events).
+    if (log.length < this.logSeen) this.logSeen = log.length;
+    const recent = new Set(this.entries.slice(-60).map((e) => e.text));
+    for (const text of log.slice(this.logSeen)) if (!recent.has(text)) this.entries.push({ round, phase, text, kind: chronKind(text), cls: '' });
+    this.logSeen = log.length;
   }
 
   setPhase(phase: 'player' | 'world', round: number): void {

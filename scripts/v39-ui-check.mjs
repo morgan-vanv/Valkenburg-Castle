@@ -4,6 +4,7 @@
 // sight by mood on hover (V4.0, spec 27: no "front half"/"rear half" wording), the Burglar's backstab daggers
 // (seen unaware enemies only; behind and at the sides, spec 27), the backstab preview
 // and log line, no free-swing confirm, risk tags only on visible enemies, the unseen hit; tooltips.
+// V4.0 HUD: reads the rebuilt HUD (full hover cards via the fullCards setting, the party rail's icons, the hotbar).
 //   node scripts/v39-ui-check.mjs <baseUrl>     (http://localhost:5186/?fixture=1, or the real engine)
 //   SHOTS=<dir> saves v39-facing.png (wedges and a backstab dagger).
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -43,14 +44,14 @@ const fixture = /fixture=1/.test(base);
 const idle = () => p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 60000 });
 const state = () => p.evaluate(() => window.vc.state());
 const load = (st) => p.evaluate((x) => window.vc.load(x), st);
-const hoverTip = (at, unit = null) => p.evaluate(([a, u]) => { window.vc.hud.onHover(a, u); return document.querySelector('.hud-tip')?.textContent ?? ''; }, [at, unit]);
+const hoverTip = (at, unit = null) => p.evaluate(([a, u]) => { window.vc.hud.onHover(a, u); const el = document.querySelector('.dl-card'); return el && !el.classList.contains('hidden') ? el.textContent : ''; }, [at, unit]);
 const unhover = () => p.evaluate(() => window.vc.hud.onHover(null, null));
 const click = (at, unit = null) => p.evaluate(([a, u]) => window.vc.hud.onClick(a, u, { button: 0 }), [at, unit]);
 const logText = () => p.evaluate(() => `${window.vc.state().delve?.log.join('\n') ?? ''}\n${window.__log.join('\n')}`);
 const select = (id) => p.evaluate((x) => window.vc.hud.select(x), id);
 
 await p.goto(base);
-await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
+await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, fullCards: true })); localStorage.setItem('vc.coach.v40', JSON.stringify({ done: [], off: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
 // Every HUD log line (live lines give way to the engine's log after playback), for the log checks.
@@ -156,7 +157,7 @@ if (fit([[3, 1], [1, 1], [0, 1], [0, 2]])) {
   const wedges = await p.evaluate(() => window.vc.dio.facingMarks.children.filter((g) => g.userData.hero).map((g) => g.userData.unit));
   check('a facing wedge on every active hero', wedges.length === 2 && wedges.includes(a) && wedges.includes(burglarId), JSON.stringify(wedges));
   // V3.9.1 (spec 24.6): Face is shelved: no button, F does nothing.
-  const faceBtn = await p.$('.hud-bar button[data-action="face"]');
+  const faceBtn = await p.$('.dl-hotbar [data-action="face"], .dl-more [data-action="face"]');
   check('no Face button (shelved)', !faceBtn);
   await p.keyboard.press('f');
   await p.waitForTimeout(60);
@@ -176,7 +177,7 @@ if (fit([[3, 1], [1, 1], [0, 1], [0, 2]])) {
 if (fit([[3, 1], [3, 2], [2, 1], [4, 1]])) {
   const a = others[0];
   await scene({ [a]: { at: P, facing: F(0) }, [burglarId]: { at: step(P, 3), facing: F(3) } }, []);
-  const chips = () => p.$$eval('.hud-cards .chip.back-exposed', (els) => els.map((e) => ({ card: e.closest('[data-hero]')?.getAttribute('data-hero') ?? e.closest('.card, .hero-card')?.textContent?.slice(0, 20), title: e.title })));
+  const chips = () => p.$$eval('.dl-rail .dl-si.back-exposed', (els) => els.map((e) => ({ card: e.closest('[data-hero]')?.getAttribute('data-hero'), title: e.dataset.tip ?? e.title })));
   let c = await chips();
   check('back to back: no "back exposed" badge', c.length === 0, JSON.stringify(c));
   await scene({ [a]: { at: P, facing: F(0) }, [burglarId]: { at: step(P, 3), facing: F(0) } }, []);
@@ -216,13 +217,14 @@ if (fit([[0, 1], [0, 2], [0, 3]])) {
     await scene({ [a]: { at: P, facing: F(0) } }, [{ id: 'aw', at: M, awareness: 'alert', facing: F(1) }]);
     await select(a);
     const side = await hoverTip(M, 'aw');
-    check('hero at an unaware monster\'s side: "You are at its side: walking, it notices you within 2."', /You are at its side: walking, it notices you within 2/.test(side), side.slice(0, 300));
+    // V4.0 HUD: the card gives the verdict for where the hero stands: 3 away at the side of an unaware one, unseen.
+    check('hero at an unaware monster\'s side, 3 away: "You\'re at its side, 3 away, walking: it won\'t see you."', /You're at its side, 3 away, walking: it won't see you/.test(side), side.slice(0, 300));
     await unhover();
     // Searching (?): the tag and the words.
     await scene({ [a]: { at: P, facing: F(0) } }, [{ id: 'aw', at: M, awareness: 'alert', searchRounds: 3, facing: F(1) }]);
     await select(a);
     const srch = await hoverTip(M, 'aw');
-    check('a searching monster: "searching", sees ahead and at its sides', /searching/i.test(srch) && /ahead and at its sides/.test(srch) && !/You are at its side/.test(srch), srch.slice(0, 300));
+    check('a searching monster: "searching", sees ahead and at its sides (it would see you there)', /searching/i.test(srch) && /ahead and at its sides/.test(srch) && /at its side, 3 away, walking: it will see you/.test(srch), srch.slice(0, 300));
     await unhover();
     const marks = await p.evaluate(() => [...document.querySelectorAll('.tag-alert, .tag-hunt')].map((e) => e.textContent));
     check('...its tag shows "?"', marks.includes('?'), JSON.stringify(marks));
@@ -254,7 +256,7 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
   const mtip = await hoverTip(M, 'sl');
   check('hovering the sleeper with the Burglar: a backstab hint', /backstab/i.test(mtip), mtip.slice(0, 200));
   await unhover();
-  const sneakTitle = await p.$eval('.hud-bar .bar-modes button:nth-child(2)', (e) => e.title).catch(() => '');
+  const sneakTitle = await p.$eval('.dl-seg button:nth-child(2)', (e) => e.dataset.tip ?? e.title).catch(() => '');
   check('Burglar Sneak tooltip: quietest feet with the numbers', /Quietest feet/.test(sneakTitle) && /5%/.test(sneakTitle), sneakTitle.slice(-160));
   await select(others[0]);
   await p.waitForTimeout(60);
@@ -278,9 +280,10 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
     await select(burglarId);
     await click(M, 'sl');
     await p.waitForTimeout(120);
-    const pv = await p.$eval('.hud-preview', (e) => e.innerText).catch(() => '');
+    const pv = await p.$eval('.dl-roll', (e) => e.innerText).catch(() => '');
     if (/Backstab/.test(pv)) {
-      check('attack preview names it: "Backstab: +1 slot, double damage"', /Backstab: \+1 slot, double damage/.test(pv), pv.replace(/\n/g, ' | ').slice(0, 160));
+      // V4.0 HUD: a chip "Backstab: double damage" and the extra try as a green die labelled "backstab".
+      check('roll panel names it: "Backstab: double damage" and a backstab die', /Backstab: double damage/.test(pv) && /backstab/.test(pv), pv.replace(/\n/g, ' | ').slice(0, 160));
       await p.keyboard.press('Enter');
       await idle();
       const log = await logText();
@@ -310,10 +313,10 @@ if (fit([[0, 1], [3, 1], [3, 2]])) {
   const away = await p.evaluate(() => window.vc.hud.reach.find((x) => x.risks?.swings?.length));
   if (away) {
     const tip = await hoverTip(away.to);
-    check('leaving reach: the red sword stays in the preview', /free swing \d+–\d+/.test(tip) && (await p.$$('.risk.risk-swing')).length > 0, tip.slice(0, 100));
+    check('leaving reach: the red sword stays in the preview', /free swing \(\d+–\d+/.test(tip) && (await p.$$('.risk.risk-swing')).length > 0, tip.slice(0, 100));
     await click(away.to);
     await p.waitForTimeout(100);
-    const modal = await p.$eval('.hud-modal', (e) => (e.classList.contains('hidden') ? '' : e.innerText)).catch(() => '');
+    const modal = await p.$eval('.dl-modal', (e) => (e.classList.contains('hidden') ? '' : e.innerText)).catch(() => '');
     check('clicking it moves at once: no "Move anyway?" dialog', !/Move anyway/.test(modal), modal.slice(0, 80));
     await idle();
     s = await state();
@@ -344,7 +347,7 @@ if (fit([[3, 1], [0, 1]])) {
 // ---- 7. help text
 {
   await p.evaluate(() => window.vc.hud.toggleMenu?.());
-  const menu = await p.$eval('.hud-menu', (e) => e.innerText).catch(() => '');
+  const menu = await p.$eval('.dl-menu', (e) => e.innerText).catch(() => '');
   // V3.9.4: the Face command is shelved (FACING.faceCommand false), so the key list leaves F out.
   check('menu keys leave out the shelved F: face', !/F\s*face/i.test(menu) && /sneak/i.test(menu), menu.match(/.{0,30}(face|sneak).{0,30}/i)?.[0]);
   await p.evaluate(() => window.vc.hud.toggleMenu?.());
