@@ -3232,25 +3232,25 @@ describe('V3.7 stealth and swings', () => {
       expect(mon(r.state, m.id).facing).toBe(0);
     });
 
-    it('V3.9 (spec 24.1): the rear half is blind: a walking hero there is noticed only adjacent, a sneaking one never', () => {
+    it('V4.0 (spec 27): an unaware monster: blind straight behind (walking adjacent only), the corner of its eye at its sides', () => {
       const check = (col: number, row: number, sneak: boolean) => {
         const s = stealthDelve({ lit: true });
         put(s, 'brann', at(2, col, row));
         sneaking(s, 'brann', sneak);
         const m = monster(s, 'orc', at(2, 13, 1), 'alert');
-        (m as MonsterX).facing = 3; // looking west: the rear half is the east side (dirs 0, 1, 5)
+        (m as MonsterX).facing = 3; // looking west: behind is east (dir 0), its sides dirs 1 and 5
         return mon(ok(s, { type: 'endTurn' }).state, m.id).awareness === 'hunting';
       };
       expect(check(17, 1, false)).toBe(false); // 4 behind, lit, walking: blind
       expect(check(18, 1, false)).toBe(false);
       expect(check(15, 2, true)).toBe(false); // 2 behind, sneaking
-      expect(check(14, 2, true)).toBe(false); // adjacent, back-side neighbour, sneaking: never
+      expect(check(14, 2, true)).toBe(true); // V4.0 (spec 27): adjacent at its side, sneaking: the corner of its eye
       expect(check(14, 2, false)).toBe(true); // ...walking adjacent: noticed
       expect(check(14, 1, true)).toBe(false); // directly behind
       expect(check(14, 1, false)).toBe(true); // ...unless walking in
       // The same from the front: a sneaking hero 2 away in the light is seen.
       expect(check(11, 1, true)).toBe(true);
-      // wouldNotice agrees, and a watcher without a facing has no blind arc.
+      // wouldNotice agrees (straight behind), and a watcher without a facing has no blind arc.
       const s = stealthDelve({ lit: true });
       put(s, 'brann', at(2, 14, 1));
       const lit = litSet(w, s.delve as DelveX);
@@ -3463,7 +3463,8 @@ describe('V3.7 stealth and swings', () => {
       const s = stealthDelve({ lit: true });
       put(s, 'brann', at(2, 7, 1));
       const sleeper = monster(s, 'orc', at(2, 10, 2), 'asleep');
-      const watcher = monster(s, 'orc', at(2, 13, 1), 'alert');
+      // V4.0 (spec 27): an archer, not an orc: an orc's first-sight bellow would wake the sleeper (the preview knows; spec 27 tests).
+      const watcher = monster(s, 'archer', at(2, 13, 1), 'alert');
       const walk = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(2, 9, 1)))!;
       expect(walk.path).toEqual([at(2, 8, 1), at(2, 9, 1)]);
       // (8,1) is 2 from the sleeper: 50; (9,1) is adjacent and the end: sure.
@@ -3471,10 +3472,10 @@ describe('V3.7 stealth and swings', () => {
         { at: at(2, 8, 1), id: sleeper.id, chance: 50 },
         { at: at(2, 9, 1), id: sleeper.id, chance: 100 },
       ]);
-      expect(walk.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 8, 1) }]); // already 5 away on the first hex, lit, walking
+      expect(walk.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 8, 1), hero: 'brann' }]); // already 5 away on the first hex, lit, walking
       const sneak = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 9, 1)))!;
       expect(sneak.risks?.wake.map((x) => x.chance)).toEqual([10, 25]);
-      expect(sneak.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 9, 1) }]); // 4 away, lit, sneaking: still seen
+      expect(sneak.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 9, 1), hero: 'brann' }]); // 4 away, lit, sneaking: still seen
       const short = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 8, 1)))!;
       expect(short.risks?.notice).toEqual([]); // 5 away, sneaking
       // Once it has noticed Brann it is no longer listed.
@@ -4966,7 +4967,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
       // (The pathfinder's own way to (4,4) is the single step; the preview of this path is asked directly.)
       const seenIt = new Set([m.id]);
       const inView = new Set([posKey(M)]);
-      expect(moveRisks(ctx(s), hero(s, 'brann'), path, false, lit, seenIt, inView).notice).toEqual([{ id: m.id, at: at(2, 4, 3) }]);
+      expect(moveRisks(ctx(s), hero(s, 'brann'), path, false, lit, seenIt, inView).notice).toEqual([{ id: m.id, at: at(2, 4, 3), hero: 'brann' }]);
       expect(moveRisks(ctx(s), hero(s, 'brann'), path, true, lit, seenIt, inView).notice).toEqual([]);
       // The same seed and move give the same game.
       expect(ok(s, { type: 'move', heroId: 'brann', path, sneak: false }).events).toEqual(r.events);

@@ -728,19 +728,29 @@ export class Hud {
 
   private monsterLines(m: Monster): string[] {
     const it = this.intents[m.id];
-    const out = [`<b>${m.name}</b> <span class="dim">${m.awareness === 'patrol' ? 'on patrol' : m.awareness}</span>`];
+    // V4.0 (spec 27): the mood (the mark over its head): at its post or on patrol (unaware), searching (?), hunting (!).
+    const searching = m.awareness === 'alert' && m.searchRounds !== undefined;
+    const mood = m.awareness === 'patrol' ? 'on patrol' : m.awareness === 'alert' ? (searching ? 'searching' : 'at its post') : m.awareness;
+    const out = [`<b>${m.name}</b> <span class="dim">${mood}</span>`];
     if (m.kind !== 'gloam') out.push(`HP ${m.hp}/${m.maxHp}${m.stuck ? ` · <span class="neg">rooted ${m.stuck}: can't move, can act</span>` : ''}`);
     const note = MONSTER_NOTE[m.kind];
     if (note) out.push(`<span class="dim">${note}</span>`);
-    const aw = AWARENESS_TEXT[m.awareness];
+    const aw = AWARENESS_TEXT[searching ? 'searching' : m.awareness];
     if (aw && m.kind !== 'gloam') out.push(`<span class="dim">${aw}${m.awareness === 'patrol' && this.state?.delve?.knownRoutes.includes(m.id) ? ' Route known (drawn on the map).' : ''}</span>`);
     if (m.holding) out.push(`<span class="neg">Holding ${this.nameOf(m.holding)}</span>`);
-    // V3.7 (20.1, 20.2): facing and the blind arc, fear.
+    // V4.0 (spec 27): facing, and what it makes of the selected hero where they stand (its sides depend on its mood).
     const mf = facingOf(m);
     if (m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' && mf !== undefined) {
       const sel = this.selected();
-      const behind = sel && this.inBlindArc(m.at, mf, sel.at);
-      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}: sees only its front half.${behind ? ` <span class="pos">You are in its rear half${this.sneak ? ': it never notices you sneaking' : ': walking, it notices you only next to it'}.</span>` : ''}</span>`);
+      const where = sel ? this.sightBearing(m.at, mf, sel.at) : null;
+      const noticed = !!sel && ((m as { noticedIds?: string[] }).noticedIds ?? []).includes(sel.heroId);
+      const quiet = !!sel && this.heroDef(sel.heroId)?.cls === 'burglar';
+      let you = '';
+      if (noticed) {
+        // It knows where they are: no hiding at its side or back.
+      } else if (where === 'back') you = this.sneak ? 'You are straight behind it: sneaking, it never notices you.' : 'You are straight behind it: walking, it notices you only right behind it.';
+      else if (where === 'side' && m.awareness !== 'hunting' && !searching) you = this.sneak ? `You are at its side: sneaking, ${quiet ? 'it misses you even right beside it' : 'it notices you only right beside it'}.` : `You are at its side: walking, it notices you within ${V37.sideWalk}.`;
+      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}.${you ? ` <span class="pos">${you}</span>` : ''}</span>`);
     }
     // V3.9 (24.3): the Burglar's backstab, in words.
     {
@@ -750,7 +760,7 @@ export class Hud {
         const now = backstabFrom(s, sel.heroId, m.id, sel.at);
         const unaware = m.awareness === 'asleep' || !((m as { noticedIds?: string[] }).noticedIds ?? []).includes(sel.heroId) && m.awareness !== 'hunting';
         if (now) out.push(`<span class="pos">🗡 Backstab now: +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage.</span>`);
-        else if (unaware) out.push(`<span class="dim">🗡 Unaware of ${this.heroDef(sel.heroId)?.name}: strike from its rear half to backstab.</span>`);
+        else if (unaware) out.push(`<span class="dim">🗡 Unaware of ${this.heroDef(sel.heroId)?.name}: strike from its side or from behind to backstab.</span>`);
       }
     }
     if ((m.feared ?? 0) > 0) out.push(`<span class="fear-word">Feared · ${m.feared} turn${m.feared === 1 ? '' : 's'}: flees from ${this.nameOf(m.fearOf ?? '')}, attacks nobody, and your heroes swing free as it leaves them.</span>`);
@@ -783,7 +793,16 @@ export class Hud {
     if (!risks) return [];
     const out: string[] = [];
     for (const w of risks.wake) out.push(`<span class="risk-line risk-wake">☾ ${this.nameOf(w.id)} may wake · ${Math.round(w.chance)}%</span>`);
-    for (const n of risks.notice) out.push(`<span class="risk-line risk-notice">👁 ${this.nameOf(n.id)} notices you</span>`);
+    // V4.0 (spec 27): who would see whom on this move: "The orc will see you, then Fenna".
+    const me = this.selectedId;
+    const seers = new Map<string, string[]>();
+    for (const n of risks.notice) {
+      const who = !n.hero || n.hero === me ? 'you' : this.nameOf(n.hero);
+      const l = seers.get(n.id) ?? [];
+      if (!l.includes(who)) l.push(who);
+      seers.set(n.id, l);
+    }
+    for (const [id, who] of seers) out.push(`<span class="risk-line risk-notice">👁 ${this.nameOf(id)} will see ${who.join(', then ')}</span>`);
     for (const sw of risks.swings) out.push(`<span class="risk-line risk-swing">⚔ ${this.nameOf(sw.id)}: free swing ${sw.damage[0]}–${sw.damage[1]}</span>`);
     if (!out.length && this.sneak) out.push('<span class="dim">Nobody stirs.</span>');
     return out;
@@ -793,6 +812,13 @@ export class Hud {
   private facingWords(at: Pos, facing: number): string {
     const d = DIRS[facing]!;
     return compass(at, { level: at.level, q: at.q + d.q, r: at.r + d.r });
+  }
+
+  /** V4.0 (spec 27): where `p` lies from a monster at `at` facing `facing`: front (3 directions), side (the 2 rear-side ones), back. */
+  private sightBearing(at: Pos, facing: number, p: Pos): 'front' | 'side' | 'back' | null {
+    if (samePos(at, p) || at.level !== p.level) return null;
+    const off = (dirIndexOf(p.q - at.q, p.r - at.r) - facing + 6) % 6;
+    return off === 3 ? 'back' : off === 2 || off === 4 ? 'side' : 'front';
   }
 
   /** Is `p` in the blind arc of a figure at `at` facing `facing` (the three back directions, as the engine's dirIndex)? */

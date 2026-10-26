@@ -159,7 +159,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       return Math.hypot(a.x - b.x, a.y - b.y);
     }, risky.to);
     check('a new risk tag starts over its monster (no slide-in)', drift !== null && drift < 4, `moved ${drift?.toFixed(1)}px`);
-    check('...and the hover tip lists them (wake % / notices / free swing)', /may wake · \d+%|notices you|free swing \d+–\d+/.test(tip), tip.slice(0, 160));
+    check('...and the hover tip lists them (wake % / notices / free swing)', /may wake · \d+%|notices you|will see you|free swing \d+–\d+/.test(tip), tip.slice(0, 160));
     const wake = risky.risks.wake[0];
     if (wake) check('wake tag shows the chance', tags.some((t) => /risk-wake/.test(t.cls) && new RegExp(`${Math.round(wake.chance)}%`).test(t.text)), tags.map((t) => t.text).join(' '));
     {

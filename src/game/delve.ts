@@ -29,6 +29,7 @@ import { parleyTargets } from './parley';
 import { dirIndex, faceToward, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
 import { BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS, FACING } from './data';
+import { SEARCH_ROUNDS } from './data'; // V4.0 (spec 27)
 import {
   BRIAR_DMG, BRIAR_MANA, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS,
   HAMSTRING_SLOTS, NIGHTTHORN_DMG, NIGHTTHORN_MANA, NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SHIELD_BRACED_DMG, SMASH_GOLD, SMASH_GOLD_CHANCE, SMASH_ITEM_CHANCE,
@@ -988,8 +989,9 @@ function areaOf(c: Ctx, at: Pos, radius: number): Pos[] {
 }
 
 /**
- * V3.9 (spec 24.3): can this hero backstab `id` now? A Burglar with a melee weapon, adjacent, in the
- * target's rear half, the target unaware of them; monsters and crew members, not the Dragon or the Gloam.
+ * V3.9 (spec 24.3, 27): can this hero backstab `id` now? A Burglar with a melee weapon, adjacent, outside the
+ * target's front (a monster's sides or straight behind it; straight behind a crew member), the target unaware
+ * of them; monsters and crew members, not the Dragon or the Gloam.
  */
 export function canBackstab(c: Ctx, h: HeroInDelve, id: string, unnoticed = unnoticedBy(c, id, h.heroId)): boolean {
   const def = heroDef(c, h.heroId);
@@ -1373,6 +1375,7 @@ export function smokeOut(c: Ctx, at: Pos): Pos[] {
     if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness !== 'hunting') continue;
     if (hexes.some((p) => samePos(p, m.at))) {
       m.awareness = 'alert';
+      m.searchRounds = SEARCH_ROUNDS; // V4.0 (spec 27): it lost them: searching (?), not back at its post
       forgetHeroes(m);
       c.ev.push({ type: 'awake', id: m.id, awareness: 'alert' });
     }
@@ -1517,6 +1520,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         const seesSomeone = c.d.heroes.some((x) => x.status === 'active' && x.veil <= 0 && monsterSees(c.w, c.d, m.at, x.at, lit));
         if (seesSomeone) continue;
         m.awareness = 'alert';
+        m.searchRounds = SEARCH_ROUNDS; // V4.0 (spec 27): it lost the trail: searching (?)
         m.focusAt = { ...o.at };
         m.intent = undefined;
         forgetHeroes(m);

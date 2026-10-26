@@ -252,6 +252,17 @@ export const WAKE_END_SNEAK = 25;
 export const NOTICE = { litWalk: 8, litSneak: 4, unlitWalk: 5, unlitSneak: 1, hollowWalk: 8, hollowSneak: 3 } as const;
 /** V3.9 (spec 24.3): the Burglar's quiet feet: a sneaking Burglar is noticed within 2 lit, adjacent unlit, 2 in the Hollow. */
 export const NOTICE_QUIET = { litSneak: 2, unlitSneak: 1, hollowSneak: 2 } as const;
+/**
+ * V4.0 (spec 27): monster sight by mood. An unaware monster (at its post or on patrol) catches heroes at its
+ * SIDES (the two rear-side directions) out of the corner of its eye only: a walking hero within SIDE_NOTICE_WALK,
+ * and anyone adjacent when SIDE_NOTICE_ADJACENT, except a sneaking Burglar when BURGLAR_SIDE_QUIET (quietest
+ * feet: the Burglar can still backstab from the sides). Searching and hunting monsters see their sides fully.
+ */
+export const SIDE_NOTICE_WALK = 2;
+export const SIDE_NOTICE_ADJACENT = true;
+export const BURGLAR_SIDE_QUIET = true;
+/** The orc's first-sight bellow (spec 16.4): noise 5 at the orc, once a delve. */
+export const BELLOW_NOISE = 5;
 /** V3.9 (spec 24.3): a sneaking Burglar's sound rolls on sleepers: 5% per hex (others 10), ending adjacent 10% (others 25). */
 export const WAKE_SNEAK_QUIET = 5;
 export const WAKE_END_SNEAK_QUIET = 10;

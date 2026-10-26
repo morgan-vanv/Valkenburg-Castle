@@ -2066,6 +2066,9 @@ input.seed {
 .tag-alert {
   color: var(--gold);
 }
+.tag-hunt {
+  color: var(--red);
+}
 .tag-shackled {
   color: #9ec8ff;
 }

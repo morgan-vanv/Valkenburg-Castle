@@ -2008,7 +2008,16 @@ export class Diorama {
       this.riskTags.set(id, el);
     };
     for (const w of risks.wake) mk(w.id, 'risk-wake', `<span class="risk-icon">☾</span><span class="risk-num">${Math.round(w.chance)}%</span>`, `${this.nameOf(w.id)} may wake as you pass (${Math.round(w.chance)}%).`, 0xffd040);
-    for (const n of risks.notice) mk(n.id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(n.id)} would notice you on this move${n.at ? ' (the walk goes on)' : ''}.`, COLORS.danger);
+    // V4.0 (spec 27): one eye per watcher; its title names everyone it would see on this move ("you, then Fenna").
+    const mover = risks.notice.length ? this.selectedId : null;
+    const seers = new Map<string, string[]>();
+    for (const n of risks.notice) {
+      const who = !n.hero || n.hero === mover ? 'you' : this.nameOf(n.hero);
+      const l = seers.get(n.id) ?? [];
+      if (!l.includes(who)) l.push(who);
+      seers.set(n.id, l);
+    }
+    for (const [id, who] of seers) mk(id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(id)} would see ${who.join(', then ')} on this move (the walk goes on).`, COLORS.danger);
     for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">⚔</span><span class="risk-num">${sw.damage[0]}–${sw.damage[1]}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
   }
 
@@ -3706,7 +3715,8 @@ function heroTag(h: HeroInDelve, max: number, lantern: boolean, open = true, dra
 }
 
 function monsterTag(m: Monster): string {
-  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' ? '<b class="tag-alert">?</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
+  // V4.0 (spec 27): the mark is the mood: z asleep, ? searching (alert with a search running), ! hunting; at its post nothing, on patrol 👣.
+  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' && m.searchRounds !== undefined ? '<b class="tag-alert" title="Searching: sees its sides as well as ahead">?</b>' : m.awareness === 'hunting' && m.kind !== 'dragon' ? '<b class="tag-hunt" title="Hunting">!</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
   const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
   const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
   const stuck = (m.stuck ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted or glued: can't move for ${m.stuck} more round${m.stuck === 1 ? '' : 's'}; it can still act">rooted · ${m.stuck}</b>` : '';
