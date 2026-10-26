@@ -1832,6 +1832,7 @@ export class Hud {
   }
 
   private captionFor: string | null = null;
+  private captionVerb = '';
   private captionRaf = 0;
 
   /** The castle's turn: a caption card beside the actor with its dice as small hexes, then the result. */
@@ -1839,8 +1840,11 @@ export class Hud {
     const r = e.roll;
     const it = this.intents[e.who] ?? this.state?.delve?.rivals?.members.find((x) => x.id === e.who)?.intent;
     const verb = /shot|overwatch/i.test(e.what) ? 'shoots' : /bite/i.test(e.what) ? 'bites' : /firebolt/i.test(e.what) ? 'hurls a firebolt at' : /attack/i.test(e.what) ? 'strikes' : e.what.toLowerCase();
+    // The title names the planned target only until the act reports who it really hit (actResult): a guard or
+    // a re-plan can change it, and the caption must never name two different heroes.
     const target = it?.targetId ? this.nameOf(it.targetId) : '';
-    this.captionStart(e.who, `${cap(this.theName(e.who))} ${verb}${target ? ` ${target}` : ''}`);
+    this.captionVerb = `${cap(this.theName(e.who))} ${verb}`;
+    this.captionStart(e.who, `${this.captionVerb}${target ? ` ${target}` : ''}`);
     const dice = r.results.map(() => h('span', { class: 'dl-die dl-die-sm plain' }, h('span', { class: 'dl-die-p num' }, '')));
     const row = h('div', { class: 'dl-cap-dice' }, ...dice);
     this.caption.querySelector('.dl-cap-body')?.append(row);
@@ -1889,8 +1893,12 @@ export class Hud {
     if (!body) return;
     let text = '';
     let cls = '';
+    if ((e.type === 'hit' || e.type === 'miss') && e.attacker === this.captionFor && this.captionVerb) {
+      const t = this.caption.querySelector('.dl-cap-t');
+      if (t) t.textContent = `${this.captionVerb} ${this.nameOf(e.target)}`;
+    }
     if (e.type === 'hit' && (e.attacker === this.captionFor || !this.captionFor)) {
-      text = `${e.damage} damage${this.isHeroId(e.target) ? ` to ${this.nameOf(e.target)}` : ''}`;
+      text = `${e.damage} damage`;
       cls = 'dmg';
     } else if (e.type === 'miss' && e.attacker === this.captionFor) text = 'Misses.';
     else if (e.type === 'downed') {
