@@ -20,18 +20,18 @@ const w = new World(testCastle);
 const ALL = ['keven', 'brann', 'pim', 'aldous'];
 
 /** The classic party (V3.2 starts with Keven alone): a sellsword, a burglar and a pyromancer join for free. */
-function party(s: GameState, extra: [string, string, HeroClass][] = []): GameState {
+function party(s: GameState, extra: [string, string, HeroClass, number?][] = []): GameState {
   s.campaign.roster.push(
     makeHero('brann', 'Brann', 'sellsword'),
     makeHero('pim', 'Pim', 'burglar'),
     makeHero('aldous', 'Aldous', 'pyromancer'),
-    ...extra.map(([id, name, cls]) => makeHero(id, name, cls)),
+    ...extra.map(([id, name, cls, level]) => makeHero(id, name, cls, level ?? 1)),
   );
   return s;
 }
 
 /** A delve on the test castle with no monsters or rivals; heroes placed by hand. */
-function delve(opts: { heroes?: string[]; kind?: 'rescue' | 'recover'; seed?: number; extra?: [string, string, HeroClass][] } = {}): GameState {
+function delve(opts: { heroes?: string[]; kind?: 'rescue' | 'recover'; seed?: number; extra?: [string, string, HeroClass, number?][] } = {}): GameState {
   let s = party(e.newGame(opts.seed ?? 1), opts.extra);
   const k = s.campaign.board.find((x) => !opts.kind || x.kind === opts.kind)!;
   const r = e.apply(s, { type: 'startDelve', contractId: k.id, heroIds: opts.heroes ?? ALL, entrance: 0, packs: {} });
@@ -1391,10 +1391,10 @@ describe('15.3 classes', () => {
     expect(r2.state.delve!.monsters[0]!.at).toEqual(at(2, 10, 6));
   });
 
-  it('sapper: a satchel of 3 charges, throws a charge up to 3, digs rubble and cracked walls (noise 4)', () => {
+  it('sapper: one improvised explosive a level (level 1: 1), throws a charge up to 3, digs rubble and cracked walls (noise 4)', () => {
     const s = delve({ heroes: ['sam'], extra: [['sam', 'Sam', 'sapper']] });
-    // V3.7 (spec 20.3), V4.0 (26.5): the Sapper's own improvised explosives: one slotless pack item holding 3.
-    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'improvised-charge')).toMatchObject([{ amount: 3, slots: 0 }]);
+    // V3.7 (spec 20.3), V4.0 (26.5, 30.2): the Sapper's own improvised explosives: one slotless pack item, one a level.
+    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'improvised-charge')).toMatchObject([{ amount: 1, slots: 0, name: 'Improvised explosive' }]);
     put(s, 'sam', at(2, 12, 3));
     s.delve!.light = 20;
     const o = option(s, 'sam', 'throwCharge')!;
@@ -1408,7 +1408,7 @@ describe('15.3 classes', () => {
     const r = act(s, 'sam', 'throwCharge', { at: at(2, 15, 3) });
     expect(r.events.some((x) => x.type === 'thrown' && x.kind === 'charge')).toBe(true);
     expect(r.events).toContainEqual({ type: 'fuseSet', at: at(2, 15, 3), rounds: 1, by: 'sam' });
-    expect(hero(r.state, 'sam').pack.find((i) => i.kind === 'improvised-charge')!.amount).toBe(2);
+    expect(hero(r.state, 'sam').pack.find((i) => i.kind === 'improvised-charge')).toBeUndefined(); // the only one, spent
     const r2 = ok(r.state, { type: 'endTurn' });
     expect(r2.events.some((x) => x.type === 'blast')).toBe(true);
     expect(r2.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBe(MONSTERS.orc.hp - 4);
@@ -2658,7 +2658,7 @@ describe('V3.5', () => {
       expect(seen['L1']!).toBeLessThan(130);
       // V3.7 (spec 20.4): built like level 3 heroes: class HP +2 per level above 1.
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['ranger', 12], ['sapper', 14]]);
+      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['ranger', 12], ['sapper', 13]]); // V4.0 (spec 30.1): the Sapper's HP 9
       const g = buildCrew(s as GameStateX, 'gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['burglar', 11], ['pyromancer', 10]]);
     });
@@ -3509,9 +3509,12 @@ describe('V3.7 crews', () => {
     const s = delve({ heroes: ['brann'] });
     const wake = buildCrew(s as GameStateX, 'the-wake', WAKE_SPOTS);
     expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
-      ['sellsword', 16, 4, 2, 1], ['hedgewitch', 13, 4, 2, 1], ['shadowmancer', 12, 4, 2, 1], ['sapper', 16, 4, 2, 1],
+      ['sellsword', 16, 4, 2, 1], ['hedgewitch', 13, 4, 2, 1], ['shadowmancer', 12, 4, 2, 1], ['sapper', 15, 4, 2, 1],
     ]);
     expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['improvised-charge', 'charge', 'charge', 'charge']]); // V4.0 (spec 28.6): class kit
+    // V4.0 (spec 30.1, 30.2): Spade, a level 4 Sapper, brings 4 improvised explosives (and 3 bought: 7); armor 0 + 1, Might 60 + 15 + 20.
+    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 4, slots: 0 });
+    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 15, chance: 95, armor: 1 });
     expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
     // Sellsword: Sword 3 slots at Might 70 + 15 (three levels) + 20 (weapon 2); armor 1 + 1; move 4.
     expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 105, dmg: 2, armor: 2, move: 4, range: 1 });
@@ -4233,9 +4236,11 @@ describe('V3.7 kit and calm', () => {
   });
 
   describe('brace and the shield', () => {
-    it('brace: heir, sellsword and sapper; braced until the next player phase: enemies roll −15%, hits do 1 less; free swings at full slots', () => {
+    it('brace: heir and sellsword (V4.0 spec 30.1: not the sapper); braced until the next player phase: enemies roll −15%, hits do 1 less; free swings at full slots', () => {
       const s = delve({ heroes: ['keven', 'brann', 'pim', 'sam'], extra: [['sam', 'Sam', 'sapper']] });
-      for (const [id, has] of [['keven', true], ['brann', true], ['sam', true], ['pim', false]] as const) expect(!!option(s, id, 'brace')).toBe(has);
+      for (const [id, has] of [['keven', true], ['brann', true], ['sam', false], ['pim', false]] as const) expect(!!option(s, id, 'brace')).toBe(has);
+      expect(s.delve!.heroes.find((h) => h.heroId === 'sam')).toBeDefined();
+      expect(e.apply(s, { type: 'act', heroId: 'sam', action: 'brace', target: {}, focus: 0 }).error).toBeDefined();
       put(s, 'brann', GATE);
       const m = monster(s, 'orc', at(1, 5, 7), 'hunting');
       const r = act(s, 'brann', 'brace', {});
@@ -4491,7 +4496,7 @@ describe('V3.7.1', () => {
       const s = pimAtDoor();
       const pv = e.preview(s, 'pim', 'pick', { at: door });
       expect(pv.slots).toBe(2);
-      expect(pv.modifiers).toContain('Improvised pick: 2 slots, used up');
+      expect(pv.modifiers).toContain('Improvised pick: 2 slots, uses 1 of 1'); // V4.0 (spec 30.2): Pim is level 1
       expect(pv.outcomes).toEqual(['Lock jams', 'Opens, noise 2', 'Opens silently']);
       const cmd: Command = { type: 'act', heroId: 'pim', action: 'pick', target: { at: door }, focus: 0 };
       for (const hits of [0, 1, 2]) {
@@ -4506,7 +4511,7 @@ describe('V3.7.1', () => {
       hero(t, 'pim').acted = false;
       put(t, 'pim', at(1, 16, 1)); // next to the locked chest
       const o = option(t, 'pim', 'pick')!;
-      expect(o.blocked).toBe('Your improvised pick is spent. Smash it, or buy lockpicks from Gerda.');
+      expect(o.blocked).toBe('Your improvised picks are spent. Smash it, or buy lockpicks from Gerda.');
       expect(e.preview(t, 'pim', 'pick', { at: at(1, 17, 1) }).ok).toBe(false);
       expect(option(t, 'pim', 'smash')).toBeTruthy();
     });
@@ -5246,7 +5251,8 @@ describe('V4.0 play-test fixes (spec 26)', () => {
 
 describe('V4.0 play-test fixes: the Burglar walks 5, class kit is the hero\'s own (spec 26.4, 26.5)', () => {
   const maxCost = (s: GameState, id: string, sneak: boolean) => Math.max(0, ...e.reachable(s, id, sneak).map((r) => r.cost));
-  const sapperDelve = () => delve({ heroes: ['sam', 'brann', 'pim'], extra: [['sam', 'Sam', 'sapper']] });
+  // V4.0 (spec 30.2): Sam is level 3, so brings 3 improvised explosives (one a level).
+  const sapperDelve = () => delve({ heroes: ['sam', 'brann', 'pim'], extra: [['sam', 'Sam', 'sapper', 3]] });
 
   it('the Burglar walks 5 and sneaks 4; dash 5; everyone else walks 4 (sneak 2)', () => {
     const s = alarm(delve());
@@ -5274,7 +5280,7 @@ describe('V4.0 play-test fixes: the Burglar walks 5, class kit is the hero\'s ow
     expect(maxCost(s, 'pim', false)).toBe(3);
   });
 
-  it('the Sapper starts with "Improvised explosives" ×3: their own item kind, no slot, not counted in the pack', () => {
+  it('the Sapper (level 3) starts with "Improvised explosives" ×3: their own item kind, no slot, not counted in the pack', () => {
     const s = sapperDelve();
     const sam = hero(s, 'sam');
     expect(sam.pack).toMatchObject([{ kind: 'improvised-charge', name: 'Improvised explosives', amount: 3, slots: 0 }]);

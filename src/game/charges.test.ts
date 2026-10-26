@@ -21,11 +21,11 @@ FACING.turnOnAction = true;
 const e = createEngine(testCastle);
 const w = new World(testCastle);
 
-/** A delve with Sam the sapper (and Brann), no monsters, rivals or traps. */
+/** A delve with Sam the sapper (level 3: 3 improvised explosives, spec 30.2) and Brann, no monsters, rivals or traps. */
 function delve(opts: { heroes?: string[]; castle?: CastleDef } = {}): GameState {
   const eng = opts.castle ? createEngine(opts.castle) : e;
   let s = eng.newGame(1);
-  s.campaign.roster.push(makeHero('brann', 'Brann', 'sellsword'), makeHero('sam', 'Sam', 'sapper'), makeHero('pim', 'Pim', 'burglar'));
+  s.campaign.roster.push(makeHero('brann', 'Brann', 'sellsword'), makeHero('sam', 'Sam', 'sapper', 3), makeHero('pim', 'Pim', 'burglar'));
   const k = s.campaign.board[0]!;
   const r = eng.apply(s, { type: 'startDelve', contractId: k.id, heroIds: opts.heroes ?? ['sam', 'brann'], entrance: 0, packs: {} });
   expect(r.error).toBeUndefined();
@@ -87,7 +87,7 @@ const HALL = at(1, 16, 7);
 
 describe('V3.7 sapper', () => {
   describe('the satchel', () => {
-    it('holds 3 charges in one slotless pack item; bought charges add; it is spent first and never dropped, given or stashed', () => {
+    it('holds one charge a level (Sam, level 3: 3) in one slotless pack item; bought charges add; it is spent first and never dropped, given or stashed', () => {
       const s = delve();
       const sam = hero(s, 'sam');
       expect(sam.pack.filter((i) => i.kind === 'improvised-charge')).toMatchObject([{ amount: 3, slots: 0, name: 'Improvised explosives' }]);

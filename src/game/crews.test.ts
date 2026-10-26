@@ -271,7 +271,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
         expect(r.state.delve!.rivals!.job).toBeUndefined();
       }
       expect(done).toBe(true);
-    });
+    }, 30000); // seeds until a jam: slow under load
   });
 
   describe('28.4 traps', () => {

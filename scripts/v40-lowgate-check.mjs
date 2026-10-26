@@ -5,7 +5,8 @@
 // slot only with the surgeon home; buying on step 3 puts the item in the selected hero's pack;
 // the cart keeps valuables apart from gear and Sell all sells only valuables; the forge row and
 // the ale picker appear only once won back; step 4 lists only the main gate on a new campaign
-// and shows no sketch; Delve starts a delve; "Same as last time" jumps to step 4 with the
+// and shows no sketch (V4.0 spec 30.5: with a remembered Level 1 the sketch fills ≥ 45% of the window's height, the rest
+// still in view, at 1280×800 and 1440×900; SHOTS=<dir> saves them); Delve starts a delve; "Same as last time" jumps to step 4 with the
 // remembered party; the won-back banner's "Show me" goes to the step; the graves; tooltips on
 // keyboard focus. No page errors.
 //   node scripts/v40-lowgate-check.mjs <baseUrl>
@@ -130,13 +131,15 @@ check('Keven carries the lantern', !!(await p.$('.lg-hero[data-hero="keven"] .lg
 {
   const cls0 = (await st()).campaign.roster.find((x) => x.id === r0).cls;
   const kitOf = () => p.$eval(`.lg-hero[data-hero="${r0}"] .lg-kit`, (e) => ({ t: e.innerText, tip: e.dataset.tip, afterSlots: e.previousElementSibling?.classList.contains('lg-sl-row') })).catch(() => null);
-  for (const [cls, want] of [['burglar', /Brings their own: improvised pick/], ['sapper', /Brings their own: 3 improvised explosives/]]) {
-    await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls}';`);
+  // V4.0 (spec 30.2): one a level; the hero is set to level 2 for the check ("2 improvised picks").
+  const lv0 = (await st()).campaign.roster.find((x) => x.id === r0).level;
+  for (const [cls, want] of [['burglar', /Brings their own: 2 improvised picks/], ['sapper', /Brings their own: 2 improvised explosives/]]) {
+    await edit(`const h = s.campaign.roster.find((h) => h.id === '${r0}'); h.cls = '${cls}'; h.level = 2;`);
     await p.waitForTimeout(60);
     const k = await kitOf();
     check(`a ${cls}'s loadout card: "${want.source.replace(/\\/g, '')}" under the slots`, !!k && want.test(k.t) && k.afterSlots && /own · .*\nDoesn't take a slot; can't be given away/.test(k.tip ?? ''), k ? `${k.t} | ${(k.tip ?? '').split('\n')[0]}` : 'none');
   }
-  await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls0}';`);
+  await edit(`const h = s.campaign.roster.find((h) => h.id === '${r0}'); h.cls = '${cls0}'; h.level = ${lv0};`);
   await p.waitForTimeout(60);
   check('Keven brings no kit line', !(await p.$('.lg-hero[data-hero="keven"] .lg-kit')));
 }
@@ -217,6 +220,35 @@ const ents = await p.$$eval('.lg-ent', (els) => els.map((e) => e.innerText.split
 const hasMemory = await p.evaluate(() => typeof window.vcEngine.castleMemory === 'function' && window.vcEngine.castleMemory(window.vc.state()).some((m) => m.hexes.length));
 check('step 4 lists only the main gate on a new campaign', ents.length === 1 && /Main gate|Gatehouse/.test(ents[0]), ents.join(','));
 check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(await p.$('.lg-sketch.none')) && !(await p.$('.lg-sketch svg')));
+// V4.0 (spec 30.5): with a remembered Level 1, the sketch takes most of the column (≥ 45% of the window's height) and the
+// ways in, the lantern choice and the plan still show without scrolling, at 1280×800 and 1440×900.
+{
+  const SHOTS = process.env.SHOTS ?? '';
+  const keep = await p.evaluate(() => structuredClone(window.vc.state().campaign));
+  await edit(`const lv = window.vcEngine.castle().levels.find((l) => l.level === 1); s.campaign.explored = { 1: Object.keys(lv.tiles) }; delete s.campaign.opened;`);
+  for (const [w, hh] of [[1280, 800], [1440, 900]]) {
+    await p.setViewportSize({ width: w, height: hh });
+    await step('setout');
+    await p.waitForTimeout(250);
+    const m = await p.evaluate(() => {
+      const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+      const main = document.querySelector('.lg-main');
+      const sk = r('.lg-sketch svg');
+      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 9999, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
+    });
+    check(`${w}×${hh}: the sketch takes ≥ 45% of the window's height`, m.svg && m.sketch >= 0.45 * m.vh, `${Math.round(m.sketch)} of ${m.vh}`);
+    check(`...ways in, lantern and plan in view without scrolling`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
+    check('...room names readable (≥ 11px) and the ways in named on it', m.names >= 3 && m.fs >= 11 && m.ents2 >= 1, `${m.names} names, ${m.ents2} ways, ${Math.round(m.fs)}px`);
+    if (SHOTS) {
+      await p.mouse.move(5, hh - 5);
+      await p.waitForTimeout(150);
+      await p.screenshot({ path: `${SHOTS}/setout-${w}x${hh}.png` });
+    }
+  }
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await edit(`s.campaign.explored = ${JSON.stringify(keep.explored ?? null)} ?? undefined; s.campaign.opened = ${JSON.stringify(keep.opened ?? null)} ?? undefined;`);
+  await step('setout');
+}
 check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Lantern/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
 check('the plan warns when Keven goes', /If he falls, the campaign ends with him\./.test(await p.$eval('.lg-plan', (e) => e.innerText)));
 await p.click('.lg-shutter input');
