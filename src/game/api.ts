@@ -199,6 +199,12 @@ export interface Engine {
   calmReach(state: GameState, heroId: string, sneak?: boolean): Reach[];
   /** V3.7 (spec 20.5): is the party calm (free movement on)? With a reason when not ("An orc hunts Pim"). */
   calm(state: GameState): { calm: boolean; why?: string };
+  /**
+   * V4.0 HUD (spec 27, read-only): the floor a monster or crew member would notice a hero on now, for the hover
+   * shading: `front` where it looks properly, `side` the corner of an unaware monster's eye; straight behind never.
+   * For a hero moving as given (default walking; `quiet` = a Burglar's feet). Optional: the HUD skips the shading without it.
+   */
+  sightWash?(state: GameState, watcherId: string, sneaking?: boolean, quiet?: boolean): { front: Pos[]; side: Pos[] };
   /** V3.5 (spec 18.6): the parley deals a hero can make with the crew right now (empty if none in reach). */
   deals(state: GameState, heroId: string): DealOption[];
   /** V3.2: one-line role and the ability/spell lines for a class, for recruit cards. */

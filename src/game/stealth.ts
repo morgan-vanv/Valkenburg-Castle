@@ -585,3 +585,31 @@ export function blindArcHexes(f: Facer, radius: number): Pos[] {
   }
   return out;
 }
+
+/**
+ * V4.0 HUD (spec 27, read-only): the floor a watcher (monster or crew member) would see a hero on right now, for the
+ * hover shading. Hexes within notice range on its level where a hero moving as given (`sneaking`, `quiet` for a
+ * Burglar's feet) would be noticed: `front` where it looks properly (ahead; the sides too once searching or hunting,
+ * or for a crew member), `side` the corner of an unaware monster's eye. Straight behind is never shaded.
+ */
+export function sightWash(c: Ctx, watcherId: string, sneaking = false, quiet = false): { front: Pos[]; side: Pos[] } {
+  const front: Pos[] = [];
+  const side: Pos[] = [];
+  const m = c.d.monsters.find((x) => x.id === watcherId && x.hp > 0 && !x.buried);
+  const r = m ? undefined : rivalsOnMap(c).find((x) => x.id === watcherId);
+  const f = m ?? r;
+  if (!f) return { front, side };
+  const mood: Mood = m ? moodOf(m) : 'unaware';
+  if (mood === 'asleep') return { front, side };
+  const lit = litSet(c.w, c.d);
+  for (const hh of range(f.at, NOTICE.litWalk)) {
+    const p = { level: f.at.level, ...hh };
+    if (samePos(p, f.at) || !c.w.tile(p) || !isFloorish(c.w, c.d, p)) continue;
+    let b = bearingOf(f, p);
+    if (b === 'side' && blindCone(f)) b = 'front';
+    if (b === 'back') continue;
+    if (!wouldNotice(c, f, p, sneaking, lit, quiet, mood)) continue;
+    (b === 'side' && mood === 'unaware' ? side : front).push(p);
+  }
+  return { front, side };
+}
