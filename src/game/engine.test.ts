@@ -2091,8 +2091,7 @@ describe('16.4 new monsters', () => {
     let g = s.delve!.monsters.find((x) => x.id === gh.id)!;
     expect(g.buried).toBe(false);
     expect(g.awareness).toBe('hunting');
-    // V3.9 (spec 24.2): it rose behind him: unseen until he turns (free).
-    expect(e.intents(s)[gh.id]).toBeUndefined();
+    // V3.9.2 (spec 24.7): heroes are blind only straight behind; it rose to his rear side and is seen.
     s = ok(s, { type: 'face', heroId: 'brann', facing: dirIndex(hero(s, 'brann').at, g.at) }).state;
     // Adjacent now: the intent is grab; next phase Brann is held.
     expect(e.intents(s)[gh.id]?.kind).toBe('grab');
@@ -3886,7 +3885,7 @@ describe('V3.7 crews', () => {
 
 // ---------------------------------------------------------------- V3.7 (spec 20.5)
 
-import { hexKey } from './hex';
+import { DIRS, hexKey } from './hex';
 import { calmReach } from './calm';
 import { CALM_STEPS, SHIELD_PRICE } from './data';
 
@@ -4430,7 +4429,7 @@ describe('V3.7.2 prospectors keep off the party\'s way in (spec 23.2)', () => {
 
 // ---------------------------------------------------------------- V3.9 (spec 24)
 
-import { inFrontHalf, inRearHalf } from './stealth';
+import { behindHex, inFrontHalf, inRearHalf } from './stealth';
 import { overwatchCheck } from './ai';
 import { FACING } from './data';
 // V3.9.1: tests written for the shelved facing mechanic run with it on; 'V3.9.1 facing shelved' tests it off.
@@ -4457,7 +4456,8 @@ describe('V3.9 eyes front', () => {
         expect(h.facing).toBeTypeOf('number');
         // The south gate (2,9): the gate room lies north.
         expect(inFrontHalf(h, at(1, 3, 6))).toBe(true);
-        expect(inRearHalf(h, at(1, h.at.q, h.at.r + 1))).toBe(true);
+        // V3.9.2 (spec 24.7): a hero is blind only in the cone straight behind.
+        expect(inRearHalf(h, behindHex(h))).toBe(true);
       }
     });
 
@@ -4745,6 +4745,20 @@ describe('V3.9.1 facing shelved (spec 24.6)', () => {
     const f = hero(s, 'brann').facing;
     expect(f).toBeDefined();
     expect(hero(s, 'brann').facing).toBe(f);
+  });
+});
+
+describe('V3.9.2 blind cone for heroes and crews, rear half for monsters (spec 24.7)', () => {
+  it('a hero sees the rear diagonals but not straight behind; a monster sees neither', () => {
+    const f = 0;
+    const me = { at: at(2, 8, 4), facing: f };
+    const back = behindHex(me);
+    const diag = { level: 2, q: me.at.q + DIRS[(f + 2) % 6]!.q, r: me.at.r + DIRS[(f + 2) % 6]!.r };
+    expect(inRearHalf({ ...me, heroId: 'x' } as never, back)).toBe(true);
+    expect(inRearHalf({ ...me, heroId: 'x' } as never, diag)).toBe(false);
+    expect(inRearHalf({ ...me, crew: 'ferrymen' } as never, diag)).toBe(false);
+    expect(inRearHalf(me, back)).toBe(true);
+    expect(inRearHalf(me, diag)).toBe(true);
   });
 });
 

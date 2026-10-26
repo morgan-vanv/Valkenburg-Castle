@@ -11,7 +11,7 @@ import {
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
-import { dirIndex, heroSwings, inRearHalf } from './stealth';
+import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
 
 // ---------------------------------------------------------------- perception
 
@@ -174,6 +174,12 @@ export function strike(c: Ctx, attacker: string, targetId: string, slots: number
 
 /** `strike` with the roll's hits and the damage dealt (free swings report them, spec 20.2). */
 export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots: number, p: number, dmg: number, what: string): { hit: string | null; hits: number; damage: number } {
+  // V3.9.2 (spec 24.7): whoever strikes turns to face the target (monsters and crew members alike).
+  {
+    const me = c.d.monsters.find((m) => m.id === attacker) ?? c.d.rivals?.members.find((r) => r.id === attacker);
+    const to = figurePosOf(c, targetId);
+    if (me && to) faceToward(me, to);
+  }
   let tid = targetId;
   const g = guardFor(c, tid);
   if (g) {

@@ -281,10 +281,10 @@ export const CALM_STEPS = 4;
  */
 export const FREE_MOVE = { enabled: false };
 /**
- * V3.9.1 (spec 24.6): the managed facing mechanic is shelved. Heroes face the way they last moved;
- * the free `face` command and turning toward an action's target are off. Flip these to bring them back.
+ * V3.9.1 (spec 24.6): the free `face` command is shelved (off). V3.9.2 (spec 24.7): acting turns a hero
+ * toward the action's target again (`turnOnAction`).
  */
-export const FACING = { faceCommand: false, turnOnAction: false };
+export const FACING = { faceCommand: false, turnOnAction: true };
 /** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
 export const BRACE_DMG = 1;
 export const BRACE_CHANCE = -15;

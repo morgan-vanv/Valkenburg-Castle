@@ -496,6 +496,11 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
   const st = rivalStats(r);
   const t = targets(c).find((x) => x.id === it.targetId);
   const member = rivalsOnMap(c).find((x) => x.id === it.targetId);
+  // V3.9.2 (spec 24.7): using an item or a spell turns the user toward its target.
+  {
+    const to = it.to ?? t?.at ?? member?.at;
+    if (to && member !== r) faceToward(r, to);
+  }
   switch (it.kind) {
     case 'veil': {
       const who = member ?? r;

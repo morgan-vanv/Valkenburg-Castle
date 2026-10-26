@@ -262,16 +262,20 @@ export function inFrontHalf(at: Pos, facing: number, p: Pos): boolean {
   return frontDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
 }
 
-/** Is `p` in the rear half (the back direction and its two neighbours)? */
-export function inRearHalf(at: Pos, facing: number, p: Pos): boolean {
+/**
+ * Is `p` in the figure's blind area? Monsters: the rear half (the back direction and its two
+ * neighbours). V3.9.2 (spec 24.7) `cone`: heroes and crew members, only straight behind.
+ */
+export function inRearHalf(at: Pos, facing: number, p: Pos, cone = false): boolean {
   if (at.level !== p.level || samePos(at, p)) return false;
-  return backDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
+  const i = dirIndexOf(p.q - at.q, p.r - at.r);
+  return cone ? i === (facing + 3) % 6 : backDirs(facing).includes(i);
 }
 
 /** The three neighbour hexes in a figure's rear half: directly behind first, then the two back flanks. */
-export function rearNeighbours(at: Pos, facing: number): Pos[] {
+export function rearNeighbours(at: Pos, facing: number, cone = false): Pos[] {
   const back = (facing + 3) % 6;
-  return [back, (back + 5) % 6, (back + 1) % 6].map((i) => ({ level: at.level, ...add(at, DIRS[i]!) }));
+  return (cone ? [back] : [back, (back + 5) % 6, (back + 1) % 6]).map((i) => ({ level: at.level, ...add(at, DIRS[i]!) }));
 }
 
 /** The direction of a step (or of "toward"): hex.ts DIRS index, as the engine's dirIndex. */
@@ -345,7 +349,7 @@ export function backstabFrom(s: GameState, heroId: string, targetId: string, fro
   const f = facingOf(t.u);
   if (f === undefined) return false;
   if (!unawareOf(d, targetId, heroId)) return false;
-  return inRearHalf(t.u.at, f, from) && Math.max(Math.abs(from.q - t.u.at.q), Math.abs(from.r - t.u.at.r), Math.abs(from.q + from.r - t.u.at.q - t.u.at.r)) === 1;
+  return inRearHalf(t.u.at, f, from, !!t.crew) && Math.max(Math.abs(from.q - t.u.at.q), Math.abs(from.r - t.u.at.r), Math.abs(from.q + from.r - t.u.at.q - t.u.at.r)) === 1;
 }
 
 /** Was this hit (in the state before it) a backstab? */
@@ -375,7 +379,7 @@ export function backstabSpots(s: GameState, heroId: string, reach: Pos[], seen: 
     if (t.crew && d.rivals?.stance === 'hired') continue;
     const f = facingOf(t.u);
     if (f === undefined || !unawareOf(d, id, heroId)) continue;
-    for (const p of rearNeighbours(t.u.at, f)) {
+    for (const p of rearNeighbours(t.u.at, f, !!t.crew)) {
       const k = posKey(p);
       if (!can.has(k) || done.has(k)) continue;
       done.add(k);
