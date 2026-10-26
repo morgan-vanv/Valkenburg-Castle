@@ -912,3 +912,54 @@ Owner-approved; design pillars 15 (the countdown is a number that informs a choi
 
 - A paralyzed hero is **helpless** (as downed or dozing), and isn't "up" for another hero's "alone". A crew member that can stand next to a paralyzed hero with nobody up within `CAPTURE_ALONE` (4) seizes them ("finds Fenna paralyzed and alone"): held (`grabbedBy`), dragged toward the way out; they may Escape once the paralysis ends or a friend cures it (an antidote from next to them, Mend within 3). A friend can't Shoulder a hero a crew member holds. Held when the delve ends, they are captured, not left to die.
 - The Gallows Choir's venom dart goes for a hero alone (28.8's `alone`) first: paralyzed and alone, the crew can carry them off.
+
+## 30. V4.0 play-test fixes 2 (owner, 2026-10-26)
+
+Owner requests from play. Design pillars 15 (numbers only where they inform a choice), 11 (visual clarity; every HUD element explains itself), 16 (intuitive), 17 (crews play by the party's rules). Contract: none changed (`kitPerDelve`, `KIT_PER_LEVEL` in data.ts; `classKit`, `pickName`, `spendPick` in charges.ts; `fitClass` in camp.ts; `Diorama.showPick`, `picked`, `pickDim` in the view). Tests: `src/game/kit.test.ts`, engine.test.ts and charges.test.ts updated.
+
+### 30.1 The Sapper: no Brace, a little squishier (owner)
+
+Owner: "Remove the brace ability from the sapper, and in general make them slightly weaker and squishier than dedicated melee units like the sellswords. Sappers aren't frail, but they should have noticeable tradeoffs compared to the other classes (particularly the sellswords)."
+
+- `CLASSES.sapper`: HP 9 (was 10), Might 60 (was 65), armor 0 (was 1). The hammer stays (3 Might slots, 2 damage); Finesse 50, Wits 45, Nerve 60 unchanged. Their strength is charges and Dig. The Sellsword keeps HP 10, Might 70, armor 1, Brace, Guard and the strong shove.
+- Brace is the Heir's and the Sellsword's only (`targetsFor('brace')`); refused for a Sapper. A Sapper braced in a save made mid-delve stays braced until that world phase ends.
+- Text: `ROLES` (no Brace line; "Improvised explosives: 1 a level each delve"), `CLASS_KIT` and `CLASS_ABILITIES` (no Brace chip), `CLASS_GEAR` (Armor 0), the recruit card's "Best at" ("Blowing a new way through walls and doors. Lighter in a brawl than a Sellsword."). Lowgate's "This party can" never named Brace.
+- **Old saves.** A hero's max HP and stats are stored on the hero (class base + 2 HP and +5 main stat a level), armor is read from the table at use. `fitClass` (camp.ts), run by `deserialize` on the roster, the tavern's recruits and captives, brings a Sapper down to the table at their level: max HP and any stat above the table are lowered (only lowered; idempotent); current HP drops by the same amount, so a wounded Sapper keeps their wounds (a level 3 Sapper at 8/14 becomes 7/13). A Sapper in the castle when the game was saved is capped at the new maximum. No save-key bump.
+- **Crews (pillar 17).** Crew Sappers are built from the table at the crew level, so the Ferrymen's Brecht (level 3) is HP 13 (was 14), Might hit 80% (was 85%), armor 0 + 1 = 1 (was 2); the Wake's Spade (level 4) HP 15 (was 16), 95% (capped, unchanged), armor 1 (was 2). Members saved mid-delve keep their stored HP; legacy members (no level) already used the old `RIVAL_CLASSES` table (HP 9, armor 0).
+
+### 30.2 Class kit by level (owner)
+
+Owner: "Give the free items for sappers/burglars in accordance with that character's level (1 free explosive or lockpick per level per delve). Sappers starting with 3 charges is a lot."
+
+- `kitPerDelve(level)` = level × `KIT_PER_LEVEL` (1), at least 1: level 1 brings 1, level 3 brings 3, level 6 (`MAX_LEVEL`) brings 6. Replaces `SAPPER_CHARGES` (3), which is gone; its callers use `kitPerDelve` / `classKit`.
+- **Sapper:** improvised explosives, one slotless `improvised-charge` item with `amount` = level, made at `startDelve` (`classKit`). Bought blasting charges still add and are spent after them. Everything else as 26.5.
+- **Burglar:** improvised picks, now one slotless `improvised` item with `amount` = level, named "Improvised picks (2)" / "Improvised pick" with one left (`pickName`). Each Pick attempt uses one (`spendPick`), whatever happens; the item goes at 0, and then Pick is blocked with "Your improvised picks are spent. Smash it, or buy lockpicks from Gerda." Same 2 Finesse slots and outcomes; the smith's lockpicks (3 slots for a Burglar, never used up) are unchanged and used first. Log: "Fenna has 1 improvised pick left." / "Fenna's last improvised pick is spent."; the roll's modifier "Improvised pick: 2 slots, uses 1 of 2".
+- **Crews (pillar 17):** by the crew's level, in `member` (rivals.ts): the Ferrymen's Brecht 3 explosives (and his 2 bought charges: 5, as before), the Wake's Spade 4 (and 3 bought: 7, was 6), the Lantern Sisters' Burglar 2 picks, the Gallows Choir's Little Mags 3. Crew Burglars carry lockpicks and use them first; without, `crewWorkLock` works an improvised pick at 2 slots and uses one up a try.
+- **Old saves:** a Burglar's single pick from before (amount 1) is one use; a Sapper's 3 explosives saved mid-delve stay 3 for that delve. The next delve brings the new count.
+- UI: the kit mark on the party card shows the count for both kits ("⌐ 2 own"; hover "Fenna's own · 2 improvised picks left"); Lowgate's Outfit card says "Brings their own: 2 improvised picks" / "1 improvised explosive" by level; the help texts (Pick, the kit lines, recruit chips: "1 a level per delve") follow.
+
+### 30.3 Which one you're picking (owner)
+
+Owner: "When given an option to choose between multiple targets (whether it be attacks, or jump destinations) there is no real clarity about what target you're selecting. When selecting a target out of multiple, hovering the option should visually show which they are selecting."
+
+- While an action is armed with several options, the one a click (or Enter) would take is marked: a thick near-white ring lifted off its hex with a breathing halo (red for a foe or a drop, green for a friend, amber for a hex), the other options' rings dimmed to 40%, and the figure's tag outlined (`Diorama.showPick`). Every pick mode goes through it: enemy, ally, hex, item and other pickers (Give, Free, Escape, Shoulder), jump (its landing and fall told: "Falls 2 levels into the Hollow: 7 damage"), shove and knockback (the hex they'd land on, for the knockback straight away from the Ranger), throws, fireball, gust, smoke and glue (the area under the marked hex), Set and Throw charge (the blast plan under it), blink, dig, unbar.
+- The pill above the hotbar lists the options (up to 8 when they aren't all on the map, or when there are 6 or fewer); two with the same name say which way each is ("Orc · east", "Orc · south-west"). Hovering or focusing an entry marks its hex or figure on the board. The pill ends "▸ Orc · east  Tab: next of 2 · Enter: take it".
+- Keyboard: Tab or the arrow keys step through the options with the same mark (Shift+Tab, Left, Up go back; the view follows to the option's level); Enter takes the marked one. Pointing at an option takes over from the keyboard's choice.
+
+### 30.4 Only what a hero can do (owner)
+
+Owner: "We should also consider hiding actions that party members are currently unable to take (this saves visual space). Right now my sapper's action selection bar is scrolling on a 2K screen. I can't even attack and I don't even have charges to use."
+
+- The hotbar shows only what the selected hero can do now: the engine's options with a target, minus blocked ones (a lock with no pick, a full pack's Take, a shut way out's Leave). The dimmed "Attack · nobody in reach" button is gone. Spells without mana, Set/Throw charge without charges and acted heroes' actions never were options; free actions stay. Blocked reasons still show on the board's hover card ("Pick: Your improvised picks are spent...").
+- Order is fixed with absent buttons collapsed: Attack, Shove, class abilities and spells in the engine's order, the way out, the stairs, then what's in reach.
+- Nothing to do: "Nothing to do here. Move, or End turn." ("Action used. Move, or End turn." after acting; "Done this round. End turn, or pick another hero." after both). Hovering the hero's name (or that line) lists what they can do elsewhere: "Corin can: Attack, Shove, Set charge, Throw charge, Dig. The bar shows only what Corin can do from here, now; ..."
+- More lists only usable entries, and is left off when it has none.
+- The bar never scrolls: it is as wide as its buttons (at least 968px, at most the window less 32px; at 1360 and below at least the window less 200px), the actions never scroll, and if it still doesn't fit the labels fold away (`compact`: icons, keys and hovers stay), then it tightens (`tight`). Checked at 1280, 1440 and 2560 wide.
+- Pack tooltips speak the V4.0 HUD: "Use: Items › Potion (...)" is gone; the hotbar says "Click to use (key H), then yourself or a hero next to you." and elsewhere (Lowgate) "Use: click it in the pack, then ..." (`ITEM_USE`, `itemUseLine`, `itemClickLine`); kit and lockpicks name their action ("Use: Pick, next to a locked door or chest").
+
+### 30.5 The Set out sketch, larger (owner)
+
+Owner on Lowgate's step 4 sketch of the castle: "It looks great, I'd like to see it emphasized more."
+
+- The sketch takes the left column's spare height (at least 300px; the page scrolls below that) and scales to fill it: it is drawn in map units with `preserveAspectRatio="xMidYMid meet"`, fitting what you remember of Level 1 and the ways in with a hex and a half of padding. With a sketch, the lantern checkbox moves under the plan, so the ways in, the lantern choice and the plan stay in view at 1280 × 800 and 1440 × 900 (sketch 405px and 497px, ≥ 45% of the window).
+- Room and entrance names grow with the sketch but never under ~12.5px on screen, with a dark outline; a room name that would overlap an entrance's or another room's is left out (laid out again when the sketch resizes). The entrance markers and the job's mark scale with it; "Closest to the job" stays on the entrance card. The empty state ("You've never been inside...") stays compact.

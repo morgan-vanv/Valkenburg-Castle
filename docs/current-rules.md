@@ -1,6 +1,6 @@
 # Current rules (V4.0)
 
-Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`) and V4.0's play-test fixes (spec 26: Walk/Sneak per hero, noticing during moves, when monsters turn), and V4.0's venom (spec 29, section 8.6). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
+Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`) and V4.0's play-test fixes (spec 26: Walk/Sneak per hero, noticing during moves, when monsters turn), and V4.0's venom (spec 29, section 8.6), and V4.0's play-test fixes 2 (spec 30: the Sapper without Brace, class kit by level). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
 
 Scope: the rules engine (src/game) and castle data (src/data/castle) as they stand on `main` at V3.9.4 (commit bc3f1fd). Presentation is mentioned only where it carries a rule. Every number below was read from the code. Section 18 lists where the spec disagrees.
 
@@ -152,7 +152,7 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 - Entrances (`castle.entrances`, index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21). Only an open one may be used (section 3.1); `startDelve` refuses a shut one: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate." Heroes are placed on the entrance and the nearest free hexes.
 - Ways already opened this campaign stand open (the gate open and unlocked, the rubble in `blown`). While the sally port is shut, its key lies in the library at L1 (3, 1).
 - Lantern: full (20), open; the bearer is Keven if he goes, else the first hero.
-- Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. The Sapper gets 3 improvised explosives (one slotless item, kind `improvised-charge`, `amount` 3). Every Burglar gets one improvised pick (slotless).
+- Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. Class kit, one a hero level (spec 30.2, `classKit`): the Sapper gets improvised explosives (one slotless item, kind `improvised-charge`, `amount` = level); every Burglar gets improvised picks (one slotless item, kind `improvised`, `amount` = level).
 - Every hero faces "into the castle": toward the centroid of floor hexes within 6.
 - Objective placed: a recover item at the site (heirloom value 60 / 120 / 180 by level, or the story item), or a shackled prisoner (5 HP; a captive hero 1 HP). The slay target is the Dragon spawn.
 - Hoard: up to 3 pieces (300 each, 2 slots) on free Lair hexes round the Dragon, minus those already carried out.
@@ -493,12 +493,14 @@ Code: common.ts `roll`, `clampChance`, `hurtHero`, `hurtAny`, `turnOnHit`, `kill
 | Sellsword | 10 | 70 | 45 | 40 | 60 | Sword 3 Might, 2 | 1 | Might | 0 |
 | Burglar | 7 | 40 | 75 | 60 | 50 | Dagger 2 Finesse, 2 | 0 | Finesse | 0 |
 | Ranger | 8 | 45 | 75 | 60 | 55 | Longbow 3 Finesse, 2, range 6, noise 1 | 0 | Finesse | 0 |
-| Sapper | 10 | 65 | 50 | 45 | 60 | Hammer 3 Might, 2 | 1 | Might | 0 |
+| Sapper | 9 | 60 | 50 | 45 | 60 | Hammer 3 Might, 2 | 0 | Might | 0 |
 | Pyromancer | 6 | 30 | 50 | 75 | 55 | Staff 2 Might, 1 | 0 | Wits | 3 |
 | Shadowmancer | 6 | 30 | 55 | 75 | 50 | Staff 2 Might, 1 | 0 | Wits | 3 |
 | Hedgewitch | 7 | 35 | 50 | 70 | 65 | Staff 2 Might, 1 | 0 | Wits | 3 |
 
 Nerve is not used by any rule.
+
+V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Might 60, armor 0, no Brace; was 10, 65, 1 and Brace); their strength is charges and Dig. HP and the main stat are stored on each hero (+2 HP and +5 main stat a level), so a save's Sappers are brought down to the table on load (`fitClass`: only lowers; a wounded Sapper keeps their wounds, one in the castle is capped at the new maximum); armor is read from the table. Crew Sappers (the Ferrymen's Brecht, the Wake's Spade) are built from the table: HP 13 and 15, armor 0 + the crew's armor tier.
 
 ### 9.2 Actions anyone can take
 
@@ -506,7 +508,7 @@ Nerve is not used by any rule.
 | --- | --- |
 | Attack | Weapon: melee on an adjacent visible enemy; Ranger on a visible enemy in line of sight within 6 |
 | Shove | 2 Might slots (Sellsword 3) on an adjacent visible enemy (not the Dragon); 2+ hits push it 1 hex straight away (section 13.2); Perfect +1 damage; noise 2 |
-| Pick | Needs lockpicks or the improvised pick (section 9.4) |
+| Pick | Needs lockpicks or an improvised pick (section 9.4) |
 | Smash | 2 Might slots on an adjacent (or own-hex) locked door or chest, jammed included (not the barred gate); door opens on 2 hits, chest on 1; noise 4 either way |
 | Unbar | V4.0: with the sally port key, next to the barred gate: opens it, silent, for the campaign (section 3.1) |
 | Smash crate/barrel | Adjacent crate or barrel; noise 4; 60% gold 3–12, 20% torch/potion/firecracker/caltrops, 20% nothing; the hex becomes floor |
@@ -533,19 +535,19 @@ Nerve is not used by any rule.
 | Class | Ability | Rule |
 | --- | --- | --- |
 | Heir | Rally | Action: every other active hero within 3 gains 1 Focus (to their max). Cooldown 3 rounds |
-| Heir, Sellsword, Sapper | Brace | Action: until the next player phase, each hit on them does 1 less (after armor, min 0) and enemies roll −15; their free swings are at full slots |
+| Heir, Sellsword | Brace | Action: until the next player phase, each hit on them does 1 less (after armor, min 0) and enemies roll −15; their free swings are at full slots |
 | Sellsword | Guard | Action: pick an adjacent active ally; until the next player phase, monster and crew strikes aimed at that ally hit the Sellsword (adjacency not rechecked) |
 | Sellsword | Strong shove | Shove at 3 slots |
 | Burglar | Quiet feet | Walks 5 and sneaks 4 (dash the same); quieter wake rolls and noticing (sections 5.3, 5.4); a sneaking Burglar next to the sleeping Dragon doesn't wake it |
 | Burglar | Backstab | Section 8.2 |
-| Burglar | Light fingers | Opens chests without using the action. Starts each delve with an improvised pick |
+| Burglar | Light fingers | Opens chests without using the action. Starts each delve with improvised picks, one a hero level (section 9.4) |
 | Ranger | Overwatch | Action: in the coming world phase, shoots the first monster or crew member that moves or acts within 6 that the Ranger can see (field of view counts). Full bow roll (adjacent −1 slot, asleep +20). Lapses at the end of the world phase |
 | Ranger | Knockback shot | 2 Finesse slots at range ≤ 5 in sight, not the Dragon; 2 hits push the target 1 hex away from the Ranger with all shove outcomes; noise 1 |
 | Ranger (any bow) | Hamstring | 1 Finesse slot at −20, range ≤ 5 in sight, awake target, not the Dragon; a hit roots it 2 rounds (heroes: no move or dash; monsters and crew: stuck in place); noise 1 |
 | Sapper | Set charge | Action, 1 charge: an adjacent floor-like hex, cracked wall or breakable wall with no fuse; fuse 1 or 2 |
 | Sapper | Throw charge | Action, 1 charge: a hex within 3 the party can see; fuse 1 |
 | Sapper (and Mole's Brown) | Dig | Action: adjacent rubble or cracked wall becomes floor; noise 4; no roll |
-| Sapper | Improvised explosives | 3 each delve (one slotless item, "Improvised explosives"; "Improvised explosive" with 1 left); the same blast, fuse, set and throw rules as a bought blasting charge; bought charges add to them; the improvised ones are spent first |
+| Sapper | Improvised explosives | One a hero level each delve (`kitPerDelve`: level 1 brings 1, level 6 brings 6; was 3 at any level), one slotless item, "Improvised explosives" ("Improvised explosive" with 1 left); the same blast, fuse, set and throw rules as a bought blasting charge; bought charges add to them; the improvised ones are spent first |
 | Pyromancer | Firebolt (1 mana) | 3 Wits slots, range 5, visible enemy in line of sight; 2 per hit minus armor; noise 3 |
 | Pyromancer | Fireball (2 mana) | A floor or pit hex within 5 the party can see: 3 Wits slots; every figure within 1 (allies too) takes hits × max(1, 2 − armor) (monster or hero armor; crew armor and ward are ignored), Perfect +1; floor hexes burn 2 world phases (1 damage per phase to whoever stands there; lit; monsters won't path into fire); noise 6 |
 | Pyromancer | Kindle (1 mana) | +6 light (only below 20); silent |
@@ -567,15 +569,15 @@ Sneak attack and backstab apply only to the weapon `attack` action, not to spell
 | --- | --- | --- | --- |
 | Lockpicks (smith, 25) | Burglar | 3 | never |
 | Lockpicks | anyone else | 2 | never |
-| Improvised pick (every Burglar, each delve, slotless) | its carrier | 2 | after one pick, whatever the result |
+| Improvised picks (every Burglar, one a hero level each delve, one slotless item "Improvised picks (2)", "Improvised pick" with 1 left) | its carrier | 2 | one per Pick attempt, whatever the result |
 
-No pick, no Pick (Burglar included). A Burglar with both uses the lockpicks.
+No pick, no Pick (Burglar included). A Burglar with both uses the lockpicks. A save's single improvised pick from before spec 30.2 is one use.
 
 Pick outcomes: all slots hit: opens silently; one short: opens, noise 2; on 3 slots, 1 hit: holds; 0 hits: jams (only smash or a charge opens it now).
 
 Other ways in: Smash (section 9.2), a blasting charge, the skeleton key (one use, anyone, silent, not on jammed locks), a crew's paid "open" job.
 
-V4.0 (spec 28.3): crew members open locks by these rules: with lockpicks a Burglar picks at 3 Finesse slots, anyone else at 2 (same outcomes); without, or on a jammed lock, Smash (2 Might slots, noise 4); a crew Sapper blasts a locked door that is its short way (12.3).
+V4.0 (spec 28.3): crew members open locks by these rules: with lockpicks a Burglar picks at 3 Finesse slots, anyone else at 2 (same outcomes); a crew Burglar brings improvised picks by the heroes' rule (one a crew level: the Lantern Sisters' Burglar 2) and works them at 2 slots, one used up a try, when she has no lockpicks (spec 30.2); without, or on a jammed lock, Smash (2 Might slots, noise 4); a crew Sapper blasts a locked door that is its short way (12.3).
 
 V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or a blast within 1 opens it (section 3.1).
 
@@ -597,9 +599,9 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 - Sally port key (V4.0): section 3.1.
 - Grappling hook, rope: section 13.1.
 - Blasting charge (bought, 1 slot): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw, after their improvised explosives.
-- Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised pick are the hero's own. No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives.
+- Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised picks are the hero's own, one a hero level each delve (spec 30.2; crew members by crew level: the Ferrymen's Brecht 3 explosives plus 2 bought charges, the Wake's Spade 4 plus 3). No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives.
 
-Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `migrateSatchel`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`; V4.0 venom.ts (`envenom`, `cureVenom`, `venomTakes`).
+Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `KIT_PER_LEVEL`, `kitPerDelve`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `pickName`, `classKit`, `spendPick`, `migrateSatchel`; camp.ts `fitClass`; crewmove.ts `crewWorkLock`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`; V4.0 venom.ts (`envenom`, `cureVenom`, `venomTakes`).
 
 ---
 
@@ -682,14 +684,14 @@ Rival entrances: east breach, sally port. V4.0: the Sisters make their own entra
 
 ### 12.2 Members
 
-Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; V4.0 (spec 28.1): move as a hero of the class: walk 4 (Burglar 5), sneak 2 (Burglar 4), dash as far again (legacy members without a level: 4); range 6 with a bow else 1. A crew Sapper also brings improvised explosives (3, slotless, its own kit, spent first, not dropped when it dies). Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
+Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; V4.0 (spec 28.1): move as a hero of the class: walk 4 (Burglar 5), sneak 2 (Burglar 4), dash as far again (legacy members without a level: 4); range 6 with a bow else 1. Class kit as a hero's, one a crew level (spec 30.2): a crew Sapper brings improvised explosives (slotless, its own kit, spent first, not dropped when it dies), a crew Burglar improvised picks (used only without lockpicks). Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
 
 | Crew | Level | Tiers | Members (pack) |
 | --- | --- | --- | --- |
-| Lantern Sisters | 2 | weapon 1, armor 1 | Ranger (2 caltrops, potion): 10 HP, 90%, armor 1. Shadowmancer (smoke, firecracker): 8 HP, spells 80%. Burglar (2 darts, smoke, lockpicks): 9 HP, 90%, darts 80% |
-| The Ferrymen | 3 | weapon 1, armor 1 | Sellsword (potion, glue): 14 HP, 90%, armor 2. Ranger (2 caltrops, potion): 12 HP, 95%. Sapper (2 charges, glue): 14 HP, 85%, armor 2 |
-| The Gallows Choir | 3 | weapon 1, armor 1 | Sellsword (potion, glue). Burglar (sleep dart, venom dart (V4.0), smoke, lockpicks): 11 HP, 95%. Pyromancer (potion, oil): 10 HP, spells 85% |
-| The Wake | 4 | weapon 2, armor 1 | Sellsword (2 potions): 16 HP, 95%, armor 2. Hedgewitch (2 potions): 13 HP, spells 85%. Shadowmancer (smoke, firecracker): 12 HP, spells 90%. Sapper (3 charges): 16 HP, 95%, armor 2 |
+| Lantern Sisters | 2 | weapon 1, armor 1 | Ranger (2 caltrops, potion): 10 HP, 90%, armor 1. Shadowmancer (smoke, firecracker): 8 HP, spells 80%. Burglar (2 darts, smoke, lockpicks, 2 improvised picks): 9 HP, 90%, darts 80% |
+| The Ferrymen | 3 | weapon 1, armor 1 | Sellsword (potion, glue): 14 HP, 90%, armor 2. Ranger (2 caltrops, potion): 12 HP, 95%. Sapper (3 improvised explosives, 2 charges, glue): 13 HP, 80%, armor 1 (spec 30.1) |
+| The Gallows Choir | 3 | weapon 1, armor 1 | Sellsword (potion, glue). Burglar (sleep dart, venom dart (V4.0), smoke, lockpicks, 3 improvised picks): 11 HP, 95%. Pyromancer (potion, oil): 10 HP, spells 85% |
+| The Wake | 4 | weapon 2, armor 1 | Sellsword (2 potions): 16 HP, 95%, armor 2. Hedgewitch (2 potions): 13 HP, spells 85%. Shadowmancer (smoke, firecracker): 12 HP, spells 90%. Sapper (4 improvised explosives, 3 charges): 15 HP, 95%, armor 1 (spec 30.1) |
 
 Cutthroat members each carry a purse: 30 gold (level 2–3), 50 (the Wake). The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
 
@@ -806,7 +808,7 @@ The Dragon and the Gloam can't be pushed.
 - Collapse and rubble are decided from the map before the blast (no chain collapse).
 - Noise 8, also heard on the levels above and below.
 
-Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; venom.ts `trapDamage` (V4.0); charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast` (calls ways.ts `checkWays`), `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `SAPPER_CHARGES`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
+Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; venom.ts `trapDamage` (V4.0); charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast` (calls ways.ts `checkWays`), `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `kitPerDelve`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
 
 ---
 
