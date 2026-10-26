@@ -8,7 +8,7 @@ import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENA
 import { say, type Ctx, type MonsterX } from './state';
 import {
   armorOf, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
-  rangedLabel, roll, rootFigure,
+  rangedLabel, roll, rootFigure, turnOnHit,
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
@@ -317,6 +317,7 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     }
     const armor = m ? monsterArmor(c, m as MonsterX) : 0;
     hurtAny(c, id, r.hits * Math.max(1, cls.weapon.dmg - armor) + (r.perfect ? 1 : 0), h.heroId, { crit: r.perfect });
+    turnOnHit(c, id, h.heroId); // V4.0 (spec 26.3)
     return !figure(c, id);
   }
   return false;

@@ -2008,7 +2008,7 @@ export class Diorama {
       this.riskTags.set(id, el);
     };
     for (const w of risks.wake) mk(w.id, 'risk-wake', `<span class="risk-icon">☾</span><span class="risk-num">${Math.round(w.chance)}%</span>`, `${this.nameOf(w.id)} may wake as you pass (${Math.round(w.chance)}%).`, 0xffd040);
-    for (const n of risks.notice) mk(n.id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(n.id)} would notice you where this move ends.`, COLORS.danger);
+    for (const n of risks.notice) mk(n.id, 'risk-notice', '<span class="risk-icon">👁</span>', `${this.nameOf(n.id)} would notice you on this move${n.at ? ' (the walk goes on)' : ''}.`, COLORS.danger);
     for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">⚔</span><span class="risk-num">${sw.damage[0]}–${sw.damage[1]}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
   }
 
@@ -2659,7 +2659,8 @@ export class Diorama {
         const v = this.units.get(e.by);
         const hero = this.units.get(e.hero);
         if (!v || !v.root.visible) return;
-        if (hero) v.face(hero.root.position.x - v.root.position.x, hero.root.position.z - v.root.position.z);
+        // V4.0 (spec 26.3): a hunting monster notices without turning (`faced` false).
+        if (hero && e.faced !== false) v.face(hero.root.position.x - v.root.position.x, hero.root.position.z - v.root.position.z);
         this.facingKey = '';
         this.refreshFacing();
         this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.3, 0)), '👁 Noticed!', 'warn', 1.3);

@@ -587,6 +587,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       overwatch: false,
       veil: 0,
       ward: 0,
+      // V4.0 (spec 26.1): each hero's own Walk/Sneak setting; Burglars start sneaking.
+      moveMode: h.cls === 'burglar' ? 'sneak' : 'walk',
       ...(ale ? { ale } : {}),
     };
     // V3.7 (spec 20.3): the Sapper's satchel: 3 charges in one slotless pack item; bought charges add to them.

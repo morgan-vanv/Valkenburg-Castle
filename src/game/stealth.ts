@@ -6,11 +6,11 @@ import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type 
 import type { HeroInDelve } from './types';
 import type { MoveRisks } from './api';
 import {
-  BLINDSIDE_SLOTS, CLASSES, NOTICE, NOTICE_QUIET, RUBBLE_STEP_NOISE, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK, WAKE_END_SNEAK_QUIET, WAKE_RANGE, WAKE_SNEAK, WAKE_SNEAK_QUIET, WAKE_WALK,
+  BLINDSIDE_SLOTS, CLASSES, CUTTHROAT_SIGHT, NOTICE, NOTICE_QUIET, RUBBLE_STEP_NOISE, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK, WAKE_END_SNEAK_QUIET, WAKE_RANGE, WAKE_SNEAK, WAKE_SNEAK_QUIET, WAKE_WALK,
 } from './data';
 import { chance } from './rng';
 import { say, type Ctx, type DelveX, type HeroX, type MonsterX, type RivalX } from './state';
-import { activeHeroes, armorOf, goAlert, hd, heroDef, heroName, hurtAny, lightPenaltyFor, monsterArmor, monsterStats, occupant, rivalsOnMap, roll } from './common';
+import { activeHeroes, armorOf, goAlert, hd, heroDef, heroName, hurtAny, lightPenaltyFor, monsterArmor, monsterStats, occupant, rivalsOnMap, roll, turnOnHit } from './common';
 import { dijkstra, dirIndex, inFrontHalf, isFloorish, kindAt, los, noiseField, pathTo, smoky, type World } from './world';
 import { blocked, hitRange, strikeDetailed, wardOf, type Target } from './ai';
 import { figure } from './falls';
@@ -130,15 +130,20 @@ export function perceivable(c: Ctx, m: MonsterX, t: Target, lit: Set<string>, se
   return wouldNotice(c, m, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id));
 }
 
-/** A monster or crew member takes note of a hero: remembered for sneak attacks and swings, faces them, one `noticed` event. */
+/**
+ * A monster or crew member takes note of a hero: remembered for sneak attacks and swings, one `noticed`
+ * event (with the hero's hex). V4.0 (spec 26.3): an unaware watcher turns to face them; a hunting monster
+ * notices without turning (it turns on its own turn, toward what it strikes or steps to, and when hit).
+ */
 export function noticeHero(c: Ctx, m: MonsterX | RivalX, heroId: string): void {
   const h = hd(c, heroId);
   if (!h) return;
   const ids = ((m as MonsterX).noticedIds ??= []);
-  faceToward(m, h.at);
+  const turn = (m as MonsterX).awareness !== 'hunting';
+  if (turn) faceToward(m, h.at);
   if (ids.includes(heroId)) return;
   ids.push(heroId);
-  c.ev.push({ type: 'noticed', by: m.id, hero: heroId });
+  c.ev.push({ type: 'noticed', by: m.id, hero: heroId, at: { ...h.at }, faced: turn });
 }
 
 export function forgetHeroes(m: MonsterX): void {
@@ -285,7 +290,10 @@ export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos): boolean {
     const dmg = r.hits ? r.hits * Math.max(1, cls.weapon.dmg - t.armor) + (r.perfect ? 1 : 0) : 0;
     c.ev.push({ type: 'swing', by: h.heroId, target: id, hits: r.hits, damage: dmg });
     if (!r.hits) c.ev.push({ type: 'miss', attacker: h.heroId, target: id });
-    else hurtAny(c, id, dmg, h.heroId, { crit: r.perfect });
+    else {
+      hurtAny(c, id, dmg, h.heroId, { crit: r.perfect });
+      turnOnHit(c, id, h.heroId); // V4.0 (spec 26.3)
+    }
     if (!figure(c, id)) return true;
   }
   return false;
@@ -323,26 +331,31 @@ export function fleePlan(c: Ctx, self: { id: string; at: Pos; fearOf?: string },
 
 // ---------------------------------------------------------------- the move preview
 
-/** Awake watchers that could notice a hero: alert, hunting and patrolling monsters, and a waiting or hostile crew. */
-function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean }[] {
-  const out: { id: string; f: Facer; noticed: (heroId: string) => boolean }[] = [];
+/**
+ * Awake watchers that could notice a hero: alert, hunting and patrolling monsters, and a waiting or hostile crew
+ * (a hostile crew has noticed everyone; a waiting one notices within CUTTHROAT_SIGHT, as crewNotice does).
+ */
+function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean; cap?: number }[] {
+  const out: { id: string; f: Facer; noticed: (heroId: string) => boolean; cap?: number }[] = [];
   for (const m of c.d.monsters) {
     if (m.buried || m.awareness === 'asleep' || m.kind === 'gloam' || m.kind === 'dragon' || m.at.level !== level) continue;
     out.push({ id: m.id, f: m, noticed: (id) => hasNoticed(m, id) });
   }
   const cr = c.d.rivals;
   if (cr && (cr.stance === 'waiting' || cr.stance === 'hostile')) {
-    for (const r of rivalsOnMap(c)) if (r.at.level === level) out.push({ id: r.id, f: r, noticed: () => cr.stance === 'hostile' });
+    for (const r of rivalsOnMap(c)) if (r.at.level === level) out.push({ id: r.id, f: r, noticed: () => cr.stance === 'hostile', cap: CUTTHROAT_SIGHT });
   }
   return out;
 }
 
 /**
  * What a move along `path` risks (spec 20.1, 20.2, 24.4): every wake roll on the way with its chance,
- * the awake enemies that would notice the hero at the destination (those that haven't yet), and the
- * free swings leaving provokes, with their damage range. V3.9: only enemies the party has seen
- * (`seen`): wake rolls for seen sleepers, notice for enemies visible now (`vis`), swings for seen ones.
- * Unseen sleepers still roll when the move is made.
+ * the awake enemies that would notice the hero (those that haven't yet), and the free swings leaving
+ * provokes, with their damage range. V4.0 (spec 26.2): noticing is checked at every hex of the path, as
+ * the move itself does; `at` is the first hex where it would happen. Watchers are taken as they face now
+ * (a wake roll or a bellow on the way can turn one; the preview can't know the dice). V3.9: only enemies
+ * the party has seen (`seen`): wake rolls for seen sleepers, notice for enemies visible now (`vis`), swings
+ * for seen ones. Unseen sleepers still roll when the move is made.
  */
 export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, lit: Set<string>, seen: Set<string>, vis: Set<string>): MoveRisks {
   const risks: MoveRisks = { wake: [], notice: [], swings: [] };
@@ -350,6 +363,7 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
   const armor = armorOf(heroDef(c, h.heroId)!) + wardOf(h);
   const quiet = quietFeet(c, h.heroId);
   const swung = new Set<string>();
+  const noticing = new Set<string>();
   let from = h.at;
   let facing = h.facing;
   path.forEach((p, i) => {
@@ -370,12 +384,14 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
     }
     if (p.level === from.level) facing = dirIndex(from, p);
     from = p;
+    for (const wt of watchers(c, p.level)) {
+      if (noticing.has(wt.id) || wt.noticed(h.heroId) || !vis.has(posKey(wt.f.at))) continue;
+      if (wt.cap !== undefined && distance(wt.f.at, p) > wt.cap) continue;
+      if (!wouldNotice(c, wt.f, p, sneak, lit, quiet)) continue;
+      noticing.add(wt.id);
+      risks.notice.push({ id: wt.id, at: { ...p } });
+    }
   });
-  const dest = path[path.length - 1]!;
-  for (const wt of watchers(c, dest.level)) {
-    if (wt.noticed(h.heroId) || !vis.has(posKey(wt.f.at))) continue;
-    if (wouldNotice(c, wt.f, dest, sneak, lit, quiet)) risks.notice.push({ id: wt.id });
-  }
   return risks;
 }
 

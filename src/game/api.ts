@@ -57,7 +57,8 @@ export interface Reach {
 
 export interface MoveRisks {
   wake: { at: Pos; id: string; chance: number }[];
-  notice: { id: string }[];
+  /** V4.0 (spec 26.2): `at` is the first hex of the path where it would notice the hero (the move goes on). */
+  notice: { id: string; at?: Pos }[];
   swings: { id: string; damage: [number, number] }[];
 }
 
@@ -156,7 +157,8 @@ export interface Engine {
   apply(state: GameState, command: Command): ApplyResult;
 
   // delve queries
-  reachable(state: GameState, heroId: string, sneak: boolean): Reach[];
+  /** V4.0 (spec 26.1): `sneak` omitted = the hero's own Walk/Sneak setting. */
+  reachable(state: GameState, heroId: string, sneak?: boolean): Reach[];
   actions(state: GameState, heroId: string): ActionOption[];
   preview(state: GameState, heroId: string, action: ActionKind, target: ActionTarget): RollPreview;
   visibility(state: GameState): Visibility;
@@ -164,7 +166,7 @@ export interface Engine {
   /** Intent per visible, awake monster id. */
   intents(state: GameState): Record<string, Intent>;
   /** Noise radius a move would make (for the ripple preview). */
-  moveNoise(state: GameState, heroId: string, sneak: boolean): number;
+  moveNoise(state: GameState, heroId: string, sneak?: boolean): number;
   /** Is this hex lit by the lantern, a torch, a brazier or a fixed light? Heroes outside light fight at Dark penalties. */
   inLight(state: GameState, at: Pos): boolean;
   /** Current sight range in hexes (lantern stage minus depth). */
@@ -190,7 +192,7 @@ export interface Engine {
   /** V3.9 (spec 24.4): enemies the party has seen this delve (ids), for previews and markers. */
   seenEnemies(state: GameState): Set<string>;
   /** V3.7 (spec 20.5): while calm, every explored hex the hero could walk to (any length), with path and risks. */
-  calmReach(state: GameState, heroId: string, sneak: boolean): Reach[];
+  calmReach(state: GameState, heroId: string, sneak?: boolean): Reach[];
   /** V3.7 (spec 20.5): is the party calm (free movement on)? With a reason when not ("An orc hunts Pim"). */
   calm(state: GameState): { calm: boolean; why?: string };
   /** V3.5 (spec 18.6): the parley deals a hero can make with the crew right now (empty if none in reach). */
