@@ -621,3 +621,8 @@ New core tenets (claude/design-pillars.md): **flavor** (each class has a "flavor
 - Kept: front-half sight for heroes and enemies, sleepers hear only, blindsided +1 slot, unseen hits, the Burglar's quiet feet and backstab, previews only for seen enemies.
 - Presentation: the move preview's end shows a subtle forward arrow only (no wedge); no rear-half wash on hovering an enemy; heroes and enemies keep their small facing arrows.
 - The shelved code stays behind the two flags in src/game/data.ts; engine tests for it run with the flags on.
+
+### 24.7 V3.9.2: turning on actions, blind cones (owner, 2026-10-26)
+
+- **Everyone turns toward what they act on.** A hero faces the way of their last step, then toward the target of any action aimed at a hex or a figure (attack, shove, throw, cast, take or open something next to them, use an item on someone) (`FACING.turnOnAction = true`). Monsters and crew members likewise: moving faces the last step; any strike, item, spell or ability aimed at someone or somewhere turns them to it. The free Face command stays shelved.
+- **Blind areas by kind.** Heroes and crew members are blind only in a **cone straight behind** (the single back hex direction, at any distance, adjacent included): they see the other five directions. Monsters keep the **whole rear half** blind (three directions). Everything built on "the rear half" uses the figure's blind area: noticing (a walking hero in it is noticed only when adjacent, a sneaking one never), blindsided (+1 slot when attacked from a hero's blind cone), unseen hits, overwatch, hero visibility, Burglar backstab (a monster from any of its rear-half neighbours; a crew member only from straight behind).

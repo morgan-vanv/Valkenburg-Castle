@@ -26,6 +26,8 @@ import { rivalStats } from './rivals';
 export interface Facer {
   at: Pos;
   facing?: number;
+  /** V3.9.2 (spec 24.7): blind only in the cone straight behind (heroes, crew members). */
+  cone?: boolean;
 }
 
 export { dirIndex };
@@ -44,7 +46,7 @@ export function behindHex(f: Facer): Pos {
 
 export { inFrontHalf };
 
-/** The rear half (spec 24.1): the back direction and its two neighbours, at any distance. Never with no facing. */
+/** The blind area (spec 24.1, 24.7): monsters the whole rear half; heroes and crew members the cone straight behind. Never with no facing. */
 export function inRearHalf(f: Facer, p: Pos): boolean {
   if (f.facing === undefined || p.level !== f.at.level || samePos(p, f.at)) return false;
   return !inFrontHalf(f, p);
@@ -363,7 +365,7 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
       if (swung.has(sw.id) || !seen.has(sw.id)) continue;
       swung.add(sw.id);
       // V3.9 (spec 24.2): a swing from the hero's rear half (as they stand before the step) is blindsided.
-      const extra = inRearHalf({ at: from, facing }, sw.at) ? BLINDSIDE_SLOTS : 0;
+      const extra = inRearHalf({ at: from, facing, cone: true }, sw.at) ? BLINDSIDE_SLOTS : 0;
       risks.swings.push({ id: sw.id, damage: hitRange(sw.slots + extra, sw.dmg, armor) });
     }
     if (p.level === from.level) facing = dirIndex(from, p);

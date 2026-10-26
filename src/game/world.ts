@@ -233,11 +233,19 @@ export function dirIndex(from: Hex, to: Hex): number {
  * V3.9 (spec 24.1, 24.2): the front half: the three hex directions centred on `facing` (dirIndex of the
  * offset, as the view's dirIndexOf). Everything else on the level is the rear half. No facing: all round.
  */
-export function inFrontHalf(f: { at: Pos; facing?: number }, p: Pos): boolean {
+export function inFrontHalf(f: { at: Pos; facing?: number; cone?: boolean }, p: Pos): boolean {
   if (f.facing === undefined || samePos(p, f.at)) return true;
   if (p.level !== f.at.level) return false;
   const i = dirIndex(f.at, p);
+  // V3.9.2 (spec 24.7): heroes and crew members are blind only in a cone straight behind (one direction);
+  // monsters keep the whole rear half blind.
+  if (blindCone(f)) return i !== (f.facing + 3) % 6;
   return i === f.facing || i === (f.facing + 1) % 6 || i === (f.facing + 5) % 6;
+}
+
+/** V3.9.2 (spec 24.7): heroes (`heroId`) and crew members (`crew`) have a narrow blind cone; monsters a blind half. */
+export function blindCone(f: object): boolean {
+  return 'heroId' in f || 'crew' in f || (f as { cone?: boolean }).cone === true;
 }
 
 /**
@@ -246,7 +254,7 @@ export function inFrontHalf(f: { at: Pos; facing?: number }, p: Pos): boolean {
  */
 export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>, facing?: number): boolean {
   if (from.level !== p.level) return false;
-  if (!inFrontHalf({ at: from, facing }, p)) return false; // V3.9 (spec 24.2): only the front half
+  if (!inFrontHalf({ at: from, facing, cone: true }, p)) return false; // V3.9 (spec 24.2, 24.7): not in the blind cone
   const dist = distance(from, p);
   if (dist <= 1) return true;
   if (smoky(d, p)) return false;
@@ -410,7 +418,7 @@ export const LIT_SIGHT = 14;
  */
 export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>, facing?: number): Pos[] {
   const seen = new Set<string>();
-  const eye = { at: from, facing };
+  const eye = { at: from, facing, cone: true }; // a hero's eyes (spec 24.7)
   for (const h of range(from, sightRangeAt(w, d, from, lit))) {
     const p = { level: from.level, ...h };
     // V3.9 (spec 24.2): only the front half, adjacent hexes included.

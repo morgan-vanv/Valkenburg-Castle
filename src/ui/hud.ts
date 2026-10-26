@@ -599,9 +599,9 @@ export class Hud {
         const rf = facingOf(rival);
         if (rf !== undefined && d.rivals.stance !== 'hired') {
           const selH = this.selected();
-          const behind = selH && this.inBlindArc(rival.at, rf, selH.at);
+          const behind = selH && this.inBlindArc(rival.at, rf, selH.at, true);
           const stab = selH && d.rivals.stance !== 'hostile' && this.heroDef(selH.heroId)?.cls === 'burglar';
-          lines.push(`<span class="dim">Faces ${this.facingWords(rival.at, rf)}: sees only that half.${behind ? ` <span class="pos">You are in their rear half${stab ? ': backstab from next to them' : ''}.</span>` : ' The faint hexes are their rear half.'}</span>`);
+          lines.push(`<span class="dim">Faces ${this.facingWords(rival.at, rf)}: blind only straight behind.${behind ? ` <span class="pos">You are right behind them${stab ? ': backstab from next to them' : ''}.</span>` : ''}</span>`);
         }
         if ((rival.feared ?? 0) > 0) lines.push(`<span class="fear-word">Feared · ${rival.feared} turn${rival.feared === 1 ? '' : 's'}: runs from ${this.nameOf(rival.fearOf ?? '')}, drops any hold.</span>`);
         if (rival.dragging) lines.push(`<span class="neg">Dragging ${this.nameOf(rival.dragging)} toward the way out (3 a round). Kill, down or fear them to free ${this.nameOf(rival.dragging)}.</span>`);
@@ -725,7 +725,7 @@ export class Hud {
     if (m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' && mf !== undefined) {
       const sel = this.selected();
       const behind = sel && this.inBlindArc(m.at, mf, sel.at);
-      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}: sees only its front half.${behind ? ` <span class="pos">You are in its rear half${this.sneak ? ': it never notices you sneaking' : ': walking, it notices you only next to it'}.</span>` : ' The faint hexes are its rear half.'}</span>`);
+      out.push(`<span class="dim">Faces ${this.facingWords(m.at, mf)}: sees only its front half.${behind ? ` <span class="pos">You are in its rear half${this.sneak ? ': it never notices you sneaking' : ': walking, it notices you only next to it'}.</span>` : ''}</span>`);
     }
     // V3.9 (24.3): the Burglar's backstab, in words.
     {
@@ -781,9 +781,11 @@ export class Hud {
   }
 
   /** Is `p` in the blind arc of a figure at `at` facing `facing` (the three back directions, as the engine's dirIndex)? */
-  private inBlindArc(at: Pos, facing: number | undefined, p: Pos): boolean {
+  private inBlindArc(at: Pos, facing: number | undefined, p: Pos, cone = false): boolean {
     if (facing === undefined || samePos(at, p) || at.level !== p.level) return false;
-    return backDirs(facing).includes(dirIndexOf(p.q - at.q, p.r - at.r));
+    const i = dirIndexOf(p.q - at.q, p.r - at.r);
+    // V3.9.2 (spec 24.7): crew members (and heroes) are blind only straight behind.
+    return cone ? i === (facing + 3) % 6 : backDirs(facing).includes(i);
   }
 
   private describeHex(at: Pos): string {

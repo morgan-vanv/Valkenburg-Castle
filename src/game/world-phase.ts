@@ -452,6 +452,11 @@ function monsterAct(c: Ctx, m: MonsterX): void {
     m.returning = undefined;
   }
   if (m.kind === 'dragon' && dragonSpecial(c, m, it)) return;
+  // V3.9.2 (spec 24.7): acting on someone turns a monster toward them (web, steal, drag, grab, shove...).
+  if (it.kind !== 'move' && it.kind !== 'flee' && it.kind !== 'wait') {
+    const to = it.targetId ? targets(c).find((x) => x.id === it.targetId)?.at : it.to;
+    if (to) faceToward(m, to);
+  }
   switch (it.kind) {
     case 'shout': {
       const t = targets(c).find((x) => x.id === it.targetId);

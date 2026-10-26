@@ -181,7 +181,7 @@ if (fit([[3, 1], [3, 2], [2, 1], [4, 1]])) {
   await scene({ [a]: { at: P, facing: F(0) }, [burglarId]: { at: step(P, 3), facing: F(0) } }, []);
   c = await chips();
   check('the one behind turns away: its back is exposed (one badge)', c.length === 1, JSON.stringify(c));
-  check('...with a tooltip that says what to do', !!c[0] && /Back exposed/.test(c[0].title) && /blindsided/.test(c[0].title) && /facing this way/.test(c[0].title), c[0]?.title.slice(0, 120));
+  check('...with a tooltip that says what to do', !!c[0] && /Back exposed/.test(c[0].title) && /blindsided/.test(c[0].title) && /stand where they can see it/.test(c[0].title), c[0]?.title.slice(0, 120));
   await scene({ [a]: { at: P, facing: F(0) } }, []);
   c = await chips();
   check('a hero alone shows the badge', c.length === 1);
