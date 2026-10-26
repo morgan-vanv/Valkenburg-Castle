@@ -7,7 +7,7 @@
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { GameEvent, HeroInDelve } from './types';
 import type { Reach } from './api';
-import { CALM_STEPS } from './data';
+import { CALM_STEPS, FREE_MOVE } from './data';
 import { say, type Ctx, type HeroX } from './state';
 import { activeHeroes, hd, heroName, levelHeal, makeNoise, nameOf, occupant, onMap, rivalsOnMap, wakeAdjacent } from './common';
 import { brightnessOf, dijkstra, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
@@ -31,6 +31,7 @@ function withArticle(name: string): string {
  * held, webbed or rooted.
  */
 export function calmReason(c: Ctx): string | undefined {
+  if (!FREE_MOVE.enabled) return 'Free movement is off (spec 23.1).';
   const d = c.d;
   const active = activeHeroes(c);
   const levels = new Set(active.map((h) => h.at.level));
@@ -66,6 +67,11 @@ export function isCalm(c: Ctx): boolean {
 /** Sync `Delve.calm` with the rules; a `calm` event when it changes (spec 20.5). */
 export function updateCalm(c: Ctx): void {
   if (c.s.stage !== 'delve') return;
+  // Spec 23.1: free movement is off; stay silently "not calm" (no Combat! banners).
+  if (!FREE_MOVE.enabled) {
+    c.d.calm = false;
+    return;
+  }
   const why = calmReason(c);
   const now = why === undefined;
   if (c.d.calm === now) return;

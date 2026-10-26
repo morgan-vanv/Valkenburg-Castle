@@ -565,3 +565,15 @@ Core tenet (owner): **we want to offer flexibility in approach, but tradeoffs co
 ### 21.5 Noticing a walking hero from farther
 
 - Noticing ranges for a **walking** hero go up by 2: lit walking 8 (was 6), unlit walking 5 (was 3), Hollow walking 8 (was 6). Sneaking unchanged (lit 4, unlit 1, Hollow 3). Blind arc: walking still at half range (4 lit, 2 unlit).
+
+## 23. V3.7.2: back to turns (owner, 2026-10-25 night)
+
+V3.8's exploration mode (section 22) is reverted and shelved: docs/shelved/exploration-mode.md, branch `shelf/exploration-mode`. Section 22 doesn't apply to `main`.
+
+### 23.1 Entirely turn-based
+
+- V3.7's free movement while calm (20.5's calm walk, Follow, `CALM_STEPS`) is switched off: `FREE_MOVE.enabled = false` in src/game/data.ts. `Engine.calm` always reports not calm, no `calm` events fire, and `move` is the budgeted turn move. Everything else in 20.5 stays (End turn only prompts for idle heroes, Brace, shields, Hamstring, Night thorn, Briar, crates). The calm code and its tests stay for a later return.
+
+### 23.2 Prospectors keep off the party's way in
+
+- A prospector crew (the Lantern Sisters) never uses a rival entrance within 6 hexes of the entrance the party came in by; of the rest it takes the one farthest from the party's. It enters on round 6–9 (was 3–6), and waits while any hero stands within 6 hexes of its way in.

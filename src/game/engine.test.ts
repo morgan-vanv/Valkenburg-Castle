@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { FREE_MOVE } from './data';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { distance, posKey, samePos, type Pos } from './hex';
@@ -3880,6 +3881,9 @@ describe('V3.7 kit and calm', () => {
   const walked = (ev: GameEvent[], id: string) => ev.flatMap((x) => (x.type === 'moved' && x.id === id ? x.path : []));
 
   describe('calm', () => {
+    // V3.7.2: free movement is switched off in play; these keep the shelved code working.
+    beforeAll(() => { FREE_MOVE.enabled = true; });
+    afterAll(() => { FREE_MOVE.enabled = false; });
     it('is calm with nothing hunting; says why not: a hunter, a hostile crew, a lit fuse, the Gloam, a hero down or rooted', () => {
       const s = hollow();
       expect(e.calm(s)).toEqual({ calm: true });
@@ -3925,6 +3929,9 @@ describe('V3.7 kit and calm', () => {
   });
 
   describe('free movement', () => {
+    // V3.7.2: free movement is switched off in play; these keep the shelved code working.
+    beforeAll(() => { FREE_MOVE.enabled = true; });
+    afterAll(() => { FREE_MOVE.enabled = false; });
     it('walks a path of any length hex by hex, the castle turning every 4 steps; `moved` stays clear, calmSteps counts on', () => {
       const s = hollow();
       hero(s, 'brann').acted = true; // an action spent does not stop a calm walk
@@ -4376,3 +4383,22 @@ describe('V3.7.1', () => {
     expect(wouldNotice(c, f, at(2, 16, 1), true, new Set())).toBe(false); // unlit sneaking, 2
   });
 });
+
+describe('V3.7.2 prospectors keep off the party\'s way in (spec 23.2)', () => {
+  it('never enter by the party\'s entrance; come in round 6 to 9; wait while a hero is within 6 of theirs', () => {
+    let made = 0;
+    for (let seed = 1; seed < 40; seed++) {
+      const t = delve({ seed });
+      const ent = t.delve!.heroes[0]!.at;
+      const cr = makeCrew(w, t as never, t.delve as never, 1, ent);
+      if (!cr) continue;
+      made++;
+      const way = cr.members[0]!.at;
+      expect(Math.max(Math.abs(way.q - ent.q), Math.abs(way.r - ent.r), Math.abs(way.q + way.r - ent.q - ent.r))).toBeGreaterThan(6);
+      expect(cr.entersRound).toBeGreaterThanOrEqual(6);
+      expect(cr.entersRound).toBeLessThanOrEqual(9);
+    }
+    expect(made).toBeGreaterThan(0);
+  });
+});
+

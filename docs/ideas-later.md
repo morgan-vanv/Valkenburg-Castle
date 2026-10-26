@@ -18,3 +18,4 @@ Castle redesign pitch: https://claude.ai/artifact/Do2xMUkTkDjgGjPRimNJJd
 - **Arrows as ammunition (2026-10-25):** bows use purchasable arrows (a quiver item), with specialty arrows as forge upgrades (fire, barbed/hamstring, grapple line, whistling/lure). Owner's second play-test batch.
 - **Tripwire charges (2026-10-25):** the Sapper lays a charge as a trap that enemies set off; a forge upgrade from Gerda.
 - **Collapse ceilings and seal hallways with charges (2026-10-25):** a charge against a hallway's roof or a doorway brings it down, filling hexes with rock that blocks movement and sight (and Dig clears it slowly). Revisit after the owner play-tests the V3.7 Sapper rework.
+- **Free exploration outside combat (shelved 2026-10-25):** BG3-style exploration (V3.8) and the earlier calm free move (V3.7). Code, findings and how to resume: docs/shelved/exploration-mode.md (branch `shelf/exploration-mode`). The owner wants to return to it.

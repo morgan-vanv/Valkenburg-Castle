@@ -9,14 +9,14 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Intent, Item } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CLASSES, CREW_PURSE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
-  HIRE_KEEP, PROSPECTOR_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_MOVE,
+  HIRE_KEEP, PROSPECTOR_CHANCE, PROSPECTOR_ENTERS, PROSPECTOR_KEEP_OFF, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_MOVE,
   SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, type CrewDef, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type RivalX } from './state';
 import {
   chestLoot, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
-  rivalsOnMap, roll, valueOf,
+  rivalsOnMap, roll, valueOf, activeHeroes,
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
 import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, walk, type Target } from './ai';
@@ -108,15 +108,18 @@ function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
  * waiting from round 1 at a post on Level 2. Level 3: the Wake, 60%, at a post on Level 3 (the
  * pool on Level 2 when the castle has no Level 3 posts). Never two crews.
  */
-export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number): CrewX | null {
+export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, partyEntrance?: Pos): CrewX | null {
   const c: Ctx = { w, s, d, ev: [] };
   if (level <= 1) {
-    if (!w.castle.rivalEntrances.length || random(s) >= PROSPECTOR_CHANCE) return null;
-    const at = pick(s, w.castle.rivalEntrances);
+    // Spec 23.2: never the party's own way in; the rival way in farthest from it.
+    const ways = w.castle.rivalEntrances.filter((p) => !partyEntrance || distance(p, partyEntrance) > PROSPECTOR_KEEP_OFF);
+    if (!ways.length || random(s) >= PROSPECTOR_CHANCE) return null;
+    const far = partyEntrance ? Math.max(...ways.map((p) => distance(p, partyEntrance))) : 0;
+    const at = partyEntrance ? pick(s, ways.filter((p) => distance(p, partyEntrance) === far)) : pick(s, ways);
     const def = CREWS['lantern-sisters'];
     return {
       crew: def.id, name: def.name, temperament: 'prospector', stance: 'neutral', goal: 'loot', spotted: false,
-      entersRound: int(s, 3, 6),
+      entersRound: int(s, PROSPECTOR_ENTERS[0], PROSPECTOR_ENTERS[1]),
       members: def.members.map((m, i) => member(s, `r${i + 1}`, def, m, at)),
       pickups: 0, entered: false,
     };
@@ -155,6 +158,8 @@ function rivalEnter(c: Ctx): void {
   const cr = c.d.rivals;
   if (!cr || cr.entered || c.d.round < cr.entersRound) return;
   const at = cr.members[0]!.at;
+  // Spec 23.2: they don't walk in on top of the party; wait while a hero is near their way in.
+  if (activeHeroes(c).some((h) => h.at.level === at.level && distance(h.at, at) <= PROSPECTOR_KEEP_OFF)) return;
   const spots = spotsAround(c.w, c.d, at, cr.members.length, (p) => !!occupant(c, p));
   if (spots.length < cr.members.length) return; // blocked: try next round
   cr.entered = true;
