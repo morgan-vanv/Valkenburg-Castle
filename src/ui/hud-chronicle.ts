@@ -8,7 +8,7 @@ import { clear, h, icon } from './dom';
 
 const OPEN_KEY = 'vc.chronicle.open.v40';
 
-export type ChronKind = 'strike' | 'move' | 'heard' | 'shout' | 'item' | 'crew' | 'warn' | 'light' | 'plain';
+export type ChronKind = 'strike' | 'move' | 'heard' | 'shout' | 'item' | 'crew' | 'warn' | 'light' | 'pick' | 'smash' | 'dig' | 'disarm' | 'plain';
 
 export interface ChronEntry {
   round: number;
@@ -28,6 +28,10 @@ const KIND_ICON: Record<ChronKind, IconName> = {
   crew: 'crew',
   warn: 'warn',
   light: 'lantern',
+  pick: 'lock',
+  smash: 'hammer',
+  dig: 'dig',
+  disarm: 'trap',
   plain: 'dot',
 };
 
@@ -36,6 +40,12 @@ export function chronKind(text: string, cls = ''): ChronKind {
   if (/log-heard/.test(cls) || /^(footsteps|a clash|a shout|a crash|a blast|a roar|a scream|something)/i.test(text)) return 'heard';
   if (/shout|bellow|horn/i.test(text)) return 'shout';
   if (/lantern|gutters|pitch black|the dark/i.test(text)) return 'light';
+  // V4.0 (spec 28): crews' and heroes' work on locks, rubble and traps.
+  if (/\bpicks?\b.*\block|\bpicks the\b|lock (jams|opens)|unbar/i.test(text)) return 'pick';
+  if (/\bdisarms?\b/i.test(text)) return 'disarm';
+  if (/\bdigs?\b|digs? through|dug/i.test(text)) return 'dig';
+  if (/\bsmash(es)?\b/i.test(text)) return 'smash';
+  if (/\bsneaks?\b/i.test(text)) return 'move';
   if (/ · [a-z]+.*: \d+\/\d+|strike|attack|hits|swing|backstab|damage|dmg|misses|fires|shot|bite|firebolt|fireball/i.test(text)) return 'strike';
   if (/ is down|is dead|taken|left behind|notices|wakes|combat|grabs|webbed|dragged|robs|stole/i.test(text)) return 'warn';
   if (/crew|sisters|ferrymen|choir|the wake|toll|truce|hire|parley|deal|sell-swords/i.test(text)) return 'crew';

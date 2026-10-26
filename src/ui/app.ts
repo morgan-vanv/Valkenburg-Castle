@@ -692,7 +692,8 @@ export class App {
           continue;
         case 'noticed':
           if (this.dio.isWatchable(e.by)) sfx.play('click', { pitch: 0.55, gain: 0.8 });
-          this.hud.log(`${this.hud.nameOf(e.by)} notices ${this.hud.nameOf(e.hero)}!`, 'log-enemy');
+          // V4.0 (spec 28): `hero` may be a crew member a monster spotted (sent only when visible): no alarm colour for that.
+          this.hud.log(`${this.hud.nameOf(e.by)} notices ${this.hud.nameOf(e.hero)}!`, this.isHero(e.hero) ? 'log-enemy' : '');
           await this.dio.playEvent(e);
           continue;
         case 'woke':

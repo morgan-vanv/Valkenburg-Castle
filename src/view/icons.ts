@@ -120,11 +120,16 @@ export const INTENT_ICON: Partial<Record<string, IconName>> = {
   firecracker: 'blast',
   blink: 'blink',
   hamstring: 'shoot',
+  // V4.0 (spec 28): crews play by the party's rules.
+  pick: 'lock',
+  smash: 'hammer',
+  disarm: 'trap',
+  dig: 'dig',
 };
 
 /** Friendly intents (a hired crew member's mend or ward) draw green; shouts amber; the rest red. */
 export function intentTone(kind: string): 'foe' | 'friend' | 'warn' {
   if (kind === 'mend' || kind === 'ward' || kind === 'potion') return 'friend';
-  if (kind === 'shout' || kind === 'toll' || kind === 'move' || kind === 'veil' || kind === 'flee' || kind === 'overwatch') return 'warn';
+  if (kind === 'shout' || kind === 'toll' || kind === 'move' || kind === 'veil' || kind === 'flee' || kind === 'overwatch' || kind === 'pick' || kind === 'smash' || kind === 'disarm' || kind === 'dig') return 'warn';
   return 'foe';
 }
