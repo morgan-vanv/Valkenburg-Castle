@@ -6,7 +6,9 @@
 // outcome bar, Focus diamonds raising the kill chance), the castle's turn (banner, folded hotbar), the Chronicle
 // folding and opening (remembered), the parley tiles, the return report's boxes, and the first-delve coach marks
 // (shown once, gone for good once done). V4.0 venom (spec 29): the countdown on a card, the antidote from the pack, Shoulder
-// next to a paralyzed ally (SHOTS=<dir> saves a few screenshots of them). No page errors.
+// next to a paralyzed ally. V4.0 spec 30.3/30.4: the hovered (or Tab-chosen) target marked apart from the other options, a
+// pill entry marking its figure, a jump's landing; a Sapper with no charges and nobody in reach shows no unusable buttons;
+// the hotbar never scrolls at 1280, 1440 and 2560 wide (SHOTS=<dir> saves screenshots). No page errors.
 //   node scripts/v40-hud-check.mjs <baseUrl>      (npx vite preview --port 4185 --strictPort → http://localhost:4185/)
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
 
@@ -119,7 +121,7 @@ const bar = await p.evaluate(() => ({
   endRight: (() => { const h = document.querySelector('.dl-hotbar').getBoundingClientRect(); const e = document.querySelector('.dl-end').getBoundingClientRect(); return h.right - e.right; })(),
 }));
 check('hotbar: the selected hero\'s name and Walk/Sneak', /Keven/.test(bar.who) && bar.seg.join() === 'Walk:true,Sneak:false', `${bar.who} ${bar.seg}`);
-check('Attack shown dimmed with why when nobody is in reach', /Attack · (nobody in reach|the action is used)/.test(bar.attack), bar.attack.split('\n')[0]);
+check('no Attack button when nobody is in reach (V4.0 spec 30.4: only what the hero can do)', bar.attack === '', bar.attack.split('\n')[0]);
 check('the pack: 4 slots, the torch and the potion usable, 2 empty', bar.slots.length === 4 && bar.slots[0].action === 'torch' && bar.slots[0].usable && bar.slots.filter((x) => x.empty).length === 2, JSON.stringify(bar.slots));
 check('End turn at the right of the bar, one dot per hero who can still act (4)', bar.end === 4 && bar.endRight < 20, `${bar.end} dots, ${bar.endRight}px from the edge`);
 // Sneak per hero: S sets only the selected hero.
@@ -247,6 +249,174 @@ const SHOTS = process.env.SHOTS ?? '';
   const carry = await p.evaluate((x) => ({ carrying: window.vc.state().delve.heroes.find((h) => h.heroId === x.k).carrying ?? '', setDown: !!document.querySelector('.dl-hotbar .dl-ab[data-action="setDown"]'), icon: !!document.querySelector(`.dl-rcard[data-hero="${x.k}"] .dl-si.carry`), line: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-rcard-fate.para`)?.textContent ?? '' }), ids);
   check('Shoulder: the hero carries them, Set down is offered, the cards say so', carry.carrying === ids.f && carry.setDown && carry.icon && /shoulders/.test(carry.line), JSON.stringify(carry));
   await p.evaluate(() => { const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.paralyzed = undefined; h.carrying = undefined; h.venom = undefined; } window.vc.load(s); });
+}
+
+// ---- V4.0 play-test fixes 2 (spec 30.3, 30.4): "this one" marked among several targets; the hotbar shows only what a hero can do
+{
+  // Screenshots point the real mouse at the target (so the board's own hover runs), with the first-delve coach mark set aside.
+  const shot = async (path, at, id = null) => {
+    if (!SHOTS) return;
+    if (at) {
+      const sp = await p.evaluate((x) => (x.id ? window.vc.dio.unitScreen(x.id) : null) ?? window.vc.dio.screenOf(x.at, 0.2), { at, id });
+      await p.mouse.move(sp.x, sp.y + (id ? 40 : 0));
+      await p.waitForTimeout(250);
+    }
+    await p.evaluate(() => { const c = document.querySelector('.dl-coach'); if (c) c.style.visibility = 'hidden'; });
+    await p.screenshot({ path: `${SHOTS}/${path}`, timeout: 180000 });
+    await p.evaluate(() => { const c = document.querySelector('.dl-coach'); if (c) c.style.visibility = ''; });
+  };
+  // Keven and a second hero in the Great Hall, two awake orcs next to Keven, nothing else near. (The state is put back after.)
+  await p.evaluate(() => { window.__pre30 = structuredClone(window.vc.state()); });
+  const spots = await p.evaluate((x) => {
+    const s = structuredClone(window.vc.state());
+    const [k, f] = s.delve.heroes;
+    k.at = x.k; f.at = x.f;
+    for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.venom = undefined; h.paralyzed = undefined; h.carrying = undefined; }
+    const near = (m) => m.at.level === 1 && Math.abs(m.at.r - x.k.r) <= 6 && Math.abs(m.at.q - x.k.q) <= 8;
+    s.delve.monsters = s.delve.monsters.filter((m) => !near(m));
+    const orcs = [{ ...x.k, q: x.k.q + 1 }, { ...x.k, q: x.k.q - 1, r: x.k.r + 1 }].map((at, i) => ({ id: `t-orc${i}`, kind: 'orc', name: 'Orc', at, hp: 6, maxHp: 6, awareness: 'hunting', spawnedAt: at, noticedIds: [k.heroId], facing: 3 }));
+    s.delve.monsters.push(...orcs);
+    window.vc.load(s);
+    window.vc.hud.select(k.heroId);
+    return { k: k.heroId, f: f.heroId, orcs: orcs.map((o) => ({ id: o.id, at: o.at })) };
+  }, { k: ax(16, 14), f: ax(14, 12) });
+  await p.waitForTimeout(400);
+  await p.click('.dl-hotbar [data-action="attack"]');
+  await p.waitForTimeout(150);
+  const armed = await p.evaluate(() => ({ pill: !document.querySelector('.dl-pill').classList.contains('hidden'), keys: document.querySelector('.dl-pill-keys')?.innerText ?? '' }));
+  check('Attack with two orcs in reach arms a pick ("Tab: next of 2 · Enter: take it")', armed.pill && /Tab: next of 2/.test(armed.keys), armed.keys);
+  const pickOf = () => p.evaluate(() => ({ pk: window.vc.dio.picked, tags: [...document.querySelectorAll('.unit-tag.tag-picked')].map((e) => e.dataset.id), dim: window.vc.dio.pickDim, pill: document.querySelector('.dl-pill-hot')?.textContent ?? '' }));
+  await p.evaluate(() => window.vc.hud.onHover(null, null));
+  check('nothing marked before pointing at one; the options at full strength', await p.evaluate(() => !window.vc.dio.picked.at && !window.vc.dio.pickDim));
+  await p.evaluate((o) => window.vc.hud.onHover(o.at, o.id), spots.orcs[0]);
+  let pk = await pickOf();
+  check('hovering one orc marks it: the bright ring on its hex, its tag lit, the other option dimmed', pk.pk.unit === spots.orcs[0].id && pk.pk.at && pk.pk.at.q === spots.orcs[0].at.q && pk.tags.join() === spots.orcs[0].id && pk.dim === true, JSON.stringify(pk));
+  check('...and the pill says what Enter takes ("Orc")', /Orc/.test(pk.pill), pk.pill);
+  await shot('pick-attack-1440.png', spots.orcs[0].at, spots.orcs[0].id);
+  await p.evaluate((o) => window.vc.hud.onHover(o.at, o.id), spots.orcs[0]);
+  await p.evaluate((o) => window.vc.hud.onHover(o.at, o.id), spots.orcs[1]);
+  pk = await pickOf();
+  check('...pointing at the other moves the mark (one at a time)', pk.pk.unit === spots.orcs[1].id && pk.tags.join() === spots.orcs[1].id, JSON.stringify(pk));
+  await p.evaluate(() => window.vc.hud.onHover(null, null));
+  await p.keyboard.press('Tab');
+  const k1 = (await pickOf()).pk.unit;
+  await p.keyboard.press('Tab');
+  const k2 = (await pickOf()).pk.unit;
+  check('Tab steps through the options with the same mark', !!k1 && !!k2 && k1 !== k2 && spots.orcs.some((o) => o.id === k1) && spots.orcs.some((o) => o.id === k2), `${k1} → ${k2}`);
+  // The pill's list: hovering an entry marks it on the board.
+  const listed = await p.$$('.dl-pill-opt[data-pick]');
+  if (listed.length) {
+    await listed[0].evaluate((e) => e.dispatchEvent(new MouseEvent('mouseenter'))); // (the first-delve coach mark may sit over the pill)
+    await p.waitForTimeout(80);
+    const lp = await pickOf();
+    check('hovering a pill entry marks its figure on the board', !!lp.pk.unit && (await listed[0].evaluate((e) => e.classList.contains('hot'))), JSON.stringify(lp.pk));
+  } else check('the pill lists the two orcs', false);
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(200);
+  check('Enter takes the marked one (the roll panel opens)', await shown('.dl-roll'));
+  await p.keyboard.press('Escape');
+  await p.keyboard.press('Escape');
+  check('Esc clears the mark', await p.evaluate(() => !window.vc.dio.picked.at && document.querySelectorAll('.unit-tag.tag-picked').length === 0));
+
+  // A jump with several drops in reach: the hovered one is marked and its landing told.
+  const findJump = (hid) => p.evaluate((id) => {
+    const s0 = window.vc.state();
+    const lv = window.vcEngine.castle().levels.find((l) => l.level === 1);
+    for (const key of Object.keys(lv.tiles)) {
+      const t = lv.tiles[key];
+      if (t.kind !== 'floor') continue;
+      const [q, r] = key.split(',').map(Number);
+      const s = structuredClone(s0);
+      const h = s.delve.heroes.find((x) => x.heroId === id);
+      if (s.delve.heroes.some((x) => x !== h && x.at.level === 1 && x.at.q === q && x.at.r === r)) continue;
+      h.at = { level: 1, q, r };
+      const o = window.vcEngine.actions(s, id).find((a) => a.action === 'jump');
+      if (o && o.targets.length >= 2) { window.vc.load(s); window.vc.hud.select(id); return o.targets.map((t) => t.at); }
+    }
+    return null;
+  }, hid);
+  const jump = await findJump(spots.k);
+  check('a hex with two or more drops to jump into', !!jump, `${jump?.length ?? 0}`);
+  if (jump) {
+    await p.waitForTimeout(400);
+    await p.evaluate((at) => window.vc.dio.lookAt(at), jump[0]);
+    await p.click('.dl-hotbar [data-action="jump"]');
+    await p.waitForTimeout(150);
+    await p.evaluate((at) => window.vc.hud.onHover(at, null), jump[1]);
+    await p.waitForTimeout(80);
+    const jp = await p.evaluate(() => ({ pk: window.vc.dio.picked, landing: (() => { const e = document.querySelector('.landing-tag'); return e && !e.classList.contains('hidden') ? e.textContent : ''; })() }));
+    check('Jump: hovering one drop marks it and tells where it lands', !!jp.pk.at && jp.pk.at.q === jump[1].q && jp.pk.at.r === jump[1].r && /(Lands|Falls)/.test(jp.landing), JSON.stringify(jp));
+    await shot('pick-jump-1440.png', jump[1]);
+    await p.keyboard.press('Escape');
+  }
+
+  // The hotbar: a Sapper with no charges and nobody in reach shows no button it can't use, and never scrolls.
+  const sap = await p.evaluate((x) => {
+    const s = structuredClone(window.vc.state());
+    const f = s.delve.heroes.find((h) => h.heroId === x.f);
+    const def = s.campaign.roster.find((r) => r.id === x.f);
+    def.cls = 'sapper';
+    f.at = x.at; f.moved = false; f.acted = false;
+    f.pack = f.pack.filter((i) => i.kind !== 'charge' && i.kind !== 'improvised-charge');
+    s.delve.monsters = s.delve.monsters.filter((m) => !m.id.startsWith('t-orc'));
+    window.vc.load(s);
+    window.vc.hud.select(x.f);
+    const o = window.vcEngine.actions(window.vc.state(), x.f).map((a) => a.action);
+    return o;
+  }, { f: spots.f, at: ax(12, 18) });
+  await p.waitForTimeout(300);
+  const hb = await p.evaluate(() => {
+    const bar = document.querySelector('.dl-hotbar');
+    const acts = [...bar.querySelectorAll('.dl-acts .dl-ab')].map((e) => ({ a: e.dataset.action, off: e.classList.contains('off') || e.classList.contains('blocked') || e.getAttribute('aria-disabled') === 'true' }));
+    return { acts, none: bar.querySelector('.dl-acts-none')?.textContent ?? '', over: bar.scrollWidth - bar.clientWidth, actsOver: (() => { const a = bar.querySelector('.dl-acts'); return a.scrollWidth - a.clientWidth; })(), overflowX: getComputedStyle(bar.querySelector('.dl-acts')).overflowX, who: bar.querySelector('.dl-who-n')?.dataset.tip ?? '' };
+  });
+  check('a Sapper with no charges and nobody in reach: no Attack, no Set or Throw charge, nothing dimmed', !hb.acts.some((x) => x.off) && !hb.acts.some((x) => ['attack', 'setCharge', 'throwCharge', 'brace'].includes(x.a)), JSON.stringify(hb.acts) + ' engine: ' + sap.join(','));
+  check('...with nothing to do, the bar says so ("Nothing to do here. Move, or End turn.")', hb.acts.length > 0 || /Nothing to do here\. Move, or End turn\./.test(hb.none), hb.none || JSON.stringify(hb.acts));
+  check('...hovering the name lists what they can do elsewhere', /can: Attack, Shove, .*Set charge.*Dig/.test(hb.who), hb.who.split('\n')[0]);
+  check('...and the bar does not scroll (1440)', hb.over <= 1 && hb.actsOver <= 1 && hb.overflowX !== 'auto' && hb.overflowX !== 'scroll', `${hb.over}/${hb.actsOver} ${hb.overflowX}`);
+  if (SHOTS) {
+    await p.mouse.move(700, 300);
+    await shot('hotbar-sapper-1440.png');
+    await p.screenshot({ path: `${SHOTS}/hotbar-sapper-1440-bar.png`, clip: { x: 0, y: 900 - 150, width: 1440, height: 150 }, timeout: 180000 });
+  }
+  // Keven with many options (two orcs, a potion, a torch) still fits at 1280 and 2560 wide.
+  await p.evaluate((x) => { const s = structuredClone(window.vc.state()); const k = s.delve.heroes.find((h) => h.heroId === x.k); k.acted = false; k.moved = false; const orcs = [{ ...k.at, q: k.at.q + 1 }, { ...k.at, q: k.at.q - 1, r: k.at.r + 1 }].map((at, i) => ({ id: `t-orc${i}`, kind: 'orc', name: 'Orc', at, hp: 6, maxHp: 6, awareness: 'hunting', spawnedAt: at, noticedIds: [k.heroId], facing: 3 })); s.delve.monsters.push(...orcs); window.vc.load(s); window.vc.hud.select(x.k); }, spots);
+  for (const [w, hgt] of [[1280, 800], [2560, 1440], [1440, 900]]) {
+    await p.setViewportSize({ width: w, height: hgt });
+    await p.waitForTimeout(400);
+    for (const id of [spots.k, spots.f]) {
+      await p.evaluate((i) => window.vc.hud.select(i), id);
+      await p.waitForTimeout(150);
+      const f = await p.evaluate(() => { const bar = document.querySelector('.dl-hotbar'); const r = bar.getBoundingClientRect(); const a = bar.querySelector('.dl-acts'); return { over: bar.scrollWidth - bar.clientWidth, actsOver: a.scrollWidth - a.clientWidth, left: r.left, right: r.right, page: document.documentElement.scrollWidth - innerWidth, n: bar.querySelectorAll('.dl-acts .dl-ab').length, mode: bar.className }; });
+      check(`hotbar at ${w}×${hgt} (${id}): no scrolling, inside the window`, f.over <= 1 && f.actsOver <= 1 && f.left >= 0 && f.right <= w && f.page <= 0, JSON.stringify(f));
+      if (SHOTS && w === 2560 && id === spots.f) {
+        await p.mouse.move(1300, 400);
+        await shot('hotbar-sapper-2560.png');
+      }
+    }
+    if (SHOTS && w === 2560) {
+      await p.evaluate((i) => window.vc.hud.select(i), spots.k);
+      await p.waitForTimeout(150);
+      await p.click('.dl-hotbar [data-action="attack"]');
+      await p.waitForTimeout(100);
+      await shot('pick-attack-2560.png', await p.evaluate(() => window.vc.state().delve.monsters.find((m) => m.id === 't-orc0').at), 't-orc0');
+      await p.keyboard.press('Escape');
+      const back = await p.evaluate(() => structuredClone(window.vc.state()));
+      const j2 = await findJump(spots.k);
+      if (j2) {
+        await p.waitForTimeout(300);
+        await p.evaluate((at) => window.vc.dio.lookAt(at), j2[0]);
+        await p.waitForTimeout(300);
+        await p.click('.dl-hotbar [data-action="jump"]');
+        await p.waitForTimeout(150);
+        await shot('pick-jump-2560.png', j2[1]);
+        await p.keyboard.press('Escape');
+      }
+      await p.evaluate((s) => window.vc.load(s), back);
+    }
+  }
+  await p.evaluate(() => { window.vc.load(window.__pre30); window.vc.hud.select(window.__pre30.delve.heroes[0].heroId); });
+  await p.waitForTimeout(300);
 }
 
 // ---- the castle's turn: banner and the folded hotbar while it plays

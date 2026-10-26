@@ -1441,9 +1441,11 @@ function setOutStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
   left.append(group);
   const box = h('input', { type: 'checkbox', class: 'lg-check', 'data-k': 'shutter', checked: !!l.startShuttered }) as HTMLInputElement;
   box.addEventListener('change', () => host.setDraft({ ...l, startShuttered: box.checked }, 'setout'));
-  left.append(h('label', { class: 'lg-shutter prep-shutter' }, box, h('span', { class: 'lg-shutter-t' }, h('span', { class: 'lg-shutter-n' }, 'Go in with the lantern shut'), h('span', { class: 'lg-sub' }, 'Level 1 has daylight. A shut lantern burns no oil; open it when it gets dark.'))));
-
-  main.append(h('div', { class: 'lg-setout' }, left, plan(s, l, host)));
+  const shutter = h('label', { class: 'lg-shutter prep-shutter' }, box, h('span', { class: 'lg-shutter-t' }, h('span', { class: 'lg-shutter-n' }, 'Go in with the lantern shut'), h('span', { class: 'lg-sub' }, 'Level 1 has daylight. A shut lantern burns no oil; open it when it gets dark.')));
+  // V4.0 (spec 30.5): with a sketch, the lantern choice sits under the plan so the sketch gets the left column's height.
+  const hasSketch = !!left.querySelector('.lg-sketch:not(.none)');
+  if (!hasSketch) left.append(shutter);
+  main.append(h('div', { class: 'lg-setout' }, left, hasSketch ? h('div', { class: 'lg-setout-r' }, plan(s, l, host), shutter) : plan(s, l, host)));
 }
 
 function sketch(s: GameState, l: Loadout, host: CampHost, ents: EntranceInfo[], mem: Map<number, Set<string>>, site: { level: number; q: number; r: number } | null): HTMLElement {
@@ -1454,30 +1456,30 @@ function sketch(s: GameState, l: Loadout, host: CampHost, ents: EntranceInfo[], 
     return h('div', { class: 'lg-sketch none', 'data-sketch': 'none' }, h('span', { class: 'lg-sketch-none' }, "You've never been inside. All anyone knows is the main gate."));
   }
   void s;
-  const W = 620;
-  const H = 250;
+  // V4.0 (spec 30.5, owner: "emphasized more"): the sketch is drawn in world units (a hex is 1 across its corners) and
+  // scales to fill the column (preserveAspectRatio meet), so hexes, marks and room names grow with the space it gets.
   const hexes = [...known].map(parseHexKey);
   const pts = hexes.map((x) => hexToWorld(x));
   const entPts = ents.map((e) => ({ e, p: castle.entrances[e.index] })).filter((x) => x.p && x.p.level === 1);
   for (const x of entPts) pts.push(hexToWorld(x.p!));
-  const minX = Math.min(...pts.map((p) => p.x)) - 1;
-  const maxX = Math.max(...pts.map((p) => p.x)) + 1;
-  const minZ = Math.min(...pts.map((p) => p.z)) - 1;
-  const maxZ = Math.max(...pts.map((p) => p.z)) + 1;
-  const sc = Math.min((W - 60) / (maxX - minX), (H - 50) / (maxZ - minZ));
-  const ox = (W - (maxX - minX) * sc) / 2;
-  const oz = (H - (maxZ - minZ) * sc) / 2;
+  const pad = 1.6;
+  const minX = Math.min(...pts.map((p) => p.x)) - pad;
+  const maxX = Math.max(...pts.map((p) => p.x)) + pad;
+  const minZ = Math.min(...pts.map((p) => p.z)) - pad;
+  const maxZ = Math.max(...pts.map((p) => p.z)) + pad + 1.2; // room under the lowest entrance's name
+  const W = maxX - minX;
+  const H = maxZ - minZ;
   const at = (q: number, r: number) => {
     const w = hexToWorld({ q, r });
-    return { x: ox + (w.x - minX) * sc, y: oz + (w.z - minZ) * sc };
+    return { x: w.x - minX, y: w.z - minZ };
   };
-  const g = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H, role: 'img', 'aria-label': 'Sketch of what you have seen of Level 1, with the ways in you know' });
-  const rr = sc * 0.97;
+  const g = svg('svg', { viewBox: `0 0 ${W.toFixed(2)} ${H.toFixed(2)}`, preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': 'Sketch of what you have seen of Level 1, with the ways in you know' });
+  const rr = 0.97;
   const corners = (cx: number, cy: number) =>
     [0, 1, 2, 3, 4, 5]
       .map((i) => {
         const a = (Math.PI / 180) * (60 * i - 30);
-        return `${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`;
+        return `${(cx + rr * Math.cos(a)).toFixed(2)},${(cy + rr * Math.sin(a)).toFixed(2)}`;
       })
       .join(' ');
   const solid = new Set(['wall', 'pillar', 'cracked', 'sealed', 'tallprop', 'brazier']);
@@ -1488,26 +1490,53 @@ function sketch(s: GameState, l: Loadout, host: CampHost, ents: EntranceInfo[], 
     const fill = solid.has(t.kind) ? '#4a3f35' : t.kind === 'pit' ? '#070606' : t.kind === 'exit' ? '#3a2a12' : '#211b17';
     g.append(svg('polygon', { points: corners(p.x, p.y), fill }));
   }
-  const entNames = new Set(ents.map((e) => e.name.toLowerCase()));
-  for (const room of lv.rooms) {
-    if (!known.has(`${room.labelAt.q},${room.labelAt.r}`) || entNames.has(room.name.toLowerCase())) continue;
-    const p = at(room.labelAt.q, room.labelAt.r);
-    g.append(svg('text', { x: p.x.toFixed(1), y: p.y.toFixed(1), fill: '#8a7f6e', 'font-family': 'IM Fell English, Georgia, serif', 'font-size': 13, 'text-anchor': 'middle' }, room.name));
-  }
   if (site && site.level === 1) {
     const p = at(site.q, site.r);
-    g.append(svg('circle', { cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 8, fill: '#8f1018' }), svg('text', { x: p.x.toFixed(1), y: (p.y + 4).toFixed(1), fill: '#ffcf86', 'font-size': 11, 'text-anchor': 'middle' }, '✦'));
+    g.append(svg('circle', { cx: p.x.toFixed(2), cy: p.y.toFixed(2), r: 0.75, fill: '#8f1018', stroke: '#ffcf86', 'stroke-width': 0.12 }), svg('text', { x: p.x.toFixed(2), y: (p.y + 0.38).toFixed(2), fill: '#ffcf86', 'font-size': 1.0, 'text-anchor': 'middle' }, '✦'));
   }
-  for (const { e, p } of entPts) {
-    const q = at(p!.q, p!.r);
+  const entMarks = entPts.map(({ e, p }) => ({ e, q: at(p!.q, p!.r) }));
+  for (const { e, q } of entMarks) {
     const on = e.index === l.entrance;
     const ok = e.state === 'open';
-    g.append(
-      svg('rect', { x: (q.x - 7).toFixed(1), y: (q.y - 7).toFixed(1), width: 14, height: 14, fill: on ? '#3a2a12' : '#0b0908', stroke: on ? '#e8a33d' : ok ? '#8a7f6e' : '#5a4c3f', 'stroke-width': on ? 2.5 : 1.5, 'stroke-dasharray': ok ? '' : '3 2' }),
-      svg('text', { x: q.x.toFixed(1), y: (q.y + 22).toFixed(1), fill: on ? '#ffcf86' : '#b8ab94', 'font-family': 'IM Fell English, Georgia, serif', 'font-size': 13, 'text-anchor': 'middle' }, e.name),
-    );
+    g.append(svg('rect', { x: (q.x - 0.65).toFixed(2), y: (q.y - 0.65).toFixed(2), width: 1.3, height: 1.3, fill: on ? '#3a2a12' : '#0b0908', stroke: on ? '#e8a33d' : ok ? '#8a7f6e' : '#5a4c3f', 'stroke-width': on ? 0.24 : 0.14, 'stroke-dasharray': ok ? '' : '0.3 0.2' }));
   }
-  return h('div', { class: 'lg-sketch', 'data-sketch': 'level1' }, g);
+  // Names (entrances first, then rooms): in map units, so they grow with the sketch, but never under ~12px on screen,
+  // and never on top of each other (a room name that would overlap is left out). Laid out again when the sketch resizes.
+  const entNames = new Set(ents.map((e) => e.name.toLowerCase()));
+  const names = [
+    ...entMarks.map(({ e, q }) => ({ text: e.name, x: q.x, y: q.y + 1.9, ent: true, on: e.index === l.entrance })),
+    ...lv.rooms.filter((room) => known.has(`${room.labelAt.q},${room.labelAt.r}`) && !entNames.has(room.name.toLowerCase())).map((room) => ({ ...at(room.labelAt.q, room.labelAt.r), text: room.name, ent: false, on: false })),
+  ];
+  const layer = svg('g', { class: 'lg-sk-names' });
+  g.append(layer);
+  let laid = 0;
+  const layout = (pxPerUnit: number) => {
+    const fs = Math.max(1.05, 12.5 / Math.max(0.1, pxPerUnit));
+    if (Math.abs(fs - laid) < 0.01) return;
+    laid = fs;
+    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    const taken: { x0: number; x1: number; y0: number; y1: number }[] = [];
+    for (const n of names) {
+      const size = n.ent ? fs * 1.08 : fs;
+      const w = n.text.length * size * 0.5;
+      const y = n.ent ? n.y + (size - 1.05) * 0.6 : n.y;
+      const box = { x0: n.x - w / 2 - 0.2, x1: n.x + w / 2 + 0.2, y0: y - size * 0.85, y1: y + size * 0.3 };
+      if (!n.ent && taken.some((o) => box.x0 < o.x1 && box.x1 > o.x0 && box.y0 < o.y1 && box.y1 > o.y0)) continue;
+      taken.push(box);
+      layer.append(svg('text', { class: n.ent ? 'lg-sk-ent' : 'lg-sk-room', x: n.x.toFixed(2), y: y.toFixed(2), fill: n.ent ? (n.on ? '#ffcf86' : '#c8bba4') : '#a89c88', 'font-family': 'IM Fell English, Georgia, serif', 'font-size': size.toFixed(2), 'text-anchor': 'middle', 'paint-order': 'stroke', stroke: '#110d0b', 'stroke-width': (size * 0.2).toFixed(2) }, n.text));
+    }
+  };
+  layout(14);
+  const box = h('div', { class: 'lg-sketch', 'data-sketch': 'level1' }, g);
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => {
+      if (!box.isConnected) return ro.disconnect();
+      const r = (g as unknown as SVGSVGElement).getBoundingClientRect();
+      if (r.width && r.height) layout(Math.min(r.width / W, r.height / H));
+    });
+    ro.observe(box);
+  }
+  return box;
 }
 
 function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {

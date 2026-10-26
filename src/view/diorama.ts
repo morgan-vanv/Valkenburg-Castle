@@ -105,6 +105,12 @@ export class Diorama {
   private pathDots: THREE.InstancedMesh;
   private pathEnd: THREE.Mesh;
   private hoverMesh: THREE.Mesh;
+  /** V4.0 (spec 30.3): "this one": the hovered or keyboard-chosen option while an action is armed. */
+  private pickRing!: THREE.Mesh;
+  private pickHalo!: THREE.Mesh;
+  private pickedUnit: string | null = null;
+  /** V4.0 (spec 30.3): the other options are dimmed (read by checks). */
+  pickDim = false;
   private ring: THREE.Mesh;
   private rippleMesh: THREE.InstancedMesh;
   private rippleData: { center: THREE.Vector3; count: number } | null = null;
@@ -290,6 +296,13 @@ export class Diorama {
     this.hoverMesh = new THREE.Mesh(hexRing(0.86, 0.96), new THREE.MeshBasicMaterial({ color: COLORS.parchment, transparent: true, opacity: 0.8, depthWrite: false }));
     this.hoverMesh.visible = false;
     this.hoverMesh.renderOrder = 4;
+    // V4.0 (spec 30.3): the chosen option: a thick bright ring lifted off the floor, and a halo that breathes outward.
+    this.pickRing = new THREE.Mesh(hexRing(0.6, 0.98), new THREE.MeshBasicMaterial({ color: 0xfff8e4, transparent: true, opacity: 1, depthWrite: false }));
+    this.pickRing.visible = false;
+    this.pickRing.renderOrder = 6;
+    this.pickHalo = new THREE.Mesh(hexRing(0.98, 1.2), new THREE.MeshBasicMaterial({ color: 0xffc860, transparent: true, opacity: 0.8, depthWrite: false }));
+    this.pickRing.add(this.pickHalo);
+    this.pickRing.add(throughWall(this.pickRing));
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.66, 0.8, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.ember, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }));
     this.ring.visible = false;
     this.ring.renderOrder = 3;
@@ -323,6 +336,7 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
+    this.overlay.add(this.pickRing);
     this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.facePreview, this.riskRings, this.fuseMarks, this.soundMarks, this.collapseDebris);
     // V3.9: the facing a move or a Face leaves: an ember wedge with an arrow.
     {
@@ -737,7 +751,7 @@ export class Diorama {
       this.ring.scale.setScalar(1 + Math.sin(t * 4) * 0.04);
     } else this.ring.visible = false;
     const tm = this.highlights.get('target')!.material as THREE.MeshBasicMaterial;
-    tm.opacity = 0.55 + 0.35 * Math.sin(t * 6);
+    tm.opacity = (0.55 + 0.35 * Math.sin(t * 6)) * (this.pickDim ? 0.4 : 1); // V4.0 (spec 30.3): dimmed while one is marked
     for (const g of this.breathMarks.children) {
       if (g.userData.breath) {
         const k = 0.5 + 0.5 * Math.sin(t * 7 + g.position.x);
@@ -760,6 +774,12 @@ export class Diorama {
       g.scale.setScalar(1.25 + 0.2 * k);
     }
     for (const l of this.lips.children) ((l as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(t * 5);
+    if (this.pickRing.visible) {
+      const k = 0.5 + 0.5 * Math.sin(t * 5);
+      this.pickHalo.scale.setScalar(1 + k * 0.16);
+      (this.pickHalo.material as THREE.MeshBasicMaterial).opacity = 0.45 + 0.5 * (1 - k);
+      this.pickRing.position.y = (this.pickRing.userData.y as number) + 0.03 * k;
+    }
     if (this.linkPulse.visible) {
       const k = 0.5 + 0.5 * Math.sin(t * 3.2);
       this.linkPulse.scale.setScalar(1 + k * 0.22);
@@ -1258,7 +1278,7 @@ export class Diorama {
         v.crouch(!!r.sneaked); // V4.0 (spec 28.1): a sneaking crew member crouches, as a sneaking hero
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
         const tagEl = this.tags.get(r.id)?.el;
-        if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st} crew-${r.crew}`;
+        if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st} crew-${r.crew}${this.pickedUnit === r.id ? ' tag-picked' : ''}`;
         // V3.7 (20.4): level badge, feared and dragging marks.
         const lvl = r.level && r.level > 1 ? `<b class="tag-lvl" title="Level ${r.level}${r.weaponTier ? `, weapon +${r.weaponTier}` : ''}${r.armorTier ? `, armor +${r.armorTier}` : ''}">L${r.level}</b>` : '';
         const marks = (r.feared ?? 0) > 0 ? '<b class="tag-fear">feared</b>' : r.dragging ? `<b class="tag-dragging">dragging ${state.campaign.roster.find((x) => x.id === r.dragging)?.name ?? ''}</b>` : (r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : '';
@@ -1570,8 +1590,49 @@ export class Diorama {
     return this.project(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0)));
   }
 
+  /**
+   * V4.0 (spec 30.3): mark the option a click (or Enter) would take while an action is armed: a thick bright ring on its
+   * hex, the figure's tag lit (`unitId`), and the other options dimmed. `at` null clears it.
+   */
+  showPick(at: Pos | null, kind: 'foe' | 'ally' | 'hex' | 'danger' = 'hex', unitId: string | null = null): void {
+    const on = !!at && at.level === this.shownLevel;
+    this.pickRing.visible = on;
+    if (on) {
+      // The ring is always near-white (apart from every red, green or teal option ring); the halo carries the kind.
+      const col = kind === 'foe' || kind === 'danger' ? 0xff4a30 : kind === 'ally' ? 0x8dff6a : 0xffc860;
+      (this.pickHalo.material as THREE.MeshBasicMaterial).color.setHex(col);
+      const y = this.worldOf(at!, 0.07);
+      this.pickRing.position.copy(y);
+      this.pickRing.userData.y = y.y;
+      this.pickRing.userData.at = { ...at! };
+    }
+    if (this.pickedUnit !== unitId) {
+      if (this.pickedUnit) this.tags.get(this.pickedUnit)?.el.classList.remove('tag-picked');
+      this.pickedUnit = unitId;
+    }
+    if (unitId) this.tags.get(unitId)?.el.classList.add('tag-picked');
+    this.dimOptions(on);
+  }
+
+  /** The id of the figure marked by showPick (for checks). */
+  get picked(): { at: Pos | null; unit: string | null } {
+    return { at: this.pickRing.visible ? { ...(this.pickRing.userData.at as Pos) } : null, unit: this.pickedUnit };
+  }
+
+  /** V4.0 (spec 30.3): while one option is marked, the others fade a little. */
+  private dimOptions(on: boolean): void {
+    if (this.pickDim === on) return;
+    this.pickDim = on;
+    for (const style of ['ally', 'dash', 'danger', 'breakable'] as HighlightStyle[]) {
+      const mat = this.highlights.get(style)!.material as THREE.MeshBasicMaterial;
+      const base = style === 'dash' ? 0.6 : 0.9;
+      mat.opacity = on ? base * 0.45 : base;
+    }
+  }
+
   clearHighlights(): void {
     for (const m of this.highlights.values()) m.count = 0;
+    this.showPick(null);
     this.showPath(null);
     this.showRipple(null, 0);
     this.linkPulse.visible = false;
