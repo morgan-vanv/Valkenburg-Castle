@@ -134,9 +134,12 @@ export function quietFeet(c: Ctx, heroId: string): boolean {
 
 // ---------------------------------------------------------------- noticing
 
-/** The hero's move mode for noticing: the last move was a sneak (a hero who never moved counts as walking). */
-export function isSneaking(h: HeroInDelve): boolean {
-  return (h as HeroX).sneaked === true;
+/**
+ * A figure's move mode for noticing: its last move was a sneak (one that never moved counts as walking). Heroes
+ * today (`HeroX.sneaked`); spec 27 hook: any figure with a `sneaked` flag (a crew member, once crews sneak) plugs in.
+ */
+export function isSneaking(h: HeroInDelve | { sneaked?: boolean }): boolean {
+  return (h as { sneaked?: boolean }).sneaked === true;
 }
 
 /**
@@ -172,7 +175,10 @@ export function wouldNotice(c: Ctx, f: Facer & { awareness?: Awareness; searchRo
   return los(c.w, c.d, f.at, heroAt);
 }
 
-/** V4.0 (spec 27): a hero as a watcher sees them: where they stand, their last move mode, the Burglar's quiet feet. */
+/**
+ * V4.0 (spec 27): a figure as a watching monster sees it: where it stands, its last move mode, quiet feet (a Burglar).
+ * Not hero-specific: crew parity (pillar 17) can add crew members to the list `sightedHeroes` builds.
+ */
 export interface Sighted {
   id: string;
   at: Pos;
@@ -188,7 +194,7 @@ export interface Look {
   noticed: string[];
 }
 
-/** Active, unveiled heroes as monsters see them now (spec 27). */
+/** The figures monsters look for, as they stand now (spec 27): active, unveiled heroes (crew members are a later hook). */
 export function sightedHeroes(c: Ctx): Sighted[] {
   return c.d.heroes.filter((h) => h.status === 'active' && h.veil <= 0).map((h) => ({ id: h.heroId, at: h.at, sneaking: isSneaking(h), quiet: quietFeet(c, h.heroId) }));
 }
@@ -476,7 +482,7 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
   const emits = (c.d.lanternBearer === h.heroId && c.d.lanternOpen !== false) || h.torch > 0 || h.ale === 'glowworm';
   let doors = c.d.doors;
   let cc: Ctx = c;
-  const others = c.d.heroes.filter((x) => x !== h && x.status === 'active' && x.veil <= 0).map((x) => ({ id: x.heroId, at: x.at, sneaking: isSneaking(x), quiet: quietFeet(c, x.heroId) }));
+  const others = sightedHeroes(c).filter((x) => x.id !== h.heroId);
   let from = h.at;
   let facing = h.facing;
   path.forEach((p, i) => {

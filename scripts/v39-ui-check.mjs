@@ -246,17 +246,6 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
   const seen = await p.evaluate(() => [...(window.vcEngine.seenEnemies?.(window.vc.state()) ?? [])]);
   const tags = await p.$$eval('.backstab-tag', (els) => els.map((e) => ({ target: e.dataset.target, title: e.title })));
   check('Burglar selected: dagger markers on the sleeper\'s back and side hexes', tags.some((t) => t.target === 'sl'), JSON.stringify(tags.map((t) => t.target)));
-  {
-    // V4.0 (spec 27): backstab from its sides or straight behind; never from its front.
-    const spots = await p.evaluate(() => window.vc.dio.stabSpots.map((x) => x.at));
-    const rch = await p.evaluate(() => window.vc.hud.reach.map((x) => x.to));
-    const can = (x) => same(x, P) || rch.some((y) => same(y, x));
-    const sides = [step(M, 2), step(M, 4)].filter((x) => plain(x) && can(x));
-    const fronts = [step(M, 0), step(M, 1), step(M, 5)];
-    if (sides.length) check('...a dagger at a side hex it can reach', sides.some((x) => spots.some((y) => same(x, y))), JSON.stringify(spots));
-    else skip('side dagger', 'no side hex in reach');
-    check('...none in front of it', !fronts.some((x) => spots.some((y) => same(x, y))), JSON.stringify(spots));
-  }
   check('...none for the enemy nobody has seen', !tags.some((t) => t.target === 'un') && !seen.includes('un'), `seen ${JSON.stringify(seen)}`);
   check('..."Backstab from here" in the marker tooltip', /Backstab from here/.test(tags[0]?.title ?? ''));
   const spot = step(M, 3);
@@ -299,6 +288,17 @@ if (burglarId && fit([[0, 1], [0, 2], [3, 1], [3, 2], [3, 3]])) {
       check(`log: "${nm} backstabs the orc: N"`, new RegExp(`${nm} backstabs (the )?orc: \\d+`, "i").test(log), log.slice(-160));
     } else skip('backstab preview and log', `the engine's preview has no Backstab yet (${pv.replace(/\n/g, ' | ').slice(0, 80)})`);
   } else skip('backstab strike', 'the rear hex is not in reach');
+  // V4.0 (spec 27): backstab from a monster's sides as well as straight behind; never from its front. An awake orc at
+  // its post two hexes off: turned so the hex between them is at its side, then so it is in front.
+  for (const [f, want] of [[1, true], [3, false]]) {
+    const O = step(P, 0, 2);
+    await scene({ [burglarId]: { at: P, facing: F(0) } }, [{ id: 'aw', at: O, awareness: 'alert', facing: F(f) }]);
+    await select(burglarId);
+    await p.waitForTimeout(120);
+    const spots = await p.evaluate(() => window.vc.dio.stabSpots.map((x) => x.at));
+    const has = spots.some((y) => same(y, step(P, 0, 1)));
+    check(want ? 'an unaware orc: a dagger on the hex at its side' : '...none on the hex in front of it', has === want, JSON.stringify(spots));
+  }
 }
 
 // ---- 5. no free-swing confirm; risk tags only on visible enemies

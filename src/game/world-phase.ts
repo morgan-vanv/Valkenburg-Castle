@@ -358,8 +358,9 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
  * remembered, a `noticed` event per hero (`at`: their hex; `faced` for the one it turned to), hunting (an unaware
  * one turns to that hero; one already hunting keeps its facing and quarry), the orc's first-sight bellow; it
  * re-plans its intent when the command ends (`c.replan`). A monster turned by a bellow looks again at the next
- * look. `first`: the moving hero, turned to first among those seen at once. `before` runs once before the first
- * event. Deterministic.
+ * look. `first`: the figure that moved, turned to first among those seen at once. `before` runs once before the
+ * first event. Deterministic. Not tied to a hero's move: callable after any figure's step (crew parity, pillar 17,
+ * can call it after a crew member's step; who is looked for comes from `sightedHeroes`).
  */
 export function lookAll(c: Ctx, first?: string, before?: () => void): boolean {
   if (c.d.phase !== 'player' || c.s.stage !== 'delve') return false;
