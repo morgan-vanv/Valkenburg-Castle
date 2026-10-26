@@ -3,10 +3,10 @@
 // except by screenshots that want a fixed scene (`?fixture=1`).
 
 import type { ActionOption, Engine, FallInfo, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
-import { DIRS, distance, hexKey, line, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
+import { DIRS, distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, AleOffer, ApplyResult, CastleDef, Command, CrewId, DealOption, GameState, Hero, HeroClass, Intent, Item, Rival, RivalCrew, ShopOffer, StoryId } from '../game/types';
 import { backDirs, blastPreview, blastRings, breakableWall } from './stealth';
-import { longPath } from './pathing';
+import { longPaths } from './pathing';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
   return { id, name, cls, level: 1, xp: 0, maxHp, hp: maxHp, stats, weaponTier: 0, armorTier: 0, wounded: 0, delves: 0, kills: 0 };
@@ -142,12 +142,8 @@ function facingToward(from: Pos, to: Pos): number {
   return best;
 }
 
-/**
- * A delve in progress on the test castle. V3.8: `explore` gives the delve as it starts (exploring:
- * sleepers, an investigating orc, a patrol on its route); without it, the V3.7 scene in turns (the
- * rats hunt the party), which the older checks use.
- */
-export function fixtureDelve(castle: CastleDef, explore = false): GameState {
+/** A delve in progress on the test castle. */
+export function fixtureDelve(castle: CastleDef): GameState {
   const e = castle.entrances[0]!;
   const near = (p: Pos, i: number): Pos => posNeighbors(p)[i] ?? p;
   const at0: Pos = near(e, 1);
@@ -195,14 +191,10 @@ export function fixtureDelve(castle: CastleDef, explore = false): GameState {
         at: s.at,
         hp: s.kind === 'orc' ? 6 : s.kind === 'rats' ? 3 : 5,
         maxHp: s.kind === 'orc' ? 6 : s.kind === 'rats' ? 3 : 5,
-        // V3.8 (22): exploring: sleepers, a posted orc that heard something (investigating) and a patrol.
-        awareness: explore ? (s.patrol ? 'patrol' : i === 1 ? 'alert' : 'asleep') : i === 0 ? 'hunting' : 'asleep',
-        route: explore ? s.patrol : undefined,
-        routeIndex: explore && s.patrol ? 1 : undefined,
-        focusAt: explore && i === 1 ? s.at : undefined,
+        awareness: i === 0 ? 'hunting' : 'asleep',
         spawnedAt: s.at,
         // V3.7 (20.1): a facing each; the hunter faces the party.
-        facing: !explore && i === 0 ? facingToward(s.at, at0) : ((s as { facing?: number }).facing ?? (i * 2) % 6),
+        facing: i === 0 ? facingToward(s.at, at0) : (i * 2) % 6,
       })),
       rivals: null,
       light: 44,
@@ -221,9 +213,7 @@ export function fixtureDelve(castle: CastleDef, explore = false): GameState {
       blown: [],
       fuses: [],
       smashed: [],
-      mode: explore ? 'explore' : 'combat',
-      ticks: 0,
-      lanternSteps: 0,
+      calmSteps: 0,
       ropes: [],
       liftWorking: false,
       lanternOpen: true,
@@ -255,9 +245,6 @@ export function withBreakables(castle: CastleDef): CastleDef {
   spots.forEach((p, i) => (tiles[hexKey(p)] = { ...tiles[hexKey(p)]!, kind: 'prop', prop: i ? 'barrel' : 'crate' }));
   return { ...castle, levels: castle.levels.map((l) => (l === lv ? { ...l, tiles } : l)) };
 }
-
-/** V3.8 (22.4): acts that start combat with the party first. */
-const HOSTILE = new Set<ActionKind>(['attack', 'firebolt', 'fireball', 'nightthorn', 'briar', 'sleep', 'dread', 'dart', 'knockback', 'hamstring', 'shove', 'gust', 'setCharge', 'throwCharge', 'charge']);
 
 export function fixtureEngine(castle0: CastleDef): Engine {
   const castle = withBreakables(castle0);
@@ -422,77 +409,28 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     }
     return out;
   };
-  /** V3.8 (22.5): combat holds while anything hunts a hero's level, a crew is hostile or demanding, a fuse burns, or someone is down/held/webbed. */
-  const combatWhy = (s: GameState): string | null => {
+  /** V3.7 (20.5): calm when nothing hunts a hero's level, no crew is hostile or demanding, no fuse burns, nobody is downed/held/webbed/rooted. */
+  const calmOf = (s: GameState): { calm: boolean; why?: string } => {
     const d = s.delve;
-    if (!d) return null;
+    if (!d) return { calm: false };
     const levels = new Set(d.heroes.filter((h) => h.status === 'active').map((h) => h.at.level));
     const hunter = d.monsters.find((m) => m.hp > 0 && m.awareness === 'hunting' && levels.has(m.at.level));
-    if (hunter) return `${hunter.name} hunts the party.`;
-    if (d.rivals && (d.rivals.stance === 'hostile' || d.rivals.stance === 'demanding')) return `${d.rivals.name} ${d.rivals.stance === 'hostile' ? 'are fighting you' : 'demand a toll'}.`;
-    if (d.monsters.some((m) => m.kind === 'gloam')) return 'The dark is awake.';
-    if (d.fuses?.length) return 'A fuse is burning.';
-    const bad = d.heroes.find((h) => h.status === 'downed' || h.grabbedBy || h.webbed);
-    if (bad) return `${s.campaign.roster.find((x) => x.id === bad.heroId)?.name ?? bad.heroId} is ${bad.status === 'downed' ? 'down' : bad.grabbedBy ? 'held' : 'webbed'}.`;
-    return null;
-  };
-  const modeOf = (s: GameState): 'explore' | 'combat' => s.delve?.mode ?? 'combat';
-  /** V3.8 (22.7, 21.5): where each awake enemy would notice a walking / sneaking hero (the fixture: no light per hero, simple sight lines). */
-  const blocksSight = (p: Pos, s: GameState) => {
-    const t = tile(p);
-    if (!t) return true;
-    if (['wall', 'cracked', 'pillar', 'tallprop', 'sealed'].includes(t.kind)) return !(s.delve?.blown ?? []).includes(posKey(p));
-    if (t.kind === 'door') return !s.delve?.doors[posKey(p)]?.open;
-    return false;
-  };
-  const visionOf = (s: GameState): { id: string; walk: Pos[]; sneak: Pos[] }[] => {
-    const d = s.delve;
-    if (!d) return [];
-    const litSet = lit(s);
-    const out: { id: string; walk: Pos[]; sneak: Pos[] }[] = [];
-    for (const m of d.monsters) {
-      if (m.hp <= 0 || m.buried || m.awareness === 'asleep' || m.kind === 'gloam' || (m.feared ?? 0) > 0) continue;
-      const walkH: Pos[] = [];
-      const sneakH: Pos[] = [];
-      for (const x of range(m.at, 8)) {
-        const p = { level: m.at.level, ...x };
-        if (samePos(p, m.at)) continue;
-        const t = tile(p);
-        if (!t || blocksSight(p, s) || t.kind === 'pit') continue;
-        const between = line(m.at, p).slice(1, -1);
-        if (between.some((q) => blocksSight({ level: p.level, ...q }, s))) continue;
-        const lt = litSet.has(posKey(p));
-        const blind = inBlindArc(m, p);
-        const dd = distance(p, m.at);
-        const walkR = blind ? (lt ? 4 : 2) : m.at.level === 3 ? 8 : lt ? 8 : 5;
-        const sneakR = blind ? 0 : m.at.level === 3 ? 3 : lt ? 4 : 1;
-        if (dd <= walkR) walkH.push(p);
-        if (dd <= sneakR) sneakH.push(p);
-      }
-      out.push({ id: m.id, walk: walkH, sneak: sneakH });
-    }
-    return out;
-  };
-  /** One step from `from` toward `to` over walkable hexes (greedy), or null. */
-  const stepToward = (s: GameState, from: Pos, to: Pos): Pos | null => {
-    const d = s.delve!;
-    const opts = posNeighbors(from).filter((p) => walk(s, p) && !d.heroes.some((h) => h.status === 'active' && samePos(h.at, p)));
-    opts.sort((a, b) => distance(a, to) - distance(b, to));
-    const best = opts[0];
-    return best && distance(best, to) < distance(from, to) ? best : (best ?? null);
+    if (hunter) return { calm: false, why: `${hunter.name} hunts the party.` };
+    if (d.rivals && (d.rivals.stance === 'hostile' || d.rivals.stance === 'demanding')) return { calm: false, why: `${d.rivals.name} ${d.rivals.stance === 'hostile' ? 'are fighting you' : 'demand a toll'}.` };
+    if (d.monsters.some((m) => m.kind === 'gloam')) return { calm: false, why: 'The dark is awake.' };
+    if (d.fuses?.length) return { calm: false, why: 'A fuse is burning.' };
+    const bad = d.heroes.find((h) => h.status === 'downed' || h.grabbedBy || h.webbed || (h.rooted ?? 0) > 0);
+    if (bad) return { calm: false, why: `${s.campaign.roster.find((x) => x.id === bad.heroId)?.name ?? bad.heroId} is ${bad.status === 'downed' ? 'down' : bad.grabbedBy ? 'held' : bad.webbed ? 'webbed' : 'rooted'}.` };
+    return { calm: true };
   };
   const eng: Engine = {
     castle: () => castle,
-    mode: (s) => {
-      const m = modeOf(s);
-      return m === 'combat' ? { mode: m, why: combatWhy(s) ?? undefined } : { mode: m };
-    },
-    explorePath: (s, heroId, to, sneak) => {
+    calm: (s) => calmOf(s),
+    calmReach: (s, heroId, sneak) => {
+      if (!calmOf(s).calm) return [];
       const vis = visInner(s);
-      const path = longPath(castle, s, vis, heroId, to, 120);
-      return path ? { to, cost: path.length, path, risks: risksFor(s, heroId, path, !!sneak) } : null;
+      return [...longPaths(castle, s, vis, heroId, 60).entries()].map(([, path]) => ({ to: path[path.length - 1]!, cost: path.length, path, risks: risksFor(s, heroId, path, !!sneak) }));
     },
-    vision: (s) => visionOf(s),
     blastPreview: (s, at) => {
       const pv = blastPreview(castle, s.delve ?? null, at);
       const d = s.delve;
@@ -506,21 +444,6 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     },
     apply(state: GameState, cmd: Command): ApplyResult {
       const res = applyInner(state, cmd);
-      // V3.8 (22.4, 22.6): exploring has no act limit; a hostile act starts combat with the party first.
-      if (cmd.type === 'act' && !res.error && res.state.delve && modeOf(state) === 'explore') {
-        const d = res.state.delve;
-        const h = d.heroes.find((x) => x.heroId === cmd.heroId);
-        if (h) h.acted = false;
-        if (HOSTILE.has(cmd.action) && d.mode === 'explore') {
-          d.mode = 'combat';
-          for (const o of d.heroes) delete o.walk;
-          if (h) h.acted = true;
-          const m = d.monsters.find((x) => x.id === cmd.target.id);
-          if (m) m.awareness = 'hunting';
-          const nm = res.state.campaign.roster.find((x) => x.id === cmd.heroId)?.name ?? cmd.heroId;
-          res.events.unshift({ type: 'mode', mode: 'combat', first: 'party', by: cmd.heroId, why: `${nm} strikes first.` });
-        }
-      }
       // The fixture writes the V3.7 lines into the delve log too (the real engine says them itself).
       if (res.state.delve && !res.error) {
         const name = (id: string) => res.state.campaign.roster.find((h) => h.id === id)?.name ?? res.state.delve!.monsters.find((m) => m.id === id)?.name ?? res.state.delve!.rivals?.members.find((r) => r.id === id)?.name ?? id;
@@ -682,7 +605,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         return { state: s, events: ev };
       }
       if (cmd.type === 'startDelve') {
-        const st = fixtureDelve(castle, true);
+        const st = fixtureDelve(castle);
         st.campaign = structuredClone(state.campaign);
         const k = st.campaign.board.find((x) => x.id === cmd.contractId);
         if (k) st.delve!.contract = k;
@@ -700,140 +623,59 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         s.campaign.stash.push(item(`b${Date.now()}`, o.kind, o.name));
         return { state: s, events: [] };
       }
-      // ---- V3.8 (22.2): exploring: walk orders, stance, the tick.
-      if ((cmd.type === 'walk' || cmd.type === 'stopWalk' || cmd.type === 'sneak' || cmd.type === 'tick') && s.delve && modeOf(state) !== 'explore') return { state, events: [], error: 'Not while fighting.' };
-      if (cmd.type === 'walk' && s.delve) {
-        const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
-        if (!h || h.status !== 'active') return { state, events: [], error: 'No such hero.' };
-        if (!cmd.path.length) return { state, events: [], error: 'No path.' };
-        h.walk = { path: cmd.path.map((p) => ({ ...p })), sneak: cmd.sneak ?? !!h.sneaking };
-        return { state: s, events: [] };
-      }
-      if (cmd.type === 'stopWalk' && s.delve) {
-        const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
-        if (h) delete h.walk;
-        return { state: s, events: [] };
-      }
-      if (cmd.type === 'sneak' && s.delve) {
-        const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
-        if (!h) return { state, events: [], error: 'No such hero.' };
-        h.sneaking = cmd.on;
-        if (h.walk) h.walk.sneak = cmd.on;
-        return { state: s, events: [] };
-      }
-      if (cmd.type === 'tick' && s.delve) {
+      if (cmd.type === 'move' && s.delve && calmOf(state).calm && cmd.path.length > 0) {
+        // V3.7 (20.5): free move: the whole path, the castle turning every 4 steps, followers in file.
         const d = s.delve;
+        const h = d.heroes.find((x) => x.heroId === cmd.heroId)!;
         const ev: ApplyResult['events'] = [];
-        d.ticks = (d.ticks ?? 0) + 1;
-        const t = d.ticks;
-        const nameOf = (id: string) => s.campaign.roster.find((x) => x.id === id)?.name ?? id;
-        // (1) heroes step.
-        for (const h of d.heroes) {
-          if (h.status !== 'active' || !h.walk) continue;
-          if (h.walk.sneak && t % 2) continue;
-          const next = h.walk.path[0];
-          if (!next) {
-            delete h.walk;
-            continue;
-          }
-          const taken = d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, next) && h.walk!.path.length === 1);
-          if (!walk(s, next) || taken) {
-            delete h.walk;
-            ev.push({ type: 'walkStopped', heroId: h.heroId, at: h.at, why: taken ? 'Someone stands there.' : 'The way is blocked.' });
-            continue;
-          }
-          h.walk.path.shift();
-          const tl = tile(next);
-          if (tl?.kind === 'door' && !d.doors[posKey(next)]?.open) {
-            d.doors[posKey(next)] = { ...d.doors[posKey(next)]!, open: true };
-            ev.push({ type: 'doorChanged', at: next, open: true, locked: false });
-          }
-          h.at = next;
-          ev.push({ type: 'moved', id: h.heroId, path: [next] });
-          if (h.heroId === d.lanternBearer && d.lanternOpen !== false) {
-            d.lanternSteps = (d.lanternSteps ?? 0) + 1;
-            if (d.lanternSteps % 4 === 0) {
-              d.light = Math.max(0, d.light - 1);
-              ev.push({ type: 'light', light: d.light, brightness: eng.brightness(s) });
-            }
-          }
-          if (!h.walk.path.length) delete h.walk;
-        }
-        for (const k of lit(s)) if (!d.explored.includes(k)) d.explored.push(k);
-        // (2) patrols and investigators, 1 hex every 4 ticks.
-        if (t % 4 === 0)
-          for (const m of d.monsters) {
-            if (m.hp <= 0 || (m.stuck ?? 0) > 0) continue;
-            let goal: Pos | undefined;
-            if (m.awareness === 'patrol' && m.route?.length) {
-              goal = m.route[m.routeIndex ?? 0];
-              if (goal && samePos(goal, m.at)) {
-                m.routeIndex = ((m.routeIndex ?? 0) + 1) % m.route.length;
-                goal = m.route[m.routeIndex];
-              }
-            } else if (m.awareness === 'alert' && m.focusAt && !samePos(m.focusAt, m.at)) goal = m.focusAt;
-            if (!goal) continue;
-            const step = stepToward(s, m.at, goal);
-            if (!step) continue;
-            m.facing = facingToward(m.at, step);
-            m.at = step;
-            ev.push({ type: 'moved', id: m.id, path: [step] });
-          }
-        // (3) noticing.
-        const vis = visionOf(s);
-        let noticed: { by: string; hero: string } | null = null;
-        for (const h of d.heroes) {
-          if (h.status !== 'active' || noticed) continue;
-          const sneak = h.walk?.sneak ?? !!h.sneaking;
-          for (const v of vis) {
-            if ((sneak ? v.sneak : v.walk).some((p) => samePos(p, h.at))) {
-              noticed = { by: v.id, hero: h.heroId };
+        const followers = cmd.follow ? d.heroes.filter((o) => o !== h && o.status === 'active' && o.at.level === h.at.level && distance(o.at, h.at) <= 3) : [];
+        const trail: Pos[] = [h.at];
+        let walked: Pos[] = [];
+        let stopped: string | undefined;
+        const risks = risksFor(state, cmd.heroId, cmd.path, !!cmd.sneak);
+        for (const step of cmd.path) {
+          h.at = step;
+          trail.push(step);
+          walked.push(step);
+          d.calmSteps = (d.calmSteps ?? 0) + 1;
+          const woke = risks.wake.find((w) => samePos(w.at, step) && w.chance >= 50);
+          if (woke) {
+            const m = d.monsters.find((x) => x.id === woke.id);
+            if (m) {
+              m.awareness = 'hunting';
+              m.facing = facingToward(m.at, h.at);
+              stopped = `${m.name} wakes and has seen ${s.campaign.roster.find((x) => x.id === h.heroId)?.name ?? h.heroId}.`;
+              ev.push({ type: 'moved', id: cmd.heroId, path: walked }, { type: 'woke', id: m.id, by: cmd.heroId }, { type: 'noticed', by: m.id, hero: cmd.heroId });
+              walked = [];
               break;
             }
           }
-        }
-        // (4) exploring rounds.
-        if (t % 8 === 0) {
-          d.round++;
-          for (const h of d.heroes) {
-            if (h.nightEyes) h.nightEyes--;
-            if (h.rooted) h.rooted--;
-          }
-          for (const m of d.monsters) {
-            if (m.stuck) m.stuck--;
-            if (m.awareness === 'alert' && m.focusAt && samePos(m.focusAt, m.at)) {
-              m.searchRounds = (m.searchRounds ?? 3) - 1;
-              if (m.searchRounds <= 0) {
-                delete m.searchRounds;
-                delete m.focusAt;
-                m.awareness = m.route?.length ? 'patrol' : 'alert';
-              }
-            }
+          if (d.calmSteps % 4 === 0) {
+            ev.push({ type: 'moved', id: cmd.heroId, path: walked });
+            walked = [];
+            followers.forEach((f, i) => {
+              const spot = trail[Math.max(0, trail.length - 2 - i)]!;
+              if (!samePos(f.at, spot)) ev.push({ type: 'moved', id: f.heroId, path: [spot] });
+              f.at = spot;
+            });
+            d.round++;
+            d.light = Math.max(0, d.light - 1);
+            ev.push({ type: 'phase', phase: 'world', round: d.round - 1 }, { type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
           }
         }
-        if (noticed) {
-          const m = d.monsters.find((x) => x.id === noticed!.by)!;
-          const h = d.heroes.find((x) => x.heroId === noticed!.hero)!;
-          m.awareness = 'hunting';
-          m.facing = facingToward(m.at, h.at);
-          m.focusAt = h.at;
-          for (const o of d.heroes) delete o.walk;
-          d.mode = 'combat';
-          d.phase = 'player';
-          ev.push({ type: 'noticed', by: m.id, hero: h.heroId }, { type: 'mode', mode: 'combat', first: 'enemies', by: m.id, why: `${m.name} saw ${nameOf(h.heroId)}.` }, { type: 'phase', phase: 'world', round: d.round });
-          const step = distance(m.at, h.at) > 1 ? stepToward(s, m.at, h.at) : null;
-          if (step) {
-            m.at = step;
-            ev.push({ type: 'moved', id: m.id, path: [step] });
-          }
-          d.round++;
+        if (walked.length) ev.push({ type: 'moved', id: cmd.heroId, path: walked });
+        followers.forEach((f, i) => {
+          const spot = trail[Math.max(0, trail.length - 2 - i)]!;
+          if (!samePos(f.at, spot)) ev.push({ type: 'moved', id: f.heroId, path: [spot] });
+          f.at = spot;
+        });
+        for (const k of lit(s)) if (!d.explored.includes(k)) d.explored.push(k);
+        if (stopped) {
           for (const o of d.heroes) o.moved = o.acted = o.dashed = false;
-          ev.push({ type: 'phase', phase: 'player', round: d.round });
+          ev.push({ type: 'calm', calm: false, why: stopped });
         }
         return { state: s, events: ev };
       }
-      if (cmd.type === 'move' && s.delve && modeOf(state) === 'explore') return { state, events: [], error: 'Exploring: walk instead.' };
-      if (cmd.type === 'endTurn' && s.delve && modeOf(state) === 'explore') return { state, events: [], error: 'Nothing to end: you are exploring.' };
       if (cmd.type === 'move' && s.delve) {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
         const risks = risksFor(state, cmd.heroId, cmd.path, !!cmd.sneak);
@@ -955,6 +797,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         d.fuses = left;
         d.round++;
         d.light = Math.max(0, d.light - 1);
+        const wasCalm = calmOf(state).calm;
         for (const h of d.heroes) {
           h.moved = h.acted = h.dashed = false;
           if (h.nightEyes) h.nightEyes--;
@@ -963,13 +806,8 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         }
         for (const m of d.monsters) if (m.stuck) m.stuck--;
         ev.push({ type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
-        // V3.8 (22.5): nothing left fighting: back to exploring.
-        if (!combatWhy(s)) {
-          d.mode = 'explore';
-          d.ticks = 0;
-          for (const m of d.monsters) if (m.awareness === 'alert' && !m.focusAt) m.focusAt = m.at;
-          ev.push({ type: 'mode', mode: 'explore', why: 'The castle quiets.' });
-        }
+        const nowCalm = calmOf(s);
+        if (nowCalm.calm !== wasCalm) ev.push({ type: 'calm', calm: nowCalm.calm, why: nowCalm.why });
         return { state: s, events: ev };
       }
       if (cmd.type === 'act' && s.delve) {

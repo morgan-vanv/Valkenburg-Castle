@@ -334,7 +334,7 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
 }
 
 /** An alert searcher's clock runs down; at zero it goes back to its route or post (spec 16.1). */
-export function searchTick(c: Ctx, m: MonsterX): void {
+function searchTick(c: Ctx, m: MonsterX): void {
   if (m.awareness !== 'alert' || m.returning) return;
   if (m.searchRounds === undefined) return;
   m.searchRounds -= 1;
@@ -582,60 +582,6 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   }
 }
 
-/** V3.8 (spec 22.4): a monster caught by an ambush does nothing this world phase; one the act set hunting turns to face the attacker. */
-function surprised(c: Ctx, m: MonsterX, by: string): void {
-  m.intent = { kind: 'wait' };
-  if (m.buried || m.awareness === 'asleep' || m.kind === 'gloam' || m.kind === 'dragon') return;
-  if (m.awareness !== 'hunting') return; // only what the act roused: a far patrol or searcher just loses its turn
-  const h = hd(c, by);
-  if (!h || h.status !== 'active') return;
-  goHunting(c, m, h.at);
-  if (h.at.level === m.at.level) noticeHero(c, m, by);
-}
-
-/**
- * V3.8 (spec 22.2): an exploring round. The round-based timers of the world phase count down
- * (veil, ward, night-eye, roots, glue, smoke, fire and burning, rally, shouts, dread, the Black
- * Cask's hiccups) without the lantern's burn, the torches (they burn by distance), bleeding or
- * anyone's turn. The round number goes up.
- */
-export function exploreRound(c: Ctx): void {
-  const d = c.d;
-  d.round += 1;
-  burnPhase(c);
-  for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
-  for (const h of d.heroes) {
-    if ((h.rooted ?? 0) > 0) h.rooted! -= 1;
-    if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
-    if (h.veil > 0) h.veil -= 1;
-    if (h.ward > 0) h.ward -= 1;
-    h.braced = undefined;
-    h.guarding = undefined;
-    if ((h.nightEyes ?? 0) > 0) {
-      h.nightEyes! -= 1;
-      if (h.nightEyes === 0) say(c, `${heroName(c, h.heroId)}'s night-eye fades.`);
-    }
-  }
-  for (const m of d.monsters) {
-    if ((m.stuck ?? 0) > 0) m.stuck! -= 1;
-    if ((m.shoutCooldown ?? 0) > 0) m.shoutCooldown! -= 1;
-    if ((m.feared ?? 0) > 0) {
-      m.feared! -= 1;
-      if (m.feared === 0) m.fearOf = undefined;
-    }
-  }
-  for (const r of d.rivals?.members ?? []) {
-    if ((r.feared ?? 0) > 0) {
-      r.feared! -= 1;
-      if (r.feared === 0) r.fearOf = undefined;
-    }
-    if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
-  }
-  tickDown(d.smoke);
-  tickDown(d.glue);
-  tickDown(d.burning);
-}
-
 // ---------------------------------------------------------------- the Gloam
 
 /**
@@ -661,49 +607,42 @@ function gloamPhase(c: Ctx): void {
     return;
   }
   c.d.gloamCalm = 0;
-  g ??= spawnGloam(c, lit) ?? undefined;
-  if (!g) return;
+  if (!g) {
+    const hollow = unlit3.length > 0;
+    const anchor = hollow ? unlit3[0]!.at : (lanternPos(c.d) ?? activeHeroes(c)[0]!.at);
+    const [lo, hi] = hollow ? [GLOAM_RISE_MIN, GLOAM_RISE_MAX] : [8, 10];
+    const vis = visibleSet(c.w, c.d, lit);
+    const dark = (p: Pos) => kindAt(c.w, c.d, p) === 'floor' && !occupant(c, p) && !lit.has(posKey(p));
+    const ring = range(anchor, hi).map((h) => ({ level: anchor.level, ...h })).filter((p) => distance(p, anchor) >= lo && dark(p));
+    const hidden = ring.filter((p) => !vis.has(posKey(p)));
+    let pool = hidden.length ? hidden : ring;
+    if (!pool.length) pool = (c.w.floors.get(anchor.level) ?? []).filter((p) => dark(p) && isFloorish(c.w, c.d, p));
+    if (!pool.length) return;
+    const at = pick(c.s, pool);
+    g = {
+      id: `m${c.d.nextMonster ?? 99}`,
+      kind: 'gloam',
+      name: 'The Gloam',
+      at,
+      hp: 99,
+      maxHp: 99,
+      awareness: 'hunting',
+      spawnedAt: at,
+    };
+    c.d.nextMonster = (c.d.nextMonster ?? 99) + 1;
+    c.d.monsters.push(g);
+    c.ev.push({ type: 'gloam', at });
+    c.ev.push({ type: 'spawned', id: g.id, at });
+    say(c, hollow ? 'The dark here is awake.' : 'Something moves in the dark.');
+  }
   monsterAct(c, g);
-}
-
-
-/** The Gloam rises (spec 5, 16.2): near the lantern when it is out, or near the first hero in the dark of the Hollow. Out of sight if it can. */
-export function spawnGloam(c: Ctx, lit: Set<string> = litSet(c.w, c.d)): MonsterX | null {
-  const unlit3 = unlitOnL3(c, lit);
-  const hollow = unlit3.length > 0;
-  const anchor = hollow ? unlit3[0]!.at : (lanternPos(c.d) ?? activeHeroes(c)[0]!.at);
-  const [lo, hi] = hollow ? [GLOAM_RISE_MIN, GLOAM_RISE_MAX] : [8, 10];
-  const vis = visibleSet(c.w, c.d, lit);
-  const dark = (p: Pos) => kindAt(c.w, c.d, p) === 'floor' && !occupant(c, p) && !lit.has(posKey(p));
-  const ring = range(anchor, hi).map((h) => ({ level: anchor.level, ...h })).filter((p) => distance(p, anchor) >= lo && dark(p));
-  const hidden = ring.filter((p) => !vis.has(posKey(p)));
-  let pool = hidden.length ? hidden : ring;
-  if (!pool.length) pool = (c.w.floors.get(anchor.level) ?? []).filter((p) => dark(p) && isFloorish(c.w, c.d, p));
-  if (!pool.length) return null;
-  const at = pick(c.s, pool);
-  const g: MonsterX = {
-    id: `m${c.d.nextMonster ?? 99}`,
-    kind: 'gloam',
-    name: 'The Gloam',
-    at,
-    hp: 99,
-    maxHp: 99,
-    awareness: 'hunting',
-    spawnedAt: at,
-  };
-  c.d.nextMonster = (c.d.nextMonster ?? 99) + 1;
-  c.d.monsters.push(g);
-  c.ev.push({ type: 'gloam', at });
-  c.ev.push({ type: 'spawned', id: g.id, at });
-  say(c, hollow ? 'The dark here is awake.' : 'Something moves in the dark.');
-  return g;
 }
 
 // Charges: V3.7 (spec 20.3) fused charges live in charges.ts; tickFuses runs at the end of the world phase.
 
 // ---------------------------------------------------------------- the phase
 
-export function tickDown(rec: Record<string, number> | undefined): void {
+function tick(rec: Record<string, number> | undefined): void {
   if (!rec) return;
   for (const k of Object.keys(rec)) {
     rec[k]! -= 1;
@@ -712,7 +651,7 @@ export function tickDown(rec: Record<string, number> | undefined): void {
 }
 
 /** Everyone standing in fire takes BURN_DMG (armor doesn't help). */
-export function burnPhase(c: Ctx): void {
+function burnPhase(c: Ctx): void {
   const burning = Object.entries(c.d.burning ?? {}).filter(([, n]) => n > 0).map(([k]) => k);
   if (!burning.length) return;
   const keys = new Set(burning);
@@ -752,15 +691,9 @@ export function worldPhase(c: Ctx): void {
   }
   // 2. Monsters, in id order.
   const order = [...d.monsters].filter((m) => m.kind !== 'gloam').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
-  const caught = new Set(d.ambush?.ids ?? []);
   for (const m of order) {
     if (!d.monsters.includes(m)) continue;
     c.visCache = undefined;
-    // V3.8 (spec 22.4): caught unaware by an ambush, it only turns to face and takes up the hunt.
-    if (caught.has(m.id)) {
-      surprised(c, m, d.ambush!.by);
-      continue;
-    }
     monsterAct(c, m);
   }
   // 3. Rivals. 4. The Gloam.
@@ -769,9 +702,8 @@ export function worldPhase(c: Ctx): void {
   // V3.7 (spec 20.3): fuses count down; charges at 0 go off now, at the end of the world phase.
   tickFuses(c);
   // 5. New round.
-  // V3.8 (spec 22.4): the ambush is over after its first world phase.
-  d.ambush = undefined;
-  // Braces end at the next player phase.
+  // V3.7 (spec 20.5): the castle has turned: free movement counts its steps afresh; braces end at the next player phase.
+  d.calmSteps = 0;
   for (const h of d.heroes) {
     h.moved = false;
     h.acted = false;
@@ -809,9 +741,9 @@ export function worldPhase(c: Ctx): void {
     // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) comes loose.
     if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
   }
-  tickDown(d.smoke);
-  tickDown(d.glue);
-  tickDown(d.burning);
+  tick(d.smoke);
+  tick(d.glue);
+  tick(d.burning);
   refreshSight(c);
   if (checkDelveEnd(c)) return;
   d.round += 1;

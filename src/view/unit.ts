@@ -141,18 +141,6 @@ export class UnitView {
     });
   }
 
-  private crouched = false;
-  /** V3.8 (22.8): a sneaking hero crouches (squashed lower). */
-  crouch(on: boolean): void {
-    this.crouched = on;
-    if (this.busy) return;
-    this.fig.scale.set(this.scale, this.scale * (on ? 0.78 : 1), this.scale);
-  }
-
-  get isCrouched(): boolean {
-    return this.crouched;
-  }
-
   /** Lie down (downed hero), without fading. */
   lieDown(down: boolean): void {
     this.fig.rotation.z = down ? 1.35 : 0;

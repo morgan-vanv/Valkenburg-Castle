@@ -7,7 +7,6 @@
 //   node scripts/v32-clarity-check.mjs <baseUrl> [seed=1980]      (SHOT=/path/to.png takes one 1280x800 shot on the stairs)
 
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
-import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base, seed = '1980'] = process.argv.slice(2);
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -35,13 +34,11 @@ await p.goto(base);
 await p.evaluate(() => localStorage.clear());
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
-await inTurns(p);
 await p.evaluate(() => {
   localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, reduceFlashes: false, noEndTurnAsk: true }));
 });
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
-await inTurns(p);
 await p.fill('input.seed', seed);
 await p.click('text=New campaign');
 await p.waitForTimeout(200);

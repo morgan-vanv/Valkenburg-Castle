@@ -450,19 +450,11 @@ function goOut(c: Ctx, r: RivalX): void {
   c.ev.push({ type: 'out', id: r.id });
 }
 
-/** V3.8 (spec 22.2): exploring, crews walk a hex at a time; `one` cuts a planned walk to its first hex. */
-function budgetOf(r: RivalX, one: boolean): number {
-  return one ? 2 : rivalStats(r).move;
-}
-function cut(path: Pos[] | null, one: boolean): Pos[] {
-  return one ? (path ?? []).slice(0, 1) : (path ?? []);
-}
-
-function leaveAct(c: Ctx, r: RivalX, one = false): void {
+function leaveAct(c: Ctx, r: RivalX): void {
   const ex = exitsBy(c, r.at)[0];
   if (!ex) return;
   if (samePos(ex, r.at)) return goOut(c, r);
-  const path = cut(approach(c, r.id, r.at, [ex], budgetOf(r, one), true), one);
+  const path = approach(c, r.id, r.at, [ex], rivalStats(r).move, true) ?? [];
   walk(c, r.id, r, path);
   if (samePos(r.at, ex)) goOut(c, r);
 }
@@ -507,12 +499,12 @@ function hiredAct(c: Ctx, r: RivalX): void {
 }
 
 /** The paid job (spec 18.6): walk there, then work the winch or open the lock silently. Returns true if this member did it. */
-function jobAct(c: Ctx, r: RivalX, one = false): boolean {
+function jobAct(c: Ctx, r: RivalX): boolean {
   const cr = c.d.rivals!;
   const job = cr.job;
   if (!job?.at || r !== jobber(c)) return false;
   if (!within(r.at, job.at, 1)) {
-    const path = cut(approach(c, r.id, r.at, jobSpots(c, r), budgetOf(r, one), true), one);
+    const path = approach(c, r.id, r.at, jobSpots(c, r), rivalStats(r).move, true) ?? [];
     walk(c, r.id, r, path);
   }
   if (!within(r.at, job.at, 1)) return true;
@@ -550,7 +542,7 @@ function jobAct(c: Ctx, r: RivalX, one = false): boolean {
   return true;
 }
 
-function lootAct(c: Ctx, r: RivalX, one = false): void {
+function lootAct(c: Ctx, r: RivalX): void {
   const cr = c.d.rivals!;
   const g = bestLoot(c, r);
   if (!g) {
@@ -562,11 +554,11 @@ function lootAct(c: Ctx, r: RivalX, one = false): void {
   if (!within(r.at, g.at, 1)) {
     const spots = [g.at, ...posNeighbors(g.at)].filter((p) => canEnter(c.w, c.d, p) && !blocked(c, p, r.id));
     const before = r.at;
-    const path = cut(approach(c, r.id, r.at, spots, budgetOf(r, one), true), one);
-    walk(c, r.id, r, path);
+    const path = approach(c, r.id, r.at, spots, rivalStats(r).move, true);
+    walk(c, r.id, r, path ?? []);
     if (samePos(before, r.at) && !within(r.at, g.at, 1)) {
       // Stuck: a hero in the way two rounds running makes them angry (not under a truce).
-      cr.blocked = (cr.blocked ?? 0) + (one ? 0.5 : 1); // exploring: two steps a round
+      cr.blocked = (cr.blocked ?? 0) + 1;
       if (cr.blocked >= 2 && cr.spotted && cr.stance === 'neutral') {
         cr.stance = 'hostile';
         c.ev.push({ type: 'rivalsStance', stance: 'hostile' });
@@ -602,14 +594,14 @@ function lootAct(c: Ctx, r: RivalX, one = false): void {
   }
 }
 
-function postAct(c: Ctx, r: RivalX, one = false): void {
+function postAct(c: Ctx, r: RivalX): void {
   if (!r.post || samePos(r.post, r.at)) return;
-  const path = cut(approach(c, r.id, r.at, [r.post], budgetOf(r, one), true), one);
+  const path = approach(c, r.id, r.at, [r.post], rivalStats(r).move, true) ?? [];
   walk(c, r.id, r, path);
 }
 
 /** Spec 18.6: the hired rounds are up. Rich parties may be betrayed; otherwise back to their business. */
-export function hireEnds(c: Ctx): void {
+function hireEnds(c: Ctx): void {
   const cr = c.d.rivals!;
   cr.hiredRounds = undefined;
   cr.hiredBy = undefined;
@@ -655,13 +647,6 @@ export function rivalsAct(c: Ctx): void {
       continue;
     }
     if (cr.stance === 'hostile') {
-      // V3.8 (spec 22.4): caught by an ambush, a member only turns to face the attacker this phase.
-      if (c.d.ambush?.ids.includes(r.id)) {
-        const by = hd(c, c.d.ambush.by);
-        if (by) faceToward(r, by.at);
-        r.intent = { kind: 'wait' };
-        continue;
-      }
       hostileAct(c, r);
       continue;
     }
@@ -698,59 +683,5 @@ export function rivalsAct(c: Ctx): void {
   // Gone?
   for (const r of cr.members) if (r.goneOut && r.loot.length) {
     noteOnce(c, `${cr.name} left with ${valueOf(r.loot)} gold in loot.`);
-  }
-}
-
-// ---------------------------------------------------------------- V3.8 exploring (spec 22.2, 22.6)
-
-/**
- * A crew while the party explores. 'tick' (every tick): a hired crew keeps up with the hirer at
- * walking pace. 'step' (every PATROL_TICKS): prospectors walk a hex toward their loot or the way out,
- * cutthroats back to their post, the jobber to the job. 'round' (every exploring round): a crew
- * enters on its round, veils and wards fade, prospectors decide to leave, the hire runs down.
- * Hostile and demanding crews mean combat, so they never come here.
- */
-export function rivalsExplore(c: Ctx, beat: 'tick' | 'step' | 'round'): void {
-  const cr = c.d.rivals;
-  if (!cr) return;
-  if (beat === 'round') {
-    rivalEnter(c);
-    if (!cr.entered) return;
-    if (cr.temperament === 'prospector' && (cr.stance === 'neutral' || cr.stance === 'truce') && cr.goal !== 'leave'
-      && ((cr.pickups ?? 0) >= 3 || c.d.light <= SISTERS_LEAVE_LIGHT)) cr.goal = 'leave';
-    for (const r of cr.members) {
-      if ((r.veil ?? 0) > 0) r.veil! -= 1;
-      if ((r.ward ?? 0) > 0) r.ward! -= 1;
-    }
-    if (cr.stance === 'hired' && cr.hiredRounds !== undefined) {
-      cr.hiredRounds -= 1;
-      if (cr.hiredRounds <= 0) hireEnds(c);
-    }
-    return;
-  }
-  if (!cr.entered || cr.stance === 'hostile' || cr.stance === 'demanding') return;
-  if (cr.stance === 'hired') {
-    if (beat !== 'tick') return;
-    for (const r of rivalsOnMap(c)) {
-      const h = cr.hiredBy ? hd(c, cr.hiredBy) : undefined;
-      if (!h || h.status !== 'active' || (r.stuck ?? 0) > 0) continue;
-      if (h.at.level === r.at.level && distance(h.at, r.at) <= HIRE_KEEP) continue;
-      const keep = keepSpots(c, r);
-      const path = keep.length ? cut(approach(c, r.id, r.at, keep, 2, true), true) : [];
-      walk(c, r.id, r, path);
-    }
-    return;
-  }
-  if (beat !== 'step') return;
-  let jobDone = false;
-  for (const r of rivalsOnMap(c)) {
-    if ((r.stuck ?? 0) > 0) continue;
-    if (!jobDone && cr.job && jobAct(c, r, true)) {
-      jobDone = true;
-      continue;
-    }
-    if (cr.goal === 'leave') leaveAct(c, r, true);
-    else if (cr.temperament === 'cutthroat') postAct(c, r, true);
-    else lootAct(c, r, true);
   }
 }

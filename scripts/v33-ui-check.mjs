@@ -6,7 +6,6 @@
 //                                                     shutter, patrol route, gloam)
 
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
-import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base] = process.argv.slice(2);
 const shots = process.env.SHOTS;
@@ -42,7 +41,6 @@ await p.evaluate(() => localStorage.clear());
 await p.evaluate(() => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, reduceFlashes: false, noEndTurnAsk: true })));
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
-await inTurns(p);
 await p.fill('input.seed', '7');
 await p.click('text=New campaign');
 await p.waitForTimeout(200);
@@ -179,7 +177,7 @@ const inj = await p.evaluate(() => {
   };
 });
 check('known patrol route is drawn (dots, arrows, waypoint rings)', inj.routeObjects > 6, `${inj.routeObjects} objects`);
-check('patroller gets the patrol icon (V3.8: →)', inj.patrolTag === '→', inj.patrolTag);
+check('patroller gets the footprint icon', inj.patrolTag === '👣', inj.patrolTag);
 check('new monster models: captain, archer, ghoul; sisters by class', JSON.stringify(inj.models) === JSON.stringify(['captain', 'archer', 'ghoul', 'sisterRanger', 'sisterShadow', 'sisterBurglar']), inj.models.join(','));
 check('buried ghoul is not drawn', inj.buriedDrawn === false);
 check('intent tags: shout, attack, grab, overwatch, veil, dart', ['intent-attack', 'intent-dart', 'intent-grab', 'intent-overwatch', 'intent-shout', 'intent-veil'].every((c) => inj.intents.includes(c)), inj.intents.join(','));

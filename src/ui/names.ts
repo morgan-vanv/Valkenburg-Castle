@@ -46,6 +46,7 @@ export const V37 = {
   blastNoise: liveNum(8, 'BLAST_NOISE', 'CHARGE_NOISE'),
   charges: SAPPER_CHARGES,
   /** Spec 20.5. */
+  calmSteps: liveNum(4, 'CALM_STEPS'),
   shieldPrice: liveNum(50, 'SHIELD_PRICE'),
   bracePenalty: liveNum(15, 'BRACE_PENALTY', 'BRACE_TO_HIT'),
   hamstringRange: liveNum(5, 'HAMSTRING_RANGE'),
@@ -420,9 +421,8 @@ export const AWARENESS_TEXT: Record<string, string> = {
 
 /** V3.7 (spec 20.1): the move modes explained with the live numbers. */
 export const MOVE_HELP = {
-  /** V3.8 (22): exploring. */
-  explore: 'Exploring: the castle moves in real time, half a second a tick (Space pauses). Click any explored hex to walk there, however far; Shift-click or drag a box to move several heroes at once. Every hex still counts: noise, wake rolls, traps. Anything that notices you starts combat; striking first is an ambush.',
-  stance: `Stance (S): walking moves 1 hex a tick and is heard (noise 1); sneaking moves half as fast, silently. Awake enemies notice a walking hero within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit; a sneaking one within ${V37.noticeLitSneak} lit, ${V37.noticeDarkSneak} unlit, never from behind. Red hexes: seen walking. Dark red: seen even sneaking.`,
+  calm: `Free move: nothing hunts the party, so the castle only turns every ${V37.calmSteps} steps you take. Click any explored hex to walk there, however far; the hex-by-hex rules still apply (noise, wake rolls, traps). The walk stops the moment something notices you, a sleeper wakes or a trap goes off, and your party acts first.`,
+  follow: 'Follow: every other active hero within 3 comes along behind in single file, the lantern with them. Off: only the selected hero walks.',
   walk: `Walk: up to 4 hexes, noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you in sight within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (half that in their blind arc). Hovering a hex shows what the move risks.
 After moving, a second move (a dash) spends the action.`,
   sneak: `Sneak (S): up to 2 hexes (Burglar 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (half unlit; ending next to one ${V37.wakeEndSneak}%). Awake monsters notice you within ${V37.noticeLitSneak} lit, ${V37.noticeDarkSneak} unlit, and never from behind: the dim hexes behind each enemy are its blind arc, the marked hex right behind it is safe. Your first strike on a monster that has not noticed you gets +1 slot.`,

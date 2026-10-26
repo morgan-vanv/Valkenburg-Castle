@@ -48,7 +48,7 @@ import { posNeighbors } from '../src/game/hex';
 import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
 import { breakableWall } from '../src/game/charges';
-import { walkableSet } from '../src/game/explore';
+import { calmReach } from '../src/game/calm';
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -76,67 +76,18 @@ let errors = 0;
 const refusals: Record<string, number> = {};
 const evCount: Record<string, number> = {};
 let gloamStrikes = 0;
-/** V3.7 kit counts: braces, heroes hamstrung. */
-const calm = { braces: 0, hamstrung: 0 };
-/**
- * V3.8 (spec 22): exploration. Ticks, walk orders, explore actions; combat starts by trigger; combats
- * ended (back to exploring); light burned by distance walked (ticks) and by world phases (combat).
- */
-const ex = { ticks: 0, walks: 0, sneakWalks: 0, actions: 0, stopped: 0, combats: 0, ends: 0, burnWalk: 0, burnTurn: 0, worldPhases: 0 };
-const starts: Record<string, number> = {};
-let delveTicks = 0;
-let delveBurnWalk = 0;
-let delveBurnTurn = 0;
-let delveCombats = 0;
-function startKind(why: string, first: string): string {
-  if (first === 'enemies') return /draw steel/.test(why) ? 'crew turned' : 'noticed (enemies first)';
-  if (/strikes first/.test(why)) return 'hostile act';
-  if (/looses an arrow/.test(why)) return 'overwatch';
-  if (/toll/.test(why)) return 'toll';
-  if (/calls the fight/.test(why)) return 'fight deal';
-  if (/Gloam/.test(why)) return 'the Gloam';
-  if (/fuse/.test(why)) return 'fuse';
-  return why;
-}
+/** V3.7 (spec 20.5): free movement while calm: moves, steps walked, castle turns taken on the way, walks that stopped for combat, braces. */
+const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, hamstrung: 0 };
 function run(s: GameState, cmd: Command): GameState {
   const r = e.apply(s, cmd);
   const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
-  if (!r.error && s.delve) {
-    if (cmd.type === 'tick') {
-      ex.ticks++;
-      delveTicks++;
-    }
-    if (cmd.type === 'walk') {
-      ex.walks++;
-      if (cmd.sneak) ex.sneakWalks++;
-    }
-    if (cmd.type === 'act' && s.delve.mode === 'explore') ex.actions++;
-    let inWorld = false;
-    let light = s.delve.light;
+  if (cmd.type === 'move' && !r.error && s.delve?.calm) {
+    calm.moves++;
+    if (cmd.follow) calm.follows++;
     for (const ev of r.events) {
-      if (ev.type === 'phase') {
-        inWorld = ev.phase === 'world';
-        if (inWorld) ex.worldPhases++;
-      }
-      if (ev.type === 'light') {
-        if (ev.light < light) {
-          if (inWorld) { ex.burnTurn += light - ev.light; delveBurnTurn += light - ev.light; }
-          else if (cmd.type === 'tick') { ex.burnWalk += light - ev.light; delveBurnWalk += light - ev.light; }
-        }
-        light = ev.light;
-      }
-      if (ev.type === 'walkStopped') ex.stopped++;
-      if (ev.type === 'mode' && ev.mode === 'combat') {
-        ex.combats++;
-        delveCombats++;
-        const k = startKind(ev.why ?? '', ev.first ?? '');
-        starts[k] = (starts[k] ?? 0) + 1;
-        if (VERBOSE) console.log(`  combat: ${ev.first} first, ${ev.why}`);
-      }
-      if (ev.type === 'mode' && ev.mode === 'explore' && ev.why) {
-        ex.ends++;
-        if (VERBOSE) console.log(`  back to exploring (${cmd.type})`);
-      }
+      if (ev.type === 'moved' && ev.id === cmd.heroId) calm.steps += ev.path.length;
+      if (ev.type === 'phase' && ev.phase === 'world') calm.turns++;
+      if (ev.type === 'calm' && !ev.calm) calm.stopped++;
     }
   }
   for (const ev of r.events) if (ev.type === 'rooted' && s.delve?.heroes.some((h) => h.heroId === ev.id)) calm.hamstrung++;
@@ -479,9 +430,44 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   if (alive()) s = sapperCheck(s, id);
   if (!alive()) return s;
   const me = hero()!;
-  const calmMoved = false;
+  // V3.7 (spec 20.5): free movement while calm. The lantern bearer walks the whole way to the goal with the
+  // squad following; the others only catch up when they've fallen more than 3 behind. A walk ends early when
+  // the castle stirs (the engine stops it); the next hero's turn carries on from there.
+  let calmMoved = false;
+  if (!me.webbed && s.delve!.calm && !option(s, id, 'attack')) {
+    const d = s.delve as DelveX;
+    const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+    const isBearer = !bearer || bearer.heroId === id;
+    const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const behind = !isBearer && bearer && (bearer.at.level !== me.at.level || hexDist(me.at, bearer.at) > COHESION);
+    if (isBearer || behind) {
+      const goals = isBearer ? routeFor(s, me.at).goals : [bearer!.at];
+      const field = distField(w, d, goals, { stairs: true, allowLocked: true });
+      const here = field.get(posKey(me.at)) ?? 999;
+      const sneak = nearSleeper(s, me.at);
+      const c: Ctx = { w, s: s as GameStateX, d, ev: [] };
+      let best: ReturnType<typeof calmReach>[0] | undefined;
+      let bestD = here;
+      for (const r of calmReach(c, id, sneak)) {
+        if (inBlast(d, r.to)) continue;
+        if (!isBearer && hexDist(r.to, bearer!.at) > 1 && r.to.level === bearer!.at.level) continue; // catch up to the bearer's side
+        const dd = field.get(posKey(r.to)) ?? 999;
+        if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
+          bestD = dd;
+          best = r;
+        }
+      }
+      if (best) {
+        if (sneak) sneakMoves++;
+        else walkMoves++;
+        const before = s;
+        s = run(s, { type: 'move', heroId: id, path: best.path, sneak, follow: isBearer });
+        calmMoved = s !== before;
+      }
+    }
+  }
   if (!alive()) return s;
-  // Combat: the budgeted move, which may step into the unknown.
+  // No free walk (not calm, or the explored frontier is as close as it gets): the budgeted move, which may step into the unknown.
   if (!hero()!.moved && !hero()!.webbed && !calmMoved) {
     const me = hero()!;
     // Stay put next to an awake enemy we can hit; close in on a hunter in sight within 4 (archers plink from range).
@@ -581,138 +567,6 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   return s;
 }
 
-// ---------------------------------------------------------------- V3.8 exploring (spec 22)
-
-/** Give up on a delve after this many ticks of exploring. */
-const TICK_CAP = Number(process.env.TICK_CAP ?? 3000);
-/** Re-plan a walk order this often (ticks): the explored frontier moves as the party walks. */
-const REPLAN = 4;
-/** Followers keep within this many hexes of the lantern bearer while exploring. */
-const KEEP = 2;
-
-/** Free, harmless explore actions (no attacks: those start fights): drink, free the prisoner, take, revive, mend, oil, kindle, open chests, pick, light braziers, leave, work the winch, smash a lock. */
-function exploreActs(s: GameState, id: string): GameState {
-  const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
-  if (s.stage !== 'delve' || s.delve!.mode !== 'explore' || hero()?.status !== 'active') return s;
-  const me = hero()!;
-  const def = e.heroById(s, id)!;
-  const leaving = objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50;
-  const order: ActionKind[] = ['escape', 'potion', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave', 'winch'];
-  const all = e.actions(s, id).filter((o) => !o.blocked && order.includes(o.action));
-  for (const a of order) {
-    const o = all.find((x) => x.action === a);
-    if (!o) continue;
-    if (a === 'potion' && !(me.hp * 2 < def.maxHp && o.targets.some((t) => t.id === id))) continue;
-    if (a === 'leave' && !leaving) continue;
-    if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
-    if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
-    if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
-    if (a === 'free' && s.delve!.prisoner?.escortedBy) continue;
-    if (a === 'open' && !o.targets.some((t) => t.id)) continue;
-    if (a === 'take' && me.pack.length >= 4) continue;
-    if (a === 'winch' && !routeFor(s, me.at).winch) continue;
-    const target = a === 'potion' ? o.targets.find((t) => t.id === id)! : a === 'open' ? o.targets.find((t) => t.id)! : o.targets[0]!;
-    const before = s;
-    s = act(s, id, a, target, 0);
-    if (s !== before) return s;
-  }
-  return s;
-}
-
-/** Explored, free hexes nearest the goals (by the goal field), best first. */
-function frontier(s: GameState, goals: Pos[], me: HeroInDelve, limit: number): Pos[] {
-  const d = s.delve as DelveX;
-  const field = distField(w, d, goals, { stairs: true, allowLocked: true });
-  const here = field.get(posKey(me.at)) ?? 999;
-  const out: { p: Pos; f: number; n: number }[] = [];
-  for (const k of walkableSet({ w, s: s as GameStateX, d, ev: [] })) {
-    const f = field.get(k);
-    if (f === undefined || f >= here) continue;
-    const [lv, rest] = k.split(':');
-    const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
-    const p = { level: Number(lv), q, r };
-    if (inBlast(d, p)) continue;
-    out.push({ p, f, n: p.level === me.at.level ? hexDistance(p, me.at) : 50 });
-  }
-  out.sort((a, b) => a.f - b.f || a.n - b.n);
-  return out.slice(0, limit).map((x) => x.p);
-}
-
-/** Walk the hero toward one of `targets` (first reachable); returns the new state and whether an order was given. */
-function walkTo(s: GameState, id: string, targets: Pos[], sneak: boolean): { s: GameState; ok: boolean } {
-  for (const t of targets) {
-    const r = e.explorePath(s, id, t, sneak);
-    if (!r) continue;
-    const next = run(s, { type: 'walk', heroId: id, path: r.path, sneak });
-    if (next !== s) return { s: next, ok: true };
-  }
-  return { s, ok: false };
-}
-
-/** When the explored frontier is as close as it gets: jump a pit that lands nearer, or smash a lock in the way. */
-function stuckActs(s: GameState, id: string): GameState {
-  const me = s.delve!.heroes.find((x) => x.heroId === id)!;
-  const rt = routeFor(s, me.at);
-  const jo = option(s, id, 'jump');
-  if (!rt.winch && jo) {
-    const t = jo.targets.find((x) => rt.jump.some((p) => samePos(p, x.at!)));
-    if (t) {
-      const pv = e.preview(s, id, 'jump', t);
-      if (pv.ok && !/down/.test(pv.warning ?? '')) return act(s, id, 'jump', t);
-    }
-  }
-  const sm = option(s, id, 'smash');
-  if (sm) return act(s, id, 'smash', sm.targets[0]!, 0);
-  return sapperCheck(s, id);
-}
-
-/** One tick of the bot exploring: parley, actions, walk orders (the bearer toward the goal, the others keeping up), then the tick. */
-function exploreTick(s: GameState): GameState {
-  const d0 = s.delve as DelveX;
-  const tick = d0.ticks ?? 0;
-  const bearerId = d0.lanternBearer;
-  const ids = d0.heroes.filter((h) => h.status === 'active').map((h) => h.heroId).sort((a, b) => (a === bearerId ? -1 : b === bearerId ? 1 : 0));
-  for (const id of ids) {
-    if (s.stage !== 'delve' || s.delve!.mode !== 'explore') return s;
-    const meNow = s.delve!.heroes.find((h) => h.heroId === id)!;
-    const cr = s.delve!.rivals;
-    if (cr && cr.spotted && cr.members.some((r) => !r.goneOut && r.hp > 0 && r.at.level === meNow.at.level && hexDistance(r.at, meNow.at) <= 5)) s = parleyCheck(s, id);
-    if (s.stage !== 'delve' || s.delve!.mode !== 'explore') return s;
-    s = exploreActs(s, id);
-    if (s.stage !== 'delve' || s.delve!.mode !== 'explore') return s;
-    s = lanternCheck(s, id);
-    if (s.stage !== 'delve' || s.delve!.mode !== 'explore') return s;
-    const d = s.delve as DelveX;
-    const me = d.heroes.find((h) => h.heroId === id);
-    if (!me || me.status !== 'active' || me.webbed || me.grabbedBy) continue;
-    if (me.walk && (tick + ids.indexOf(id)) % REPLAN !== 0) continue;
-    const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
-    const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
-    const isBearer = !bearer || bearer.heroId === id;
-    const sneak = nearSleeper(s, me.at);
-    if (!!me.sneaking !== sneak) s = run(s, { type: 'sneak', heroId: id, on: sneak });
-    if (isBearer || leaving) {
-      const goals = routeFor(s, me.at).goals;
-      const res = walkTo(s, id, frontier(s, goals, me, 8), sneak);
-      s = res.s;
-      if (!res.ok && !s.delve!.heroes.find((h) => h.heroId === id)!.walk) s = stuckActs(s, id);
-      continue;
-    }
-    // Keep up with the bearer: a free hex within KEEP of them, nearest first.
-    if (bearer!.at.level === me.at.level && hexDistance(bearer!.at, me.at) <= KEEP) {
-      if (me.walk) s = run(s, { type: 'stopWalk', heroId: id });
-      continue;
-    }
-    const near = [...d.explored]
-      .map((k) => { const [lv, rest] = k.split(':'); const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number]; return { level: Number(lv), q, r }; })
-      .filter((p) => p.level === bearer!.at.level && hexDistance(p, bearer!.at) <= KEEP && hexDistance(p, bearer!.at) >= 1 && !inBlast(d, p))
-      .sort((a, b) => (a.level === me.at.level ? hexDistance(a, me.at) : 99) - (b.level === me.at.level ? hexDistance(b, me.at) : 99));
-    s = walkTo(s, id, near.slice(0, 6), sneak).s;
-  }
-  if (s.stage !== 'delve' || s.delve!.mode !== 'explore') return s;
-  return run(s, { type: 'tick' });
-}
-
 interface Row {
   squad: string;
   contract: string;
@@ -730,10 +584,6 @@ interface Row {
   story: string;
   dragonDead: boolean;
   reachedL3: boolean;
-  ticks: number;
-  combats: number;
-  burnWalk: number;
-  burnTurn: number;
 }
 
 const rows: Row[] = [];
@@ -825,45 +675,12 @@ for (let i = 0; i < N; i++) {
   let everHostile = false;
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
-  delveTicks = 0;
-  delveBurnWalk = 0;
-  delveBurnTurn = 0;
-  delveCombats = 0;
-  let lastRound = s.delve!.round;
-  const t0 = Date.now();
   while (s.stage === 'delve') {
-    // V3.8 (spec 22): exploring, the bot gives walk orders and acts, then the castle ticks.
-    if (s.delve!.mode === 'explore') {
-      if (VERBOSE && delveTicks % 100 === 0) {
-        const d = s.delve!;
-        console.log(`  t${delveTicks} r${d.round} light ${d.light} ${d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)}${h.walk ? `>${h.walk.path.length}` : ''}`).join(' ')} (${Date.now() - t0} ms)`);
-        if (process.env.STUCK === '1') {
-          const b = d.heroes.find((h) => h.heroId === d.lanternBearer)!;
-          const goals = routeFor(s, b.at);
-          const fr = frontier(s, goals.goals, b, 5);
-          const field = distField(w, d as DelveX, goals.goals, { stairs: true, allowLocked: true });
-          console.log(`   bearer ${b.heroId} field ${field.get(posKey(b.at))} winch ${goals.winch} jump ${goals.jump.length} frontier ${fr.map((p) => `${posKey(p)}(${field.get(posKey(p))}) ${e.explorePath(s, b.heroId, p, false) ? 'ok' : 'no'}`).join(' ')}`);
-          console.log(`   around: ${posNeighbors(b.at).map((p) => `${posKey(p)} ${kindAt(w, d as DelveX, p)}${d.doors[posKey(p)]?.locked ? ' locked' : ''} f${field.get(posKey(p))}`).join('; ')}`);
-          console.log(`   acts: ${e.actions(s, b.heroId).map((o) => o.action).join(',')}`);
-        }
-      }
-      s = exploreTick(s);
+    for (const h of s.delve!.heroes.filter((x) => x.status === 'active')) {
       if (s.stage !== 'delve') break;
-      if (s.delve!.rivals?.stance === 'hostile') everHostile = true;
-      if (delveTicks >= TICK_CAP || s.delve!.round >= ROUND_CAP) {
-        s = run(s, { type: 'abandon' });
-        break;
-      }
-      if (s.delve!.round === lastRound) continue;
-    } else {
-      if (VERBOSE) console.log(`  combat r${s.delve!.round} (${Date.now() - t0} ms) ${e.mode(s).why ?? ''}`);
-      for (const h of s.delve!.heroes.filter((x) => x.status === 'active')) {
-        if (s.stage !== 'delve' || (s.delve!.mode as string) === 'explore') break;
-        s = heroTurn(s, h);
-      }
-      if (s.stage !== 'delve') break;
+      s = heroTurn(s, h);
     }
-    lastRound = s.delve!.round;
+    if (s.stage !== 'delve') break;
     if (s.delve!.rivals?.stance === 'hostile') everHostile = true;
     {
       const d = s.delve as DelveX;
@@ -882,7 +699,7 @@ for (let i = 0; i < N; i++) {
       s = run(s, { type: 'abandon' });
       break;
     }
-    if (s.delve!.mode !== 'explore') s = run(s, { type: 'endTurn' });
+    s = run(s, { type: 'endTurn' });
   }
   const sum = s.summary!;
   const d = s.delve!;
@@ -921,10 +738,6 @@ for (let i = 0; i < N; i++) {
     story: k.story ?? '',
     dragonDead: !d.monsters.some((m) => m.kind === 'dragon') && castle.spawns.some((sp) => sp.kind === 'dragon'),
     reachedL3: d.explored.some((k) => k.startsWith('3:')),
-    ticks: delveTicks,
-    combats: delveCombats,
-    burnWalk: delveBurnWalk,
-    burnTurn: delveBurnTurn,
   });
   if (VERBOSE) for (const n of sum.notes) console.log('   ', n);
   const back = e.apply(s, { type: 'backToCamp' });
@@ -937,10 +750,10 @@ for (let i = 0; i < N; i++) {
   }
 }
 
-console.log('delve  contract     story      done  rounds ticks fights burn(walk+turn) light  loot bounty deaths  dark gloam  squad                 crew');
+console.log('delve  contract     story      done  rounds light  loot bounty deaths  dark gloam  squad                 crew');
 rows.forEach((r, i) => {
   console.log(
-    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${r.story.padEnd(10)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.ticks).padStart(5)} ${String(r.combats).padStart(6)} ${`${r.burnWalk}+${r.burnTurn}`.padStart(15)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${String(r.darkRounds).padStart(5)} ${String(r.gloamStrikes).padStart(5)}  ${r.squad.padEnd(20)}  ${r.crew}`,
+    `${String(i + 1).padStart(5)}  ${r.contract.padEnd(11)} ${r.story.padEnd(10)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${String(r.rounds).padStart(6)} ${String(r.light).padStart(5)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(6)} ${String(r.darkRounds).padStart(5)} ${String(r.gloamStrikes).padStart(5)}  ${r.squad.padEnd(20)}  ${r.crew}`,
   );
 });
 console.log(`\nstory (spec 18.3): ${rows.filter((r) => r.story).length} story delves, ${rows.filter((r) => r.story && r.done).length} done; unlocked: ${unlocked.join(', ') || 'nothing'}`);
@@ -964,10 +777,7 @@ for (const lv of [1, 2, 3]) {
   console.log(`  L${lv}    ${String(rs.length).padStart(3)}  ${String(rs.filter((r) => r.done).length).padStart(4)}  ${String(rs.reduce((a, r) => a + r.deaths, 0)).padStart(6)}  ${String(rs.reduce((a, r) => a + r.darkRounds, 0)).padStart(16)}  ${String(rs.reduce((a, r) => a + r.gloamStrikes, 0)).padStart(13)}`);
 }
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
-console.log(`explore (spec 22): ticks ${ex.ticks} (avg ${(ex.ticks / Math.max(1, rows.length)).toFixed(0)} a delve), walk orders ${ex.walks} (${ex.sneakWalks} sneaking), stopped early ${ex.stopped}, explore actions ${ex.actions}; combats ${ex.combats}, back to exploring ${ex.ends}, world phases ${ex.worldPhases}`);
-console.log(`  combat starts by trigger: ${Object.entries(starts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
-console.log(`  lantern: burned ${ex.burnWalk} by distance walked, ${ex.burnTurn} by world phases; per delve ${(ex.burnWalk / Math.max(1, rows.length)).toFixed(1)} + ${(ex.burnTurn / Math.max(1, rows.length)).toFixed(1)}`);
-console.log(`braces ${calm.braces}, heroes hamstrung ${calm.hamstrung}`);
+console.log(`calm (spec 20.5): free moves ${calm.moves} (${calm.follows} with follow), steps walked while calm ${calm.steps}, castle turns on the way ${calm.turns}, walks stopped by combat ${calm.stopped}, braces ${calm.braces}, heroes hamstrung ${calm.hamstrung}`);
 console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, floor collapsed ${sap.collapsed} / rubbled ${sap.rubbled}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
 if (sapLog.length) console.log(`  blasts: ${sapLog.slice(0, 12).join('; ')}${sapLog.length > 12 ? '; ...' : ''}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);
