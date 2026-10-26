@@ -1197,6 +1197,7 @@ export class Diorama {
       place(v, h.at);
       v.lieDown(h.status === 'downed');
       v.dead = false;
+      v.crouch(h.status === 'active' && (h as { sneaked?: boolean }).sneaked === true); // V4.0 (spec 28.1)
       v.setOpacity(1);
       this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId), !!hero?.shield));
       // V3.9 (24.2): heroes turn to their facing too.
@@ -1240,6 +1241,7 @@ export class Diorama {
         keep.add(r.id);
         place(v, r.at);
         turn(v, r);
+        v.crouch(!!r.sneaked); // V4.0 (spec 28.1): a sneaking crew member crouches, as a sneaking hero
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
         const tagEl = this.tags.get(r.id)?.el;
         if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st} crew-${r.crew}`;
@@ -3607,6 +3609,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   firecracker: '✺',
   blink: '⟿',
   hamstring: '➴',
+  pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
   attack: 'attacks',
@@ -3641,6 +3644,7 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   firecracker: 'throws a firecracker to',
   blink: 'blinks away to',
   hamstring: 'shoots the legs of',
+  pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */

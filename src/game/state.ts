@@ -50,6 +50,14 @@ export interface RivalX extends Rival {
   ward?: number;
   /** V3.7: the kit intent's helper hex (a Sapper's set spot, a potion's step back). */
   kitFrom?: Pos;
+  /**
+   * V4.0 (spec 28.5): heroes who have noticed this member: added whenever the hero sees her hex (their own eyes:
+   * facing, light), all forgotten at the crew's turn once no hero sees her any more. A hero not in it is
+   * open to the member's sneak attack (and the Burglar's backstab), as a monster not in a hero's `noticedIds`.
+   */
+  seenBy?: string[];
+  /** V4.0 (spec 28.2): the monster that attacked this member this world phase (it fights back). */
+  attackedBy?: string;
 }
 
 export interface CrewX extends RivalCrew {

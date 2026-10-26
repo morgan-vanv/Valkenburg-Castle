@@ -20,13 +20,13 @@ import { awayFrom, checkDelveEnd, pusherFor, refreshSight, setLight, unlitOnL3, 
 import { push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
 import {
-  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
+  adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, foes, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
 } from './ai';
 import { HAMSTRING_RANGE } from './data';
 import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
-import { faceToward, fleePlan, lookRound, moodOf, noticeHero, perceivable, sightedHeroes, type Sighted } from './stealth';
+import { faceToward, fleePlan, lookRound, moodOf, noticeFigure, perceivable, sightedHeroes, type Sighted } from './stealth';
 
 // ---------------------------------------------------------------- planning
 
@@ -51,7 +51,8 @@ function canSteal(t: Target): boolean {
 
 function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): Target | null {
   if (m.awareness === 'asleep') return null;
-  const all = targets(c);
+  // V4.0 (spec 28.2, pillar 17): crew members are fair game too; the nearest it makes out, whoever it is.
+  const all = foes(c);
   // A ghoul keeps at the hero it holds.
   if (m.holding) {
     const held = all.find((t) => t.id === m.holding);
@@ -73,7 +74,7 @@ function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): T
 
 /** Orc (adjacent) or archer (ranged, spec 16.4): shove instead of attack when the hero's back is to an unrailed pit. */
 function edgeShove(c: Ctx, m: MonsterX, from: Pos, t: Target, path: Pos[]): Plan | null {
-  if ((m.kind !== 'orc' && m.kind !== 'archer') || !t.hero) return null;
+  if ((m.kind !== 'orc' && m.kind !== 'archer') || !(t.hero || t.rival)) return null;
   const o = pushOutcome(c, pusherFor(from, t.at), t.at, t.id);
   if (o.kind !== 'fall' || !o.fall) return null;
   return { intent: { kind: 'shove', targetId: t.id, to: o.dest, damage: [0, o.fall.damage] }, path };
@@ -194,7 +195,7 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
   }
   // Wounded rats run.
   if (m.kind === 'rats' && m.hp <= 1) {
-    const ts = targets(c).filter((t) => t.at.level === m.at.level);
+    const ts = foes(c).filter((t) => t.at.level === m.at.level);
     const nodes = dijkstra(c.w, c.d, m.at, { enter: (p) => !blocked(c, p, m.id), stairs: false, budget: move });
     let best = m.at;
     let bestD = -1;
@@ -331,18 +332,19 @@ function firstSightBellow(c: Ctx, m: MonsterX): void {
 
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
   if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || m.buried) return;
-  const seen = targets(c).filter((t) => perceivable(c, m, t, lit, (a, b, L) => sees(c, a, b, L))).sort(byDist(m.at));
+  const seen = foes(c).filter((t) => perceivable(c, m, t, lit, (a, b, L) => sees(c, a, b, L))).sort(byDist(m.at));
   // V4.0 (spec 26.3): its quarry: the one it was going for, while it still makes them out; else the nearest.
   const t = seen.find((x) => x.id === m.intent?.targetId) ?? seen[0];
   if (t) {
     // V3.7 (spec 20.1): every hero it makes out is noticed (remembered, one event each); it hunts its quarry and faces it.
     const turn = m.awareness !== 'hunting';
-    if (t.hero) noticeHero(c, m, t.id, turn);
-    for (const x of seen) if (x.hero && x !== t) noticeHero(c, m, x.id, false);
+    // V4.0 (spec 28.2): crew members are noticed like heroes.
+    if (t.hero || t.rival) noticeFigure(c, m, t.id, turn);
+    for (const x of seen) if ((x.hero || x.rival) && x !== t) noticeFigure(c, m, x.id, false);
     goHunting(c, m, t.at);
     // V4.0 (spec 27): facing its quarry with hunting eyes, it looks again (blowing the cover of heroes near them).
     const again = lookRound(c, { at: m.at, facing: m.facing, mood: 'hunting', noticed: [...(m.noticedIds ?? [])] }, sightedHeroes(c).filter((x) => x.at.level === m.at.level), lit);
-    for (const id of again.ids) noticeHero(c, m, id, false);
+    for (const id of again.ids) noticeFigure(c, m, id, false);
     firstSightBellow(c, m);
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
     // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1); it forgets who it saw.
@@ -362,8 +364,9 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
  * first event. Deterministic. Not tied to a hero's move: callable after any figure's step (crew parity, pillar 17,
  * can call it after a crew member's step; who is looked for comes from `sightedHeroes`).
  */
-export function lookAll(c: Ctx, first?: string, before?: () => void): boolean {
-  if (c.d.phase !== 'player' || c.s.stage !== 'delve') return false;
+export function lookAll(c: Ctx, first?: string, before?: () => void, anyPhase = false): boolean {
+  // V4.0 (spec 28.2): `anyPhase`: a crew member's step in the world phase makes them look too.
+  if ((c.d.phase !== 'player' && !anyPhase) || c.s.stage !== 'delve') return false;
   const heroes = sightedHeroes(c);
   if (!heroes.length) return false;
   const lit = litSet(c.w, c.d);
@@ -381,7 +384,7 @@ export function lookAll(c: Ctx, first?: string, before?: () => void): boolean {
     const m = f.m;
     if (!c.d.monsters.includes(m)) continue;
     const q: Sighted | undefined = f.turnedTo ? heroes.find((x) => x.id === f.turnedTo) : undefined;
-    for (const id of f.ids) noticeHero(c, m, id, id === f.turnedTo);
+    for (const id of f.ids) noticeFigure(c, m, id, id === f.turnedTo);
     if (q) goHunting(c, m, q.at);
     (c.replan ??= new Set()).add(m.id);
     firstSightBellow(c, m);
@@ -461,16 +464,16 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
     if (!nodes.has(posKey(to))) return null;
     return pathTo(nodes, to);
   };
-  if (it.kind === 'shout') return targets(c).some((x) => x.id === it.targetId) ? { intent: it, path: [] } : null;
+  if (it.kind === 'shout') return foes(c).some((x) => x.id === it.targetId) ? { intent: it, path: [] } : null;
   if (it.kind === 'shove') {
-    const t = targets(c).find((x) => x.id === it.targetId);
+    const t = foes(c).find((x) => x.id === it.targetId);
     const from = m.shoveFrom ?? m.at;
     if (!t || !it.to || !samePos(pushDest(from, t.at), it.to)) return null;
     if (m.kind === 'archer' ? !within(from, t.at, ARCHER_RANGE) || !los(c.w, c.d, from, t.at) : !adjacentTo(from, t.at)) return null;
     const path = pathTo2(from);
     return path ? { intent: it, path } : null;
   }
-  const t = it.targetId ? targets(c).find((x) => x.id === it.targetId) : undefined;
+  const t = it.targetId ? foes(c).find((x) => x.id === it.targetId) : undefined;
   if (it.kind !== 'move' && !t) return null;
   if (it.kind === 'web') return t?.hero && !adjacentTo(m.at, t.at) ? { intent: it, path: [] } : null;
   if (it.kind === 'drag') return t?.hero?.webbed && !adjacentTo(m.at, t.at) && within(m.at, t.at, 3) ? { intent: it, path: [] } : null;
@@ -529,12 +532,12 @@ function monsterAct(c: Ctx, m: MonsterX): void {
   if (m.kind === 'dragon' && dragonSpecial(c, m, it)) return;
   // V3.9.2 (spec 24.7): acting on someone turns a monster toward them (web, steal, drag, grab, shove...).
   if (it.kind !== 'move' && it.kind !== 'flee' && it.kind !== 'wait') {
-    const to = it.targetId ? targets(c).find((x) => x.id === it.targetId)?.at : it.to;
+    const to = it.targetId ? foes(c).find((x) => x.id === it.targetId)?.at : it.to;
     if (to) faceToward(m, to);
   }
   switch (it.kind) {
     case 'shout': {
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t) break;
       m.shoutCooldown = CAPTAIN_SHOUT_COOLDOWN;
       c.ev.push({ type: 'shout', id: m.id });
@@ -543,26 +546,27 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         if (x === m || (x.kind !== 'orc' && x.kind !== 'archer' && x.kind !== 'captain')) continue;
         if (x.at.level !== m.at.level || distance(x.at, m.at) > CAPTAIN_SHOUT_RANGE) continue;
         goHunting(c, x, t.at);
-        if (t.hero) noticeHero(c, x, t.id);
+        if (t.hero || t.rival) noticeFigure(c, x, t.id);
         x.intent = { kind: 'wait', targetId: t.id };
       }
       makeNoise(c, m.at, SHOUT_NOISE, { what: 'shout' });
       break;
     }
     case 'shove': {
-      const t = targets(c).find((x) => x.id === it.targetId);
-      if (!t?.hero || t.hero.status !== 'active') break;
+      const t = foes(c).find((x) => x.id === it.targetId);
+      // V4.0 (spec 28.2): a crew member at an edge is shoved like a hero.
+      if (!t || (t.hero ? t.hero.status !== 'active' : !t.rival)) break;
       if (m.kind === 'archer' ? !within(m.at, t.at, ARCHER_RANGE) || !los(c.w, c.d, m.at, t.at) : !adjacentTo(m.at, t.at)) break;
-      say(c, m.kind === 'archer' ? `${m.name} aims to knock ${heroName(c, t.id)} off the edge.` : `${m.name} lunges to shove ${heroName(c, t.id)} over the edge.`);
+      say(c, m.kind === 'archer' ? `${m.name} aims to knock ${nameOf(c, t.id)} off the edge.` : `${m.name} lunges to shove ${nameOf(c, t.id)} over the edge.`);
       if (chance(c.s, ORC_SHOVE_CHANCE)) push(c, t.id, pusherFor(m.at, t.at), m.id);
       else {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
-        say(c, `${heroName(c, t.id)} keeps their footing.`);
+        say(c, `${nameOf(c, t.id)} keeps their footing.`);
       }
       break;
     }
     case 'grab': {
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t?.hero || t.hero.status !== 'active' || t.hero.grabbedBy || m.holding || !adjacentTo(m.at, t.at)) break;
       m.holding = t.id;
       t.hero.grabbedBy = m.id;
@@ -572,7 +576,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
       break;
     }
     case 'drag': {
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t?.hero || !t.hero.webbed || adjacentTo(m.at, t.at)) break;
       say(c, `${m.name} hauls on the web. ${heroName(c, t.id)} is dragged in.`);
       push(c, t.id, awayFrom(m.at, t.at), m.id, 'dragged');
@@ -580,13 +584,14 @@ function monsterAct(c: Ctx, m: MonsterX): void {
     }
     case 'attack': {
       if (!it.targetId) break;
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t || t.at.level !== m.at.level) break;
       if (m.kind === 'gloam') {
         if (distance(t.at, m.at) !== 1 || lit.has(posKey(t.at))) break;
         const h = hd(c, t.id);
         say(c, 'The Gloam touches ' + nameOf(c, t.id) + '.');
         if (h) hurtHero(c, h, GLOAM_DMG - wardOf(h), m.id);
+        else if (t.rival) hurtAny(c, t.id, GLOAM_DMG, m.id);
         else hurtPrisoner(c, GLOAM_DMG, m.id);
         break;
       }
@@ -608,14 +613,14 @@ function monsterAct(c: Ctx, m: MonsterX): void {
     }
     case 'hamstring': {
       // V3.7 (spec 20.5): the orc archer roots a hero.
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t?.hero || t.at.level !== m.at.level || !within(m.at, t.at, HAMSTRING_RANGE) || !los(c.w, c.d, m.at, t.at)) break;
       faceToward(m, t.at);
       hamstringShot(c, m.id, t, st.chance);
       break;
     }
     case 'steal': {
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t || !t.hero || distance(t.at, m.at) !== 1 || t.at.level !== m.at.level) break;
       const r = roll(c, m.id, 'Steal', st.slots, st.chance);
       if (!r.hits) {
@@ -635,7 +640,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
       break;
     }
     case 'web': {
-      const t = targets(c).find((x) => x.id === it.targetId);
+      const t = foes(c).find((x) => x.id === it.targetId);
       if (!t?.hero) break;
       t.hero.webbed = true;
       m.lastWeb = c.d.round;

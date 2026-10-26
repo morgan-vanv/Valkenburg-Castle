@@ -571,8 +571,21 @@ export const PROSPECTOR_ENTERS: [number, number] = [6, 9];
 export const PROSPECTOR_KEEP_OFF = 6;
 /** Spec 20.4: the Wake on Level 3 contracts. */
 export const WAKE_CHANCE = 0.6;
-/** Crew members move 4, whatever their class (V4.0, spec 26.4: a crew Burglar does not get the hero Burglar's walk 5). */
+/**
+ * Legacy members (V3.5 saves without `level`) move 4. V4.0 (spec 28, pillar 17): level-built members move like heroes of
+ * their class: walk WALK_MOVE (Burglar BURGLAR_WALK), sneak 2 (Burglar SMUGGLER_SNEAK), dash the same (crewmove.ts `crewBudget`).
+ */
 export const RIVAL_MOVE = 4;
+/** V4.0 (spec 28.1): crew members at peace sneak when a monster they can see asleep or unaware lies within this of their path. */
+export const CREW_CAUTION = 3;
+/** V4.0 (spec 28.1): ... or an active hero within this of their path (looting near the party). */
+export const CREW_PARTY_CAUTION = 5;
+/** V4.0 (spec 28.1): a hostile member out of the party's sight stalks (sneaks) its target when it is within this. */
+export const CREW_STALK_RANGE = 6;
+/** V4.0 (spec 28.1): a member sees a monster (for caution) within this in line of sight (crews carry their own light). */
+export const CREW_LOOKOUT = 8;
+/** V4.0 (spec 28.6): a crew Sapper digs or blasts a way when it saves at least this many hexes of walking (as the sim bot). */
+export const SAPPER_SHORTCUT = 6;
 /** Spec 20.4: members at or below half HP back off a hex and drink a potion (heals 5, like a hero's). */
 export const RIVAL_POTION_HEAL = 5;
 /** Spec 20.4: a dragged hero moves 3 a round toward the crew's exit. */
