@@ -638,3 +638,8 @@ Sight is narrow; sound fills the gap, **for the heroes only**. Monsters and crew
 - Hearing is not seeing: heard enemies stay unseen (no intents, not targetable); `seenEnemies` and previews are unaffected.
 - **Presentation:** footsteps as faint footprint glyphs on the heard hexes, a trail in the order heard, fading toward the oldest; loud sounds as a pulsing ring with an icon for `what` at the hex. Shown on the level they happened, drawn over fog (explored or not), never revealing the figure. A log line per world phase summarising, by direction from the party ("Footsteps beyond the door to the north-east", "A clash to the west"), at most two lines. Hover on a marker: "Heard footsteps here, last turn".
 - Stale shove/drag arrows: an intent arrow from a victim to a landing hex is drawn only while the victim still stands next to that hex (the plan was made before they moved); otherwise the monster's intent tag still names it but no arrow is drawn.
+
+### 24.9 V3.9.4: tidy-up before V4.0 (owner, 2026-10-26)
+
+- Move-risk tags (wake %, notice eye, free swing) and the Burglar's backstab dagger appear over their figure or hex from their first frame: their appear animation is a fade only. (It used to animate `transform`, which these tags use for their screen position, so they slid in from the screen's top-left corner.) The owner will revisit the free-swing warning's presentation in V4.0.
+- The unlit hint's tooltip names the live unlit notice ranges (5 walking, 1 sneaking) instead of a stale 3.

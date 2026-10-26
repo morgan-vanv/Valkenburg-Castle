@@ -63,11 +63,11 @@ const m0 = await p.evaluate(() => ({
   stage: document.querySelector('.light-stage')?.textContent ?? '',
   open: window.vc.state().delve.lanternOpen,
   toggle: document.querySelector('.light-toggle')?.textContent ?? '',
-  saveKey: !!localStorage.getItem('vc.save.v33'),
+  saveKey: Object.keys(localStorage).find((k) => k.startsWith('vc.save.')) ?? null,
 }));
 check('delve starts shuttered when asked; meter says "Shuttered · not burning"', m0.open === false && /Shuttered · not burning/.test(m0.state) && m0.stage === 'Shuttered', `${m0.state} | ${m0.stage}`);
 check('meter toggle offers Open', /Open/.test(m0.toggle), m0.toggle);
-check('save key vc.save.v33', m0.saveKey);
+check('a save is written (current key, V3.9: vc.save.v39)', m0.saveKey === 'vc.save.v39', String(m0.saveKey));
 await shot('01-shuttered');
 // The bar's Lantern group for the bearer (hotkey L), then L opens it.
 const bar0 = await p.evaluate(() => {
@@ -110,7 +110,7 @@ const dark = await p.evaluate(() => {
     sight: E.sightRange(s, d.lanternBearer),
   };
 });
-check('unlit heroes get the dark card badge', dark.unlit.length > 0 && dark.darkCards === dark.unlit.length && dark.chips.every((c) => /In the dark · sight \d/.test(c)), `${dark.unlit.length} unlit, chips: ${dark.chips.join(', ')}`);
+check('unlit heroes get the dark card badge', dark.unlit.length > 0 && dark.darkCards === dark.unlit.length && dark.chips.every((c) => /In the dark · (sight \d|night-eye)/.test(c)), `${dark.unlit.length} unlit, chips: ${dark.chips.join(', ')}`);
 check('context hint leads with "In the dark: sight N"', new RegExp(`In the dark: sight ${dark.sight}`).test(dark.hint), dark.hint);
 check('vignette is dark for an unlit selected hero', dark.vignette === 'dark' || dark.vignette === 'pitch', dark.vignette);
 

@@ -1834,7 +1834,7 @@ export class Hud {
     // 16.2: standing in the dark: say so, with the hero's own sight range.
     if (!this.isLit(sel.heroId)) {
       const sight = this.sightOf(sel.heroId);
-      lead.push(h('span', { class: 'hint-dark', title: sel.at.level === 3 ? 'In the Hollow the dark itself hunts anyone standing unlit.' : 'Monsters see you only within 3 while you stand unlit; you see less too.' }, h('b', null, 'In the dark'), sight !== null ? `: sight ${sight}` : ''));
+      lead.push(h('span', { class: 'hint-dark', title: sel.at.level === 3 ? 'In the Hollow the dark itself hunts anyone standing unlit.' : `Monsters notice you only within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking, while you stand unlit; you see less too.` }, h('b', null, 'In the dark'), sight !== null ? `: sight ${sight}` : ''));
     }
     const R = 4;
     for (let dq = -R; dq <= R; dq++)

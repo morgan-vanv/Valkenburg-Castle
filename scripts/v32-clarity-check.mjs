@@ -1,5 +1,5 @@
 // Spec 15.7 checks in the real UI, headless, by DOM assertions (no screenshots unless SHOT=<path>):
-//   - walking Hobart onto the tower stair shows "Take stairs ↓ Level 2" in the bar, the hex hint
+//   - walking Keven onto the tower stair shows "Take stairs ↓ Level 2" in the bar, the hex hint
 //     "Stairs here", the "↓ L2" marker, and clicking the button puts him on Level 2;
 //   - a blocked take (pack full next to loot) shows a greyed button with its reason and flashes it;
 //   - the goal box names the objective's location once its hex is explored, and the beacon tag shows.
@@ -39,16 +39,17 @@ await p.evaluate(() => {
 });
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
-await p.fill('input.seed', seed);
-await p.click('text=New campaign');
-await p.waitForTimeout(200);
-
-// Hire two, take the first contract, delve.
-await p.click('.station:has-text("Tavern")');
-for (let i = 0; i < 2; i++) await p.click('.recruit button:not([disabled]) >> nth=0').catch(() => {});
-await p.click('.station:has-text("Bounty board")');
-await p.click('.contract >> nth=0 >> text=Take the job');
-await p.click('.btn-delve');
+// V3.9.4: the camp screen changed in V3.4, so start the delve through the engine (as the later checks do):
+// a campaign on the seed, one hire, the first job.
+await p.evaluate(async (sd) => {
+  const E = window.vcEngine;
+  window.vc.load(E.apply(E.newGame(Number(sd)), { type: 'newCampaign', seed: Number(sd) }).state);
+  const s0 = window.vc.state();
+  const r = s0.campaign.recruits.find((x) => x.price <= s0.campaign.gold);
+  if (r) await window.vc.send({ type: 'hire', heroId: r.hero.id });
+  const s = window.vc.state();
+  await window.vc.send({ type: 'startDelve', contractId: s.campaign.board[0].id, heroIds: s.campaign.roster.map((h) => h.id), entrance: 0, packs: {} });
+}, seed);
 await idle();
 await p.waitForTimeout(300);
 
@@ -56,7 +57,7 @@ await p.waitForTimeout(300);
 const goal0 = await p.evaluate(() => ({ brief: document.querySelector('.hud-goal .goal-brief')?.textContent ?? '', where: !!document.querySelector('.goal-where') }));
 check('goal box shows the brief before the objective is seen', goal0.brief.length > 0 && !goal0.where, goal0.brief);
 
-// Walk Hobart to the stairs through the engine: a BFS over the level's tiles (closed doors count
+// Walk Keven to the stairs through the engine: a BFS over the level's tiles (closed doors count
 // as passable, we open them on the way) gives the distance field; each move picks the reach entry
 // that lowers it most.
 const walk = await p.evaluate(async () => {
@@ -106,7 +107,7 @@ const walk = await p.evaluate(async () => {
   return { fail: `never reached the stairs; at ${JSON.stringify(hob().at)} field ${field.get(key(hob().at.q, hob().at.r))}` };
 });
 await idle();
-check('Hobart reached the tower stair', !!walk.ok, JSON.stringify(walk));
+check('Keven reached the tower stair', !!walk.ok, JSON.stringify(walk));
 
 if (walk.ok) {
   // Make sure the move is available (a fresh turn), then read the bar.
@@ -157,11 +158,11 @@ if (walk.ok) {
     const id = vc.state().campaign.roster.find((r) => r.cls === 'heir').id;
     return { level: vc.state().delve.heroes.find((x) => x.heroId === id).at.level, shown: vc.dio.shownLevel };
   });
-  check('clicking it puts Hobart on Level 2', after.level === 2, JSON.stringify(after));
+  check('clicking it puts Keven on Level 2', after.level === 2, JSON.stringify(after));
   check('the view followed him to Level 2', after.shown === 2);
 }
 
-// Blocked take: stage Hobart next to loot with a full pack (state surgery through vc.load).
+// Blocked take: stage Keven next to loot with a full pack (state surgery through vc.load).
 const blocked = await p.evaluate(() => {
   const vc = window.vc;
   const E = window.vcEngine;

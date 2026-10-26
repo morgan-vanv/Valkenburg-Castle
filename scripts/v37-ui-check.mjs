@@ -144,6 +144,21 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
     const tip = await hoverTip(risky.to);
     const tags = await visible('.risk');
     check('hovering a risky hex: risk tags on the monsters', tags.length > 0, JSON.stringify(tags.map((t) => t.text)));
+    // V3.9.4: a fresh tag is over its monster from its first frames (its pop used to slide it in from the top-left).
+    await unhover();
+    const drift = await p.evaluate(async (at) => {
+      window.vc.hud.onHover(at, null);
+      const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+      await frame();
+      await frame();
+      const el = [...document.querySelectorAll('.risk')].find((e) => e.style.display !== 'none');
+      if (!el) return null;
+      const a = el.getBoundingClientRect();
+      await new Promise((r) => setTimeout(r, 400));
+      const b = el.getBoundingClientRect();
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }, risky.to);
+    check('a new risk tag starts over its monster (no slide-in)', drift !== null && drift < 4, `moved ${drift?.toFixed(1)}px`);
     check('...and the hover tip lists them (wake % / notices / free swing)', /may wake · \d+%|notices you|free swing \d+–\d+/.test(tip), tip.slice(0, 160));
     const wake = risky.risks.wake[0];
     if (wake) check('wake tag shows the chance', tags.some((t) => /risk-wake/.test(t.cls) && new RegExp(`${Math.round(wake.chance)}%`).test(t.text)), tags.map((t) => t.text).join(' '));

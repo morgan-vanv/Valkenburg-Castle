@@ -22,6 +22,8 @@ Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and 
 
 ## Since launch
 
+- **V3.9.4, tidy-up (2026-10-26):** the move preview's warnings over enemies (free swing, may wake, will notice) and the Burglar's backstab dagger now appear in place instead of sliding in from the top-left corner of the screen each time you hover a hex. The "In the dark" hint's tooltip gives the right notice ranges. Docs, readme and old checks brought up to date for V4.0.
+
 - **V3.9.3, hearing (2026-10-26):** your heroes hear what they can't see. In the castle's turn, footsteps of unseen monsters and crews within earshot leave a trail of faint footprints (closed doors muffle; rats and spiders are quiet, the Dragon carries far), and fights, shouts, smashes, blasts, roars and screams out of sight show as a pulsing ring with an icon. The log sums it up in a line or two ("Footsteps beyond the door to the north-east", "A clash to the west"). Hearing tells you where, not who: heard enemies stay unseen. The marks last until the castle moves again. Monsters gain nothing from it. Also: a monster's shove or drag arrow is no longer drawn once its victim has moved away from it (the intent tag still says what it planned).
 
 - **V3.9.2, turning and blind spots (2026-10-26):** heroes, monsters and crews turn toward whatever they attack, throw at, cast on or use, as well as facing the way they move. Heroes and rival crews are now blind only in a narrow cone straight behind them; monsters keep their whole back half blind, so sneaking round a monster is easier than round a crew. The Burglar's backstab works from any of a monster's back hexes, but only from straight behind a crew member.
