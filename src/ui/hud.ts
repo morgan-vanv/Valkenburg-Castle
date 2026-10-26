@@ -789,7 +789,9 @@ export class Hud {
     const act = this.bestActionFor(null, at);
     if (link) out.push({ html: `Click: ${esc(linkButton(link.info))}`, cls: 'act' });
     else if (exit?.option && !exit.option.blocked) out.push({ html: 'Click: Leave the castle', cls: 'act' });
-    else if (act && !r) out.push(this.clickLine(act.option, act.target));
+    // V4.0 (spec 30.4): blocked options are hidden from the hotbar, so the card under the mouse must say why, even on
+    // a hex the hero could also walk to ("Take: your pack is full").
+    else if (act && (!r || act.option.blocked)) out.push(this.clickLine(act.option, act.target));
     return out;
   }
 
