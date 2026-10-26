@@ -23,6 +23,8 @@ import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, target
 import { faceToward, fleePlan, inFrontHalf, isSneaking, quietFeet, wouldNotice } from './stealth';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
+import { blast } from './charges';
+import { checkWays, wayAtEntrance, wayOpen } from './ways';
 
 // ---------------------------------------------------------------- making a crew
 
@@ -111,16 +113,23 @@ function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
 export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, partyEntrance?: Pos): CrewX | null {
   const c: Ctx = { w, s, d, ev: [] };
   if (level <= 1) {
-    // Spec 23.2: never the party's own way in; the rival way in farthest from it.
+    // Spec 23.2: never within 6 of the party's own way in. V4.0 (spec 25.4): either rival way in, by the
+    // dice (shut or not: the Sisters make their own entrance).
     const ways = w.castle.rivalEntrances.filter((p) => !partyEntrance || distance(p, partyEntrance) > PROSPECTOR_KEEP_OFF);
     if (!ways.length || random(s) >= PROSPECTOR_CHANCE) return null;
-    const far = partyEntrance ? Math.max(...ways.map((p) => distance(p, partyEntrance))) : 0;
-    const at = partyEntrance ? pick(s, ways.filter((p) => distance(p, partyEntrance) === far)) : pick(s, ways);
+    const at = pick(s, ways);
     const def = CREWS['lantern-sisters'];
+    const members = def.members.map((m, i) => member(s, `r${i + 1}`, def, m, at));
+    // V4.0 (spec 25.4): coming by a barred gate, the Burglar sister carries its key.
+    const way = wayAtEntrance(w.castle, at);
+    if (way?.kind === 'gate' && !wayOpen(s, way.id)) {
+      const b = members.find((r) => r.cls === 'burglar') ?? members[0]!;
+      (b.pack ??= []).push(makeItem({ s }, 'gatekey'));
+    }
     return {
       crew: def.id, name: def.name, temperament: 'prospector', stance: 'neutral', goal: 'loot', spotted: false,
       entersRound: int(s, PROSPECTOR_ENTERS[0], PROSPECTOR_ENTERS[1]),
-      members: def.members.map((m, i) => member(s, `r${i + 1}`, def, m, at)),
+      members,
       pickups: 0, entered: false,
     };
   }
@@ -160,12 +169,47 @@ function rivalEnter(c: Ctx): void {
   const at = cr.members[0]!.at;
   // Spec 23.2: they don't walk in on top of the party; wait while a hero is near their way in.
   if (activeHeroes(c).some((h) => h.at.level === at.level && distance(h.at, at) <= PROSPECTOR_KEEP_OFF)) return;
+  makeEntrance(c, cr, at);
   const spots = spotsAround(c.w, c.d, at, cr.members.length, (p) => !!occupant(c, p));
   if (spots.length < cr.members.length) return; // blocked: try next round
   cr.entered = true;
   cr.members.forEach((r, i) => (r.at = spots[i]!));
   c.ev.push({ type: 'rivalsEnter', at });
   say(c, 'Lanterns at the door. Someone else is here.');
+}
+
+/**
+ * V4.0 (spec 25.4): a crew coming by a shut way makes its own entrance: by a barred gate the member
+ * with its key unlocks it (silently; the key stays in her pack); by rubble they blast it open from
+ * outside (a real blast, noise 8). Either way it is open for good.
+ */
+function makeEntrance(c: Ctx, cr: CrewX, at: Pos): void {
+  const way = wayAtEntrance(c.w.castle, at);
+  if (!way || wayOpen(c.s, way.id)) return;
+  if (way.kind === 'gate') {
+    const keyed = cr.members.find((r) => r.pack?.some((i) => i.kind === 'gatekey'));
+    if (!keyed) return;
+    for (const p of way.at) {
+      const door = doorAt(c.d, p);
+      if (!door) continue;
+      door.open = true;
+      door.locked = false;
+      door.jammed = false;
+      c.ev.push({ type: 'doorChanged', at: p, open: true, locked: false });
+    }
+    c.w.fixedCache = null;
+    say(c, `A key turns in the sally port's bar. ${cr.name} let themselves in.`);
+  } else {
+    const by = (cr.members.find((r) => r.cls === 'burglar') ?? cr.members[0]!).id;
+    say(c, `${cr.name} set a charge in the rubble of the east breach.`);
+    // Blast the heap nearest the exit, then any still standing, until the way is clear.
+    for (let i = 0; i < way.at.length && !c.d.ways?.[way.id]; i++) {
+      const left = way.at.filter((p) => kindAt(c.w, c.d, p) === 'cracked').sort((a, b) => distance(a, at) - distance(b, at));
+      if (!left.length) break;
+      blast(c, left[0]!, by);
+    }
+  }
+  checkWays(c);
 }
 
 // ---------------------------------------------------------------- looting
@@ -186,7 +230,8 @@ function lootGoals(c: Ctx, r: RivalX): LootGoal[] {
   const out: LootGoal[] = [];
   for (const ch of c.d.chests) if (!ch.opened && !ch.jammed) out.push({ at: ch.at, chestId: ch.id, objective: false });
   for (const g of c.d.ground) {
-    if (!g.items.length) continue;
+    // V4.0 (spec 25.2): a pile holding only the sally port key is worth nothing to a prospector.
+    if (!g.items.length || g.items.every((i) => i.kind === 'gatekey')) continue;
     if (c.d.heroes.some((h) => (h.status === 'active' || h.status === 'downed') && samePos(h.at, g.at))) continue;
     const chest = c.d.chests.find((ch) => ch.opened && samePos(ch.at, g.at));
     if (chest && cr.spare?.includes(chest.id)) continue;
@@ -583,8 +628,9 @@ function lootAct(c: Ctx, r: RivalX): void {
     } else {
       const pile = c.d.ground.find((x) => samePos(x.at, g.at));
       if (pile) {
-        items = pile.items;
-        pile.items = [];
+        // V4.0 (spec 25.2): the sally port key is left lying (worth nothing to them).
+        items = pile.items.filter((i) => i.kind !== 'gatekey');
+        pile.items = pile.items.filter((i) => i.kind === 'gatekey');
         c.d.ground = c.d.ground.filter((x) => x.items.length);
       }
       const hl = items.find((i) => i.kind === 'heirloom');

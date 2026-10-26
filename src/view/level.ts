@@ -1229,6 +1229,7 @@ export class LevelView {
   }
 
   private addCracked(h: Hex): void {
+    if (this.tile(h)?.heap) return this.addHeap(h);
     const k = this.pk(h);
     const stone = fogMaterial({ color: 0xb8ae9c, litFloor: 0.2, vertexColors: true });
     const crack = fogMaterial({ color: 0x0a0806, litFloor: 0 });
@@ -1251,11 +1252,40 @@ export class LevelView {
     this.cracked.set(k, e);
   }
 
+  /**
+   * V4.0 (spec 25.3): a heap of fallen stone choking a way (a cracked tile with `heap`): a chest-high
+   * mound of boulders over a floor slab. A blast or a Dig clears it like a cracked wall (setBlown).
+   */
+  private addHeap(h: Hex): void {
+    const k = this.pk(h);
+    const rock = fogMaterial({ color: 0x7a7066, litFloor: 0.14 });
+    const stone = fogMaterial({ color: 0xb8ae9c, litFloor: 0.2, vertexColors: true });
+    const g = new THREE.Group();
+    const n = 9;
+    for (let i = 0; i < n; i++) {
+      const a = hash2(h.q * 7 + i, h.r, 31) * Math.PI * 2;
+      const d = (i < 3 ? 0.1 : 0.35) + hash2(h.q, h.r * 5 + i, 32) * 0.4;
+      const sz = (i < 3 ? 0.42 : 0.24) + hash2(h.q + i, h.r, 33) * 0.16;
+      const m = new THREE.Mesh(new THREE.DodecahedronGeometry(sz, 0), rock);
+      // The big ones stack in the middle, so the heap rises to about head height and blocks the view.
+      m.position.set(Math.sin(a) * d * R, FLOOR_TOP + sz * 0.6 + (i < 3 ? i * 0.45 : 0), Math.cos(a) * d * R);
+      m.rotation.set(a, a * 2, a * 0.5);
+      g.add(m);
+    }
+    // The floor under the heap shows throughout (setBlown leaves 'base' alone); the boulders go when cleared.
+    const floor = new THREE.Mesh(prism(R, FLOOR_TOP, 1, 0.55), stone);
+    floor.name = 'base';
+    g.add(floor);
+    this.place(h, g);
+    const e = this.extra(h, g, [rock, stone], this.withNeighbours(h));
+    this.cracked.set(k, e);
+  }
+
   /** Blown cracked walls become floor. */
   setBlown(keys: Set<string>): void {
     for (const [k, e] of this.cracked) {
       const blown = keys.has(k);
-      for (const c of e.obj.children) c.visible = c.name === 'floor' ? blown : !blown;
+      for (const c of e.obj.children) c.visible = c.name === 'base' ? true : c.name === 'floor' ? blown : !blown;
       if (blown) this.walkable.add(k.split(':')[1] ?? '');
     }
     for (const [k, g] of this.rubble) for (const c of g.children) c.visible = !keys.has(k);

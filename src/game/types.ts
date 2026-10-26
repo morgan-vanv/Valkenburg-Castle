@@ -76,6 +76,13 @@ export interface TileDef {
   railing?: boolean;
   /** V3.7 (spec 20.3): a built wall no charge can break (stair shafts, the lift, outer walls). */
   unbreakable?: boolean;
+  /**
+   * V4.0 (spec 25.2): doors only: a barred gate. Only its key (the `unbar` action) or a blast
+   * within 1 opens it; no Pick, Smash, skeleton key or crew job.
+   */
+  barred?: boolean;
+  /** V4.0 (spec 25.3): cracked only: a heap of fallen stone choking a way (same rules as a cracked wall; drawn as rubble). */
+  heap?: boolean;
 }
 
 export interface RoomDef {
@@ -156,6 +163,30 @@ export type CastleLink =
   | { kind: 'stairs'; a: Pos; b: Pos }
   | { kind: 'lift'; a: Pos; b: Pos; winch: Pos };
 
+/** V4.0 (spec 25): the two Level 1 ways in that a new campaign finds shut. */
+export type WayId = 'sally' | 'breach';
+
+/**
+ * V4.0 (spec 25): an entrance that starts shut on a new campaign and, once opened, stays open
+ * for the rest of the campaign (as a way in and a way out).
+ * - gate: `at` is one barred, locked door (TileDef.barred); its key or a blast opens it.
+ * - rubble: `at` are cracked tiles with `heap`; a blast within 1 or a Dig clears them. The way is
+ *   open once a walkable path joins the exit to the castle's first entrance.
+ */
+export interface ShutWayDef {
+  id: WayId;
+  /** Index into CastleDef.entrances. */
+  entrance: number;
+  kind: 'gate' | 'rubble';
+  at: Pos[];
+  /** gate only: where a copy of its key lies while the gate is shut. */
+  keyAt?: Pos;
+  /** Short hover/Set-out hint while shut, e.g. "Choked with rubble." */
+  hint: string;
+  /** Log line when it opens for good. */
+  openLine: string;
+}
+
 /** A fixed light: lights its radius for good, no lantern needed. */
 export interface LightDef {
   at: Pos;
@@ -169,6 +200,10 @@ export interface CastleDef {
   links: CastleLink[];
   /** Exit tiles where a party may enter at the start of a delve. */
   entrances: Pos[];
+  /** V4.0: names of the entrances, index order ("Main gate", "Sally port", "East breach"). */
+  entranceNames?: string[];
+  /** V4.0 (spec 25): entrances that start shut on a new campaign (none listed: all open). */
+  shutWays?: ShutWayDef[];
   spawns: SpawnDef[];
   chests: ChestDef[];
   coins: CoinDef[];
@@ -226,7 +261,9 @@ export type ItemKind =
   // V3.6 (spec 19.2, 19.3)
   | 'lockpicks' // the smith's proper lockpicks: reusable; Burglar picks at 3 slots, anyone else at 2 (spec 21.4)
   | 'improvised' // V3.7.1: the Burglar's improvised pick, 1 per delve, used up on any Pick (2 slots)
-  | 'nightsight'; // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
+  | 'nightsight' // night-eye draught: drink; 8 rounds without dark penalties (sight and rolls)
+  // V4.0 (spec 25.2)
+  | 'gatekey'; // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
 
 export interface Item {
   id: string;
@@ -370,6 +407,13 @@ export interface Campaign {
   village: Village;
   /** V3.7 (spec 20.4): heroes a crew carried off; each has a rescue contract on the board until freed or given up. */
   captives: Captive[];
+  /**
+   * V4.0 (spec 25): the shut ways in (CastleDef.shutWays) opened for good. A new campaign starts with
+   * `{}` (all shut); a save without the field had every entrance open, so the field absent = all open.
+   */
+  opened?: Partial<Record<WayId, boolean>>;
+  /** V4.0 (spec 25.5): every hex the campaign's delves have seen, as hex keys "q,r" by level. Merged in at backToCamp. */
+  explored?: Record<number, string[]>;
 }
 
 export interface Captive {
@@ -691,6 +735,8 @@ export interface Delve {
   prisoner: Prisoner | null;
   /** Hexes ever seen, by posKey. */
   explored: string[];
+  /** V4.0 (spec 25): shut ways in that are open in this delve (opened before it or during it). Merged into Campaign.opened at backToCamp. */
+  ways?: Partial<Record<WayId, boolean>>;
   /** Contract objective done (item extracted or prisoner out) is checked at the end. */
   log: string[];
   /** Kills this delve by hero id. */
@@ -786,6 +832,7 @@ export type ActionKind =
   | 'caltrops' // [hex] adjacent free hex
   | 'firecracker' // [hex] throw 6, noise 6 there
   | 'key' // [hex] adjacent (or own hex) locked door or chest, silent
+  | 'unbar' // V4.0 [hex] the sally port key on the adjacent barred gate: opens it for good, silent
   | 'oil' // [self] +10 light
   | 'grapple'; // [hex on the level above] uses move and action; the hook is kept
 

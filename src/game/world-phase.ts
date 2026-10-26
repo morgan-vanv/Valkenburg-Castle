@@ -548,7 +548,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
         break;
       }
-      const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom');
+      const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom' && i.kind !== 'gatekey'); // V4.0: never the sally key
       if (!pool.length) {
         hurtHero(c, t.hero, Math.max(1, st.dmg - t.armor), m.id);
         break;

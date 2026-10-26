@@ -2,7 +2,7 @@
 // of sight, may make one deal per crew per round; deals are free (no move or action) and are
 // paid from the party's packs: gold first, then gems and jewelry, smallest first, no change.
 
-import { posKey, range, type Pos } from './hex';
+import { parsePosKey, posKey, range, type Pos } from './hex';
 import type { DealKind, DealOption, Item, JobKind } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, DEAL_PRICE, DEAL_RANGE, DEEP_PRICE, HIRE_KEEP, HIRE_ROUNDS, SCOUT_RANGE, TRUCE_HOSTILE,
@@ -117,6 +117,8 @@ function lockFor(c: Ctx): Pos | undefined {
   const cands: Pos[] = [];
   for (const [k, door] of Object.entries(c.d.doors)) {
     if (!door.locked || door.open || !seen.has(k)) continue;
+    // V4.0 (spec 25.2): no crew job opens a barred gate.
+    if (c.w.tile(parsePosKey(k))?.barred) continue;
     const [lv, rest] = k.split(':');
     const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
     cands.push({ level: Number(lv), q, r });
