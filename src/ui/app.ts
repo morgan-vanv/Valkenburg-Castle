@@ -3,8 +3,9 @@
 // input is blocked.
 
 import type { Engine } from '../game/api';
+import { heardLines } from '../view/sounds';
 import { posKey, type Pos } from '../game/hex';
-import type { Command, GameEvent, GameState } from '../game/types';
+import type { Command, GameEvent, GameState, Heard } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { Diorama } from '../view/diorama';
 import { wasBackstab } from '../view/stealth';
@@ -394,6 +395,15 @@ export class App {
     /** V3.9 (24.3): the last roll and whether a free swing introduced it (a swing is never a backstab). */
     let lastRoll: { who: string; what: string } | null = null;
     let swingNext = false;
+    /** V3.9.3 (24.8): what the heroes heard this world phase, summarised in the log when it ends. */
+    let heard: Heard[] = [];
+    const logHeard = () => {
+      if (!heard.length) return;
+      const d = before.delve;
+      const ears = (d?.heroes ?? []).filter((h) => h.status === 'active').map((h) => h.at);
+      for (const text of heardLines(heard, ears, d?.doors ?? {}, 2)) this.hud.log(text, 'log-heard');
+      heard = [];
+    };
     for (const e of events) {
       if (!this.root.isConnected) return;
       // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
@@ -407,6 +417,7 @@ export class App {
       if (e.type === 'phase') {
         if (e.phase === 'world') world = true;
         else {
+          logHeard();
           world = false;
           if (panned) this.returnToSelected();
           panned = false;
@@ -582,6 +593,9 @@ export class App {
         // ---- V3.9 (24.2): facing and unseen hits
         case 'faced':
           await this.dio.playEvent(e);
+          continue;
+        case 'heard':
+          heard.push(e.sound);
           continue;
         case 'unseenHit':
           sfx.play('whoosh', { pitch: 0.7, gain: 0.7 });
@@ -778,6 +792,7 @@ export class App {
           await this.dio.playEvent(e);
       }
     }
+    logHeard();
     if (panned) this.returnToSelected();
   }
 
@@ -867,6 +882,8 @@ export class App {
       dio: this.dio,
       hud: this.hud,
       busy: () => this.busy,
+      /** Play a list of events through the HUD as if the engine sent them (DOM checks only). */
+      play: (events: GameEvent[], before: GameState) => this.playEvents(events, before),
       posKey,
       /** Replace the state (debug/screenshots only). */
       load: (st: GameState) => {

@@ -285,6 +285,8 @@ export const FREE_MOVE = { enabled: false };
  * toward the action's target again (`turnOnAction`).
  */
 export const FACING = { faceCommand: false, turnOnAction: true };
+/** V3.9.3 (spec 24.8): heroes hear unseen enemies (footsteps, loud sounds). Off only in tests that prove monsters don't care. */
+export const HEARING = { enabled: true };
 /** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
 export const BRACE_DMG = 1;
 export const BRACE_CHANCE = -15;

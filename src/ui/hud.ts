@@ -10,6 +10,7 @@ import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
 import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
+import { heardIcon, heardTitle } from '../view/sounds';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
@@ -639,6 +640,9 @@ export class Hud {
         const spot = backstabSpots(this.state, sel.heroId, this.reach.map((x) => x.to), this.seenEnemies(), this.vis.visible).find((x) => samePos(x.at, at));
         if (spot) lines.push(`<span class="tip-stab">🗡 <b>Backstab from here</b> · ${this.nameOf(spot.target)} has not noticed ${this.heroDef(sel.heroId)?.name}: +${V39.backstabSlots} slot, ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit</span>`);
       }
+      // V3.9.3 (24.8): a heard sound under the mouse.
+      const heard = (d.heard ?? []).filter((x) => samePos(x.at, at));
+      if (heard.length) lines.push(...heard.map((x) => `<b>${heardIcon(x)} ${heardTitle(x)}</b>`), `<span class="dim">${FACING_HELP.hearing}</span>`);
       const desc = this.describeHex(at);
       if (desc) lines.push(desc);
       const link = sel && samePos(sel.at, at) ? this.linkHere() : null;

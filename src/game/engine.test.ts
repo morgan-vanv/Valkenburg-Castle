@@ -4762,3 +4762,107 @@ describe('V3.9.2 blind cone for heroes and crews, rear half for monsters (spec 2
   });
 });
 
+
+import { strike, walk } from './ai';
+import { HEARING } from './data';
+
+describe('V3.9.3 hearing', () => {
+  /** A world-phase context: the hero in the pantry faces west, the pantry door (7,2) closed behind them. */
+  function scene(heroAt: Pos) {
+    const s = delve({ heroes: ['keven'] });
+    put(s, 'keven', heroAt);
+    look(s, 'keven', at(1, 1, 2));
+    s.delve!.phase = 'world';
+    s.delve!.doors[posKey(at(1, 7, 2))]!.open = false;
+    return s;
+  }
+
+  it('hears an unseen walker through a door within range, not beyond', () => {
+    const s = scene(at(1, 6, 2));
+    const orc = monster(s, 'orc', at(1, 10, 2), 'alert');
+    const c = ctx(s);
+    walk(c, orc.id, orc, [at(1, 9, 2)]); // 9 → 8 1, door 3, 6 = 4 ≤ 4
+    expect(s.delve!.heard?.map((x) => x.kind)).toEqual(['steps']);
+    expect(c.ev.some((x) => x.type === 'heard')).toBe(true);
+    // Rats are quieter: range 2.
+    const s2 = scene(at(1, 6, 2));
+    const rats = monster(s2, 'rats', at(1, 10, 2), 'alert');
+    walk(ctx(s2), rats.id, rats, [at(1, 9, 2)]);
+    expect(s2.delve!.heard ?? []).toEqual([]);
+    // Farther into the pantry, the orc's steps are out of range.
+    const s3 = scene(at(1, 3, 2));
+    const orc3 = monster(s3, 'orc', at(1, 10, 2), 'alert');
+    walk(ctx(s3), orc3.id, orc3, [at(1, 9, 2)]);
+    expect(s3.delve!.heard ?? []).toEqual([]);
+  });
+
+  it('a trail in order; a seen walker leaves no entry', () => {
+    const s = scene(at(1, 6, 2));
+    const orc = monster(s, 'orc', at(1, 10, 2), 'alert');
+    walk(ctx(s), orc.id, orc, [at(1, 9, 2), at(1, 8, 2)]);
+    expect(s.delve!.heard!.map((x) => x.n)).toEqual([0, 1]);
+    // Facing the walker across the pit hall: seen, not heard.
+    const s2 = delve({ heroes: ['keven'] });
+    put(s2, 'keven', at(1, 9, 1));
+    look(s2, 'keven', at(1, 10, 2));
+    s2.delve!.phase = 'world';
+    const orc2 = monster(s2, 'orc', at(1, 11, 2), 'alert');
+    walk(ctx(s2), orc2.id, orc2, [at(1, 10, 2)]);
+    expect(s2.delve!.heard ?? []).toEqual([]);
+  });
+
+  it('a loud clash out of sight is heard within its radius', () => {
+    const s = scene(at(1, 5, 2));
+    const c = ctx(s);
+    makeNoise(c, at(1, 3, 2), 2, { what: 'clash' }); // ahead of the hero: seen, not an entry
+    expect(s.delve!.heard ?? []).toEqual([]);
+    makeNoise(c, at(1, 6, 2), 2, { what: 'clash' }); // straight behind: unseen, heard
+    expect(s.delve!.heard).toEqual([{ at: at(1, 6, 2), kind: 'loud', what: 'clash', n: 0 }]);
+    const s2 = scene(at(1, 6, 2));
+    const c2 = ctx(s2);
+    makeNoise(c2, at(1, 9, 2), 2, { what: 'clash' }); // through the door: 3 > 2
+    expect(s2.delve!.heard ?? []).toEqual([]);
+    makeNoise(c2, at(1, 9, 2), 5, { what: 'shout' });
+    expect(s2.delve!.heard).toEqual([{ at: at(1, 9, 2), kind: 'loud', what: 'shout', n: 0 }]);
+    // Heroes' own noise (no `what`) is never "heard".
+    makeNoise(c2, at(1, 9, 3), 5);
+    expect(s2.delve!.heard!.length).toBe(1);
+  });
+
+  it('an unseen attacker striking from behind is heard as a clash', () => {
+    const s = scene(at(1, 5, 2));
+    const orc = monster(s, 'orc', at(1, 6, 2), 'hunting');
+    const c = ctx(s);
+    strike(c, orc.id, 'keven', 2, 50, 3, 'Attack');
+    expect(s.delve!.heard?.some((x) => x.kind === 'loud' && x.what === 'clash' && samePos(x.at, at(1, 6, 2)))).toBe(true);
+  });
+
+  it('entries are cleared when the next world phase starts', () => {
+    let s = delve({ heroes: ['keven'] });
+    s.delve!.heard = [{ at: at(1, 9, 2), kind: 'steps', n: 0 }];
+    s = ok(s, { type: 'endTurn' }).state;
+    expect(s.delve!.heard ?? []).toEqual([]);
+  });
+
+  it('monsters behave exactly the same with or without hearing', () => {
+    const run = (on: boolean) => {
+      HEARING.enabled = on;
+      let s = party(e.newGame(7));
+      const k = s.campaign.board[0]!;
+      s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: ALL, entrance: 1, packs: {} }).state;
+      let heard = 0;
+      for (let i = 0; i < 8 && s.delve; i++) {
+        const r = e.apply(s, { type: 'endTurn' });
+        s = r.state;
+        heard += r.events.filter((x) => x.type === 'heard').length;
+      }
+      HEARING.enabled = true;
+      return { mons: JSON.stringify(s.delve?.monsters.map((m) => [m.id, m.at, m.awareness, m.hp])), rng: JSON.stringify(s.rng), heard };
+    };
+    const a = run(true);
+    const b = run(false);
+    expect(a.mons).toBe(b.mons);
+    expect(a.rng).toBe(b.rng);
+    expect(b.heard).toBe(0);
+  });
+});

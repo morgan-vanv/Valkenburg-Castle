@@ -19,6 +19,7 @@ import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, facingOf, fu
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
+import { heardFade, heardIcon, heardTitle } from './sounds';
 
 const MAX_LIGHTS = 12;
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
@@ -50,6 +51,12 @@ interface Tag {
 }
 
 /** Hex outline (pointy-top) lying flat. */
+/** V3.9.3 (24.8): a shove/drag plan whose victim no longer stands next to the landing hex. */
+export function staleShove(victim: Pos | null, to: Pos): boolean {
+  if (!victim) return false;
+  return victim.level !== to.level || Math.max(Math.abs(victim.q - to.q), Math.abs(victim.r - to.r), Math.abs(victim.q + victim.r - to.q - to.r)) !== 1;
+}
+
 function hexRing(rIn: number, rOut: number): THREE.BufferGeometry {
   return new THREE.RingGeometry(rIn, rOut, 6, 1, Math.PI / 6).rotateX(-Math.PI / 2);
 }
@@ -187,6 +194,10 @@ export class Diorama {
   private fuseMarks = new THREE.Group();
   private fuseTags: { el: HTMLElement; at: THREE.Vector3; level: number }[] = [];
   private fuseKey = '';
+  /** V3.9.3 (24.8): what the heroes heard: pulsing rings for loud sounds, a tag per heard hex (footprints, icons). */
+  private soundMarks = new THREE.Group();
+  private soundTags: { el: HTMLElement; at: THREE.Vector3; level: number }[] = [];
+  private soundKey = '';
   /** V3.7 (20.3): built walls broken by blasts, per level (the level is rebuilt with rubble there). */
   private brokenKey = new Map<number, string>();
   /** The state a playback is heading to (beginPlayback), for drags and fuses mid-animation. */
@@ -293,7 +304,7 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.facePreview, this.riskRings, this.fuseMarks, this.collapseDebris);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.facePreview, this.riskRings, this.fuseMarks, this.soundMarks, this.collapseDebris);
     // V3.9: the facing a move or a Face leaves: an ember wedge with an arrow.
     {
       const col = COLORS.emberHot;
@@ -469,9 +480,11 @@ export class Diorama {
     this.facingKey = '';
     this.blindKey = '';
     this.fuseKey = '';
+    this.soundKey = '';
     this.refreshFacing();
     this.refreshBlindArcs();
     this.refreshFuses();
+    this.refreshSounds();
     if (changed) this.hooks.levelChanged(level);
   }
 
@@ -784,6 +797,12 @@ export class Diorama {
       r.scale.setScalar(1 + k * 0.12);
       ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.35 + 0.45 * k;
     }
+    for (const r of this.soundMarks.children) {
+      // 24.8: a loud sound's ring pulses outward and fades, over and over.
+      const k = ((t * 0.9 + (r.userData.phase as number)) % 1 + 1) % 1;
+      r.scale.setScalar(0.7 + k * 0.6);
+      ((r as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - k);
+    }
     for (const g of this.fuseMarks.children) {
       if (g.userData.spark) {
         const k = 0.5 + 0.5 * Math.sin(t * 11 + (g.userData.phase as number));
@@ -995,6 +1014,11 @@ export class Diorama {
       t.el.style.display = p.behind || t.level !== this.shownLevel ? 'none' : '';
       t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
     }
+    for (const t of this.soundTags) {
+      const p = this.project(t.at);
+      t.el.style.display = p.behind || t.level !== this.shownLevel ? 'none' : '';
+      t.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+    }
     if (this.landingAt) {
       const p = this.project(this.landingAt);
       this.landingTag.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
@@ -1061,6 +1085,7 @@ export class Diorama {
       for (const id of [...this.props.keys()]) this.removeProp(id);
       this.clearIntents();
       this.refreshLootGlow();
+      this.refreshSounds();
       this.dugWalls.clear();
       this.applyBrokenWalls([]);
       return;
@@ -1079,6 +1104,7 @@ export class Diorama {
     this.blindKey = '';
     this.refreshBlindArcs();
     this.refreshFuses();
+    this.refreshSounds();
   }
 
   /** Visible-but-unlit hexes look darker than lit ones. */
@@ -1599,13 +1625,16 @@ export class Diorama {
         continue;
       }
       if (it.kind === 'shove' && it.to) {
-        this.markShove(at, it.targetId ? targetPos(state, it.targetId) : null, it.to, id);
+        const victim = it.targetId ? targetPos(state, it.targetId) : null;
+        // V3.9.3 (24.8): the plan was made before the victim moved away: no stale arrow, the tag still names it.
+        if (!staleShove(victim, it.to)) this.markShove(at, victim, it.to, id);
         el.title = `${name}: knocks ${target} back to the marked hex${this.levels.get(it.to.level)?.pits.has(hexKey(it.to)) ? ' (a pit!)' : ''}`;
         continue;
       }
       // 16.4: drag: the webbed hero is pulled one hex toward the spider (pits count).
       if (it.kind === 'drag' && it.to) {
-        this.markShove(at, it.targetId ? targetPos(state, it.targetId) : null, it.to, id, 0xd8d8e8);
+        const victim = it.targetId ? targetPos(state, it.targetId) : null;
+        if (!staleShove(victim, it.to)) this.markShove(at, victim, it.to, id, 0xd8d8e8);
         el.title = `${name}: drags ${target} one hex closer${this.levels.get(it.to.level)?.pits.has(hexKey(it.to)) ? ' (into a pit!)' : ''}`;
         continue;
       }
@@ -2039,6 +2068,44 @@ export class Diorama {
       this.fx.appendChild(el);
       this.fuseTags.push({ el, at: this.worldOf(f.at, onWall + 1.1), level: f.at.level });
     }
+  }
+
+  /**
+   * V3.9.3 (24.8): what the heroes heard during the last castle turn, on the shown level: footprints
+   * on each heard hex (a trail, fading toward the oldest) and a pulsing ring with an icon for loud
+   * sounds. Drawn over the fog, explored or not, and never the figure itself.
+   */
+  private refreshSounds(): void {
+    const d = this.state?.delve;
+    const list = (d?.heard ?? []).filter((x) => x.at.level === this.shownLevel);
+    const key = `#${this.shownLevel}|` + list.map((x) => `${posKey(x.at)}:${x.kind}:${x.what ?? ''}:${x.n}`).join('|');
+    if (key === this.soundKey) return;
+    this.soundKey = key;
+    this.soundMarks.clear();
+    for (const t of this.soundTags) t.el.remove();
+    this.soundTags = [];
+    if (!list.length) return;
+    const fade = heardFade(list);
+    list.forEach((h, i) => {
+      const loud = h.kind === 'loud';
+      if (loud) {
+        const ring = new THREE.Mesh(hexRing(0.6, 0.82), new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.8, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+        ring.position.copy(this.worldOf(h.at, 0.06));
+        ring.userData = { level: h.at.level, phase: i * 0.37 };
+        ring.renderOrder = 9;
+        this.soundMarks.add(ring);
+      }
+      const el = document.createElement('div');
+      el.className = `heard-tag heard-${h.kind}${loud ? ` heard-${h.what ?? 'loud'}` : ''}`;
+      el.dataset.kind = h.kind;
+      el.dataset.at = posKey(h.at);
+      if (h.what) el.dataset.what = h.what;
+      el.textContent = heardIcon(h);
+      el.style.opacity = String(fade.get(h) ?? 1);
+      el.title = heardTitle(h);
+      this.fx.appendChild(el);
+      this.soundTags.push({ el, at: this.worldOf(h.at, loud ? 0.5 : 0.08), level: h.at.level });
+    });
   }
 
   /** 20.3: what the levels hide: blown cracked walls and dug rubble, but not blast-broken walls (they show as rubble until dug). */

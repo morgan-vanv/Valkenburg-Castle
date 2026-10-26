@@ -2,6 +2,7 @@
 // the Gloam hunts, then new intents. Also blasting charges at the end of
 // the player phase. Monster behaviour: spec 7, 14.3, 14.4, 16.1, 16.3, 16.4.
 
+import { clearHeard } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent } from './types';
 import {
@@ -325,7 +326,7 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
     if (m.kind === 'orc' && !m.shouted) {
       m.shouted = true;
       say(c, `${m.name} bellows.`);
-      makeNoise(c, m.at, 5);
+      makeNoise(c, m.at, 5, { what: 'shout' });
     }
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
     // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1); it forgets who it saw.
@@ -471,7 +472,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         if (t.hero) noticeHero(c, x, t.id);
         x.intent = { kind: 'wait', targetId: t.id };
       }
-      makeNoise(c, m.at, SHOUT_NOISE);
+      makeNoise(c, m.at, SHOUT_NOISE, { what: 'shout' });
       break;
     }
     case 'shove': {
@@ -677,6 +678,8 @@ export function worldPhase(c: Ctx): void {
   refreshSight(c);
   if (checkDelveEnd(c)) return;
   d.phase = 'world';
+  // V3.9.3 (spec 24.8): last world phase's sounds are forgotten.
+  clearHeard(c);
   // V3.9 (spec 24.2): figures revealed by an unseen strike show until the end of the player phase just past.
   for (const [id, until] of Object.entries(d.revealed ?? {})) if (until <= d.round) delete d.revealed![id];
   c.visCache = undefined;

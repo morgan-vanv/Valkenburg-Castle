@@ -481,7 +481,7 @@ function hitMonster(c: Ctx, r: RivalX, id: string): void {
   const dmg = bolt ? PYRO_BOLT_DMG : st.dmg;
   if (bolt) r.charges = (r.charges ?? 1) - 1;
   const rr = roll(c, r.id, bolt ? 'Firebolt' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, bolt ? spellChance(r) : st.chance);
-  makeNoise(c, r.at, bolt ? PYRO_BOLT_NOISE : 2);
+  makeNoise(c, r.at, bolt ? PYRO_BOLT_NOISE : 2, { what: 'clash' });
   if (!rr.hits) {
     c.ev.push({ type: 'miss', attacker: r.id, target: m.id });
     return;
@@ -518,7 +518,7 @@ function jobAct(c: Ctx, r: RivalX): boolean {
       c.d.liftWorking = true;
       c.ev.push({ type: 'liftWorking' });
       say(c, `${r.name} hauls on the winch. The lift groans awake.`);
-      makeNoise(c, r.at, WINCH_NOISE);
+      makeNoise(c, r.at, WINCH_NOISE, { what: 'crash' });
     }
   } else if (job.kind === 'open') {
     const at = job.at;

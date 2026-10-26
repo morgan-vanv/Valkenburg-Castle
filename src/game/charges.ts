@@ -6,6 +6,7 @@
 // world phase). Walls it breaks go into `Delve.blown`; kindAt shows them as
 // rubble until dug (`DelveX.dug`).
 
+import { isEnemy } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Fuse, HeroInDelve, Item } from './types';
 import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG } from './data';
@@ -292,5 +293,5 @@ export function blast(c: Ctx, at: Pos, by: string): void {
     if (!samePos(now, p)) continue;
     push(c, id, at, credit);
   }
-  makeNoise(c, at, BLAST_NOISE, { otherLevels: true });
+  makeNoise(c, at, BLAST_NOISE, { otherLevels: true, ...(isEnemy(c, by) ? { what: 'blast' as const } : {}) });
 }
