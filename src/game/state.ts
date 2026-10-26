@@ -31,6 +31,12 @@ export interface HeroX extends HeroInDelve {
   sneaked?: boolean;
   /** V3.7 (spec 20.4): a hostile crew member has already taken this (downed) hero's gold and gems. */
   robbed?: boolean;
+  /** V3.8 (spec 22.2): ticks waited toward the next hex of the walk order. */
+  walkWait?: number;
+  /** V3.8 (spec 22.6): ticks the walk holds after an action (1). */
+  pause?: number;
+  /** V3.8 (spec 22.2): hexes walked with a lit torch since it last burned a round. */
+  torchSteps?: number;
 }
 
 export interface RivalX extends Rival {
@@ -89,6 +95,8 @@ export interface DelveX extends Delve {
   taken?: string[];
   /** The Dragon died this delve. */
   dragonSlain?: boolean;
+  /** V3.8 (spec 22.4): an ambush (party first): monsters and crew members caught unaware do nothing in the first world phase. */
+  ambush?: { ids: string[]; by: string };
 }
 
 export interface GameStateX extends GameState {

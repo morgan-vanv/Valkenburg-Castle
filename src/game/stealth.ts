@@ -243,6 +243,8 @@ export function heroCanSwing(h: HeroInDelve): boolean {
  * The action is not spent. Returns true when the enemy died of it.
  */
 export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos): boolean {
+  // V3.8 (spec 22.4): no free swings while exploring (a swing would be a hostile act nobody chose).
+  if (c.d.mode === 'explore') return false;
   const t = heroSwingTarget(c, id);
   if (!t) return false;
   for (const h of c.d.heroes) {
@@ -298,7 +300,7 @@ export function fleePlan(c: Ctx, self: { id: string; at: Pos; fearOf?: string },
 // ---------------------------------------------------------------- the move preview
 
 /** Awake watchers that could notice a hero: alert, hunting and patrolling monsters, and a waiting or hostile crew. */
-function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean }[] {
+export function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean }[] {
   const out: { id: string; f: Facer; noticed: (heroId: string) => boolean }[] = [];
   for (const m of c.d.monsters) {
     if (m.buried || m.awareness === 'asleep' || m.kind === 'gloam' || m.kind === 'dragon' || m.at.level !== level) continue;

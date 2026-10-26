@@ -6,6 +6,7 @@
 // it is spent. Real engine only.
 //   node scripts/v371-ui-check.mjs <baseUrl>
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base = 'http://localhost:5191/'] = process.argv.slice(2);
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -28,6 +29,7 @@ await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
+await inTurns(p);
 await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });
 await p.waitForTimeout(150);
 

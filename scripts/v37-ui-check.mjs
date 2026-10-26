@@ -7,6 +7,7 @@
 //   node scripts/v37-ui-check.mjs <baseUrl>     (http://localhost:5184/?fixture=1, or the real engine)
 //   SHOTS=<dir> saves v37-risks.png (move preview with risks) and v37-fuse.png / v37-blast.png.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base = 'http://localhost:5184/?fixture=1'] = process.argv.slice(2);
 const shots = process.env.SHOTS ?? '';
@@ -69,6 +70,7 @@ await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
+await inTurns(p);
 
 // ---- into the castle. Fixture: the fixture delve (Brann a Sapper, Aldous a Shadowmancer). Real engine: a
 // campaign, hiring a Sapper and a Shadowmancer when the campfire offers them.
@@ -419,7 +421,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   } else skip('floor collapse', sap ? 'no pit edges' : 'no Sapper');
 }
 
-// ---- 4b. spec 20.5: free move while calm, the idle-only end-turn rule, Brace, Hamstring/Night thorn/Briar, crates
+// ---- 4b. spec 20.5 (free move: gone in V3.8), the idle-only end-turn rule, Brace, Hamstring/Night thorn/Briar, crates
 {
   await p.evaluate(async () => {
     const fx = await import('/src/view/fixtures.ts');
@@ -444,51 +446,13 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   });
   await p.waitForTimeout(250);
   s = await state();
-  const calm = await p.evaluate(() => window.vcEngine.calm?.(window.vc.state()) ?? null);
   const lead = s.delve.heroes.find((h) => h.status === 'active');
   await p.evaluate((id) => window.vc.hud.select(id), lead.heroId);
   await p.waitForTimeout(150);
-  if (calm?.calm) {
-    const bar = await p.$eval('.hud-bar', (e) => e.innerText);
-    check('calm: the bar says "Free move · the castle turns in N steps"', /Free move/.test(bar) && /castle turns in \d step/.test(bar), bar.replace(/\n/g, ' | ').slice(0, 160));
-    check('...and a Follow toggle, on by default', !!(await p.$('.hud-bar .act-follow.on')));
-    check('...no budget rings while calm', (await p.evaluate(() => window.vc.dio.highlights.get('walk').count + window.vc.dio.highlights.get('sneak').count)) === 0);
-    // A far explored hex: the long path shows on hover and the click walks it.
-    const far = await p.evaluate(async (id) => {
-      const pth = await import('/src/view/pathing.ts');
-      const st = window.vc.state();
-      const E = window.vcEngine;
-      const vis = E.visibility(st);
-      const h = st.delve.heroes.find((x) => x.heroId === id);
-      const reach = new Set(E.reachable(st, id, false).map((r) => `${r.to.q},${r.to.r}`));
-      const keys = [...vis.explored].filter((k) => k.startsWith(`${h.at.level}:`)).map((k) => { const [q, r] = k.slice(2).split(',').map(Number); return { level: h.at.level, q, r }; });
-      let best = null;
-      for (const q of keys) {
-        if (reach.has(`${q.q},${q.r}`)) continue;
-        const path = pth.longPath(E.castle(), st, vis, id, q);
-        if (path && (!best || path.length > best.path.length)) best = { to: q, path };
-      }
-      return best;
-    }, lead.heroId);
-    if (far) {
-      const tip = await hoverTip(far.to);
-      check('hovering a far explored hex: "Free move · walk N hexes · the castle turns in..."', /Free move/.test(tip) && /castle turns in/.test(tip), tip.slice(0, 120));
-      check('...the long path is drawn', (await p.evaluate(() => window.vc.dio.pathDots.count)) >= far.path.length - 1, `${far.path.length} hexes`);
-      await p.evaluate((at) => window.vc.hud.onClick(at, null, { button: 0 }), far.to);
-      await idle();
-      await p.waitForTimeout(250);
-      s = await state();
-      const h2 = s.delve.heroes.find((x) => x.heroId === lead.heroId);
-      const arrived = h2.at.q === far.to.q && h2.at.r === far.to.r;
-      const log = await p.$eval('.hud-log', (e) => e.innerText).catch(() => '');
-      check('clicking it walks there (or stops with a "Combat!" / "stops" line)', arrived || /Combat!|stops/.test(log), `${JSON.stringify(h2.at)} vs ${JSON.stringify(far.to)}; ${log.split('\n').slice(-1)}`);
-      if (far.path.length >= 4 && arrived) check('the castle turned on the way (round advanced)', s.delve.round > 3 || s.delve.calmSteps >= 4, `round ${s.delve.round}, steps ${s.delve.calmSteps}`);
-    } else skip('free move walk', 'no far explored hex');
-    await unhover();
-  } else skip('free move', `not calm: ${calm?.why ?? 'engine.calm missing'}`);
-  // Combat banner.
-  await p.evaluate(async () => { await window.vc.hud.calmBanner(false, 'An orc has seen Pim.', () => Promise.resolve()); });
-  check('calmBanner builds the Combat! banner', true);
+  // V3.8: free move (20.5) is gone: exploring replaced it (spec 22). scripts/v38-ui-check.mjs checks walking, the clock and the banners.
+  check('no V3.7 free-move UI in turns (no Follow toggle, no steps counter)', !(await p.$('.hud-bar .act-follow')) && !/Free move|castle turns in/.test(await p.$eval('.hud-bar', (e) => e.innerText)));
+  await p.evaluate(async () => { await window.vc.hud.modeBanner('combat', 'enemies', 'An orc has seen Pim.', () => Promise.resolve()); });
+  check('modeBanner builds the Combat! banner', true);
   // End turn: only idle heroes prompt.
   await edit(`for (const h of s.delve.heroes) { h.moved = true; h.acted = false; }`);
   await p.waitForTimeout(150);

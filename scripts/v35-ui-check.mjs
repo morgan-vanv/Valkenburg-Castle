@@ -5,6 +5,7 @@
 //   node scripts/v35-ui-check.mjs <baseUrl>   (use ?fixture=1 until the engine lands)
 //   Optional 2nd arg: a directory to save the camp and parley screenshots in.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+import { inTurns } from './v38-ui-turns.mjs'; // V3.8: delves start exploring; these checks test turns
 
 const [base = 'http://localhost:5182/?fixture=1', shots = ''] = process.argv.slice(2);
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -32,6 +33,7 @@ await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
+await inTurns(p);
 
 // ---- title
 let t = await text();
@@ -228,6 +230,8 @@ check('deal log line', /A truce/.test(await lines()), await lines());
 
 // too poor: blocked
 await edit("s.delve.heroes.forEach((h) => (h.pack = h.pack.filter((i) => i.kind !== 'gold' && i.kind !== 'gem'))); s.delve.rivals.stance = 'neutral'; delete s.delve.rivals.dealRound;");
+// V3.8: the truce can end combat; wait out the mode banner (the HUD ignores keys while busy).
+await p.waitForFunction(() => !document.querySelector('.hud.busy'), null, { timeout: 15000 }).catch(() => {});
 await p.keyboard.press('b');
 await p.waitForTimeout(150);
 check('blocked: "You carry 0; they want 40."', /You carry 0; they want 40\./.test(await p.textContent('.hud-parley')));
@@ -251,7 +255,9 @@ await crewScene('neutral');
 await spyLog();
 await p.evaluate(() => window.vc.send({ type: 'deal', heroId: 'keven', deal: 'hire' }));
 await p.waitForTimeout(300);
-check('hire deal: one log line', /fight beside you/.test(await lines()) && (await lines()).split('\n').length === 1, (await lines()).replace(/\n/g, ' / '));
+// V3.8: hiring the last foes away ends the fight; "The castle quiets." may follow the deal line.
+const hireLines = (await lines()).split('\n').filter((l) => !/castle quiets/.test(l));
+check('hire deal: one log line', /fight beside you/.test(hireLines.join(' ')) && hireLines.length === 1, (await lines()).replace(/\n/g, ' / '));
 
 // ---- game over
 await edit("s.stage = 'over'; s.delve = null;");

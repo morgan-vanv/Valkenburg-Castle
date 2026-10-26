@@ -36,7 +36,6 @@ import {
 } from './data';
 import { int, pick } from './rng';
 import { makeItem, rootFigure } from './common';
-import { calmWalk, isCalm } from './calm';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -145,7 +144,8 @@ export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
 
 export function reachable(c: Ctx, heroId: string, sneak: boolean) {
   const h = hd(c, heroId);
-  if (!h || c.d.phase !== 'player') return [];
+  // V3.8 (spec 22.6): no budgeted moves (and no dash) while exploring: explorePath instead.
+  if (!h || c.d.phase !== 'player' || c.d.mode === 'explore') return [];
   const mk = moveKind(h);
   if (!mk) return [];
   const nodes = dijkstra(c.w, c.d, h.at, {
@@ -172,7 +172,8 @@ export function moveNoise(sneak: boolean): number {
   return sneak ? 0 : 1;
 }
 
-export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, follow = false): string | undefined {
+/** A budgeted move in combat (spec 15.2). Exploring heroes walk by ticks instead (explore.ts). */
+export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean): string | undefined {
   const h = hd(c, heroId);
   if (!h) return 'No such hero.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't move.`;
@@ -185,7 +186,6 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
   if (!path.length) return 'Pick a destination.';
   c.visCache = undefined;
   // Validate.
-  const calm = isCalm(c);
   let cost = 0;
   let prev = h.at;
   for (const p of path) {
@@ -195,15 +195,8 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
     cost += st[1];
     prev = p;
   }
-  if (!calm && cost > moveBudget(c, h, sneak)) return 'Too far.';
+  if (cost > moveBudget(c, h, sneak)) return 'Too far.';
   if (occupant(c, path[path.length - 1]!)) return 'Someone is already there.';
-  // V3.7 (spec 20.5): calm: a walk of any length, hex by hex, the castle turning every CALM_STEPS steps; `moved` stays clear.
-  if (calm) {
-    calmWalk(c, h, path, sneak, follow);
-    checkHolds(c);
-    if (c.s.stage === 'delve') rivalOverwatchFire(c, heroId);
-    return undefined;
-  }
   // Walk (or dash: the action goes on the second move).
   h.moved = true;
   if (mk === 'dash') {
