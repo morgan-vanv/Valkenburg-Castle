@@ -11,6 +11,7 @@ import { hexKey, parsePosKey, posKey, samePos, type Pos } from './hex';
 import type { CastleDef, GameState, Item, ShutWayDef, WayId } from './types';
 import { say, type Ctx, type DelveX } from './state';
 import { distField, doorAt, type World } from './world';
+import { occupant } from './common';
 
 /** The castle's shut ways (none on a castle that lists none). */
 export function shutWays(castle: CastleDef): ShutWayDef[] {
@@ -62,7 +63,8 @@ export function wayAtHex(castle: CastleDef, at: Pos): ShutWayDef | undefined {
 function clearedNow(c: Ctx, way: ShutWayDef): boolean {
   const exit = c.w.castle.entrances[way.entrance];
   if (!exit) return false;
-  if (way.kind === 'gate') return way.at.every((p) => !doorAt(c.d, p)?.locked);
+  // A crew holding the gate open on its way through (spec 25.4) has not opened it for anyone else.
+  if (way.kind === 'gate') return !c.d.gateHeld && way.at.every((p) => !doorAt(c.d, p)?.locked);
   // Rubble: a walkable path (locked doors aside) joins the exit to the rest of the level (the main gate).
   const main = c.w.castle.entrances[0];
   if (!main || main.level !== exit.level) return false;
@@ -145,4 +147,35 @@ export function entranceList(w: World, s: GameState): EntranceInfo[] {
 export function castleMemory(w: World, s: GameState): { level: number; hexes: string[] }[] {
   const mem = s.campaign.explored ?? {};
   return w.castle.levels.map((l) => ({ level: l.level, hexes: [...(mem[l.level] ?? [])] }));
+}
+
+/**
+ * V4.0 (spec 25.4): a crew that let itself in by the sally port with its own key bars the gate behind
+ * it once nobody stands in the gateway and none of its members is still outside. A hero outside keeps
+ * it from closing too (nobody is locked out). Run at the end of every world phase.
+ */
+export function relockGate(c: Ctx): void {
+  if (!c.d.gateHeld) return;
+  const way = shutWays(c.w.castle).find((x) => x.kind === 'gate');
+  const exit = way && c.w.castle.entrances[way.entrance];
+  if (!way || !exit || c.d.ways?.[way.id]) {
+    c.d.gateHeld = false;
+    return;
+  }
+  if (way.at.some((p) => occupant(c, p))) return;
+  // The gate's outer side: what the exit reaches with the gate barred.
+  const doors = way.at.map((p) => doorAt(c.d, p)).filter((x): x is NonNullable<typeof x> => !!x);
+  const was = doors.map((x) => ({ ...x }));
+  for (const x of doors) (x.open = false), (x.locked = true);
+  const outside = distField(c.w, c.d, [exit], { stairs: false });
+  const someoneOut = [...outside.keys()].some((k) => occupant(c, parsePosKey(k)));
+  if (someoneOut) {
+    doors.forEach((x, i) => Object.assign(x, was[i]));
+    return;
+  }
+  for (const x of doors) x.jammed = false;
+  for (const p of way.at) c.ev.push({ type: 'doorChanged', at: p, open: false, locked: true });
+  c.d.gateHeld = false;
+  c.w.fixedCache = null;
+  say(c, "The sally port's bar drops back into place.");
 }

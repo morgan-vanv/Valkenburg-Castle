@@ -737,6 +737,12 @@ export interface Delve {
   explored: string[];
   /** V4.0 (spec 25): shut ways in that are open in this delve (opened before it or during it). Merged into Campaign.opened at backToCamp. */
   ways?: Partial<Record<WayId, boolean>>;
+  /**
+   * V4.0 (spec 25.4): a crew let itself in by the sally port with its own key and holds the gate open
+   * only until it is through; it bars the gate behind it (relockGate). While held, the gate does not
+   * count as opened for the campaign.
+   */
+  gateHeld?: boolean;
   /** Contract objective done (item extracted or prisoner out) is checked at the end. */
   log: string[];
   /** Kills this delve by hero id. */

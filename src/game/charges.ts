@@ -14,7 +14,7 @@ import { say, type Ctx, type DelveX } from './state';
 import { chestLoot, hd, hurtAny, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
-import { checkWays } from './ways';
+import { checkWays, wayAtHex } from './ways';
 
 /** Engine-private: when a fuse was lit, so one set during a world phase isn't counted down in that same phase. */
 export interface FuseX extends Fuse {
@@ -228,6 +228,8 @@ export function blast(c: Ctx, at: Pos, by: string): void {
       c.d.blown.push(posKey(p));
     } else if (k === 'door') {
       const door = doorAt(c.d, p);
+      // V4.0 (spec 25.2): a blast at the sally port gate opens it for good, even one a crew holds open.
+      if (door && c.d.gateHeld && wayAtHex(c.w.castle, p)) c.d.gateHeld = false;
       if (door && (!door.open || door.locked)) {
         door.open = true;
         door.locked = false;

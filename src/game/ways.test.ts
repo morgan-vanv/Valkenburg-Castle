@@ -287,27 +287,73 @@ describe('V4.0 the Lantern Sisters make an entrance (spec 25.4)', () => {
     expect([...seen].sort()).toEqual([posKey(BREACH_EXIT), posKey(SALLY_EXIT)].sort());
   }, 20000);
 
-  it('by a shut sally port: the Burglar sister carries the key, unlocks the gate as they come in, and drops the key when she dies', () => {
+  it('by a shut sally port: the Burglar sister unlocks the gate, the crew bars it behind them, and her key drops when she dies', () => {
     let s = sistersBy(SALLY_EXIT);
     const burglar = s.delve!.rivals!.members.find((r) => r.cls === 'burglar')!;
     expect(burglar.pack?.some((i) => i.kind === 'gatekey')).toBe(true);
-    const r = ok(s, { type: 'endTurn' });
+    let r = ok(s, { type: 'endTurn' });
     s = r.state;
     expect((s.delve!.rivals as CrewX).entered).toBe(true);
-    expect(door(s, GATE)).toMatchObject({ open: true, locked: false });
-    expect(s.delve!.ways?.sally).toBe(true);
     expect(r.events.some((x) => x.type === 'say' && /key turns/.test(x.text))).toBe(true);
-    expect(r.events).toContainEqual({ type: 'say', text: 'The sally port gate swings open. It stays open.' });
     expect(r.events.some((x) => x.type === 'blast')).toBe(false);
+    // Their way in is never opened for the party.
+    expect(s.delve!.ways?.sally).toBeFalsy();
+    expect(r.events).not.toContainEqual({ type: 'say', text: 'The sally port gate swings open. It stays open.' });
+    // Once every sister is through and the gateway is clear, the bar drops back.
+    for (let i = 0; i < 4 && s.delve!.gateHeld; i++) s = ok(s, { type: 'endTurn' }).state;
+    expect(s.delve!.gateHeld).toBeFalsy();
+    expect(door(s, GATE)).toMatchObject({ open: false, locked: true });
+    expect(e.entrances(s)[1]!.state).toBe('locked');
     const b = s.delve!.rivals!.members.find((m) => m.cls === 'burglar')!;
     expect(b.pack?.some((i) => i.kind === 'gatekey')).toBe(true);
     // She dies: the key drops with her pack.
-    const c = ctx(s);
-    hurtAny(c, b.id, 99, 'keven');
-    expect(s.delve!.ground.some((g) => samePos(g.at, b.at) && g.items.some((i) => i.kind === 'gatekey'))).toBe(true);
-    // The gate stays open for the campaign.
-    s = leaveAndReturn(s);
+    hurtAny(ctx(s), b.id, 99, 'keven');
+    // (The library still holds its own copy: the gate is shut.)
+    const pile = s.delve!.ground.find((g) => samePos(g.at, b.at) && g.items.some((i) => i.kind === 'gatekey'));
+    expect(pile).toBeTruthy();
+    if (!pile) return;
+    // Left there, the gate stays shut for the campaign.
+    const left = leaveAndReturn(structuredClone(s));
+    expect(left.campaign.opened?.sally).toBeFalsy();
+    // Taken to the gate, it opens it for good, as any key would.
+    const key = pile.items.find((i) => i.kind === 'gatekey')!;
+    pile.items = pile.items.filter((i) => i !== key);
+    hero(s, 'brann').pack.push(key);
+    put(s, 'brann', L1(3, 14));
+    r = ok(s, { type: 'act', heroId: 'brann', action: 'unbar', target: { at: GATE, itemId: key.id }, focus: 0 });
+    expect(r.events).toContainEqual({ type: 'say', text: 'The sally port gate swings open. It stays open.' });
+    s = leaveAndReturn(r.state);
     expect(s.campaign.opened?.sally).toBe(true);
+  });
+
+  it('the gate is not barred on anyone still outside or in the gateway', () => {
+    let s = sistersBy(SALLY_EXIT);
+    s = ok(s, { type: 'endTurn' }).state;
+    for (let i = 0; i < 4 && s.delve!.gateHeld; i++) s = ok(s, { type: 'endTurn' }).state;
+    // Hold it again by hand, with a hero standing in the gateway: it stays open.
+    s.delve!.gateHeld = true;
+    Object.assign(door(s, GATE), { open: true, locked: false });
+    put(s, 'brann', GATE);
+    s = ok(s, { type: 'endTurn' }).state;
+    expect(door(s, GATE)).toMatchObject({ open: true, locked: false });
+    // ...or outside it.
+    put(s, 'brann', SALLY_EXIT);
+    s = ok(s, { type: 'endTurn' }).state;
+    expect(door(s, GATE)).toMatchObject({ open: true, locked: false });
+    // Back inside: the bar drops.
+    put(s, 'brann', L1(6, 14));
+    s = ok(s, { type: 'endTurn' }).state;
+    expect(door(s, GATE)).toMatchObject({ open: false, locked: true });
+  });
+
+  it('a blast at the gate while a crew holds it open opens it for good', () => {
+    let s = sistersBy(SALLY_EXIT);
+    s = ok(s, { type: 'endTurn' }).state;
+    s.delve!.gateHeld = true;
+    Object.assign(door(s, GATE), { open: true, locked: false });
+    blast(ctx(s), L1(3, 14), 'keven');
+    expect(s.delve!.gateHeld).toBeFalsy();
+    expect(s.delve!.ways?.sally).toBe(true);
   });
 
   it('by a shut east breach: they blast the rubble open as they arrive (noise 8, heard), and it stays open', () => {

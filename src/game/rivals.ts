@@ -179,9 +179,10 @@ function rivalEnter(c: Ctx): void {
 }
 
 /**
- * V4.0 (spec 25.4): a crew coming by a shut way makes its own entrance: by a barred gate the member
- * with its key unlocks it (silently; the key stays in her pack); by rubble they blast it open from
- * outside (a real blast, noise 8). Either way it is open for good.
+ * V4.0 (spec 25.4): a crew coming by a shut way makes its own entrance. By a barred gate the member
+ * with its key unlocks it (silently; the key stays in her pack) and the crew bars it again behind
+ * itself (relockGate): the gate stays shut for the party until a hero brings the key to it, carries it
+ * out, or blasts it. By rubble they blast it open from outside (a real blast, noise 8): open for good.
  */
 function makeEntrance(c: Ctx, cr: CrewX, at: Pos): void {
   const way = wayAtEntrance(c.w.castle, at);
@@ -198,6 +199,7 @@ function makeEntrance(c: Ctx, cr: CrewX, at: Pos): void {
       c.ev.push({ type: 'doorChanged', at: p, open: true, locked: false });
     }
     c.w.fixedCache = null;
+    c.d.gateHeld = true;
     say(c, `A key turns in the sally port's bar. ${cr.name} let themselves in.`);
   } else {
     const by = (cr.members.find((r) => r.cls === 'burglar') ?? cr.members[0]!).id;
