@@ -57,8 +57,12 @@ export interface Reach {
 
 export interface MoveRisks {
   wake: { at: Pos; id: string; chance: number }[];
-  /** V4.0 (spec 26.2): `at` is the first hex of the path where it would notice the hero (the move goes on). */
-  notice: { id: string; at?: Pos }[];
+  /**
+   * V4.0 (spec 26.2, 27): watcher `id` would notice hero `hero` (absent in older callers: the mover) when the mover
+   * stands on `at` (the move goes on). One entry per watcher and hero, in the order it would happen: the mover's
+   * own, and friends' whose cover the move would blow (a cascade, or the lantern carried past them).
+   */
+  notice: { id: string; at?: Pos; hero?: string }[];
   swings: { id: string; damage: [number, number] }[];
 }
 

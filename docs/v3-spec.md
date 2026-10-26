@@ -746,3 +746,44 @@ Contract: a new `ItemKind`, `'improvised-charge'` (types.ts).
 - A hero who dies takes their kit with them: `killHero` drops the rest of the pack, not the kit, and kit is never in `lostIds`. (Before, the dead Sapper's slotless satchel dropped as loot that anyone could pick up and carry without a slot.)
 - Old saves: `deserialize` turns a slotless `'charge'` in a delve hero's pack into improvised explosives (`migrateSatchel`); `isSatchel` still reads the old shape. No save-key bump.
 - UI: names.ts glyph ⊛ (the blasting charge stays ✹), item help saying it's the Sapper's own. The in-delve party card draws kit apart from the 4 slot boxes, in a small "kit" mark after them (the slot boxes narrow a little so the row fits); hover "Fenna's own: improvised pick. Doesn't take a slot; can't be given away." and the item's use. The "N free" count ignores kit. Lowgate's Outfit card shows a line under the 4 slots: "Brings their own: improvised pick" / "Brings their own: 3 improvised explosives" (heroes have no pronoun in the data, so "their").
+
+## 27. V4.0 monster sight by mood (owner, 2026-10-26)
+
+Owner-approved; design pillar 16 (intuitive rules, creative approaches). Supersedes pillar 14's "monsters blind in their whole rear half" and spec 24.1/24.7's monster rear half. Contract: `MoveRisks.notice[].hero` (api.ts), the `noticed` event's `faced` now true only for the hero a monster turned to (types.ts unchanged).
+
+### 27.1 Directions and moods
+
+- Relative to a figure's facing: **front** = the facing and its two neighbours (3 directions), **sides** = the two rear-side directions, **behind** = the single back direction (`bearingOf`, stealth.ts).
+- A monster's **mood** is the mark over its head (`moodOf`, `isSearching`): **unaware** = `alert` with no `searchRounds` (at its post, walking back to it) or `patrol`; **searching** (`?`) = `alert` with `searchRounds` (heard something; also a monster that lost its quarry, was smoked out, or lost a veiled hero: smoke and veil now set the search rounds, so they search and go back to their post like any searcher); **hunting** (`!`); **asleep**. No new `Awareness` value: saves load unchanged (an old `alert` without search rounds reads as unaware).
+- The view's tag: z asleep, ? searching only (no mark at its post), ! hunting, 👣 patrol.
+
+### 27.2 What each mood sees (new heroes; noticed heroes are tracked by plain sight as before)
+
+- Front ranges unchanged (lit 8 walk / 4 sneak, sneaking Burglar 2; unlit 5 / 1; Level 3 8 / 3, Burglar 2; smoke; line of sight).
+- **Unaware:** front: the front ranges. Sides: a walking hero within `SIDE_NOTICE_WALK` (2) in line of sight; any hero adjacent (`SIDE_NOTICE_ADJACENT` = true), sneaking or not, except a sneaking Burglar (`BURGLAR_SIDE_QUIET` = true: quietest feet). A sneaking hero 2+ away at the sides: never. Behind: a walking hero adjacent; a sneaking one never.
+- **Searching** and **hunting** (for heroes not yet noticed): front and sides at the front ranges; behind as unaware.
+- **Asleep:** unchanged (hears only). The Dragon and the Gloam: their own rules. Berserkers hunt once awake.
+- Crew members: unchanged (blind only straight behind; their sides are front).
+- Backstab: geometry unchanged: from outside the target's front (a monster's sides or straight behind it; straight behind a crew member), the target not having noticed the Burglar.
+
+### 27.3 Monsters look whenever anything moves
+
+- At every hex step of any hero's move, and at the landing of a blink, fall, jump, climb, grapple, gust or shove of a hero, every awake monster (not the Gloam, the Dragon, buried) looks at **every** active, unveiled hero on its level it hasn't noticed, as they stand and in the light at that moment (`lookAll`, world-phase.ts; `noticeOnMove` calls it with the mover first). A waiting crew still checks only the mover mid-move.
+- After an `act` command whose result changes the lit hexes (torch, lantern opened/shuttered/passed, kindle, oil, fire), every awake monster looks again (engine.ts `apply`).
+- All monsters look at the same moment (each `lookRound` on the state before anyone acts on it); then each acts in map order (events, hunting, bellow). A monster turned or sent searching by a bellow looks at the next look. Deterministic: no rolls.
+
+### 27.4 Blowing cover (cascade)
+
+- When a monster notices one or more heroes at once (`lookRound`): if it wasn't hunting it turns to the first of them (the figure that moved when among them, else the nearest, ties in party order), and goes hunting; then it looks again at every hero with its new facing and hunting sight; repeat until nobody new. Events: one `noticed` per hero, the one it turned to first with `faced: true`, the rest `faced: false`.
+- An already hunting monster doesn't turn on noticing (26.3). In the world phase `perceive` does the same after facing its quarry.
+- The orc's first-sight bellow (noise 5, `BELLOW_NOISE`) is unchanged: orc-only, once a delve, and alerts others through the noise rules.
+
+### 27.5 Move preview
+
+- `moveRisks` plays the move through copies of every monster the party has seen (facing, mood, noticed set): at each hex, free swings first (a monster that noticed the mover earlier on the path counts; the swing turns it), the mover's light and opened doors, every awake copy looks at every hero (`lookRound`, the cascade), then bellows, the step's noise and sure wakes (100%) turn heads and send monsters searching. `notice` lists every (watcher, hero) pair for watchers visible now, in order, with `at` the mover's hex and `hero` the hero seen. Dice aren't previewed: sleepers that may wake stay asleep, a hero who may be downed walks on.
+- HUD: "👁 Orc will see you, then Fenna"; the eye tag's title names the same.
+- Tests (src/game/sight.test.ts) check, over 40 seeded scenes, that the preview's pairs equal the move's `noticed` events whenever no swing landed.
+
+### 27.6 Hooks for crew parity (pillar 17, a later pass)
+
+- `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only.

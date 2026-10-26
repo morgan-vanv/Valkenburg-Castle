@@ -7,7 +7,7 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { HeroInDelve, Intent, Item } from './types';
 import {
   ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
-  GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SHOUT_NOISE,
+  GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SHOUT_NOISE, BELLOW_NOISE,
 } from './data';
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
@@ -26,7 +26,7 @@ import { HAMSTRING_RANGE } from './data';
 import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
-import { faceToward, fleePlan, hasNoticed, isSneaking, noticeHero, perceivable, quietFeet, wouldNotice } from './stealth';
+import { faceToward, fleePlan, lookRound, moodOf, noticeHero, perceivable, sightedHeroes, type Sighted } from './stealth';
 
 // ---------------------------------------------------------------- planning
 
@@ -326,7 +326,7 @@ function firstSightBellow(c: Ctx, m: MonsterX): void {
   if (m.kind !== 'orc' || m.shouted) return;
   m.shouted = true;
   say(c, `${m.name} bellows.`);
-  makeNoise(c, m.at, 5, { what: 'shout' });
+  makeNoise(c, m.at, BELLOW_NOISE, { what: 'shout' });
 }
 
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
@@ -336,8 +336,13 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
   const t = seen.find((x) => x.id === m.intent?.targetId) ?? seen[0];
   if (t) {
     // V3.7 (spec 20.1): every hero it makes out is noticed (remembered, one event each); it hunts its quarry and faces it.
-    for (const x of seen) if (x.hero) noticeHero(c, m, x.id);
+    const turn = m.awareness !== 'hunting';
+    if (t.hero) noticeHero(c, m, t.id, turn);
+    for (const x of seen) if (x.hero && x !== t) noticeHero(c, m, x.id, false);
     goHunting(c, m, t.at);
+    // V4.0 (spec 27): facing its quarry with hunting eyes, it looks again (blowing the cover of heroes near them).
+    const again = lookRound(c, { at: m.at, facing: m.facing, mood: 'hunting', noticed: [...(m.noticedIds ?? [])] }, sightedHeroes(c).filter((x) => x.at.level === m.at.level), lit);
+    for (const id of again.ids) noticeHero(c, m, id, false);
     firstSightBellow(c, m);
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
     // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1); it forgets who it saw.
@@ -346,39 +351,61 @@ function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
 }
 
 /**
- * V4.0 (spec 26.2): noticing happens when it happens. In the player phase, hero `h` stands on a hex of a move
- * (each step of a walk, or where a blink, fall, climb or grapple lands). Every awake monster on that level (not
- * the Gloam, not the Dragon, not buried) that hasn't noticed them and would by the noticing rule (wouldNotice,
- * the hero's last move mode) notices them now, with the world phase's effects: remembered, a `noticed` event at
- * the hex, hunting (an unaware one turns to the hero; a hunting one keeps its facing and its quarry), the orc's
- * first-sight bellow; it re-plans its intent when the command ends (`c.replan`). A waiting cutthroat crew is
- * checked the same way and demands its toll. The move itself goes on. `before` runs once before the first
- * event (a walk ends its `moved` segment there, so the view plays the "!" on the hex where it happened).
+ * V4.0 (spec 27): monsters look whenever anything moves. In the player phase, every awake monster (not the Gloam,
+ * not the Dragon, not buried) looks at every active, unveiled hero on its level it hasn't noticed, where they stand
+ * and in the light as it is now, by its mood and facing (`lookRound`, cascade included: one that notices turns to
+ * the first it saw, hunts, and looks again). They all look at the same moment; then each acts on it, in map order:
+ * remembered, a `noticed` event per hero (`at`: their hex; `faced` for the one it turned to), hunting (an unaware
+ * one turns to that hero; one already hunting keeps its facing and quarry), the orc's first-sight bellow; it
+ * re-plans its intent when the command ends (`c.replan`). A monster turned by a bellow looks again at the next
+ * look. `first`: the figure that moved, turned to first among those seen at once. `before` runs once before the
+ * first event. Deterministic. Not tied to a hero's move: callable after any figure's step (crew parity, pillar 17,
+ * can call it after a crew member's step; who is looked for comes from `sightedHeroes`).
+ */
+export function lookAll(c: Ctx, first?: string, before?: () => void): boolean {
+  if (c.d.phase !== 'player' || c.s.stage !== 'delve') return false;
+  const heroes = sightedHeroes(c);
+  if (!heroes.length) return false;
+  const lit = litSet(c.w, c.d);
+  const found: { m: MonsterX; ids: string[]; turnedTo?: string }[] = [];
+  for (const m of onMap(c)) {
+    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') continue;
+    const hs = heroes.filter((x) => x.at.level === m.at.level);
+    if (!hs.length) continue;
+    const r = lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first);
+    if (r.ids.length) found.push({ m, ...r });
+  }
+  if (!found.length) return false;
+  before?.();
+  for (const f of found) {
+    const m = f.m;
+    if (!c.d.monsters.includes(m)) continue;
+    const q: Sighted | undefined = f.turnedTo ? heroes.find((x) => x.id === f.turnedTo) : undefined;
+    for (const id of f.ids) noticeHero(c, m, id, id === f.turnedTo);
+    if (q) goHunting(c, m, q.at);
+    (c.replan ??= new Set()).add(m.id);
+    firstSightBellow(c, m);
+  }
+  return true;
+}
+
+/**
+ * V4.0 (spec 26.2, 27): noticing happens when it happens. In the player phase, hero `h` stands on a hex of a move
+ * (each step of a walk, or where a blink, fall, climb, grapple or push lands): every awake monster looks at every
+ * hero (`lookAll`, the mover first among those seen at once). A waiting cutthroat crew checks the mover the same
+ * way and demands its toll. The move itself goes on. `before` runs once before the first event (a walk ends its
+ * `moved` segment there, so the view plays the "!" on the hex where it happened).
  */
 export function noticeOnMove(c: Ctx, h: HeroInDelve, before?: () => void): void {
-  if (c.d.phase !== 'player' || c.s.stage !== 'delve' || h.status !== 'active' || h.veil > 0) return;
-  const lit = litSet(c.w, c.d);
-  const sneaking = isSneaking(h);
-  const quiet = quietFeet(c, h.heroId);
-  const who = onMap(c).filter(
-    (m) => m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness !== 'asleep' && m.at.level === h.at.level && !hasNoticed(m, h.heroId) && wouldNotice(c, m, h.at, sneaking, lit, quiet),
-  );
+  if (c.d.phase !== 'player' || c.s.stage !== 'delve') return;
   let flushed = false;
   const once = () => {
     if (flushed) return;
     flushed = true;
     before?.();
   };
-  for (const m of who) {
-    if (!c.d.monsters.includes(m)) continue;
-    once();
-    const hunting = m.awareness === 'hunting';
-    noticeHero(c, m, h.heroId);
-    if (!hunting) goHunting(c, m, h.at);
-    (c.replan ??= new Set()).add(m.id);
-    firstSightBellow(c, m);
-  }
-  crewNotice(c, h.heroId, once);
+  lookAll(c, h.heroId, once);
+  if (h.status === 'active' && h.veil <= 0) crewNotice(c, h.heroId, once);
 }
 
 /** An alert searcher's clock runs down; at zero it goes back to its route or post (spec 16.1). */

@@ -3,15 +3,16 @@
 // move preview's risks. Pure rules: no DOM, all dice through the seeded RNG.
 
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { HeroInDelve } from './types';
+import type { Awareness, HeroInDelve } from './types';
 import type { MoveRisks } from './api';
 import {
-  BLINDSIDE_SLOTS, CLASSES, CUTTHROAT_SIGHT, NOTICE, NOTICE_QUIET, RUBBLE_STEP_NOISE, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK, WAKE_END_SNEAK_QUIET, WAKE_RANGE, WAKE_SNEAK, WAKE_SNEAK_QUIET, WAKE_WALK,
+  BELLOW_NOISE, BLINDSIDE_SLOTS, BURGLAR_SIDE_QUIET, CLASSES, CUTTHROAT_SIGHT, NOTICE, NOTICE_QUIET, RUBBLE_STEP_NOISE, SIDE_NOTICE_ADJACENT, SIDE_NOTICE_WALK, STEP_NOISE, SWING_BOW_SLOTS, SWING_SLOT_PENALTY, WAKE_END_SNEAK,
+  WAKE_END_SNEAK_QUIET, WAKE_RANGE, WAKE_SNEAK, WAKE_SNEAK_QUIET, WAKE_WALK,
 } from './data';
 import { chance } from './rng';
 import { say, type Ctx, type DelveX, type HeroX, type MonsterX, type RivalX } from './state';
 import { activeHeroes, armorOf, goAlert, hd, heroDef, heroName, hurtAny, lightPenaltyFor, monsterArmor, monsterStats, occupant, rivalsOnMap, roll, turnOnHit } from './common';
-import { dijkstra, dirIndex, inFrontHalf, isFloorish, kindAt, los, noiseField, pathTo, smoky, type World } from './world';
+import { blindCone, dijkstra, dirIndex, inFrontHalf, isFloorish, kindAt, litSet, los, noiseField, pathTo, smoky, type World } from './world';
 import { blocked, hitRange, strikeDetailed, wardOf, type Target } from './ai';
 import { figure } from './falls';
 import { rivalStats } from './rivals';
@@ -46,7 +47,11 @@ export function behindHex(f: Facer): Pos {
 
 export { inFrontHalf };
 
-/** The blind area (spec 24.1, 24.7): monsters the whole rear half; heroes and crew members the cone straight behind. Never with no facing. */
+/**
+ * Outside the figure's front. Heroes and crew members: their blind cone straight behind (spec 24.7). Monsters:
+ * their sides and straight behind (spec 27: where a Burglar backstabs from; what a monster sees there depends on
+ * its mood, see `wouldNotice`). Never with no facing.
+ */
 export function inRearHalf(f: Facer, p: Pos): boolean {
   if (f.facing === undefined || p.level !== f.at.level || samePos(p, f.at)) return false;
   return !inFrontHalf(f, p);
@@ -54,6 +59,36 @@ export function inRearHalf(f: Facer, p: Pos): boolean {
 
 /** V3.7 name for the rear half (spec 24.1 made the blind arc the whole rear half). */
 export const inBlindArc = inRearHalf;
+
+/**
+ * V4.0 (spec 27): where `p` lies as seen from `f`, by the six hex directions relative to its facing: `front`
+ * (the facing and its two neighbours), `side` (the two rear-side directions), `back` (straight behind). No
+ * facing, or the figure's own hex or another level: front.
+ */
+export type Bearing = 'front' | 'side' | 'back';
+export function bearingOf(f: Facer, p: Pos): Bearing {
+  if (f.facing === undefined || p.level !== f.at.level || samePos(p, f.at)) return 'front';
+  const off = (dirIndex(f.at, p) - f.facing + 6) % 6;
+  return off === 3 ? 'back' : off === 2 || off === 4 ? 'side' : 'front';
+}
+
+/**
+ * V4.0 (spec 27): a monster's mood, the mark over its head. `asleep`; `unaware`: at its post (alert with no
+ * search running, also walking back to it) or on patrol; `searching` (?): alert with search rounds left after it
+ * heard something; `hunting` (!): it has seen someone. Saves from before spec 27 read the same way.
+ */
+export type Mood = 'asleep' | 'unaware' | 'searching' | 'hunting';
+export function moodOf(m: { awareness: Awareness; searchRounds?: number }): Mood {
+  if (m.awareness === 'asleep') return 'asleep';
+  if (m.awareness === 'hunting') return 'hunting';
+  if (m.awareness === 'alert' && m.searchRounds !== undefined) return 'searching';
+  return 'unaware';
+}
+
+/** V4.0 (spec 27): alert and looking for what it heard (search rounds running), not standing at its post. */
+export function isSearching(m: { awareness: Awareness; searchRounds?: number }): boolean {
+  return moodOf(m) === 'searching';
+}
 
 export function directlyBehind(f: Facer, p: Pos): boolean {
   return f.facing !== undefined && samePos(behindHex(f), p);
@@ -99,21 +134,38 @@ export function quietFeet(c: Ctx, heroId: string): boolean {
 
 // ---------------------------------------------------------------- noticing
 
-/** The hero's move mode for noticing: the last move was a sneak (a hero who never moved counts as walking). */
-export function isSneaking(h: HeroInDelve): boolean {
-  return (h as HeroX).sneaked === true;
+/**
+ * A figure's move mode for noticing: its last move was a sneak (one that never moved counts as walking). Heroes
+ * today (`HeroX.sneaked`); spec 27 hook: any figure with a `sneaked` flag (a crew member, once crews sneak) plugs in.
+ */
+export function isSneaking(h: HeroInDelve | { sneaked?: boolean }): boolean {
+  return (h as { sneaked?: boolean }).sneaked === true;
 }
 
 /**
- * Would an awake watcher at `f` notice a hero standing at `heroAt` (spec 20.1, 21.5, 24.1, 24.3)? Line of
- * sight (smoke hides beyond 1), then the range by light and move mode: lit 8/4, unlit 5/1, in the Hollow
- * 8/3 whatever the light; a sneaking Burglar (`quiet`) lit 2, unlit 1, Hollow 2. In the rear half a
- * walking hero is noticed only when adjacent, a sneaking hero never.
+ * Would an awake watcher at `f` notice a hero standing at `heroAt` (spec 20.1, 21.5, 24.3, 27)? By where the hero
+ * stands relative to its facing (`bearingOf`) and, for a monster, its mood (`mood`, else read from `f`, else unaware):
+ * - FRONT (any mood), and the SIDES of a searching or hunting monster: line of sight (smoke hides beyond 1), then
+ *   the range by light and move mode: lit 8/4, unlit 5/1, in the Hollow 8/3 whatever the light; a sneaking
+ *   Burglar (`quiet`) lit 2, unlit 1, Hollow 2.
+ * - SIDES of an unaware monster: a walking hero within SIDE_NOTICE_WALK (2), anyone adjacent (SIDE_NOTICE_ADJACENT)
+ *   but a sneaking Burglar (BURGLAR_SIDE_QUIET).
+ * - BEHIND: a walking hero adjacent; a sneaking one never.
+ * Heroes and crew members (`blindCone`) see their sides as their front (blind only straight behind, spec 24.7).
  */
-export function wouldNotice(c: Ctx, f: Facer, heroAt: Pos, sneaking: boolean, lit: Set<string>, quiet = false): boolean {
+export function wouldNotice(c: Ctx, f: Facer & { awareness?: Awareness; searchRounds?: number }, heroAt: Pos, sneaking: boolean, lit: Set<string>, quiet = false, mood?: Mood): boolean {
   if (f.at.level !== heroAt.level || samePos(f.at, heroAt)) return false;
+  const md = mood ?? (f.awareness ? moodOf({ awareness: f.awareness, searchRounds: f.searchRounds }) : 'unaware');
+  if (md === 'asleep') return false;
   const dist = distance(f.at, heroAt);
-  if (inRearHalf(f, heroAt)) return !sneaking && dist === 1;
+  let b = bearingOf(f, heroAt);
+  if (b === 'side' && blindCone(f)) b = 'front';
+  if (b === 'back') return !sneaking && dist === 1;
+  if (b === 'side' && md === 'unaware') {
+    // The corner of its eye: a walker within 2, anyone right beside it (a sneaking Burglar's feet are quieter still).
+    if (dist === 1 && SIDE_NOTICE_ADJACENT && !(sneaking && quiet && BURGLAR_SIDE_QUIET)) return true;
+    if (sneaking || dist > SIDE_NOTICE_WALK) return false;
+  }
   const hollow = heroAt.level === 3;
   const isLit = lit.has(posKey(heroAt));
   const sneakRange = quiet ? (hollow ? NOTICE_QUIET.hollowSneak : isLit ? NOTICE_QUIET.litSneak : NOTICE_QUIET.unlitSneak) : hollow ? NOTICE.hollowSneak : isLit ? NOTICE.litSneak : NOTICE.unlitSneak;
@@ -121,6 +173,60 @@ export function wouldNotice(c: Ctx, f: Facer, heroAt: Pos, sneaking: boolean, li
   if (dist > range) return false;
   if (dist > 1 && (smoky(c.d, heroAt) || smoky(c.d, f.at))) return false;
   return los(c.w, c.d, f.at, heroAt);
+}
+
+/**
+ * V4.0 (spec 27): a figure as a watching monster sees it: where it stands, its last move mode, quiet feet (a Burglar).
+ * Not hero-specific: crew parity (pillar 17) can add crew members to the list `sightedHeroes` builds.
+ */
+export interface Sighted {
+  id: string;
+  at: Pos;
+  sneaking: boolean;
+  quiet: boolean;
+}
+
+/** V4.0 (spec 27): what a monster's eyes depend on (the monster itself, or the move preview's copy of it). */
+export interface Look {
+  at: Pos;
+  facing?: number;
+  mood: Mood;
+  noticed: string[];
+}
+
+/** The figures monsters look for, as they stand now (spec 27): active, unveiled heroes (crew members are a later hook). */
+export function sightedHeroes(c: Ctx): Sighted[] {
+  return c.d.heroes.filter((h) => h.status === 'active' && h.veil <= 0).map((h) => ({ id: h.heroId, at: h.at, sneaking: isSneaking(h), quiet: quietFeet(c, h.heroId) }));
+}
+
+/**
+ * V4.0 (spec 27): a monster looks round. Every hero it hasn't noticed whom the noticing rule lets it see (its mood
+ * and facing, the hero's light and move mode) is noticed at once. If it wasn't hunting it turns to the first of
+ * them (`first` when among them, else the nearest, ties in party order) and hunts; then it looks again with its
+ * new facing and hunting sight, and again, until nobody new: one careless hero blows the cover of friends near them.
+ * Updates `look`; returns who it noticed in order (the one it turned to first) and whom it turned to.
+ * Deterministic: no rolls.
+ */
+export function lookRound(c: Ctx, look: Look, heroes: Sighted[], lit: Set<string>, first?: string): { ids: string[]; turnedTo?: string } {
+  const ids: string[] = [];
+  let turnedTo: string | undefined;
+  for (;;) {
+    const eye = { at: look.at, facing: look.facing };
+    const now = heroes.filter((x) => !look.noticed.includes(x.id) && wouldNotice(c, eye, x.at, x.sneaking, lit, x.quiet, look.mood));
+    if (!now.length) break;
+    now.sort((a, b) => Number(b.id === first) - Number(a.id === first) || distance(a.at, look.at) - distance(b.at, look.at) || heroes.indexOf(a) - heroes.indexOf(b));
+    if (look.mood !== 'hunting') {
+      const q = now[0]!;
+      turnedTo = q.id;
+      if (!samePos(q.at, look.at) && q.at.level === look.at.level) look.facing = dirIndex(look.at, q.at);
+      look.mood = 'hunting';
+    }
+    for (const x of now) {
+      look.noticed.push(x.id);
+      ids.push(x.id);
+    }
+  }
+  return { ids, turnedTo };
 }
 
 /** Who a monster can make out now: heroes it has noticed by plain sight (16.1), others by the noticing rule (20.1); the prisoner by sight. */
@@ -134,12 +240,12 @@ export function perceivable(c: Ctx, m: MonsterX, t: Target, lit: Set<string>, se
  * A monster or crew member takes note of a hero: remembered for sneak attacks and swings, one `noticed`
  * event (with the hero's hex). V4.0 (spec 26.3): an unaware watcher turns to face them; a hunting monster
  * notices without turning (it turns on its own turn, toward what it strikes or steps to, and when hit).
+ * `turn` overrides that (spec 27: a monster noticing several heroes at once turns to one of them only).
  */
-export function noticeHero(c: Ctx, m: MonsterX | RivalX, heroId: string): void {
+export function noticeHero(c: Ctx, m: MonsterX | RivalX, heroId: string, turn = (m as MonsterX).awareness !== 'hunting'): void {
   const h = hd(c, heroId);
   if (!h) return;
   const ids = ((m as MonsterX).noticedIds ??= []);
-  const turn = (m as MonsterX).awareness !== 'hunting';
   if (turn) faceToward(m, h.at);
   if (ids.includes(heroId)) return;
   ids.push(heroId);
@@ -331,31 +437,34 @@ export function fleePlan(c: Ctx, self: { id: string; at: Pos; fearOf?: string },
 
 // ---------------------------------------------------------------- the move preview
 
-/**
- * Awake watchers that could notice a hero: alert, hunting and patrolling monsters, and a waiting or hostile crew
- * (a hostile crew has noticed everyone; a waiting one notices within CUTTHROAT_SIGHT, as crewNotice does).
- */
-function watchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean; cap?: number }[] {
-  const out: { id: string; f: Facer; noticed: (heroId: string) => boolean; cap?: number }[] = [];
-  for (const m of c.d.monsters) {
-    if (m.buried || m.awareness === 'asleep' || m.kind === 'gloam' || m.kind === 'dragon' || m.at.level !== level) continue;
-    out.push({ id: m.id, f: m, noticed: (id) => hasNoticed(m, id) });
-  }
-  const cr = c.d.rivals;
-  if (cr && (cr.stance === 'waiting' || cr.stance === 'hostile')) {
-    for (const r of rivalsOnMap(c)) if (r.at.level === level) out.push({ id: r.id, f: r, noticed: () => cr.stance === 'hostile', cap: CUTTHROAT_SIGHT });
-  }
-  return out;
+/** V4.0 (spec 27): the move preview's copy of a monster the party has seen: its eyes, mood and what noise does to it. */
+interface Shadow extends Look {
+  m: MonsterX;
+  /** On patrol (noise sends a patroller searching, as a sleeper). */
+  patrol: boolean;
+  shouted: boolean;
+}
+
+/** What a noise at `at` does to a monster's eyes (as makeNoise): an unaware or searching one turns to it and searches (a woken berserker hunts). */
+function shadowHears(sh: Shadow, at: Pos): void {
+  if (sh.mood === 'hunting') return;
+  if (!samePos(at, sh.at) && at.level === sh.at.level) sh.facing = dirIndex(sh.at, at);
+  sh.mood = sh.m.kind === 'berserker' && (sh.mood === 'asleep' || sh.patrol) ? 'hunting' : 'searching';
+  sh.patrol = false;
 }
 
 /**
- * What a move along `path` risks (spec 20.1, 20.2, 24.4): every wake roll on the way with its chance,
- * the awake enemies that would notice the hero (those that haven't yet), and the free swings leaving
- * provokes, with their damage range. V4.0 (spec 26.2): noticing is checked at every hex of the path, as
- * the move itself does; `at` is the first hex where it would happen. Watchers are taken as they face now
- * (a wake roll or a bellow on the way can turn one; the preview can't know the dice). V3.9: only enemies
- * the party has seen (`seen`): wake rolls for seen sleepers, notice for enemies visible now (`vis`), swings
- * for seen ones. Unseen sleepers still roll when the move is made.
+ * What a move along `path` risks (spec 20.1, 20.2, 24.4, 26.2, 27): every wake roll on the way with its chance,
+ * the awake enemies that would notice a hero on the way, and the free swings leaving provokes, with their damage
+ * range. V4.0 (spec 27): the preview plays the move through the eyes of every monster the party has seen
+ * (`seen`): at each hex the mover steps on, every awake one looks at every active hero (the mover there, the
+ * others where they stand, the light as it is then: a lantern carried along lights friends), noticing as the
+ * move does, cascade included (one that notices turns, hunts and looks again). What can be known follows too:
+ * doors opened on the way, a swing turning its swinger, the orc's bellow and walking noise turning heads and
+ * sending monsters searching, sleepers woken for sure. Dice can't be previewed: a sleeper that may wake is
+ * assumed asleep, a hero who may be downed by a swing walks on. `notice` lists, in order, each (watcher, hero)
+ * for watchers visible now (`vis`), `at` the mover's hex when it happens. A waiting crew checks the mover
+ * within CUTTHROAT_SIGHT as before. V3.9: wake rolls and swings only for seen enemies.
  */
 export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, lit: Set<string>, seen: Set<string>, vis: Set<string>): MoveRisks {
   const risks: MoveRisks = { wake: [], notice: [], swings: [] };
@@ -363,36 +472,99 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
   const armor = armorOf(heroDef(c, h.heroId)!) + wardOf(h);
   const quiet = quietFeet(c, h.heroId);
   const swung = new Set<string>();
-  const noticing = new Set<string>();
+  const crewNoticing = new Set<string>();
+  const shadows: Shadow[] = [];
+  for (const m of c.d.monsters) {
+    if (m.buried || m.kind === 'gloam' || m.kind === 'dragon' || !seen.has(m.id)) continue;
+    shadows.push({ m, at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])], patrol: m.awareness === 'patrol', shouted: !!m.shouted });
+  }
+  // The mover's own light moves with them; doors open as the path passes.
+  const emits = (c.d.lanternBearer === h.heroId && c.d.lanternOpen !== false) || h.torch > 0 || h.ale === 'glowworm';
+  let doors = c.d.doors;
+  let cc: Ctx = c;
+  const others = sightedHeroes(c).filter((x) => x.id !== h.heroId);
   let from = h.at;
   let facing = h.facing;
   path.forEach((p, i) => {
     const last = i === path.length - 1;
-    const noise = stepNoise(c, p, sneak);
-    const heard = noise ? noiseField(c.w, c.d, p, noise) : undefined;
-    for (const m of sleepersNear(c, p)) {
-      if (!seen.has(m.id)) continue;
-      const pct = wakeChance(m, p, last, sneak, lit, heard, quiet);
-      if (pct > 0) risks.wake.push({ at: { ...p }, id: m.id, chance: Math.round(pct) });
+    // Free swings first, as the step leaves their reach: a monster that has noticed the mover (perhaps earlier on this path) and hunts.
+    for (const sh of shadows) {
+      const m = sh.m;
+      if (swung.has(m.id) || sh.mood !== 'hunting' || !sh.noticed.includes(h.heroId)) continue;
+      if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0) continue;
+      if (!(m.at.level === from.level && distance(m.at, from) === 1) || (m.at.level === p.level && distance(m.at, p) <= 1)) continue;
+      swung.add(m.id);
+      const st = monsterStats(m);
+      const slots = Math.max(1, st.slots - SWING_SLOT_PENALTY);
+      // V3.9 (spec 24.2): a swing from the hero's blind cone (as they stand before the step) is blindsided.
+      const extra = inRearHalf({ at: from, facing, cone: true }, m.at) ? BLINDSIDE_SLOTS : 0;
+      risks.swings.push({ id: m.id, damage: hitRange(slots + extra, st.dmg, armor) });
+      if (!samePos(from, sh.at) && from.level === sh.at.level) sh.facing = dirIndex(sh.at, from); // it turns to swing
     }
     for (const sw of swingersFor(c, h.heroId, from, p)) {
-      if (swung.has(sw.id) || !seen.has(sw.id)) continue;
+      if (swung.has(sw.id) || !seen.has(sw.id) || c.d.monsters.some((m) => m.id === sw.id)) continue;
       swung.add(sw.id);
-      // V3.9 (spec 24.2): a swing from the hero's rear half (as they stand before the step) is blindsided.
       const extra = inRearHalf({ at: from, facing, cone: true }, sw.at) ? BLINDSIDE_SLOTS : 0;
       risks.swings.push({ id: sw.id, damage: hitRange(sw.slots + extra, sw.dmg, armor) });
     }
     if (p.level === from.level) facing = dirIndex(from, p);
     from = p;
-    for (const wt of watchers(c, p.level)) {
-      if (noticing.has(wt.id) || wt.noticed(h.heroId) || !vis.has(posKey(wt.f.at))) continue;
-      if (wt.cap !== undefined && distance(wt.f.at, p) > wt.cap) continue;
-      if (!wouldNotice(c, wt.f, p, sneak, lit, quiet)) continue;
-      noticing.add(wt.id);
-      risks.notice.push({ id: wt.id, at: { ...p } });
+    const door = kindAt(c.w, c.d, p) === 'door' ? doors[posKey(p)] : undefined;
+    if (door && !door.open) {
+      doors = { ...doors, [posKey(p)]: { ...door, open: true } };
+      cc = { ...c, d: { ...c.d, doors } };
     }
+    const litNow = emits || cc !== c ? litSet(c.w, { ...cc.d, heroes: c.d.heroes.map((x) => (x === h ? { ...x, at: p } : x)) }) : lit;
+    // Every awake monster looks at every hero, all at once; then what they do about it (an orc's bellow).
+    const heroes = h.veil > 0 ? others : [{ id: h.heroId, at: p, sneaking: sneak, quiet }, ...others];
+    const bellows: Shadow[] = [];
+    for (const sh of shadows) {
+      if (sh.mood === 'asleep') continue;
+      const hs = heroes.filter((x) => x.at.level === sh.at.level);
+      if (!hs.length) continue;
+      const r = lookRound(cc, sh, hs, litNow, h.heroId);
+      if (!r.ids.length) continue;
+      if (vis.has(posKey(sh.at))) for (const id of r.ids) risks.notice.push({ id: sh.m.id, at: { ...p }, hero: id });
+      if (sh.m.kind === 'orc' && !sh.shouted) bellows.push(sh);
+    }
+    for (const sh of bellows) {
+      sh.shouted = true;
+      const heard = noiseField(c.w, cc.d, sh.at, BELLOW_NOISE);
+      for (const o of shadows) if (o.at.level === sh.at.level && heard.has(posKey(o.at))) shadowHears(o, sh.at);
+    }
+    // A waiting crew checks the mover (spec 26.2), within CUTTHROAT_SIGHT.
+    for (const wt of crewWatchers(c, p.level)) {
+      if (crewNoticing.has(wt.id) || wt.noticed(h.heroId) || !vis.has(posKey(wt.f.at)) || h.veil > 0) continue;
+      if (distance(wt.f.at, p) > CUTTHROAT_SIGHT) continue;
+      if (!wouldNotice(cc, wt.f, p, sneak, litNow, quiet)) continue;
+      crewNoticing.add(wt.id);
+      risks.notice.push({ id: wt.id, at: { ...p }, hero: h.heroId });
+    }
+    // The step's noise, then the wake rolls (as the move: after the look). A sleeper the noise reaches wakes for sure (100).
+    const noise = stepNoise(c, p, sneak);
+    const heard = noise ? noiseField(c.w, cc.d, p, noise) : undefined;
+    const woken: Shadow[] = [];
+    for (const m of sleepersNear(c, p)) {
+      const sh = shadows.find((x) => x.m === m);
+      if (!sh || sh.mood !== 'asleep') continue;
+      const pct = wakeChance(m, p, last, sneak, lit, heard, quiet);
+      if (pct > 0) risks.wake.push({ at: { ...p }, id: m.id, chance: Math.round(pct) });
+      if (pct >= 100) woken.push(sh);
+    }
+    if (heard) for (const sh of shadows) if (sh.at.level === p.level && heard.has(posKey(sh.at))) shadowHears(sh, p);
+    for (const sh of woken) if (sh.mood === 'asleep') shadowHears(sh, p);
   });
   return risks;
+}
+
+/** Waiting or hostile crews watching for a hero (a hostile crew has noticed everyone already). */
+function crewWatchers(c: Ctx, level: number): { id: string; f: Facer; noticed: (heroId: string) => boolean }[] {
+  const out: { id: string; f: Facer; noticed: (heroId: string) => boolean }[] = [];
+  const cr = c.d.rivals;
+  if (cr && (cr.stance === 'waiting' || cr.stance === 'hostile')) {
+    for (const r of rivalsOnMap(c)) if (r.at.level === level) out.push({ id: r.id, f: r, noticed: () => cr.stance === 'hostile' });
+  }
+  return out;
 }
 
 /** Hexes in a watcher's blind arc within `radius` (for tests and tools). */
