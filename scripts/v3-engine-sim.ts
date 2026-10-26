@@ -214,17 +214,23 @@ function objectiveFailed(s: GameState): boolean {
   return !onGround && !objectiveDone(s) && !d.monsters.some((m) => m.stolen?.kind === 'heirloom');
 }
 
+/** V4.0 (spec 25): only exits whose way is open (never one behind a shut gate or rubble). */
+function openExits(s: GameState): Pos[] {
+  const shut = e.entrances(s).filter((x) => x.state !== 'open').map((x) => w.castle.entrances[x.index]!);
+  return [...w.exits].filter((x) => !shut.some((p) => samePos(p, x)));
+}
+
 function goalFor(s: GameState): Pos[] {
   const d = s.delve!;
   const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
-  if (leaving) return w.exits;
+  if (leaving) return openExits(s);
   if (d.contract.kind === 'slay') {
     const dr = d.monsters.find((m) => m.kind === 'dragon');
-    return dr ? posNeighbors(dr.at) : w.exits;
+    return dr ? posNeighbors(dr.at) : openExits(s);
   }
   if (d.contract.kind === 'rescue') return [d.prisoner!.at];
   const g = d.ground.find((x) => x.items.some((i) => i.kind === 'heirloom'));
-  return g ? [g.at] : w.exits;
+  return g ? [g.at] : openExits(s);
 }
 
 /**
