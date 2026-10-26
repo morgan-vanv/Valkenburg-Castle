@@ -10,6 +10,7 @@ import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX, type RivalX } from './state';
 import { brightnessOf, litSet, noiseField, within, type World } from './world';
 import { faceToward, forgetHeroes, noticeHero } from './stealth';
+import { CLASH_HEAR, hearLoud, type LoudWhat } from './hearing';
 
 // ---------------------------------------------------------------- lookups
 
@@ -376,6 +377,7 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     }
     // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
     if (by && hd(c, by)) noticeHero(c, m, by);
+    if (opts.noise !== false) hearLoud(c, m.at, CLASH_HEAR, 'scream');
     if (m.hp <= 0) {
       killMonster(c, m, by);
       if (opts.noise !== false) makeNoise(c, m.at, 2);
@@ -392,6 +394,7 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     }
     r.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: r.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
+    if (opts.noise !== false) hearLoud(c, r.at, CLASH_HEAR, 'scream');
     if (by && hd(c, by)) makeHostile(c);
     if (r.hp <= 0) {
       r.hp = 0;
@@ -479,9 +482,11 @@ export function crewDemand(c: Ctx): void {
  * A ripple of radius R at `at`. Wakes sleepers, draws alert monsters, turns heads (spec 20.1).
  * `quiet`: no `noise` event for the view (per-hex walking noise sends one event per move).
  */
-export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean; quiet?: boolean } = {}): void {
+export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?: boolean; quiet?: boolean; what?: LoudWhat } = {}): void {
   if (radius <= 0) return;
   if (!opts.quiet) c.ev.push({ type: 'noise', at, radius });
+  // V3.9.3 (spec 24.8): an unseen enemy's noise is heard by the heroes (`what` marks an enemy source).
+  if (opts.what) hearLoud(c, at, radius, opts.what, { otherLevels: opts.otherLevels });
   const heard = noiseField(c.w, c.d, at, radius);
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
   if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);

@@ -112,6 +112,8 @@ export interface Ctx {
   ev: GameEvent[];
   /** Memo of visibleSet for target queries; cleared by refreshSight/setLight. */
   visCache?: Set<string>;
+  /** V3.9.3 (spec 24.8): the visible set hearing uses, apart from visCache so hearing never changes what monsters see. */
+  hearVis?: { sig: string; set: Set<string> };
 }
 
 export function newItemId(s: GameStateX): string {

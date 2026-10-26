@@ -136,7 +136,7 @@ export function dragonSpecial(c: Ctx, m: DragonX, it: Intent): boolean {
     }
     const pr = c.d.prisoner;
     if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) hurtPrisoner(c, BREATH_DMG, m.id);
-    makeNoise(c, m.at, BREATH_NOISE);
+    makeNoise(c, m.at, BREATH_NOISE, { what: 'roar' });
     m.breathNext = false;
     return true;
   }

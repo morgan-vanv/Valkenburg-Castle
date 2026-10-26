@@ -1,6 +1,7 @@
 // Shared AI helpers for monsters and rivals: who they can see, how they walk,
 // how they strike, and the Ranger's overwatch that fires at them.
 
+import { CLASH_HEAR, DOWNED_HEAR, FORCED_DOOR_HEAR, hearLoud, hearStep, isEnemy, partySees } from './hearing';
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent } from './types';
 import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
@@ -134,6 +135,7 @@ export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path:
       c.ev.push({ type: 'moved', id, path: [...seg] });
       seg.length = 0;
       at.at = { ...p };
+      hearStep(c, id, p);
       c.ev.push({ type: 'caltrops', id, at: p });
       say(c, `${nameOf(c, id)} treads on caltrops.`);
       hurtAny(c, id, CALTROPS_DMG, null, { noise: false });
@@ -142,12 +144,15 @@ export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path:
     if (kindAt(c.w, c.d, p) === 'door') {
       const door = doorAt(c.d, p);
       if (door && !door.open) {
+        // V3.9.3 (spec 24.8): a locked door forced open out of sight is heard (hearing only).
+        if (door.locked) hearLoud(c, p, FORCED_DOOR_HEAR, 'crash');
         door.open = true;
         door.locked = false;
         c.ev.push({ type: 'doorChanged', at: p, open: true, locked: false });
       }
     }
     seg.push(p);
+    hearStep(c, id, p);
     if (p.level !== from.level) {
       c.ev.push({ type: 'moved', id, path: [...seg] });
       seg.length = 0;
@@ -192,6 +197,10 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   // V3.9 (spec 24.2): from the hero's rear half, +1 slot; unseen, it stands out to the party.
   const bs = h ? blindside(c, attacker, h) : NOT_BLINDSIDED;
   const r = roll(c, attacker, bs.extra ? `${what} from behind` : what, slots + bs.extra, p + gm.chance);
+  // V3.9.3 (spec 24.8): an unseen enemy's attack is heard as a clash (hearing only; seen before any reveal).
+  const from = figurePosOf(c, attacker);
+  const unseenAttacker = !!from && isEnemy(c, attacker) && !partySees(c, from);
+  if (from && unseenAttacker) hearLoud(c, from, CLASH_HEAR, 'clash', { seen: false });
   if (bs.unseen) unseenStrike(c, attacker, tid, r.hits > 0);
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: tid });
@@ -199,8 +208,10 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   }
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
   const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h) - gm.dmg) + (r.perfect ? 1 : 0);
+  const wasUp = h?.status === 'active';
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
+  if (h && wasUp && h.status !== 'active' && unseenAttacker) hearLoud(c, h.at, DOWNED_HEAR, 'scream', { seen: false });
   return { hit: tid, hits: r.hits, damage: total };
 }
 
@@ -254,7 +265,7 @@ export function hamstringShot(c: Ctx, attacker: string, t: Target, chance: numbe
   const r = roll(c, attacker, bs.extra ? 'Hamstring from behind' : 'Hamstring', HAMSTRING_SLOTS + bs.extra, chance + HAMSTRING_PENALTY + gm.chance);
   if (bs.unseen) unseenStrike(c, attacker, t.id, r.hits > 0);
   const at = figurePosOf(c, attacker);
-  if (at) makeNoise(c, at, HAMSTRING_NOISE);
+  if (at) makeNoise(c, at, HAMSTRING_NOISE, { what: 'clash' });
   if (!r.hits) {
     c.ev.push({ type: 'miss', attacker, target: t.id });
     return false;

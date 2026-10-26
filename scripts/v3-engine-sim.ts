@@ -100,6 +100,11 @@ function run(s: GameState, cmd: Command): GameState {
     }
   }
   for (const ev of r.events) if (ev.type === 'rooted' && s.delve?.heroes.some((h) => h.heroId === ev.id)) calm.hamstrung++;
+  for (const ev of r.events) {
+    if (ev.type !== 'heard') continue;
+    if (ev.sound.kind === 'steps') hearing.steps++;
+    else hearing.loud[ev.sound.what ?? '?'] = (hearing.loud[ev.sound.what ?? '?'] ?? 0) + 1;
+  }
   // V3.9 (spec 24.2, 24.3): blindsided strikes on heroes, unseen hits, backstab hits and kills.
   for (const [j, ev] of r.events.entries()) {
     if (ev.type === 'unseenHit') eyes.unseenHits++;
@@ -148,6 +153,9 @@ function run(s: GameState, cmd: Command): GameState {
 }
 
 /** V3.9 (spec 24): fields of view: blindsided enemy strikes, unseen hits, backstabs, face commands. */
+/** V3.9.3 (spec 24.8): sounds the heroes heard of unseen enemies, this delve (steps, loud by `what`). */
+const hearing = { steps: 0, loud: {} as Record<string, number> };
+const hearLog: string[] = [];
 const eyes = { strikes: 0, blindsided: 0, blindHits: 0, unseenHits: 0, backstabs: 0, backstabHits: 0, backstabKills: 0, sleeperStabs: 0, faces: 0, turnedToFoe: 0 };
 function act(s: GameState, heroId: string, action: ActionKind, target: ActionTarget, focus = 0): GameState {
   const stab = action === 'attack' && e.preview(s, heroId, action, target).modifiers.some((m) => m.startsWith('Backstab'));
@@ -825,6 +833,9 @@ for (let i = 0; i < N; i++) {
       fightLog.push(`${k.kind} L${k.level} vs ${cr.name} (L${cr.members[0]?.level ?? '?'}): ${allDead && !lost ? 'won' : lost ? 'lost' : 'fled'}, members killed ${dead}/${cr.members.length}, heroes dead ${sum.dead.length}, taken ${taken}, squad ${d.heroes.map((h) => `${e.heroById(s, h.heroId)?.cls.slice(0, 4)}${e.heroById(s, h.heroId)?.level}`).join('/')}`);
     }
   }
+  hearLog.push(`delve ${i + 1} (${k.kind} L${k.level}, ${d.round} rounds): footsteps ${hearing.steps}, loud ${Object.values(hearing.loud).reduce((a, b) => a + b, 0)}${Object.keys(hearing.loud).length ? ` (${Object.entries(hearing.loud).map(([w, n]) => `${w} ${n}`).join(', ')})` : ''}`);
+  hearing.steps = 0;
+  hearing.loud = {};
   rows.push({
     squad: d.heroes.map((h) => e.heroById(s, h.heroId)?.cls.slice(0, 4) ?? '?').join('/'),
     contract: `${k.kind} L${k.level}`,
@@ -898,6 +909,8 @@ for (const kd of kinds) {
 if (DRAGON) console.log(`dragon: slain ${rows.filter((r) => r.dragonDead).length}/${rows.length}, reached L3 ${rows.filter((r) => r.reachedL3).length}/${rows.length}`);
 console.log(`stealth (spec 20.1, 20.2): moves ${walkMoves} walked / ${sneakMoves} sneaked; sleepers woken by passers-by ${evCount.woke ?? 0}; heroes noticed ${evCount.noticed ?? 0}; free swings ${evCount.swing ?? 0} (awake events: ${Object.entries(evCount).filter(([k]) => k.startsWith('awake:')).map(([k, v]) => `${k.slice(6)} ${v}`).join(', ') || 'none'})`);
 console.log(`eyes front (spec 24): enemy strikes on heroes ${eyes.strikes}, from behind ${eyes.blindsided} (${eyes.blindHits} hit), unseen hits ${eyes.unseenHits}; backstabs ${eyes.backstabs} (${eyes.sleeperStabs} on sleepers, ${eyes.backstabHits} hit, ${eyes.backstabKills} kills); face commands ${eyes.faces}, turned to a foe ${eyes.turnedToFoe}`);
+console.log(`hearing (spec 24.8): sounds heard per delve`);
+for (const l of hearLog) console.log(`  ${l}`);
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
 if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);

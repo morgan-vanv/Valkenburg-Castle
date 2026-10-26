@@ -613,7 +613,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       c.ev.push({ type: 'cast', by: r.id, spell: 'firebolt', targetId: t.id, at: { ...t.at } });
       say(c, `${r.name} hurls a firebolt at ${heroName(c, t.id)}.`);
       strike(c, r.id, t.id, PYRO_BOLT_SLOTS, spellChance(r), PYRO_BOLT_DMG, 'Firebolt');
-      makeNoise(c, r.at, PYRO_BOLT_NOISE);
+      makeNoise(c, r.at, PYRO_BOLT_NOISE, { what: 'clash' });
       return true;
     }
     case 'fireball': {
@@ -622,7 +622,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       const hexes = [it.to, ...posNeighbors(it.to)].filter((p) => isFloorish(c.w, c.d, p) || kindAt(c.w, c.d, p) === 'pit');
       const rr = roll(c, r.id, 'Fireball', 3, spellChance(r));
       c.ev.push({ type: 'cast', by: r.id, spell: 'fireball', at: { ...it.to }, hexes });
-      makeNoise(c, it.to, FIREBALL_NOISE);
+      makeNoise(c, it.to, FIREBALL_NOISE, { what: 'blast' });
       for (const p of hexes) if (isFloorish(c.w, c.d, p)) c.d.burning[posKey(p)] = 2;
       say(c, `${r.name} hurls a fireball.`);
       if (!rr.hits) return true;
@@ -676,7 +676,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       spendKit(r, 'firecracker');
       c.ev.push({ type: 'thrown', by: r.id, kind: 'firecracker', from: { ...r.at }, to: { ...it.to } });
       say(c, `${r.name} tosses a firecracker at the party's feet. Crack! Everything nearby turns to look.`);
-      makeNoise(c, it.to, FIRECRACKER_NOISE);
+      makeNoise(c, it.to, FIRECRACKER_NOISE, { what: 'blast' });
       return true;
     }
     case 'blink': {
@@ -710,7 +710,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       spendMana(r, 1);
       const hexes = [it.to, ...posNeighbors(it.to)];
       c.ev.push({ type: 'cast', by: r.id, spell: 'gust', at: { ...it.to }, hexes });
-      makeNoise(c, it.to, GUST_NOISE);
+      makeNoise(c, it.to, GUST_NOISE, { what: 'crash' });
       say(c, `${r.name} calls up a gust.`);
       const ids: string[] = [];
       for (const h of c.d.heroes) if (h.status === 'active' && hexes.some((p) => samePos(p, h.at)) && !samePos(h.at, it.to)) ids.push(h.heroId);
