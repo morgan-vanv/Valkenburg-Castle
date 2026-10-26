@@ -590,6 +590,12 @@ export const SAPPER_SHORTCUT = 6;
 export const RIVAL_POTION_HEAL = 5;
 /** Spec 20.4: a dragged hero moves 3 a round toward the crew's exit. */
 export const DRAG_MOVE = 3;
+/**
+ * V4.0 (spec 28.8, owner): a crew takes only a hero left helpless (downed, or dozing from a sleep dart) and alone: no other
+ * hero who is up (active, awake, not in a crew's hands) within this many hexes, straight-line, same level. Otherwise a downed
+ * hero in reach is finished.
+ */
+export const CAPTURE_ALONE = 4;
 /** Waiting cutthroats notice a hero this close in line of sight, or noise this loud. */
 export const CUTTHROAT_SIGHT = 6;
 export const CUTTHROAT_HEAR = 4;

@@ -84,13 +84,15 @@ export interface ApproachOpts {
   allowLocked?: boolean;
   /** Extra hexes the walker won't enter (the Gloam keeps to the dark). */
   avoid?: (p: Pos) => boolean;
+  /** V4.0 (spec 28.8): a figure the walker may pass through (a crew member hauling a seized hero who is awake). */
+  through?: string;
 }
 
 /** Best path of at most `budget` toward the nearest of `goals` (stops on a free hex). */
 export function approach(c: Ctx, self: string, from: Pos, goals: Pos[], budget: number, stairs: boolean | ApproachOpts, allowLocked = false): Pos[] | null {
   if (!goals.length) return null;
   const o: ApproachOpts = typeof stairs === 'boolean' ? { stairs, allowLocked } : stairs;
-  const enter = (p: Pos) => !blocked(c, p, self) && !(o.avoid?.(p) ?? false);
+  const enter = (p: Pos) => (!blocked(c, p, self) || (!!o.through && occupant(c, p)?.id === o.through)) && !(o.avoid?.(p) ?? false);
   const field = distField(c.w, c.d, goals, { stairs: o.stairs, allowLocked: o.allowLocked });
   if (!field.has(posKey(from))) return null;
   const nodes = dijkstra(c.w, c.d, from, { enter, stairs: o.stairs, allowLocked: o.allowLocked, budget });

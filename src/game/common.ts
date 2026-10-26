@@ -375,6 +375,14 @@ export function checkHolds(c: Ctx): void {
   }
   for (const h of c.d.heroes) {
     if (!h.grabbedBy) continue;
+    // V4.0 (spec 28.8): a seized hero held by a crew member, awake: kept while the member still carries them off.
+    const rv = c.d.rivals?.members.find((x) => x.id === h.grabbedBy);
+    if (rv) {
+      if (h.status === 'active' && rv.hp > 0 && !rv.goneOut && rv.dragging === h.heroId) continue;
+      h.grabbedBy = undefined;
+      if (h.status === 'active') c.ev.push({ type: 'released', id: h.heroId });
+      continue;
+    }
     const m = c.d.monsters.find((x) => x.id === h.grabbedBy);
     if (!m || m.holding !== h.heroId) {
       h.grabbedBy = undefined;
@@ -462,11 +470,24 @@ export function rivalGuard(c: Ctx, r: { id: string; at: Pos }): RivalX | undefin
 
 /** V3.7 (spec 20.4): the member lets go of the hero it was dragging (killed, downed or feared); the hero stays downed where they lie. */
 export function dropCaptive(c: Ctx, r: RivalX, why: string): void {
-  const id = r.dragging;
+  const id = releaseCrewHold(c, r);
   if (!id) return;
-  r.dragging = undefined;
   const h = hd(c, id);
   if (h && h.status === 'downed') say(c, `${r.name} ${why}. ${heroName(c, id)} is dropped where they lie.`);
+  else if (h && h.status === 'active') say(c, `${r.name} ${why}. ${heroName(c, id)} is free.`);
+}
+
+/** V4.0 (spec 28.8): the member lets go (no log line): `dragging` cleared, a held hero's `grabbedBy` too. Returns the hero's id. */
+export function releaseCrewHold(c: Ctx, r: RivalX): string | undefined {
+  const id = r.dragging;
+  if (!id) return undefined;
+  r.dragging = undefined;
+  const h = hd(c, id);
+  if (h && h.grabbedBy === r.id) {
+    h.grabbedBy = undefined;
+    c.ev.push({ type: 'released', id });
+  }
+  return id;
 }
 
 /** Gold value the party carries (every active or downed hero's pack): gold and valuables. */
