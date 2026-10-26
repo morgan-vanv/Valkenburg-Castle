@@ -2639,7 +2639,7 @@ export class Hud {
       h(
         'div',
         { class: 'dl-pl-head' },
-        h('div', { class: 'dl-pl-t' }, h('span', { class: 'dl-kick' }, `Parley · ${who} speaks`), h('span', { class: 'dl-pl-name', tabindex: 0, 'data-tip': `${r.name} · ${tm.name.toLowerCase()}, ${st.name.toLowerCase()}\n${CREW[r.crew]?.blurb ?? ''}\n${tm.text}\n${st.text}` }, r.name), h('span', { class: 'dl-pl-blurb' }, blurb)),
+        h('div', { class: 'dl-pl-t' }, h('span', { class: 'dl-kick' }, `Parley · ${who} speaks · ${st.name.toLowerCase()}`), h('span', { class: 'dl-pl-name', tabindex: 0, 'data-tip': `${r.name} · ${tm.name.toLowerCase()}, ${st.name.toLowerCase()}\n${CREW[r.crew]?.blurb ?? ''}\n${tm.text}\n${st.text}` }, r.name), h('span', { class: 'dl-pl-blurb' }, blurb)),
         h(
           'div',
           { class: 'dl-pl-mems', 'aria-label': 'The crew' },
