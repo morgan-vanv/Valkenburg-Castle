@@ -1,6 +1,6 @@
 // Spec 17.1 and 17.2 check, headless, by DOM text: a new campaign has 90 gold (V3.7.1) and level-1
-// recruits at 60; a hurt hero shows their HP in camp; the infirmary offers per-HP healing and
-// it works. No screenshots.
+// recruits at 60; a hurt hero shows their HP in camp; with the surgeon home, healing for gold is
+// offered in the hero's party slot (V4.0: the infirmary page is gone) and it works. No screenshots.
 //   node scripts/v34-camp-check.mjs <baseUrl>
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
 
@@ -36,12 +36,17 @@ await p.evaluate(async () => {
   s.campaign.roster[1].hp = s.campaign.roster[1].maxHp - 4;
   window.vc.load(s);
 });
-await p.getByText('Infirmary', { exact: false }).first().click();
-await p.waitForTimeout(300);
-const text = await p.evaluate(() => document.body.innerText);
-check('infirmary explains per-HP healing', /3 gold per HP/.test(text));
-check('infirmary offers "Heal 4 HP · 12"', /Heal 4 HP · 12/.test(text));
-await p.getByText('Heal 4 HP · 12').click();
+// V4.0: healing lives in the party slots on step 2; take the hire along from the roster bench.
+await p.click('.lg-step[data-step="party"]');
+await p.waitForTimeout(150);
+const hid = await p.evaluate(() => window.vc.state().campaign.roster[1].id);
+if (await p.$(`[data-bench="${hid}"]`)) await p.click(`[data-bench="${hid}"]`);
+await p.waitForTimeout(150);
+const heal = p.locator(`[data-heal="${hid}"]`);
+const tip = await heal.getAttribute('data-tip').catch(() => '');
+check('healing explains per-HP pricing', /3 gold per HP/.test(tip ?? ''), tip ?? '');
+check('the slot offers "Heal · 12 gold"', /Heal\s*·\s*12\s*gold/.test(await heal.innerText().catch(() => '')));
+await heal.click();
 await p.waitForTimeout(300);
 const after = await p.evaluate(() => {
   const s = window.vc.state();

@@ -39,9 +39,8 @@ await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
 await p.fill('input.seed', '7');
 await p.click('text=New campaign');
 await p.waitForTimeout(200);
-await p.click('.station:has-text("Bounty board")').catch(() => {});
-await p.click('.contract >> nth=0 >> text=Take the job');
-await p.click('.btn-delve');
+await p.click('.lg-step[data-step="setout"]'); // V4.0: Lowgate's step 4
+await p.click('.lg-delve');
 await idle();
 await p.waitForTimeout(300);
 

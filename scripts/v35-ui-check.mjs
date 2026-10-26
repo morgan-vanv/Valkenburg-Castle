@@ -1,6 +1,6 @@
 // V3.5 presentation check (spec 18.7), headless, by DOM text and state, no screenshots:
-// title intro, Lowgate stations and locks, pinned story contracts, infirmary drink, the Flagon
-// and ales, the won-back moment, the parley card (deals, toll, Fight, a deal made), hired crew
+// title intro, Lowgate (V4.0: the four steps) and its locks, pinned story contracts, drinking a
+// potion in the party slot, the Flagon and ales, the won-back moment, the parley card (deals, toll, Fight, a deal made), hired crew
 // tags, ale chips on delve cards, the game-over line; no console errors.
 //   node scripts/v35-ui-check.mjs <baseUrl>   (use ?fixture=1 until the engine lands)
 //   Optional 2nd arg: a directory to save the camp and parley screenshots in.
@@ -19,8 +19,8 @@ const check = (name, ok, extra = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
 };
 const text = () => p.evaluate(() => document.body.innerText);
-const station = async (id) => {
-  await p.click(`.station[data-station="${id}"]`);
+const step = async (id) => {
+  await p.click(`.lg-step[data-step="${id}"]`);
   await p.waitForTimeout(120);
 };
 /** Record every line the HUD logs during playback (the state's own log replaces them after). */
@@ -38,111 +38,100 @@ let t = await text();
 check('title: intro names Keven, Lowgate and the late Lord Hobart', /Keven/.test(t) && /Lowgate/.test(t) && /Lord Hobart/.test(t));
 check('title: "The Heir\'s Return"', /The Heir's Return/i.test(t));
 
-// ---- new campaign → camp
+// ---- new campaign → camp (V4.0: Lowgate's four steps; locked services stay quiet)
 await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });
 await p.waitForTimeout(200);
 t = await text();
-check('camp header is Lowgate', (await p.textContent('.camp-head .screen-title')) === 'Lowgate');
+check('camp header is Lowgate', (await p.textContent('.lg-title')) === 'Lowgate');
 check('no "Hobart\'s camp" anywhere', !/Hobart's camp/.test(t));
-const names = await p.$$eval('.station .st-text b', (els) => els.map((e) => e.textContent));
-check('stations named as 18.2', JSON.stringify(names) === JSON.stringify(['Notice post', 'Campfire', 'Peddler', 'Forge', 'Infirmary', "Keven's cart", 'The graves']), names.join(' | '));
-check('forge shows locked', await p.$eval('.station[data-station="smithy"]', (e) => e.classList.contains('locked')));
-check('village panel lists 5, none home', (await p.$$('.vp-row')).length === 5 && (await p.$$('.vp-row.home')).length === 0);
-
-// board
-await station('board');
-const stories = await p.$$eval('.contract.story', (els) => els.map((e) => e.dataset.story));
+const houses0 = await p.$$eval('.lg-house', (els) => els.map((e) => e.dataset.state));
+check('ribbon: three houses, none home', houses0.length === 3 && !houses0.includes('home'), houses0.join(','));
+const stories = await p.$$eval('.lg-card.story', (els) => els.map((e) => e.dataset.story));
 check('surgeon story contract pinned with its own look', stories.includes('surgeon'), stories.join(','));
-t = await p.textContent('.contract.story');
-check('story card says what it wins back', /Wins back/.test(t) && /infirmary/i.test(t));
-check('intro card on the first camp', !!(await p.$('.intro-card')));
+t = await p.textContent('.lg-card.story');
+check('story card says what it wins back', /Wins back/i.test(t) && /infirmary/i.test(t));
+check('welcome card on the first camp', !!(await p.$('.lg-welcome')));
 if (shots) await p.screenshot({ path: `${shots}/v35-ui-camp-after.png` });
 
-// forge
-await station('smithy');
-t = await text();
-check('forge cold: names Gerda, Level 2, the cellblock', /The forge is cold\. Rescue Gerda the smith \(Level 2, the cellblock\)/.test(t));
-check('forge has no upgrade buttons', !(await p.$('.tbl')));
-
-// peddler
-await station('quartermaster');
-const locked = await p.$$eval('.shop-row.locked', (els) => els.map((e) => e.dataset.kind));
-check('peddler: metalwork locked', ['caltrops', 'hook', 'key'].every((k) => locked.includes(k)), locked.join(','));
-check('locked metalwork says to rescue Gerda', /rescue Gerda/i.test(await p.textContent('.shop-row.locked')));
-check('locked buy buttons disabled', await p.$eval('.shop-row.locked .btn', (e) => e.disabled));
-
+// forge (V4.0: the gear row on each loadout card, hidden while the forge is cold)
+await step('outfit');
+check('no forge row while the forge is cold', !(await p.$('.lg-gear-row')));
+// peddler: metalwork as one dashed tile
+check('peddler: metalwork collapsed into one tile that needs a smith', !!(await p.$('[data-ware="metalwork"]')) && !(await p.$('[data-ware="hook"]')) && /need a smith/.test(await p.textContent('[data-ware="metalwork"]')));
 // campfire
-await station('tavern');
+await step('party');
 t = await text();
-check('campfire: Flagon shut, rescue Old Wim', /Campfire/.test(t) && /Rescue Old Wim \(Level 1, the library\)/.test(t));
-check('no ale menu before the Flagon', !(await p.$('.ale-menu')));
+check('the campfire, not the Flagon', /At the campfire/.test(t) && !/Gilded Flagon/.test(t));
+check('no ales before the Flagon', !(await p.$('.lg-alepick')) && !(await p.$('[data-ale]')));
 
-// infirmary: drink a potion (the real engine starts with an empty stash: buy one first)
+// healing in the party slot: drink a potion (the real engine starts with an empty stash: buy one first)
 await p.evaluate(async () => {
   if (!window.vc.state().campaign.stash.some((i) => i.kind === 'potion')) await window.vc.send({ type: 'buy', kind: 'potion' });
 });
 await edit("s.campaign.roster[0].hp = s.campaign.roster[0].maxHp - 6;");
-await station('infirmary');
-t = await text();
-check('infirmary: no surgeon, rescue Brother Aldric', /No surgeon\. Rescue Brother Aldric \(Level 1, the library\)/.test(t));
 const hp0 = await p.evaluate(() => window.vc.state().campaign.roster[0].hp);
 const pots0 = await p.evaluate(() => window.vc.state().campaign.stash.filter((i) => i.kind === 'potion').length);
-await p.click('.btn-drink');
+await p.click('[data-drink="keven"]');
 await p.waitForTimeout(150);
 const hp1 = await p.evaluate(() => window.vc.state().campaign.roster[0].hp);
 const pots1 = await p.evaluate(() => window.vc.state().campaign.stash.filter((i) => i.kind === 'potion').length);
 check('drink: +5 HP and a potion used', hp1 === hp0 + 5 && pots1 === pots0 - 1, `${hp0}→${hp1}, potions ${pots0}→${pots1}`);
-check('no heal-for-gold button without the surgeon', !/Heal \d+ HP ·/.test(await text()));
+check('no heal-for-gold button without the surgeon', !(await p.$('[data-heal]')));
 
 
 // ---- won-back moment: take the surgeon contract, come back
+const idle = () => p.waitForFunction(() => !window.vc.busy(), null, { timeout: 30000 });
 await p.evaluate(async () => {
   const s = window.vc.state();
   const k = s.campaign.board.find((x) => x.story === 'surgeon');
   const fixture = location.search.includes('fixture');
   await window.vc.send({ type: 'startDelve', contractId: k.id, heroIds: fixture ? ['keven', 'brann'] : ['keven'], entrance: 0, packs: {} });
-  if (!fixture) {
+});
+await idle();
+await p.evaluate(async () => {
+  if (!location.search.includes('fixture')) {
     // Real engine: Keven stands on the entrance (an exit); walk Aldric out with him and leave.
-    const d = window.vc.state();
+    const d = structuredClone(window.vc.state());
     const at = window.vcEngine.castle().entrances[0];
     d.delve.heroes[0].at = { ...at };
     Object.assign(d.delve.prisoner, { freed: true, out: true });
     window.vc.load(d);
     await window.vc.send({ type: 'abandon' });
   }
-  await window.vc.send({ type: 'backToCamp' });
 });
+await idle();
+await p.evaluate(() => window.vc.send({ type: 'backToCamp' }));
 await p.waitForTimeout(300);
 t = await text();
-check('won back: banner with the village line', !!(await p.$('.won-back')) && /Brother Aldric sets up in the old chapel/.test(t));
-check('won back: infirmary station lit', await p.$eval('.station[data-station="infirmary"]', (e) => e.classList.contains('won')));
-check('village panel: Aldric home', (await p.$$('.vp-row.home')).length === 1);
-await p.click('.won-back .btn-ghost');
+check('won back: banner, "Brother Aldric is home."', !!(await p.$('.lg-wonback')) && /Brother Aldric is home\./.test(t));
+check('won back: the chapel lit on the ribbon', !!(await p.$('.lg-house[data-house="chapel"].won')));
+check('ribbon: Aldric home', (await p.$$('.lg-house[data-state="home"]')).length === 1);
+await p.click('[data-wonback="later"]');
 await p.waitForTimeout(100);
-check('won-back banner dismisses', !(await p.$('.won-back')));
-await station('infirmary');
-check('infirmary now heals for gold', /3 gold per HP/.test(await text()));
+check('won-back banner dismisses ("Later")', !(await p.$('.lg-wonback')));
+await edit("s.campaign.roster[0].hp = s.campaign.roster[0].maxHp - 2; s.campaign.gold = Math.max(s.campaign.gold, 20);");
+await step('party');
+check('healing for gold now in the party slot', /3 gold per HP/.test((await p.getAttribute('[data-heal="keven"]', 'data-tip')) ?? ''));
 
 // ---- the Flagon and ales
 await edit("Object.assign(s.campaign.village, { innkeeper: true, copper: true, smith: true }); s.campaign.gold = 300;");
-await station('tavern');
-const names2 = await p.$$eval('.station .st-text b', (els) => els.map((e) => e.textContent));
-check('campfire became the Gilded Flagon', names2.includes('The Gilded Flagon'));
-const ales = await p.$$eval('.ale-row', (els) => els.map((e) => [e.dataset.ale, e.classList.contains('locked')]));
-check('7 ales on the menu', ales.length === 7, `${ales.length}`);
-check('copper ales open, cask-book ales locked', ales.filter(([, l]) => !l).length === 4 && ales.filter(([, l]) => l).length === 3);
-check("locked ale says what brews it (Wim's cask book)", /cask book/i.test(await p.textContent('.ale-row.locked')));
-await p.click('.am-hero[data-hero="keven"]');
+check('campfire became the Gilded Flagon', /At the Gilded Flagon/.test(await text()));
+await step('outfit');
+await p.click('[data-ale="keven"]');
 await p.waitForTimeout(80);
-await p.click('.ale-row[data-ale="reserve"] .btn');
+const ales = await p.$$eval('[data-pour]', (els) => els.map((e) => e.dataset.pour));
+check('the copper ales on tap (4), the cask-book ales not shown until brewed', ales.length === 4 && !ales.includes('blackcask'), ales.join(','));
+await p.click('[data-pour="reserve"]');
 await p.waitForTimeout(150);
 check('bought Hobart\'s Reserve for Keven', (await p.evaluate(() => window.vc.state().campaign.roster.find((h) => h.id === 'keven').ale)) === 'reserve');
-check('roster chip shows the ale', !!(await p.$('.hchip[data-hero="keven"] .ale-badge')));
-check('second ale for Keven is refused (buttons disabled)', await p.$eval('.ale-row[data-ale="glowworm"] .btn', (e) => e.disabled));
-check('forge open with Gerda home', !!(await p.$('.station[data-station="smithy"]:not(.locked)')));
+check('Keven\'s loadout card shows the ale by name', /Hobart's Reserve/.test(await p.textContent('.lg-hero[data-hero="keven"] .lg-gear.have.ale')));
+check('no second ale for Keven (no "Pour one")', !(await p.$('[data-ale="keven"]')));
+check('forge open with Gerda home: blade, mail, shield', !!(await p.$('.lg-hero[data-hero="keven"] [data-upgrade="weapon"]')) && !!(await p.$('.lg-hero[data-hero="keven"] .lg-gear-row')));
 if (shots) await p.screenshot({ path: `${shots}/v35-ui-camp-after-flagon.png` });
 
-// prepare shows the ale (the UI wants a hire before the first job: the real engine starts with Keven alone)
+// the party slot shows the ale
+await step('party');
+check('party slot: Keven shows his ale', /Hobart's Reserve/.test(await p.textContent('.lg-slot.hero[data-hero="keven"]')));
 await p.evaluate(async () => {
   const s = window.vc.state();
   if (s.campaign.roster.length < 2 && s.campaign.recruits[0]) {
@@ -151,10 +140,6 @@ await p.evaluate(async () => {
     await window.vc.send({ type: 'hire', heroId: s.campaign.recruits[0].hero.id });
   }
 });
-await station('board');
-await p.click('.contract .btn-primary');
-await p.waitForTimeout(150);
-check('prepare: Keven shows his ale', !!(await p.$('.pick-hero .ale-badge')));
 
 
 // A crew next to the party: the fixture's, or on the real engine a real delve with the same crew

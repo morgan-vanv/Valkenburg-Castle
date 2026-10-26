@@ -45,17 +45,16 @@ await p.fill('input.seed', '7');
 await p.click('text=New campaign');
 await p.waitForTimeout(200);
 
-// Prepare screen: the "Start shuttered" option exists and is remembered.
-await p.click('.station:has-text("Bounty board")').catch(() => {});
-await p.click('.contract >> nth=0 >> text=Take the job');
-const prep = await p.evaluate(() => !!document.querySelector('.prep-shutter input[type=checkbox]'));
-check('prepare screen offers "Start shuttered"', prep);
-await p.click('.prep-shutter input[type=checkbox]');
-const remembered = await p.evaluate(() => JSON.parse(localStorage.getItem('vc.loadout.v33') ?? '{}').startShuttered === true);
-check('start shuttered is remembered in vc.loadout.v33', remembered);
-await p.click('.btn-delve');
+// V4.0: Set out (step 4) offers "Go in with the lantern shut", remembered with the loadout at Delve.
+await p.click('.lg-step[data-step="setout"]');
+const prep = await p.evaluate(() => !!document.querySelector('.lg-shutter input[type=checkbox]'));
+check('Set out offers "Go in with the lantern shut"', prep);
+await p.click('.lg-shutter input[type=checkbox]');
+await p.click('.lg-delve');
 await idle();
 await p.waitForTimeout(300);
+const remembered = await p.evaluate(() => JSON.parse(localStorage.getItem('vc.loadout.v33') ?? '{}').startShuttered === true);
+check('the shutter is remembered in vc.loadout.v33', remembered);
 
 // 1. Shutter: the delve started shuttered (the app sent the free action), the meter says so.
 const m0 = await p.evaluate(() => ({

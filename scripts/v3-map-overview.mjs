@@ -18,9 +18,8 @@ await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
 await p.click('text=New campaign');
 await p.waitForTimeout(300);
-await p.click('text=Take the job >> nth=0');
-await p.waitForTimeout(300);
-await p.click('button:has-text("Delve")');
+await p.click('.lg-step[data-step="setout"]'); // V4.0: Lowgate's step 4
+await p.click('.lg-delve');
 await p.waitForFunction(() => window.vc.state()?.stage === 'delve' && !window.vc.busy(), null, { timeout: 60000 });
 await p.waitForTimeout(800);
 

@@ -4,7 +4,7 @@
 //
 // tours:
 //   fixture  - stand-in engine on the test castle (?fixture=1): title, camp, delve, preview
-//   full     - real engine: title, camp stations, prepare, delve, move, preview, roll, world phase, summary
+//   full     - real engine: title, Lowgate (party, outfit, set out), delve, move, preview, roll, world phase, summary
 //
 // Drives the game through window.vc (see src/main.ts).
 
@@ -48,21 +48,18 @@ await click('text=New campaign');
 await snap('01-camp-board');
 
 if (tour === 'full') {
-  for (const st of ['Quartermaster', 'Smithy', 'Tavern', 'Stash']) {
-    await click(`.station:has-text("${st}")`);
-  }
-  await click('.station:has-text("Quartermaster")');
-  await click('.shop-row:has-text("Torch") button');
-  await snap('02-quartermaster');
-  await click('.station:has-text("Tavern")');
-  await snap('03-tavern');
-  // V3.2: Hobart starts alone; hire the first two recruits we can afford.
-  for (let i = 0; i < 2; i++) await click('.recruit button:not([disabled]) >> nth=0');
-  await click('.station:has-text("Bounty board")');
+  // V4.0: Lowgate's four steps replace the stations (the old station tour is retired; see
+  // scripts/v40-lowgate-shot.mjs for the camp screenshots). Hire one, buy a torch, set out.
+  await click('.lg-step[data-step="party"]');
+  await click('.lg-hire:not(.is-off) >> nth=0');
+  await snap('03-party');
+  await click('.lg-step[data-step="outfit"]');
+  await click('[data-ware="torch"]');
+  await snap('02-outfit');
 }
-await click('.contract >> nth=0 >> text=Take the job');
-await snap('04-prepare');
-await click('.btn-delve');
+await click('.lg-step[data-step="setout"]');
+await snap('04-setout');
+await click('.lg-delve');
 await idle();
 await p.waitForTimeout(1200);
 await snap('05-delve');

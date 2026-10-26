@@ -11,8 +11,9 @@ import { Diorama } from '../view/diorama';
 import { wasBackstab } from '../view/stealth';
 import { clear, h } from './dom';
 import { Hud } from './hud';
-import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
-import { CREW, STANCE, STORY, dealLine } from './names';
+import { overScreen, summaryScreen, titleScreen, type ScreenHost } from './screens';
+import { campScreen, freshLoadout, type CampHost, type CampPage, type Loadout } from './lowgate';
+import { CREW, STANCE, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
 export const SAVE_KEY = 'vc.save.v39';
@@ -65,6 +66,8 @@ const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../
   smashProp: 'smash',
 };
 const LOADOUT_KEY = 'vc.loadout.v33';
+/** V4.0: the first-visit welcome card was dismissed (per browser). */
+const WELCOME_KEY = 'vc.welcome.v40';
 /** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
 const DELVE_DISTANCE = 19;
 
@@ -76,8 +79,13 @@ export class App {
   private screen: HTMLElement;
   private stage3d: HTMLElement;
   private settings: Settings = loadSettings();
-  private station: Station = 'board';
+  /** V4.0: the Lowgate page shown (one of the four steps, or Keven's cart / the graves). */
+  private page: CampPage = 'job';
+  /** The loadout of the last delve (remembered across sessions). */
   private loadout: Loadout | null = null;
+  /** V4.0: the loadout being put together in Lowgate on this visit. */
+  private draft: Loadout | null = null;
+  private welcomeSeen = false;
   private hurry = false;
   private lastStage: string | null = null;
   /** V3.5 (18.7): stories won back on the last return to camp, shown until dismissed. */
@@ -136,6 +144,11 @@ export class App {
     } catch {
       /* ignore */
     }
+    try {
+      this.welcomeSeen = localStorage.getItem(WELCOME_KEY) === '1';
+    } catch {
+      /* ignore */
+    }
 
     // Hold Space to hurry playback.
     addEventListener('keydown', (e) => {
@@ -162,7 +175,7 @@ export class App {
 
   /**
    * V3.6 (19.5): the exit the party came in by. The engine doesn't record it (contract request:
-   * `Delve.entrance`), so it comes from the loadout the prepare screen saved; the main gate otherwise.
+   * `Delve.entrance`), so it comes from the loadout Lowgate saved at Delve; the main gate otherwise.
    */
   private entrancePos(): Pos | null {
     const ents = this.engine.castle().entrances;
@@ -218,34 +231,64 @@ export class App {
         }
       },
       hasSave: !!this.load(),
+    };
+  }
+
+  /** V4.0: what the Lowgate pages need. */
+  private campHost(s: GameState): CampHost {
+    this.draft ??= freshLoadout(s, this.engine, this.loadout);
+    return {
+      engine: this.engine,
+      send: (c) => this.send(c),
+      state: () => this.state,
+      page: this.page,
+      setPage: (p) => {
+        this.page = p;
+        this.render();
+      },
+      draft: this.draft,
+      setDraft: (l, p) => {
+        this.draft = l;
+        if (p) this.page = p;
+        this.render();
+      },
       lastLoadout: this.loadout,
-      saveLoadout: (l) => {
-        this.loadout = l;
+      saveLoadout: (l) => this.saveLoadout(l),
+      wonBack: this.wonBack,
+      dismissWonBack: (p) => {
+        this.wonBack = [];
+        if (p) this.page = p;
+        this.render();
+      },
+      welcome: !this.welcomeSeen && s.campaign.delveCount === 0,
+      dismissWelcome: () => {
+        this.welcomeSeen = true;
         try {
-          localStorage.setItem(LOADOUT_KEY, JSON.stringify(l));
+          localStorage.setItem(WELCOME_KEY, '1');
         } catch {
           /* ignore */
         }
-      },
-      station: this.station,
-      setStation: (st) => {
-        this.station = st;
-        this.render();
-      },
-      wonBack: this.wonBack,
-      dismissWonBack: () => {
-        this.wonBack = [];
         this.render();
       },
     };
+  }
+
+  private saveLoadout(l: Loadout): void {
+    this.loadout = l;
+    try {
+      localStorage.setItem(LOADOUT_KEY, JSON.stringify(l));
+    } catch {
+      /* ignore */
+    }
   }
 
   private newCampaign(seed: number): void {
     const res = this.engine.apply(this.engine.newGame(seed), { type: 'newCampaign', seed });
     const s = res.error ? this.engine.newGame(seed) : res.state;
     this.state = s;
-    this.station = 'board'; // V3.7.1 (21.1): Keven may go alone; the campfire is a suggestion, not a gate
+    this.page = 'job'; // V4.0: every return lands on step 1
     this.loadout = null;
+    this.draft = null;
     this.wonBack = [];
     sfx.play('horn', { pitch: 0.8, gain: 0.5 });
     this.save();
@@ -296,9 +339,12 @@ export class App {
     const host = this.host();
     switch (s.stage) {
       case 'camp':
-        if (stageChanged && !this.wonBack.length) this.station = 'board';
-        host.station = this.station;
-        return campScreen(this.screen, s, host);
+        // V4.0: a return to camp lands on step 1 with a fresh draft (the last party, empty packs).
+        if (stageChanged) {
+          this.page = 'job';
+          this.draft = null;
+        }
+        return campScreen(this.screen, s, this.campHost(s));
       case 'summary':
         return summaryScreen(this.screen, s, host);
       case 'over':
@@ -348,15 +394,12 @@ export class App {
     const won = res.events.filter((e): e is Extract<GameEvent, { type: 'villageUnlocked' }> => e.type === 'villageUnlocked').map((e) => e.story);
     if (won.length) {
       this.wonBack = won;
-      const st = STORY[won[won.length - 1]!].station;
-      this.station = st;
-      this.lastStage = 'camp';
       sfx.play('levelup', { gain: 0.8 });
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
-    // 16.2: "start shuttered" on the prepare screen: shutter is free, so send it right after the delve starts.
+    // 16.2: "Go in with the lantern shut" (Set out): shutter is free, so send it right after the delve starts.
     if (cmd.type === 'startDelve' && this.loadout?.startShuttered && this.state?.delve && this.state.delve.lanternOpen !== false) {
       const bearer = this.state.delve.lanternBearer;
       void this.send({ type: 'act', heroId: bearer, action: 'shutter', target: {}, focus: 0 });

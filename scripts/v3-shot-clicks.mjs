@@ -15,8 +15,8 @@ await p.evaluate(() => localStorage.clear());
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
 await p.click('text=New campaign');
-await p.click('.contract >> nth=0 >> text=Take the job');
-await p.click('.btn-delve');
+await p.click('.lg-step[data-step="setout"]'); // V4.0: Lowgate's step 4
+await p.click('.lg-delve');
 await idle();
 await p.waitForTimeout(1500);
 // Screen position of a reachable hex.
