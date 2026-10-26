@@ -963,3 +963,10 @@ Owner on Lowgate's step 4 sketch of the castle: "It looks great, I'd like to see
 
 - The sketch takes the left column's spare height (at least 300px; the page scrolls below that) and scales to fill it: it is drawn in map units with `preserveAspectRatio="xMidYMid meet"`, fitting what you remember of Level 1 and the ways in with a hex and a half of padding. With a sketch, the lantern checkbox moves under the plan, so the ways in, the lantern choice and the plan stay in view at 1280 × 800 and 1440 × 900 (sketch 405px and 497px, ≥ 45% of the window).
 - Room and entrance names grow with the sketch but never under ~12.5px on screen, with a dark outline; a room name that would overlap an entrance's or another room's is left out (laid out again when the sketch resizes). The entrance markers and the job's mark scale with it; "Closest to the job" stays on the entrance card. The empty state ("You've never been inside...") stays compact.
+
+### 30.6 Numbers before and after (30.1, 30.2)
+
+Before = the V4.0 branch with venom merged (3755b14), after = this change; each built fresh from its commit.
+
+- Crew arena (`v37-crew-arena.ts 40`, SEED=1; 40 fights × 4 crews × 5 parties), dead / captured in all: 605 / 135 before, 564 / 137 after. Only the cells with a Sapper crew moved: the Ferrymen vs l1x4 lost 50% → 43%, vs l3x4 heroes dead 31 → 26; the Wake vs l2x4 lost 23% → 15% (dead 53 → 35), vs l3x4 30% → 33%, vs l1x4 20% → 18%. A softer crew Sapper (HP −1, armor −1) makes the Ferrymen and the Wake a little easier; the Wake's Spade's extra charge doesn't make up for it. The Sisters and the Gallows Choir are unchanged.
+- Sim (`v3-engine-sim.ts 10`, SEED=1,2,3; 30 delves): contracts done 22 → 20, hero deaths 23 → 24; crew fights 9 → 7, dead in them 15 → 12, captured 4 → 3. With a Sapper hired first (SAPPER=1): done 18 → 19, deaths 25 → 29 (a level 1 Sapper has 9 HP, no armor and one explosive). Runs diverge after the first delve, so single-seed swings are noise.

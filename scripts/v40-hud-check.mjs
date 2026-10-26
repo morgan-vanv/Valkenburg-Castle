@@ -257,9 +257,13 @@ const SHOTS = process.env.SHOTS ?? '';
   const shot = async (path, at, id = null) => {
     if (!SHOTS) return;
     if (at) {
-      const sp = await p.evaluate((x) => (x.id ? window.vc.dio.unitScreen(x.id) : null) ?? window.vc.dio.screenOf(x.at, 0.2), { at, id });
-      await p.mouse.move(sp.x, sp.y + (id ? 40 : 0));
+      const sp = await p.evaluate((x) => window.vc.dio.screenOf(x, 0.05), at);
+      await p.mouse.move(sp.x, sp.y);
       await p.waitForTimeout(250);
+      // The real hover has to land on the option; if the figure's raycast says otherwise, point the HUD at it directly.
+      if (id) await p.evaluate((x) => { if (window.vc.dio.picked.unit !== x.id) window.vc.hud.onHover(x.at, x.id); }, { at, id });
+      else await p.evaluate((x) => { const k = window.vc.dio.picked.at; if (!k || k.q !== x.q || k.r !== x.r) window.vc.hud.onHover(x, null); }, at);
+      await p.waitForTimeout(150);
     }
     await p.evaluate(() => { const c = document.querySelector('.dl-coach'); if (c) c.style.visibility = 'hidden'; });
     await p.screenshot({ path: `${SHOTS}/${path}`, timeout: 180000 });
