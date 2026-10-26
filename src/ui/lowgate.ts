@@ -384,7 +384,7 @@ function stepSummary(s: GameState, l: Loadout, step: Step, host: CampHost): stri
 
 function header(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   const c = s.campaign;
-  const left = h('div', { class: 'lg-brand' }, h('div', { class: 'lg-kick' }, `Delve ${c.delveCount + 1} · under the walls`), h('div', { class: 'lg-title' }, 'Lowgate'));
+  const left = h('div', { class: 'lg-brand', tabindex: 0, 'data-tip': `Lowgate · the village under the walls\nDelve ${c.delveCount + 1} is next. Keven camps here between delves.` }, h('div', { class: 'lg-kick' }, `Delve ${c.delveCount + 1} · under the walls`), h('div', { class: 'lg-title' }, 'Lowgate'));
   if (host.page === 'graves') {
     return h('header', { class: 'lg-head lg-head-graves' }, left, btn({ class: 'btn lg-btn', k: 'back-steps', onclick: () => goto(host, ui.lastStep) }, h('span', { 'aria-hidden': 'true' }, '←'), ' Back to the delve steps'));
   }
