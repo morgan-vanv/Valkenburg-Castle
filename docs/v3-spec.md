@@ -577,3 +577,40 @@ V3.8's exploration mode (section 22) is reverted and shelved: docs/shelved/explo
 ### 23.2 Prospectors keep off the party's way in
 
 - A prospector crew (the Lantern Sisters) never uses a rival entrance within 6 hexes of the entrance the party came in by; of the rest it takes the one farthest from the party's. It enters on round 6–9 (was 3–6), and waits while any hero stands within 6 hexes of its way in.
+
+## 24. V3.9: eyes front, the Burglar's flavor (owner, 2026-10-25 late night)
+
+New core tenets (claude/design-pillars.md): **flavor** (each class has a "flavor win" reflected in play) and **teach through gameplay** (warn only about what the party has seen; few "are you sure?" checks). New pillar: **watch each other's backs**. Overrides earlier sections where they disagree. Contract: `git diff main -- src/game/types.ts src/game/api.ts`.
+
+### 24.1 Enemy field of view; sleepers hear
+
+- Awake monsters and crew members see only their **front half**: the three hex directions centred on `facing`. Their **rear half** (the back direction and its two neighbours) is blind. (20.1's blind-arc rule becomes this: walking heroes in the rear half are noticed only when adjacent; sneaking heroes in the rear half are never noticed.) Noise still turns them to face it.
+- **Sleepers don't see at all.** They wake only by sound: the per-hex wake rolls of 20.1 are "sound" rolls (walking 50%, sneaking 10%, halved unlit, within 2), ending a move adjacent (walking: sure; sneaking: 25%), and noise as before. A sleeper never notices a hero by sight.
+
+### 24.2 Hero field of view
+
+- Every hero has `facing` (0..5). After a move it faces the direction of its last step; after an action aimed at a hex or figure it faces that way; at delve start every hero faces into the castle (away from the entrance). **Face** (`face` command) is free and unlimited in the player phase.
+- A hero sees only their **front half** (the three directions centred on `facing`), within their sight range (14.5/16.2/17.4 unchanged), plus far lights in that half. The rear half is unseen, adjacent hexes included. The party's visible set is the union of every active hero's front half: heroes cover each other's backs.
+- Hexes explored stay explored (layout memory); only *visibility* (units, intents, lit floor) follows the front halves. Enemy intents show only for enemies the party sees.
+- **Blindsided:** an attack on a hero from that hero's rear half gets **+1 slot** (monsters, crews, free swings, overwatch shots alike). If the attacker can't be seen by any hero, the hit lands as `unseenHit` (the log says "Something strikes Pim from behind"), and the attacker is visible to the party until the next player phase ends.
+- Overwatch fires only at enemies in the watcher's front half. Rally, Mend, Guard and other ally targeting are unaffected (heroes know where their friends are).
+
+### 24.3 The Burglar's flavor win
+
+- **No sneak penalty:** a Burglar sneaks at full walking pace (4, dash 4) and over rubble without extra noise (sneaking is silent anyway). (Already 4; make sure dash and rubble match.)
+- **Quietest feet:** a sneaking Burglar's sound rolls on sleepers are 5% (others 10%), ending adjacent 10% (others 25%); awake enemies notice a sneaking Burglar in their front half only within 2 if lit (others 4), only when adjacent if unlit (as others), 2 in the Hollow (others 3).
+- **Backstab** (replaces the old +1 slot on non-hunting monsters): a Burglar's melee attack from a hex in the target's **rear half** on a target that hasn't noticed the Burglar (asleep, or awake without the Burglar noticed) gets **+1 slot and double damage per hit** (before armor). Stacks with sneak attack (+1 slot). Works on monsters and crew members, not the Dragon or the Gloam. The preview names it ("Backstab: +1 slot, double damage").
+- Other heroes keep sneak attack (+1 slot on an unnoticed target) from any side.
+
+### 24.4 Previews only for what the party has seen ("teach through gameplay")
+
+- `Engine.seenEnemies(state)`: ids of monsters and crew members any hero has seen this delve (kept in the delve; dead ones dropped).
+- `Reach.risks` lists only enemies in that set: wake rolls only for seen sleepers, notice only for enemies currently visible, swings only for seen enemies. Unseen sleepers still roll and wake: walking blind into a room is punished.
+- The free-swing confirm dialog is removed (the preview's red sword stays). Confirms left: jumping down more than one level, ending the turn with heroes who did nothing.
+
+### 24.5 Presentation
+
+- No vision cones. Enemy facing as the existing small wedge; hero facing as a small wedge in the hero's colour; Face: key F, then click a neighbouring hex (or the hex the hero should face toward); the end of a move preview shows the facing it will leave.
+- Unseen rear hexes render like explored-but-not-visible (dimmed, no units). A hero alone with nobody covering their back shows a small "back exposed" badge on their card with a tooltip.
+- Remove the blind-arc wash shown while sneaking. Hovering a seen awake enemy shows its rear half faintly. When a Burglar is selected, seen unaware enemies get a small dagger marker on their rear hexes ("Backstab from here").
+- `unseenHit`: the hero flashes, an arrow from behind, log line "Something strikes Pim from behind".
