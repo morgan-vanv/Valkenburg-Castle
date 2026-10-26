@@ -4,7 +4,7 @@
 
 import { clearHeard } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { Intent } from './types';
+import type { HeroInDelve, Intent } from './types';
 import {
   ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
   GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SHOUT_NOISE,
@@ -23,10 +23,10 @@ import {
   adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
 } from './ai';
 import { HAMSTRING_RANGE } from './data';
-import { computeRivalIntents, rivalsAct } from './rivals';
+import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
-import { faceToward, fleePlan, noticeHero, perceivable } from './stealth';
+import { faceToward, fleePlan, hasNoticed, isSneaking, noticeHero, perceivable, quietFeet, wouldNotice } from './stealth';
 
 // ---------------------------------------------------------------- planning
 
@@ -316,23 +316,64 @@ export function computeIntents(c: Ctx): void {
 
 // ---------------------------------------------------------------- acting
 
+/** The orc's first-sight bellow (spec 16.4): once a delve, noise 5 at the orc. */
+function firstSightBellow(c: Ctx, m: MonsterX): void {
+  if (m.kind !== 'orc' || m.shouted) return;
+  m.shouted = true;
+  say(c, `${m.name} bellows.`);
+  makeNoise(c, m.at, 5, { what: 'shout' });
+}
+
 function perceive(c: Ctx, m: MonsterX, lit: Set<string>): void {
   if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || m.buried) return;
   const seen = targets(c).filter((t) => perceivable(c, m, t, lit, (a, b, L) => sees(c, a, b, L))).sort(byDist(m.at));
-  const t = seen[0];
+  // V4.0 (spec 26.3): its quarry: the one it was going for, while it still makes them out; else the nearest.
+  const t = seen.find((x) => x.id === m.intent?.targetId) ?? seen[0];
   if (t) {
-    // V3.7 (spec 20.1): every hero it makes out is noticed (remembered, faced, one event each); it hunts the nearest.
+    // V3.7 (spec 20.1): every hero it makes out is noticed (remembered, one event each); it hunts its quarry and faces it.
     for (const x of seen) if (x.hero) noticeHero(c, m, x.id);
     goHunting(c, m, t.at);
-    if (m.kind === 'orc' && !m.shouted) {
-      m.shouted = true;
-      say(c, `${m.name} bellows.`);
-      makeNoise(c, m.at, 5, { what: 'shout' });
-    }
+    firstSightBellow(c, m);
   } else if (m.awareness === 'hunting' && m.kind !== 'berserker') {
     // Lost sight: go alert and search the last hex it saw a hero on (focusAt) for a few rounds (spec 16.1); it forgets who it saw.
     loseQuarry(c, m);
   }
+}
+
+/**
+ * V4.0 (spec 26.2): noticing happens when it happens. In the player phase, hero `h` stands on a hex of a move
+ * (each step of a walk, or where a blink, fall, climb or grapple lands). Every awake monster on that level (not
+ * the Gloam, not the Dragon, not buried) that hasn't noticed them and would by the noticing rule (wouldNotice,
+ * the hero's last move mode) notices them now, with the world phase's effects: remembered, a `noticed` event at
+ * the hex, hunting (an unaware one turns to the hero; a hunting one keeps its facing and its quarry), the orc's
+ * first-sight bellow; it re-plans its intent when the command ends (`c.replan`). A waiting cutthroat crew is
+ * checked the same way and demands its toll. The move itself goes on. `before` runs once before the first
+ * event (a walk ends its `moved` segment there, so the view plays the "!" on the hex where it happened).
+ */
+export function noticeOnMove(c: Ctx, h: HeroInDelve, before?: () => void): void {
+  if (c.d.phase !== 'player' || c.s.stage !== 'delve' || h.status !== 'active' || h.veil > 0) return;
+  const lit = litSet(c.w, c.d);
+  const sneaking = isSneaking(h);
+  const quiet = quietFeet(c, h.heroId);
+  const who = onMap(c).filter(
+    (m) => m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness !== 'asleep' && m.at.level === h.at.level && !hasNoticed(m, h.heroId) && wouldNotice(c, m, h.at, sneaking, lit, quiet),
+  );
+  let flushed = false;
+  const once = () => {
+    if (flushed) return;
+    flushed = true;
+    before?.();
+  };
+  for (const m of who) {
+    if (!c.d.monsters.includes(m)) continue;
+    once();
+    const hunting = m.awareness === 'hunting';
+    noticeHero(c, m, h.heroId);
+    if (!hunting) goHunting(c, m, h.at);
+    (c.replan ??= new Set()).add(m.id);
+    firstSightBellow(c, m);
+  }
+  crewNotice(c, h.heroId, once);
 }
 
 /** An alert searcher's clock runs down; at zero it goes back to its route or post (spec 16.1). */

@@ -7,7 +7,7 @@ import type { ActionKind, ActionTarget, Command, GameEvent, GameState, HeroClass
 import { MONSTERS } from './data';
 import { brightnessOf, glimpseSet, noiseField, World } from './world';
 import type { DelveX, GameStateX, HeroX, MonsterX } from './state';
-import { dirIndex, wakeChance, wouldNotice } from './stealth';
+import { dirIndex, moveRisks, wakeChance, wouldNotice } from './stealth';
 import { litSet } from './world';
 import { makeNoise } from './common';
 import { makeHero } from './camp';
@@ -3108,9 +3108,12 @@ describe('V3.7 stealth and swings', () => {
       const m = monster(s, 'orc', at(2, 16, 3), 'asleep'); // 2 from the rubble at (14,3), 3 from the destination
       const path = [at(2, 14, 3), at(2, 14, 4)];
       const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: false });
-      expect(mon(r.state, m.id).awareness).toBe('alert');
-      expect(mon(r.state, m.id).focusAt).toEqual(at(2, 14, 3));
-      expect(r.events.filter((x) => x.type === 'noise')).toHaveLength(1);
+      // The rubble's noise wakes it facing (14,3); V4.0 (spec 26.2): awake now, it notices Brann on his next hex.
+      expect(r.events.find((x) => x.type === 'awake' && x.id === m.id)).toMatchObject({ awareness: 'alert' });
+      expect(r.events.find((x) => x.type === 'noticed' && x.by === m.id)).toMatchObject({ hero: 'brann', at: at(2, 14, 4) });
+      expect(mon(r.state, m.id).awareness).toBe('hunting');
+      expect(mon(r.state, m.id).focusAt).toEqual(at(2, 14, 4));
+      expect(r.events.filter((x) => x.type === 'noise' && x.radius !== 5)).toHaveLength(1); // (5: the orc's bellow)
       // Sneaking (2: the rubble alone): no noise; standing 2 from it rolls 10% (lit by the forge). Both outcomes exist, seeded.
       const creep = [at(2, 14, 3)];
       const quiet = until(s, { type: 'move', heroId: 'brann', path: creep, sneak: true }, (_ev, st) => st.delve!.monsters[0]!.awareness === 'asleep');
@@ -3456,7 +3459,7 @@ describe('V3.7 stealth and swings', () => {
   });
 
   describe('20.1 move preview risks', () => {
-    it('lists every wake roll on the path with its chance, and the awake enemies that would notice the hero at the destination', () => {
+    it('lists every wake roll on the path with its chance, and the awake enemies that would notice the hero on the way (V4.0: the first hex where they would)', () => {
       const s = stealthDelve({ lit: true });
       put(s, 'brann', at(2, 7, 1));
       const sleeper = monster(s, 'orc', at(2, 10, 2), 'asleep');
@@ -3468,10 +3471,10 @@ describe('V3.7 stealth and swings', () => {
         { at: at(2, 8, 1), id: sleeper.id, chance: 50 },
         { at: at(2, 9, 1), id: sleeper.id, chance: 100 },
       ]);
-      expect(walk.risks?.notice).toEqual([{ id: watcher.id }]); // 4 away, lit, walking
+      expect(walk.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 8, 1) }]); // already 5 away on the first hex, lit, walking
       const sneak = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 9, 1)))!;
       expect(sneak.risks?.wake.map((x) => x.chance)).toEqual([10, 25]);
-      expect(sneak.risks?.notice).toEqual([{ id: watcher.id }]); // 4 away, lit, sneaking: still seen
+      expect(sneak.risks?.notice).toEqual([{ id: watcher.id, at: at(2, 9, 1) }]); // 4 away, lit, sneaking: still seen
       const short = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 8, 1)))!;
       expect(short.risks?.notice).toEqual([]); // 5 away, sneaking
       // Once it has noticed Brann it is no longer listed.
@@ -4020,13 +4023,15 @@ describe('V3.7 kit and calm', () => {
       expect(hero(quiet.state, 'brann').at).toEqual(at(3, 12, 4));
     });
 
-    it('stops when something notices a hero during a castle turn: calm ends and every hero gets a fresh player phase', () => {
+    it('stops when something notices a hero on the way: calm ends and every hero gets a fresh player phase', () => {
       const s = hollow();
-      const o = monster(s, 'orc', at(3, 11, 4), 'alert'); // 6 from (5,4), where the first castle turn finds Brann, lit and walking
+      const o = monster(s, 'orc', at(3, 11, 4), 'alert'); // watching all round; 8 from (3,4): in the Hollow a walking hero is noticed there
       hero(s, 'brann').acted = true;
       const r = ok(s, { type: 'move', heroId: 'brann', path: east(1, 9), sneak: false });
-      expect(hero(r.state, 'brann').at).toEqual(at(3, 5, 4));
-      expect(r.events.some((x) => x.type === 'noticed' && x.by === o.id)).toBe(true);
+      // V4.0 (spec 26.2): noticed at the step that brought Brann into range, not at the next castle turn.
+      expect(hero(r.state, 'brann').at).toEqual(at(3, 3, 4));
+      expect(r.events.find((x) => x.type === 'noticed' && x.by === o.id)).toMatchObject({ hero: 'brann', at: at(3, 3, 4) });
+      expect(worlds(r.events)).toBe(0);
       expect(r.events.find((x) => x.type === 'calm')).toEqual({ type: 'calm', calm: false, why: 'An orc hunts Brann.' });
       expect(r.state.delve!.calm).toBe(false);
       expect(r.state.delve!.phase).toBe('player');
@@ -4864,5 +4869,234 @@ describe('V3.9.3 hearing', () => {
     expect(a.mons).toBe(b.mons);
     expect(a.rng).toBe(b.rng);
     expect(b.heard).toBe(0);
+  });
+});
+
+describe('V4.0 play-test fixes (spec 26)', () => {
+  const mon = (s: GameState, id: string) => s.delve!.monsters.find((m) => m.id === id) as MonsterX;
+  /** A Level 2 scene: Keven (the lantern) far off on Level 1, so Level 2 is lit only by the forge. */
+  function scene(extra: [string, string, HeroClass][] = [], heroes = ['keven', 'brann']) {
+    const s = delve({ heroes, extra });
+    put(s, 'keven', at(1, 2, 7));
+    s.delve!.light = 20;
+    s.delve!.lanternBearer = 'keven';
+    return s;
+  }
+
+  describe('26.1 Walk/Sneak per hero', () => {
+    it('each hero has their own setting: Burglars start on Sneak, everyone else on Walk; setMoveMode changes only that hero', () => {
+      let s = delve();
+      expect(s.delve!.heroes.map((h) => [h.heroId, h.moveMode])).toEqual([['keven', 'walk'], ['brann', 'walk'], ['pim', 'sneak'], ['aldous', 'walk']]);
+      s = ok(s, { type: 'setMoveMode', heroId: 'brann', sneak: true }).state;
+      expect(hero(s, 'brann').moveMode).toBe('sneak');
+      expect(hero(s, 'keven').moveMode).toBe('walk');
+      expect(hero(s, 'pim').moveMode).toBe('sneak');
+      s = ok(s, { type: 'setMoveMode', heroId: 'pim', sneak: false }).state;
+      expect(hero(s, 'pim').moveMode).toBe('walk');
+      // Free: nothing else changes, no turn is spent; it survives a save.
+      expect([hero(s, 'brann').moved, hero(s, 'brann').acted]).toEqual([false, false]);
+      expect(e.deserialize(e.serialize(s))!.delve!.heroes.find((h) => h.heroId === 'brann')!.moveMode).toBe('sneak');
+      hero(s, 'aldous').status = 'downed';
+      expect(e.apply(s, { type: 'setMoveMode', heroId: 'aldous', sneak: true }).error).toBeTruthy();
+    });
+
+    it('a move without `sneak`, reach and the noise preview use the hero\'s own setting; an explicit `sneak` still wins', () => {
+      let s = alarm(delve());
+      put(s, 'brann', GATE);
+      expect(Math.max(...e.reachable(s, 'brann').map((r) => r.cost))).toBe(4);
+      expect(e.moveNoise(s, 'brann')).toBe(1);
+      s = ok(s, { type: 'setMoveMode', heroId: 'brann', sneak: true }).state;
+      expect(Math.max(...e.reachable(s, 'brann').map((r) => r.cost))).toBe(2);
+      expect(e.moveNoise(s, 'brann')).toBe(0);
+      const r = ok(s, { type: 'move', heroId: 'brann', path: [at(1, 5, 7), at(1, 6, 7)] });
+      expect((hero(r.state, 'brann') as HeroX).sneaked).toBe(true);
+      expect(r.events.some((x) => x.type === 'noise')).toBe(false);
+      // Pim the Burglar sneaks at 4 by default.
+      put(s, 'pim', at(1, 3, 7));
+      expect(Math.max(...e.reachable(s, 'pim').map((r) => r.cost))).toBe(4);
+      const p = ok(s, { type: 'move', heroId: 'pim', path: [at(1, 3, 8)] });
+      expect((hero(p.state, 'pim') as HeroX).sneaked).toBe(true);
+      // Explicit walk overrides the setting.
+      const w2 = ok(s, { type: 'move', heroId: 'brann', path: [at(1, 5, 7)], sneak: false });
+      expect((hero(w2.state, 'brann') as HeroX).sneaked).toBe(false);
+      expect(hero(w2.state, 'brann').moveMode).toBe('sneak');
+    });
+  });
+
+  describe('26.2 noticing happens when it happens', () => {
+    // An orc in the shrine's corner (1,1) looking north-east: Brann walks (3,3) -> (4,3) -> (4,4): only (4,3) is in its view.
+    const M = at(2, 1, 1);
+    const path = [at(2, 4, 3), at(2, 4, 4)];
+    function through() {
+      const s = scene();
+      put(s, 'brann', at(2, 3, 3));
+      const m = monster(s, 'orc', M, 'alert');
+      m.facing = 1;
+      m.intent = { kind: 'wait' };
+      return { s, m };
+    }
+
+    it('a hero walking into an awake monster\'s view and out again is spotted on the hex in view, in the player phase; the move goes on', () => {
+      const { s, m } = through();
+      const lit = litSet(w, s.delve as DelveX);
+      // The geometry: only the middle hex is in its noticing range.
+      expect([at(2, 3, 3), ...path].map((p) => wouldNotice(ctx(s), m, p, false, lit))).toEqual([false, true, false]);
+      const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: false });
+      expect(hero(r.state, 'brann').at).toEqual(at(2, 4, 4));
+      expect(r.state.delve!.phase).toBe('player');
+      const i = r.events.findIndex((x) => x.type === 'noticed');
+      expect(r.events[i]).toEqual({ type: 'noticed', by: m.id, hero: 'brann', at: at(2, 4, 3), faced: true });
+      // The view plays the walk up to that hex, the "!", then the rest of the walk.
+      const moves = r.events.flatMap((x, j) => (x.type === 'moved' && x.id === 'brann' ? [[j, x.path]] : [])) as [number, Pos[]][];
+      expect(moves.map(([, p]) => p)).toEqual([[at(2, 4, 3)], [at(2, 4, 4)]]);
+      expect(moves[0]![0]).toBeLessThan(i);
+      expect(moves[1]![0]).toBeGreaterThan(i);
+      // Hunting, turned to where it saw him, and the intent shown for the coming world phase is the new plan.
+      const o = mon(r.state, m.id);
+      expect(o.awareness).toBe('hunting');
+      expect(o.noticedIds).toEqual(['brann']);
+      expect(o.facing).toBe(dirIndex(M, at(2, 4, 3)));
+      expect(o.intent).toMatchObject({ targetId: 'brann' });
+      expect(['move', 'attack']).toContain(o.intent!.kind);
+      // The orc's first-sight bellow goes off now too (noise 5 at the orc), not at End turn.
+      expect(r.events.some((x) => x.type === 'say' && /bellows/.test(x.text))).toBe(true);
+      expect(r.events).toContainEqual({ type: 'noise', at: M, radius: 5 });
+      expect(o.shouted).toBe(true);
+      // The move preview agrees: it lists the orc, at the hex where it would happen.
+      // (The pathfinder's own way to (4,4) is the single step; the preview of this path is asked directly.)
+      const seenIt = new Set([m.id]);
+      const inView = new Set([posKey(M)]);
+      expect(moveRisks(ctx(s), hero(s, 'brann'), path, false, lit, seenIt, inView).notice).toEqual([{ id: m.id, at: at(2, 4, 3) }]);
+      expect(moveRisks(ctx(s), hero(s, 'brann'), path, true, lit, seenIt, inView).notice).toEqual([]);
+      // The same seed and move give the same game.
+      expect(ok(s, { type: 'move', heroId: 'brann', path, sneak: false }).events).toEqual(r.events);
+    });
+
+    it('sneaking past the same orc (lit 4 / unlit 1) isn\'t noticed; the preview says so too', () => {
+      const { s, m } = through();
+      const r = ok(s, { type: 'move', heroId: 'brann', path, sneak: true });
+      expect(r.events.some((x) => x.type === 'noticed')).toBe(false);
+      expect(mon(r.state, m.id).awareness).toBe('alert');
+      const reach = e.reachable(s, 'brann', true).find((x) => samePos(x.to, at(2, 4, 4)));
+      expect(reach?.risks?.notice).toEqual([]);
+    });
+
+    it('a blink lands in a monster\'s view: noticed at the landing hex, at once', () => {
+      const s = scene([['sela', 'Sela', 'shadowmancer']], ['keven', 'sela']);
+      put(s, 'sela', at(2, 8, 1));
+      look(s, 'sela', at(2, 12, 1));
+      s.delve!.lanternBearer = 'sela'; // lit: noticed walking within 8; she starts 9 from it
+      const m = monster(s, 'orc', at(2, 17, 1), 'alert');
+      m.facing = 3; // looking west down the row
+      m.intent = { kind: 'wait' };
+      expect(e.reachable(s, 'sela', false).length).toBeGreaterThan(0);
+      const r = act(s, 'sela', 'blink', { at: at(2, 12, 1) });
+      expect(r.events.find((x) => x.type === 'noticed')).toEqual({ type: 'noticed', by: m.id, hero: 'sela', at: at(2, 12, 1), faced: true });
+      expect(mon(r.state, m.id).awareness).toBe('hunting');
+      expect(mon(r.state, m.id).intent).toMatchObject({ targetId: 'sela' });
+    });
+
+    it('a sleeper woken by a step notices from the hero\'s next step on, not on the step that woke it', () => {
+      const s = scene();
+      put(s, 'brann', at(2, 8, 1));
+      look(s, 'brann', at(2, 9, 1));
+      const m = monster(s, 'orc', at(2, 10, 2), 'asleep');
+      m.facing = 3;
+      // Ending the move next to it wakes it for sure (walking): alert, not yet hunting, until the world phase.
+      const end = ok(s, { type: 'move', heroId: 'brann', path: [at(2, 9, 1)], sneak: false });
+      expect(mon(end.state, m.id).awareness).toBe('alert');
+      expect(end.events.some((x) => x.type === 'noticed')).toBe(false);
+      // Woken on the first hex, it sees him on the second.
+      const on = ok(s, { type: 'move', heroId: 'brann', path: [at(2, 9, 1), at(2, 10, 1)], sneak: false });
+      expect(on.events.find((x) => x.type === 'noticed')).toMatchObject({ by: m.id, at: at(2, 10, 1) });
+      expect(mon(on.state, m.id).awareness).toBe('hunting');
+    });
+
+    it('a waiting cutthroat crew demands its toll on the step that brings a hero within 6 in its sight', () => {
+      const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
+      put(s, 'brann', at(2, 8, 1));
+      look(s, 'brann', at(2, 9, 1));
+      const walk = [at(2, 9, 1), at(2, 10, 1), at(2, 11, 1), at(2, 12, 1)];
+      const r = ok(s, { type: 'move', heroId: 'brann', path: walk, sneak: false });
+      const first = walk.find((p) => s.delve!.rivals!.members.some((x) => distance(x.at, p) <= 6))!;
+      expect(r.events.find((x) => x.type === 'noticed')).toMatchObject({ hero: 'brann', at: first });
+      expect(crewOf(r.state).stance).toBe('demanding');
+      expect(e.intents(r.state)['r1']?.kind).toBe('toll');
+    });
+  });
+
+  describe('26.3 when monsters turn', () => {
+    // The owner's report: an orc hunting the Ranger, adjacent to her; Keven walks to the hex behind it.
+    function engaged() {
+      const s = scene([['rhea', 'Rhea', 'ranger']], ['keven', 'rhea']);
+      put(s, 'rhea', at(2, 15, 1));
+      put(s, 'keven', at(2, 11, 1));
+      s.delve!.lanternBearer = 'keven';
+      const m = monster(s, 'orc', at(2, 14, 1), 'hunting');
+      m.hp = 40;
+      m.facing = 0; // at Rhea, east of it
+      m.noticedIds = ['rhea'];
+      (m as MonsterX).shouted = true;
+      m.intent = { kind: 'attack', targetId: 'rhea', to: { ...m.at } };
+      return { s, m };
+    }
+
+    it('a hunting monster doesn\'t turn toward a hero walking up behind it (nor the walking noise); it still notices them', () => {
+      const { s, m } = engaged();
+      const r = ok(s, { type: 'move', heroId: 'keven', path: [at(2, 12, 1), at(2, 13, 1)], sneak: false });
+      expect(hero(r.state, 'keven').at).toEqual(at(2, 13, 1));
+      const o = mon(r.state, m.id);
+      expect(o.facing).toBe(0);
+      expect(o.noticedIds).toEqual(['rhea', 'keven']);
+      expect(r.events.find((x) => x.type === 'noticed')).toEqual({ type: 'noticed', by: m.id, hero: 'keven', at: at(2, 13, 1), faced: false });
+      // Still going for Rhea.
+      expect(e.intents(r.state)[m.id]).toMatchObject({ kind: 'attack', targetId: 'rhea' });
+    });
+
+    it('a hit turns it to face the attacker, after the hit; a miss doesn\'t', () => {
+      const { s, m } = engaged();
+      const moved = ok(s, { type: 'move', heroId: 'keven', path: [at(2, 12, 1), at(2, 13, 1)], sneak: false }).state;
+      const cmd: Command = { type: 'act', heroId: 'keven', action: 'attack', target: { id: m.id }, focus: 0 };
+      const hit = until(moved, cmd, (ev) => ev.some((x) => x.type === 'hit' && x.attacker === 'keven'));
+      expect(mon(hit.state, m.id).facing).toBe(3); // west, at Keven
+      const miss = until(moved, cmd, (ev) => ev.some((x) => x.type === 'miss' && x.attacker === 'keven'));
+      expect(mon(miss.state, m.id).facing).toBe(0);
+      // In the world phase it still strikes Rhea (its quarry), facing her again.
+      const w1 = ok(hit.state, { type: 'endTurn' });
+      expect(w1.events.some((x) => x.type === 'roll' && x.who === m.id)).toBe(true);
+      expect(mon(w1.state, m.id).facing).toBe(0);
+    });
+
+    it('an unaware (alert) monster still turns to a noise; a hunting one doesn\'t', () => {
+      const s = scene();
+      put(s, 'brann', at(2, 3, 3));
+      const a = monster(s, 'orc', at(2, 14, 1), 'alert');
+      a.facing = 0;
+      const h = monster(s, 'orc', at(2, 14, 3), 'hunting');
+      h.facing = 0;
+      makeNoise(ctx(s), at(2, 11, 2), 4);
+      expect(a.facing).toBe(dirIndex(at(2, 14, 1), at(2, 11, 2)));
+      expect(h.facing).toBe(0);
+    });
+
+    it('noticing several heroes at once, a monster faces its quarry, not the last one noticed', () => {
+      const s = scene([['rhea', 'Rhea', 'ranger']], ['keven', 'rhea']);
+      put(s, 'keven', at(2, 12, 1)); // 2 west
+      put(s, 'rhea', at(2, 17, 1)); // 3 east
+      s.delve!.lanternBearer = 'keven';
+      const m = monster(s, 'orc', at(2, 14, 1), 'alert');
+      m.stuck = 3; // stands where it is, so only noticing turns it
+      (m as MonsterX).shouted = true;
+      const r = ok(s, { type: 'endTurn' });
+      expect(mon(r.state, m.id).noticedIds?.sort()).toEqual(['keven', 'rhea']);
+      expect(mon(r.state, m.id).facing).toBe(3); // the nearest, Keven: its quarry
+      // Already hunting Rhea, it keeps to her when it next looks round, though Keven is nearer.
+      const t = structuredClone(r.state);
+      const o = mon(t, m.id);
+      o.intent = { kind: 'wait', targetId: 'rhea' };
+      o.facing = 5;
+      const r2 = ok(t, { type: 'endTurn' });
+      expect(mon(r2.state, m.id).facing).toBe(0);
+    });
   });
 });

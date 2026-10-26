@@ -16,7 +16,7 @@ import { chance, int, pick, random } from './rng';
 import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type RivalX } from './state';
 import {
   chestLoot, crewDemand, hd, heroName, hurtAny, makeItem, makeNoise, monsterArmor, noteOnce, occupant, onMap, partyValue, putOnGround,
-  rivalsOnMap, roll, valueOf, activeHeroes,
+  rivalsOnMap, roll, turnOnHit, valueOf, activeHeroes,
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
 import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, walk, type Target } from './ai';
@@ -275,21 +275,26 @@ export function nearestHero(c: Ctx, r: RivalX): Target | undefined {
  * Spec 18.5: a waiting cutthroat crew notices the party when an active hero comes within 6 of a
  * member in line of sight (noise is heard in makeNoise). Then they demand the toll.
  */
-export function crewNotice(c: Ctx): void {
+export function crewNotice(c: Ctx, onlyHero?: string, before?: () => void): void {
   const cr = c.d.rivals;
   if (!cr || cr.temperament !== 'cutthroat' || cr.stance !== 'waiting') return;
   // V3.7 (spec 20.1): a waiting crew notices like an awake monster: by light, sneaking and facing, never beyond 6.
+  // V4.0 (spec 26.2): `onlyHero` checks one hero where they stand now (a step of their move); `before` runs once before the first event.
   const lit = litSet(c.w, c.d);
-  const ts = targets(c).filter((t) => t.hero);
+  const ts = targets(c).filter((t) => t.hero && (!onlyHero || t.id === onlyHero));
   let seen = false;
   for (const r of rivalsOnMap(c)) {
     const t = ts.find((x) => within(x.at, r.at, CUTTHROAT_SIGHT) && wouldNotice(c, r, x.at, isSneaking(x.hero!), lit, quietFeet(c, x.id)));
     if (!t) continue;
+    if (!seen) before?.();
     seen = true;
     faceToward(r, t.at);
-    c.ev.push({ type: 'noticed', by: r.id, hero: t.id });
+    c.ev.push({ type: 'noticed', by: r.id, hero: t.id, at: { ...t.at }, faced: true });
   }
-  if (seen) crewDemand(c);
+  if (seen) {
+    crewDemand(c);
+    crewAim(c);
+  }
 }
 
 /** Spec 18.6: what the crew is after, for the parley card (set while spotted). */
@@ -534,6 +539,7 @@ function hitMonster(c: Ctx, r: RivalX, id: string): void {
     return;
   }
   hurtAny(c, m.id, rr.hits * Math.max(1, dmg - monsterArmor(c, m)) + (rr.perfect ? 1 : 0), r.id, { crit: rr.perfect });
+  turnOnHit(c, m.id, r.id); // V4.0 (spec 26.3)
 }
 
 function hiredAct(c: Ctx, r: RivalX): void {

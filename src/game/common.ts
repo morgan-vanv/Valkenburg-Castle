@@ -496,7 +496,8 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;
-    faceToward(m, at);
+    // V4.0 (spec 26.3): an unaware monster turns toward the noise; a hunting one keeps its facing.
+    if (m.awareness !== 'hunting') faceToward(m, at);
     if (m.kind === 'dragon') {
       if (m.awareness === 'asleep' && radius >= DRAGON_WAKE_NOISE) {
         m.awareness = 'hunting';
@@ -516,6 +517,24 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
       m.focusAt = { ...at };
     }
   }
+}
+
+/**
+ * V4.0 (spec 26.3): a hit turns a monster (not the Gloam) or crew member to face its attacker, after the hit
+ * has resolved (a backstab lands from behind, then it faces the stabber). Called for single-target attacks
+ * that hit: strikes, shots, free swings, overwatch, firebolt, night thorn, briar, hamstring, shove and
+ * knockback. Not for misses, and not for area damage (fireball, gust, blasts, fire).
+ */
+export function turnOnHit(c: Ctx, targetId: string, attackerId: string): void {
+  const from = hd(c, attackerId)?.at ?? rivalsOnMap(c).find((x) => x.id === attackerId)?.at ?? c.d.monsters.find((x) => x.id === attackerId)?.at;
+  if (!from) return;
+  const m = c.d.monsters.find((x) => x.id === targetId);
+  if (m) {
+    if (m.kind !== 'gloam' && !m.buried) faceToward(m, from);
+    return;
+  }
+  const r = rivalsOnMap(c).find((x) => x.id === targetId);
+  if (r) faceToward(r, from);
 }
 
 /** The monster has a quarry: hunting, no longer searching or walking back. */

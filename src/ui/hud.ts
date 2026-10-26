@@ -67,7 +67,10 @@ export function hitOdds(slots: number, chance: number, locked: number): number[]
 export class Hud {
   readonly root: HTMLElement;
   selectedId: string | null = null;
-  sneak = false;
+  /** V4.0 (spec 26.1): the selected hero's own Walk/Sneak setting (engine state, `moveMode`). */
+  get sneak(): boolean {
+    return this.selected()?.moveMode === 'sneak';
+  }
   /** V3.9 (24.2): Face mode (key F): the next click on a hex turns the selected hero toward it. */
   facing = false;
   /** V3.7 (20.5): free move brings the party along (default on). */
@@ -1620,6 +1623,8 @@ export class Hud {
     const d = this.state!.delve!;
     const out: HTMLElement[] = [];
     const chip = (cls: string, text: string, tip: string) => out.push(h('span', { class: `chip ${cls}`, title: tip }, text));
+    // V4.0 (spec 26.1): this hero is set to sneak (each hero keeps their own Walk/Sneak).
+    if (hd.status === 'active' && hd.moveMode === 'sneak') chip('sneak', '◌ Sneak', `${name} is set to Sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S (or the Walk/Sneak buttons) to change it.\nMonsters judge by the last move made: standing still after a walk still counts as walking.`);
     if (hd.heroId === d.lanternBearer && hd.status === 'active') {
       const open = this.lanternOpen();
       chip(`lantern ${open ? '' : 'shut'}`, open ? '◆ Lantern' : '◇ Lantern', `${name} carries the lantern${open ? '' : ' (shuttered)'}.\nIts light goes where ${name} goes. Shutter or open it with L (free); Pass lantern hands it to a hero next to you.`);
@@ -2368,9 +2373,11 @@ export class Hud {
     this.bannerEl.classList.add('hidden');
   }
 
+  /** V4.0 (spec 26.1): Walk/Sneak is per hero: set the selected hero's (a free command; the engine keeps it). */
   private setSneak(on: boolean): void {
-    this.sneak = on;
-    this.refresh();
+    const sel = this.selected();
+    if (!sel || this.busy || this.sneak === on) return;
+    void this.host.send({ type: 'setMoveMode', heroId: sel.heroId, sneak: on });
   }
 
   private endTurn(): void {

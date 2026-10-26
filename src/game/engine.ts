@@ -12,7 +12,7 @@ import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
-import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, moveNoise, reachable, refreshSight, seenSet, spec } from './delve';
+import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
 import { applyOpenWays, castleMemory, entranceList, startWays } from './ways';
@@ -56,7 +56,10 @@ export function createEngine(castle: CastleDef): Engine {
     let err: string | undefined;
     switch (command.type) {
       case 'move':
-        err = doMove(c, command.heroId, command.path, command.sneak, command.follow);
+        err = doMove(c, command.heroId, command.path, command.sneak ?? sneakSetting(c, command.heroId), command.follow);
+        break;
+      case 'setMoveMode':
+        err = doSetMoveMode(c, command.heroId, command.sneak);
         break;
       case 'act':
         err = doAct(c, command.heroId, command.action, command.target, command.focus);
@@ -84,7 +87,9 @@ export function createEngine(castle: CastleDef): Engine {
     // Monsters woken mid-turn get an intent the player can see.
     if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
-      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.intent) m.intent = planMonster(c, m, lit).intent;
+      // V4.0 (spec 26.2): monsters that noticed a hero during the command re-plan (keeping their quarry), so the shown intent is right.
+      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
+      c.replan = undefined;
       // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
       updateCalm(c);
     }
@@ -104,7 +109,7 @@ export function createEngine(castle: CastleDef): Engine {
       // Queries never mutate: occupancy and dijkstra are read-only.
       const c = rctx(state);
       if (!c || state.stage !== 'delve') return [];
-      return reachable(c, heroId, sneak);
+      return reachable(c, heroId, sneak ?? sneakSetting(c, heroId));
     },
 
     actions(state, heroId) {
@@ -166,8 +171,9 @@ export function createEngine(castle: CastleDef): Engine {
       return out;
     },
 
-    moveNoise(_state, _heroId, sneak) {
-      return moveNoise(sneak);
+    moveNoise(state, heroId, sneak) {
+      const c = rctx(state);
+      return moveNoise(sneak ?? (c ? sneakSetting(c, heroId) : false));
     },
 
     inLight(state, at: Pos) {
@@ -213,7 +219,7 @@ export function createEngine(castle: CastleDef): Engine {
     },
     calmReach(state, heroId, sneak) {
       const c = rctx(state);
-      return c ? calmReach(c, heroId, sneak) : [];
+      return c ? calmReach(c, heroId, sneak ?? sneakSetting(c, heroId)) : [];
     },
 
     blastPreview(state, at) {
