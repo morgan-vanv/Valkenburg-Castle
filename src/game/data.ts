@@ -72,12 +72,13 @@ export const CLASSES: Record<HeroClass, ClassDef> = {
     main: 'finesse',
     mana: 0,
   },
+  // V4.0 (spec 30.1, owner): a little squishier than the Sellsword (was HP 10, Might 65, armor 1, Brace).
   sapper: {
     name: 'Sapper',
-    hp: 10,
-    stats: { might: 65, finesse: 50, wits: 45, nerve: 60 },
+    hp: 9,
+    stats: { might: 60, finesse: 50, wits: 45, nerve: 60 },
     weapon: { name: 'Hammer', slots: 3, stat: 'might', dmg: 2 },
-    armor: 1,
+    armor: 0,
     main: 'might',
     mana: 0,
   },
@@ -132,11 +133,10 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
   sapper: {
     role: 'Breacher: blows walls, digs through.',
     abilities: [
-      'Satchel: 3 charges each delve; bought charges add to them.',
+      'Improvised explosives: 1 a level each delve; bought charges add to them.',
       'Set a charge (fuse 1 or 2) on an adjacent hex, door, chest or wall; throw one up to 3 hexes (fuse 1).',
       'Blast: 4 dmg within 1 and thrown back, 2 within 2; opens locks and breaks walls on Levels 1 and 2. Noise 8. The Sapper takes 0, friends half.',
       'Dig: clear adjacent rubble or a cracked wall. Noise 4.',
-      'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.',
     ],
   },
   pyromancer: {
@@ -298,7 +298,7 @@ export const FREE_MOVE = { enabled: false };
 export const FACING = { faceCommand: false, turnOnAction: true };
 /** V3.9.3 (spec 24.8): heroes hear unseen enemies (footsteps, loud sounds). Off only in tests that prove monsters don't care. */
 export const HEARING = { enabled: true };
-/** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
+/** Brace (heir, sellsword; V4.0 spec 30.1: not the sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
 export const BRACE_DMG = 1;
 export const BRACE_CHANCE = -15;
 /** The forge shield: ranged hits do 1 less, 2 less while braced. 50 gold, needs the smith. */
@@ -404,8 +404,15 @@ export const START_GOLD = 90;
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
 export const TAVERN_SIZE = 4;
-/** V3.7 (spec 20.3): the Sapper's own charges each delve (V4.0, spec 26.5: improvised explosives). */
-export const SAPPER_CHARGES = 3;
+/**
+ * Class kit per delve (V4.0, spec 30.2, owner): the Sapper's improvised explosives and the Burglar's improvised picks,
+ * this many a hero (or crew member) level: level 1 brings 1, level 6 brings 6. Was a flat 3 explosives and 1 pick.
+ */
+export const KIT_PER_LEVEL = 1;
+/** Class kit uses a hero or crew member of this level brings each delve (spec 30.2). */
+export function kitPerDelve(level: number | undefined): number {
+  return Math.max(1, Math.floor(level ?? 1)) * KIT_PER_LEVEL;
+}
 export const BLAST_INNER_DMG = 4;
 export const BLAST_OUTER_DMG = 2;
 export const BLAST_NOISE = 8;

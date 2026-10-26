@@ -10,7 +10,7 @@ import type { Intent, Item } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CLASSES, CREW_PURSE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
   HIRE_KEEP, PROSPECTOR_CHANCE, PROSPECTOR_ENTERS, PROSPECTOR_KEEP_OFF, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES,
-  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, BURGLAR_WALK, SAPPER_CHARGES, SNEAK_ATTACK_SLOTS, WALK_MOVE, type CrewDef, type RivalStats,
+  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, BURGLAR_WALK, SNEAK_ATTACK_SLOTS, WALK_MOVE, type CrewDef, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type MonsterX, type RivalX } from './state';
@@ -24,7 +24,7 @@ import { faceToward, fleePlan, inFrontHalf, inRearHalf, isSneaking, quietFeet, w
 import {
   crewApproach, crewGo, crewOpenChest, crewPickSlots, crewPicker, crewWalk, crewWorkLock, forgetSeenBy, routeIntent, tell, type CrewRoute,
 } from './crewmove';
-import { satchelName } from './charges';
+import { classKit } from './charges';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
 import { blast } from './charges';
@@ -68,8 +68,11 @@ function member(s: GameStateX, id: string, def: CrewDef, m: CrewDef['members'][n
     ...(cls.mana ? { charges: cls.mana } : {}),
     ...(m.cls === 'shadowmancer' ? { veil: 0 } : {}),
   };
-  // V4.0 (spec 28.6): a crew Sapper brings improvised explosives like a hero Sapper (3, slotless, its own kit).
-  if (m.cls === 'sapper') r.pack!.unshift({ ...makeItem({ s }, 'improvised-charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
+  // V4.0 (spec 28.6, 30.2): class kit like a hero's, a use a crew level: a crew Sapper's improvised explosives (spent
+  // before its bought charges), a crew Burglar's improvised picks (used when she has no lockpicks). Slotless, its own.
+  const kit = classKit({ s }, m.cls, def.level);
+  if (kit && m.cls === 'sapper') r.pack!.unshift(kit);
+  else if (kit) r.pack!.push(kit);
   return r;
 }
 

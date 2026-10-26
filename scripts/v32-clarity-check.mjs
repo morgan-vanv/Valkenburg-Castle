@@ -1,7 +1,8 @@
 // Spec 15.7 checks in the real UI, headless, by DOM assertions (no screenshots unless SHOT=<path>):
 //   - walking Keven onto the tower stair shows "Take stairs ↓ Level 2" in the bar, the hex hint
 //     "Stairs here", the "↓ L2" marker, and clicking the button puts him on Level 2;
-//   - a blocked take (pack full next to loot) shows a greyed button with its reason and flashes it;
+//   - a blocked take (pack full next to loot): V4.0 hides unusable actions from the hotbar, so the
+//     check is now that no Take button shows and the pile's hover card gives the reason;
 //   - the goal box names the objective's location once its hex is explored, and the beacon tag shows.
 // V4.0 HUD: the stairs are a glowing "Stairs" button (T) in the hotbar, the job panel replaces the goal box, the
 // hover card on your own hex replaces the hint line under the old bar, and End turn shows one dot per ready hero.
@@ -194,18 +195,18 @@ const blocked = await p.evaluate(() => {
   vc.hud.select(hob.heroId);
   vc.hud.refresh();
   const opt = E.actions(vc.state(), hob.heroId).find((o) => o.action === 'take');
-  const btn = document.querySelector('.dl-hotbar .blocked[data-action="take"]');
-  return { engineBlocked: opt?.blocked ?? null, drawn: !!btn, why: btn?.dataset.tip ?? '', items: pile.items.map((i) => i.name) };
+  const btn = document.querySelector('.dl-hotbar [data-action="take"]');
+  vc.hud.onHover(pile.at, null);
+  const card = document.querySelector('.dl-card:not(.hidden)')?.innerText ?? '';
+  vc.hud.onHover(null, null);
+  return { engineBlocked: opt?.blocked ?? null, shown: !!btn, card, items: pile.items.map((i) => i.name) };
 });
 if (blocked.skip) console.log('skip blocked take:', blocked.skip);
 else {
   check('engine returns take with a blocked reason', !!blocked.engineBlocked, blocked.engineBlocked ?? 'none');
   if (blocked.engineBlocked) {
-    check('blocked take is drawn greyed with its reason on hover', blocked.drawn && blocked.why.includes(`Can't now: ${blocked.engineBlocked}`), blocked.why.split('\n')[1]);
-    await p.click('.dl-hotbar .blocked[data-action="take"]', { force: true });
-    await p.waitForTimeout(150);
-    const toast = await p.evaluate(() => document.querySelector('.hud-toast:not(.hidden)')?.textContent ?? '');
-    check('clicking it flashes the reason', toast === blocked.engineBlocked, toast);
+    check('V4.0: a blocked take is not on the hotbar', !blocked.shown);
+    check("...and the pile's hover card gives the reason", blocked.card.includes(blocked.engineBlocked), blocked.card.replace(/\n/g, ' · ').slice(0, 160));
   }
   // The beacon and goal box for the objective (if this pile is the objective).
   const beacon = await p.evaluate(() => ({

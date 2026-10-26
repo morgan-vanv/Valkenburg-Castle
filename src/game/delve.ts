@@ -21,7 +21,7 @@ import {
 } from './world';
 import { buildSummary } from './camp';
 import { fall, fallInfo, push, pushOutcome, pushText, setAfterLanding, ventCheck } from './falls';
-import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isKit, setFuse, spendCharge } from './charges';
+import { blastPreview, blastableWall, chargeCount, collapseDrop, fuseAt, isKit, setFuse, spendCharge, spendPick } from './charges';
 import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { capture, rivalCaltropsStep, striker } from './crewai';
@@ -602,12 +602,12 @@ function barredAt(c: Ctx, p: Pos): boolean {
 
 /** Spec 21.4: the reason a hero with no pick at all can't Pick. */
 export const NO_PICK = 'Locked · Smash it, or pick it with lockpicks';
-/** Spec 21.4: a Burglar whose improvised pick is spent. */
-export const PICK_SPENT = 'Your improvised pick is spent. Smash it, or buy lockpicks from Gerda.';
+/** Spec 21.4, 30.2: a Burglar whose improvised picks are spent. */
+export const PICK_SPENT = 'Your improvised picks are spent. Smash it, or buy lockpicks from Gerda.';
 
 /**
  * Spec 21.4: what this hero picks with: the smith's lockpicks first (3 slots for a Burglar, 2 for
- * anyone else, never used up), else the improvised pick (2 slots, used up); null with neither.
+ * anyone else, never used up), else the improvised picks (2 slots, one used up per attempt; spec 30.2); null with neither.
  */
 export function pickTool(c: Ctx, h: HeroInDelve): { item: Item; slots: number; proper: boolean } | null {
   const proper = itemOf(h, 'lockpicks');
@@ -872,7 +872,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return canLeaveAt(c, h.at) ? [{ at: h.at }] : [];
     // ---- V3.7 (spec 20.5) kit
     case 'brace':
-      return (cls === 'heir' || cls === 'sellsword' || cls === 'sapper') && !h.braced ? [{ id: h.heroId }] : [];
+      return (cls === 'heir' || cls === 'sellsword') && !h.braced ? [{ id: h.heroId }] : [];
     case 'hamstring':
       if (!CLASSES[cls].weapon.range) return [];
       return enemiesInSight(c, h, HAMSTRING_RANGE, { noDragon: true }).filter((t) => c.d.monsters.find((m) => m.id === t.id)?.awareness !== 'asleep');
@@ -1285,7 +1285,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       // Spec 21.4: proper lockpicks (Burglar 3 slots, others 2) or the improvised pick (2, used up).
       const tool = pickTool(c, h);
       const slots = tool?.slots ?? LOCKPICK_SLOTS;
-      mods.push(tool && !tool.proper ? `Improvised pick: ${slots} slots, used up` : `Lockpicks: ${slots} slots`);
+      mods.push(tool && !tool.proper ? `Improvised pick: ${slots} slots, uses 1 of ${tool.item.amount}` : `Lockpicks: ${slots} slots`);
       const outcomes = slots >= 3 ? ['Lock jams', 'Fails', 'Opens, noise 2', 'Opens silently'] : ['Lock jams', 'Opens, noise 2', 'Opens silently'];
       return base('finesse', slots, withLight(def.stats.finesse), outcomes, 2);
     }
@@ -1817,8 +1817,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const r = doRoll();
       const at = t.at!;
       const l = lockedThingAt(c, at)!;
-      // Spec 21.4: the improvised pick is used up whatever the result.
-      if (tool && !tool.proper) h.pack.splice(h.pack.indexOf(tool.item), 1);
+      // Spec 21.4, 30.2: one improvised pick is used up per attempt, whatever the result.
+      const picksLeft = tool && !tool.proper ? spendPick(h.pack, tool.item) : null;
       // All slots: silent; one short: open with noise 2; one hit on 3 slots: holds; none: jams (spec 19.2 on 2 slots).
       if (r.hits >= sp.slots - 1) {
         unlockAt(c, at, heroId);
@@ -1831,7 +1831,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         else c.d.chests.find((x) => samePos(x.at, at) && !x.opened)!.jammed = true;
         say(c, `The pick snaps in the lock. It's jammed.`);
       }
-      if (tool && !tool.proper) say(c, `${name}'s improvised pick is spent.`);
+      if (picksLeft === 0) say(c, `${name}'s last improvised pick is spent.`);
+      else if (picksLeft !== null) say(c, `${name} has ${picksLeft} improvised pick${picksLeft === 1 ? '' : 's'} left.`);
       break;
     }
     case 'smash': {

@@ -13,7 +13,7 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, lightScale, roundsToNext, type LightScale } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE, PARALYSIS_ROUNDS, VENOM_ROUNDS } from '../game/data';
@@ -183,6 +183,10 @@ export class Hud {
   private mouse = { x: 0, y: 0 };
   private hoverAt: Pos | null = null;
   private hoverUnit: string | null = null;
+  /** V4.0 (spec 30.3): keyboard choice among the armed action's options (index into pickOrder), and the pill entry hovered. */
+  private hotIdx = -1;
+  private keyNav = false;
+  private listHot: ActionTarget | null = null;
   private confirmBox: { text: string; ok: () => void } | null = null;
   /** V4.0 HUD: Alt held: hover cards and the roll panel show their numbers. */
   private alt = false;
@@ -239,7 +243,10 @@ export class Hud {
       if (e.key === 'Alt') this.setAlt(false);
     });
     addEventListener('blur', () => this.setAlt(false));
-    addEventListener('resize', () => this.updateCoach());
+    addEventListener('resize', () => {
+      this.updateCoach();
+      if (!this.castle) this.fitBar();
+    });
     // Every HUD element with a title (or data-tip) explains itself on hover and on keyboard focus.
     this.root.addEventListener('pointerover', (e) => this.onHudOver(e));
     this.root.addEventListener('pointerout', (e) => {
@@ -613,10 +620,11 @@ export class Hud {
     if (action === 'jump' && t.at) {
       const f = this.fallWords(t.at);
       if (f) this.dio.showLanding(t.at, f.to, f.text, f.danger);
-    } else if (action === 'shove') {
+    } else if (action === 'shove' || action === 'knockback') {
       const at = this.targetPos(t);
       if (!at) return;
-      const dest = this.shoveDest(sel.at, at);
+      // V4.0 (spec 30.3): a knockback shot pushes straight away from the shooter, at any range.
+      const dest = action === 'knockback' ? (at.level === sel.at.level && !samePos(at, sel.at) ? { level: at.level, ...add(at, DIRS[dirToward(sel.at, at)]!) } : at) : this.shoveDest(sel.at, at);
       const f = this.fallWords(dest);
       if (f) this.dio.showLanding(dest, f.to, `Shoved in: ${f.text.replace(/^Lands/, 'lands').replace(/^Falls/, 'falls')}`, true);
       else this.dio.showLanding(null, dest, 'Lands here', false);
@@ -649,6 +657,8 @@ export class Hud {
   onHover(at: Pos | null, unitId: string | null): void {
     this.hoverAt = at;
     this.hoverUnit = unitId;
+    // V4.0 (spec 30.3): pointing at an option takes over from the keyboard's choice.
+    if (this.pending && this.keyNav && this.bestActionFor(unitId, at)) this.keyNav = false;
     this.applyHover();
   }
 
@@ -688,15 +698,7 @@ export class Hud {
       else this.hideCard();
       return;
     }
-    if (this.pending && (this.pending.action === 'jump' || this.pending.action === 'shove')) {
-      const t = this.pending.targets.find((x) => (unitId ? x.id === unitId : !!at && !!x.at && samePos(x.at, at)));
-      this.dio.showLanding(null, null, '', false);
-      if (t) this.showActionLanding(this.pending.action, t);
-    }
-    if ((this.pending?.area || (this.pending && ['setCharge', 'throwCharge', 'charge'].includes(this.pending.action))) && at) {
-      const t = this.pending.targets.find((x) => x.at && samePos(x.at, at));
-      this.drawPendingArea(t ? at : null);
-    }
+    if (this.pending) this.showHot();
     // Path preview.
     const r = at && !unitId && !this.pending ? this.reach.find((x) => samePos(x.to, at)) : undefined;
     this.hoverLong = null;
@@ -787,7 +789,9 @@ export class Hud {
     const act = this.bestActionFor(null, at);
     if (link) out.push({ html: `Click: ${esc(linkButton(link.info))}`, cls: 'act' });
     else if (exit?.option && !exit.option.blocked) out.push({ html: 'Click: Leave the castle', cls: 'act' });
-    else if (act && !r) out.push(this.clickLine(act.option, act.target));
+    // V4.0 (spec 30.4): blocked options are hidden from the hotbar, so the card under the mouse must say why, even on
+    // a hex the hero could also walk to ("Take: your pack is full").
+    else if (act && (!r || act.option.blocked)) out.push(this.clickLine(act.option, act.target));
     return out;
   }
 
@@ -1170,6 +1174,88 @@ export class Hud {
 
   private areaDrawn = '';
   /** Highlight the area a hex action would cover around `at` (null: just the valid targets). */
+  /** V4.0 (spec 30.3): the armed action's options, one per hex or figure (a charge's two fuses are one option). */
+  private pickOrder(): ActionTarget[] {
+    const o = this.pending;
+    if (!o) return [];
+    const seen = new Set<string>();
+    const out: ActionTarget[] = [];
+    for (const t of o.targets) {
+      const k = `${t.id ?? ''}|${t.at ? posKey(t.at) : ''}|${t.itemId ?? ''}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(t);
+    }
+    return out;
+  }
+
+  /** The option a click or Enter takes now: the pill entry under the mouse, the keyboard's choice, or the mouse's. */
+  private hotTarget(): ActionTarget | null {
+    if (!this.pending) return null;
+    if (this.listHot) return this.listHot;
+    if (this.keyNav && this.hotIdx >= 0) return this.pickOrder()[this.hotIdx] ?? null;
+    return this.bestActionFor(this.hoverUnit, this.hoverAt)?.target ?? null;
+  }
+
+  /** How the chosen option is marked: a foe (red), a friend (green), a drop (danger) or a hex (pale). */
+  private hotKind(o: ActionOption, t: ActionTarget): 'foe' | 'ally' | 'hex' | 'danger' {
+    if (o.action === 'jump') return 'danger';
+    const d = this.state?.delve;
+    if (t.id && d?.heroes.some((x) => x.heroId === t.id)) return 'ally';
+    if (t.id && (d?.monsters.some((m) => m.id === t.id) || d?.rivals?.members.some((m) => m.id === t.id))) return o.action === 'parley' || o.action === 'bribe' ? 'hex' : 'foe';
+    if (o.pick === 'ally') return 'ally';
+    return 'hex';
+  }
+
+  /**
+   * V4.0 (spec 30.3): mark "this one" among the armed action's options: a bright lifted ring on its hex (the others
+   * dimmed), its tag lit, its landing (jump, shove, knockback) or the area it hits (throws, fireball, gust, charges), the
+   * pill entry, and the pill's "Enter: ..." line.
+   */
+  private showHot(): void {
+    const o = this.pending;
+    if (!o || this.pv || this.pill.classList.contains('fuse')) return;
+    const t = this.hotTarget();
+    const at = t ? this.targetPos(t) : null;
+    if (o.area || ['setCharge', 'throwCharge', 'charge'].includes(o.action)) this.drawPendingArea(t && t.at ? t.at : at);
+    this.dio.showLanding(null, null, '', false);
+    if (t) this.showActionLanding(o.action, t);
+    const d = this.state?.delve;
+    const unit = t?.id && (d?.heroes.some((x) => x.heroId === t.id) || d?.monsters.some((m) => m.id === t.id) || d?.rivals?.members.some((m) => m.id === t.id) || d?.prisoner?.id === t.id) ? t.id : null;
+    this.dio.showPick(at, t ? this.hotKind(o, t) : 'hex', unit);
+    const key = (x: ActionTarget) => `${x.id ?? ''}|${x.at ? posKey(x.at) : ''}|${x.itemId ?? ''}`;
+    const hk = t ? key(t) : '';
+    for (const b of this.pill.querySelectorAll<HTMLElement>('.dl-pill-opt[data-pick]')) b.classList.toggle('hot', b.dataset.pick === hk);
+    const line = this.pill.querySelector<HTMLElement>('.dl-pill-hot');
+    if (line) {
+      const sel = this.selected();
+      const tp = t ? this.targetPos(t) : null;
+      line.textContent = t ? `${this.targetLabel(t)}${sel && tp && !samePos(tp, sel.at) && tp.level === sel.at.level ? ` · ${compass(sel.at, tp)}` : ''}` : '';
+      line.classList.toggle('hidden', !t);
+    }
+  }
+
+  /** V4.0 (spec 30.3): Tab / arrows step through the armed action's options; Enter takes the marked one. */
+  private stepHot(dir: 1 | -1): void {
+    const order = this.pickOrder();
+    if (!order.length) return;
+    const cur = this.hotTarget();
+    const k = (x: ActionTarget) => `${x.id ?? ''}|${x.at ? posKey(x.at) : ''}|${x.itemId ?? ''}`;
+    const i = cur ? order.findIndex((x) => k(x) === k(cur)) : -1;
+    this.hotIdx = i < 0 ? (dir > 0 ? 0 : order.length - 1) : (i + dir + order.length) % order.length;
+    this.keyNav = true;
+    this.listHot = null;
+    const p = this.targetPos(order[this.hotIdx]!);
+    if (p && p.level !== this.dio.shownLevel) this.dio.showLevel(p.level);
+    this.showHot();
+  }
+
+  private resetHot(): void {
+    this.hotIdx = -1;
+    this.keyNav = false;
+    this.listHot = null;
+  }
+
   private drawPendingArea(at: Pos | null): void {
     const key = at ? posKey(at) : '';
     if (key === this.areaDrawn || !this.pending) return;
@@ -1310,7 +1396,7 @@ export class Hud {
     const selDef = sel ? this.heroDef(sel.heroId) : undefined;
     const canPick = !!sel && sel.pack.some((i) => itemBase(i.kind) === 'lockpicks' || i.kind === 'improvised');
     const spent = !canPick && selDef?.cls === 'burglar';
-    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised pick is spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
+    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised picks are spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
     if (t.kind === 'door' && door) {
       if (door.open) act(t.barred ? 'Sally port gate' : 'Open door', 'walk through');
       else if (t.barred && door.locked) act('Barred gate', 'the sally port key opens it (Unbar), or a charge. Then it stays open');
@@ -1528,6 +1614,7 @@ export class Hud {
     }
     if (this.pv) this.closePreview();
     else if (this.pending) this.pending = null;
+    this.resetHot();
     this.pill.classList.add('hidden');
     this.drawHighlights();
     this.renderBar();
@@ -1569,6 +1656,7 @@ export class Hud {
     }
     this.pending = o;
     this.areaDrawn = '';
+    this.resetHot();
     this.closePreview();
     this.showPill(o);
     this.drawHighlights();
@@ -1580,18 +1668,61 @@ export class Hud {
     clear(this.pill);
     const what = o.pick === 'hex' ? (o.area ? 'pick a hex (the shaded area is hit)' : 'pick a lit hex') : o.pick === 'ally' ? 'pick a friend' : o.pick === 'enemy' ? 'pick a target' : 'pick one';
     const onMap = o.pick === 'hex' || o.pick === 'ally' || o.pick === 'enemy';
-    const list = !onMap || o.targets.length <= 6 ? o.targets.slice(0, 8).map((t) => h('button', { type: 'button', class: 'dl-pill-opt', onclick: () => this.choose(o, t) }, this.targetLabel(t))) : [];
+    // V4.0 (spec 30.3): hovering an entry marks its hex or figure on the board, as pointing at it there would.
+    const opts = this.pickOrder();
+    const pk = (x: ActionTarget) => `${x.id ?? ''}|${x.at ? posKey(x.at) : ''}|${x.itemId ?? ''}`;
+    // Two options with the same name ("Orc", "Orc") say which way each one is from the hero.
+    const sel0 = this.selected();
+    const names = opts.map((t) => this.targetLabel(t));
+    const label = (t: ActionTarget, i: number) => {
+      const p = this.targetPos(t);
+      return names.filter((n) => n === names[i]).length > 1 && sel0 && p && !samePos(p, sel0.at) ? `${names[i]} · ${compass(sel0.at, p)}` : names[i]!;
+    };
+    const list =
+      !onMap || opts.length <= 6
+        ? opts.slice(0, 8).map((t, i) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'dl-pill-opt',
+                'data-pick': pk(t),
+                onclick: () => this.choose(o, t),
+                onmouseenter: () => {
+                  this.listHot = t;
+                  this.showHot();
+                },
+                onmouseleave: () => {
+                  this.listHot = null;
+                  this.showHot();
+                },
+                onfocus: () => {
+                  this.listHot = t;
+                  this.showHot();
+                },
+                onblur: () => {
+                  this.listHot = null;
+                  this.showHot();
+                },
+              },
+              label(t, i),
+            ),
+          )
+        : [];
     this.pill.className = `dl-pill ${onMap ? 'map' : 'list'} ${o.action === 'attack' || o.pick === 'enemy' ? 'foe' : ''}`;
     this.pill.append(
       h('span', { class: 'dl-pill-t' }, h('b', null, `${o.label}${o.mana ? ` (${o.mana} mana)` : ''}`), `: ${what} · `, h('button', { type: 'button', class: 'dl-pill-esc', onclick: () => this.cancel() }, 'Esc to cancel')),
       o.action === 'setCharge' ? h('span', { class: 'dl-pill-note' }, 'Outlined walls can be broken. You pick the fuse next.') : '',
       list.length ? h('span', { class: 'dl-pill-list' }, ...list) : '',
+      h('span', { class: 'dl-pill-keys' }, h('span', { class: 'dl-pill-hot hidden', 'aria-live': 'polite' }), h('span', { class: 'dim' }, `Tab: ${opts.length > 1 ? 'next of ' + opts.length : 'mark it'} · Enter: take it`)),
     );
     this.pill.classList.remove('hidden');
   }
 
   private choose(o: ActionOption, t: ActionTarget): void {
     this.pending = null;
+    this.resetHot();
+    this.dio.showPick(null);
     this.pill.classList.add('hidden');
     this.moreEl.classList.add('hidden');
     const sel = this.selected();
@@ -2370,7 +2501,7 @@ export class Hud {
     const who = h(
       'div',
       { class: 'dl-who' },
-      h('span', { class: 'dl-who-n' }, def.name, h('span', { class: 'dl-who-c' }, ` ${def.cls === 'heir' ? 'the heir' : className(def.cls).toLowerCase()}`)),
+      h('span', { class: 'dl-who-n', tabindex: 0, 'data-tip': this.elsewhereTip(def) }, def.name, h('span', { class: 'dl-who-c' }, ` ${def.cls === 'heir' ? 'the heir' : className(def.cls).toLowerCase()}`)),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
       h(
         'span',
@@ -2387,22 +2518,22 @@ export class Hud {
     const used = new Set<ActionOption>();
     const button = (o: ActionOption) => {
       used.add(o);
+      // V4.0 (spec 30.4, owner): only what this hero can do now. A blocked option (no pick for the lock, a full pack) is
+      // left off the bar; the board's hover card still says why.
+      if (o.blocked) return;
       const key = keyFor(o.action, ACTION_KEY[o.action]);
       const btn = this.actButton(o, key, def.cls);
       if (key) this.keyMap.set(key, () => btn.click());
       acts.append(btn);
     };
+    // Fixed order, absent ones collapsed: Attack, Shove, class abilities and spells (the engine's order), then what's in reach.
+    usedKeys.add('a');
     const attack = opts.find((o) => o.action === 'attack');
     if (attack) button(attack);
-    else {
-      usedKeys.add('a');
-      const why = sel.acted ? 'the action is used this round' : 'nobody in reach';
-      acts.append(h('button', { type: 'button', class: 'dl-ab off', 'data-action': 'attack', 'aria-disabled': 'true', 'data-tip': `Attack · ${why}\n${actionHelp('attack', def.cls)}`, onclick: () => this.toast(`Attack: ${why}.`) }, h('span', { class: 'dl-kb' }, 'A'), icon(CLASSES[def.cls]?.weapon.range ? 'shoot' : 'sword', 20), h('span', { class: 'dl-ab-l' }, 'Attack')));
-    }
     for (const o of opts) if (o.action === 'shove') button(o);
     for (const o of opts) if ((ABILITIES.has(o.action) || SPELLS.has(o.action)) && !used.has(o)) button(o);
     // Contextual: the way out, the stairs, then the rest.
-    if (exit?.option) {
+    if (exit?.option && !exit.option.blocked) {
       usedKeys.add('q');
       const o = exit.option;
       used.add(o);
@@ -2427,16 +2558,40 @@ export class Hud {
       if (o.action === 'unbar' && !o.targets.length) continue;
       button(o);
     }
-    if (!acts.querySelector('.dl-ab:not(.off)') && !this.busy) acts.append(h('span', { class: 'dl-acts-none' }, sel.acted ? 'Action used this round.' : 'Nothing in reach.'));
+    if (!acts.querySelector('.dl-ab') && !this.busy) {
+      const line = sel.moved && sel.acted ? 'Done this round. End turn, or pick another hero.' : sel.acted ? 'Action used. Move, or End turn.' : sel.moved ? 'Nothing to do here. End turn, or pick another hero.' : 'Nothing to do here. Move, or End turn.';
+      acts.append(h('span', { class: 'dl-acts-none', 'data-tip': this.elsewhereTip(def) }, line));
+    }
     // The pack: click an item to use it.
     const pack = this.packSlots(sel, def, keyFor);
     // More.
-    const more = this.moreItems(sel, def, opts, keyFor, dealsNow, bearer);
+    const more = this.moreItems(sel, def, opts, keyFor, dealsNow, bearer).filter((m) => !m.blocked);
     const moreBtn = h('button', { type: 'button', class: 'dl-ab dl-more-b', 'data-more': '1', 'aria-haspopup': 'menu', 'aria-expanded': this.moreEl.classList.contains('hidden') ? 'false' : 'true', disabled: this.busy || !more.length, 'data-tip': more.length ? `More · ${more.map((m) => m.label).join(', ')}` : 'More · nothing else to do here', onclick: () => this.toggleMore(more) }, icon('dots', 20), h('span', { class: 'dl-ab-l' }, 'More'));
     this.renderMore(more);
-    this.bar.append(who, h('span', { class: 'dl-sep' }), acts, h('span', { class: 'dl-sep' }), pack, moreBtn, this.endButton(d));
+    this.bar.append(who, h('span', { class: 'dl-sep' }), acts, h('span', { class: 'dl-sep' }), pack, more.length ? moreBtn : '', this.endButton(d));
+    this.fitBar();
     // The armed-action pill sits just above the bar.
     if (this.pending && !this.pill.classList.contains('hidden')) this.pill.style.bottom = `${(this.bar.offsetHeight || 94) + 24}px`;
+  }
+
+  /** V4.0 (spec 30.4): what this hero can do somewhere (their class's abilities), for the name's hover and the empty bar. */
+  private elsewhereTip(def: Hero): string {
+    const kit = (CLASS_KIT[def.cls] ?? []).filter(([, kind]) => kind !== 'passive').map(([name]) => name);
+    const base = ['Attack', 'Shove'];
+    return `${def.name} can: ${[...base, ...kit].join(', ')}.\nThe bar shows only what ${def.name} can do from here, now; the rest turns up when there's something to use it on.`;
+  }
+
+  /**
+   * V4.0 (spec 30.4): the bar never scrolls. If its buttons don't fit (a hero with many options, a narrow window), the
+   * action labels fold away (icons and keys stay; the name is in each button's hover), then the bar tightens further.
+   */
+  private fitBar(): void {
+    const bar = this.bar;
+    bar.classList.remove('compact', 'tight');
+    const over = () => bar.scrollWidth > bar.clientWidth + 1 || [...bar.querySelectorAll<HTMLElement>('.dl-acts')].some((a) => a.scrollWidth > a.clientWidth + 1);
+    if (!bar.isConnected || !bar.clientWidth) return;
+    if (over()) bar.classList.add('compact');
+    if (over()) bar.classList.add('tight');
   }
 
   private actButton(o: ActionOption, key: string | undefined, cls: string): HTMLButtonElement {
@@ -2475,7 +2630,7 @@ export class Hud {
       const item = o ? { ...o, targets: o.targets.filter((t) => t.itemId === it.id) } : null;
       const key = o ? keyFor(o.action, ACTION_KEY[o.action]) : undefined;
       const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
-      const how = item ? (item.blocked ? `\nCan't now: ${item.blocked}` : `\nClick to use${key ? ` (key ${key.toUpperCase()})` : ''}.`) : val || it.kind === 'heirloom' ? '\nCarry it out.' : '\nNothing to use it on here.';
+      const how = item ? (item.blocked ? `\nCan't now: ${item.blocked}` : `\n${itemClickLine(it.kind, key)}`) : val || it.kind === 'heirloom' ? '\nCarry it out.' : `\nNothing to use it on here.${itemUseLine(it.kind) ? `\n${itemUseLine(it.kind)}` : ''}`;
       const btn = h(
         'button',
         {
@@ -2485,7 +2640,7 @@ export class Hud {
           'data-action': item?.action,
           'data-key': key,
           disabled: this.busy,
-          'data-tip': `${itemTip(it)}${how}`,
+          'data-tip': `${itemTip(it, false)}${how}`,
           onclick: () => (item ? this.startAction(item) : this.toast(val || it.kind === 'heirloom' ? `${itemLabel(it)}: carry it out.` : `${itemLabel(it)}: nothing to use it on here.`)),
         },
         h('span', { class: 'dl-slot-g' }, itemGlyph(it.kind)),
@@ -3107,6 +3262,22 @@ export class Hud {
       }
       return;
     }
+    // V4.0 (spec 30.3): picking among options: Tab or the arrows mark the next, Enter takes the marked one.
+    if (this.pending && !this.confirmBox) {
+      if (e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.stepHot(e.key === 'ArrowLeft' || e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1);
+        return;
+      }
+      if (e.key === 'Enter') {
+        const hot = this.hotTarget();
+        if (hot && !(t instanceof HTMLButtonElement && t.classList.contains('dl-pill-opt'))) {
+          e.preventDefault();
+          this.choose(this.pending, hot);
+          return;
+        }
+      }
+    }
     // A focused button handles Enter and Space itself.
     if ((e.key === 'Enter' || e.key === ' ') && t instanceof HTMLButtonElement) return;
     const d = s.delve;
@@ -3370,9 +3541,12 @@ function packMini(pack: Item[], owner: string): HTMLElement {
 
 /** V4.0 (spec 26.5): the hero's own kit, as a small chip ("⌐ own"). */
 function kitChip(it: Item, owner: string, small = false): HTMLElement {
-  const what = it.kind === 'improvised' ? 'improvised pick' : `${it.amount} improvised explosive${it.amount === 1 ? '' : 's'}`;
-  const use = it.kind === 'improvised' ? 'One Pick at 2 Finesse tries, used up whatever happens. Use: Pick, next to a lock.' : `Blasts like a blasting charge (${V37.blastInner} within 1, ${V37.blastOuter} within 2), spent before bought charges. Use: Set charge or Throw charge.`;
-  return h('span', { class: `dl-own ${small ? 'sm' : ''}`, tabindex: 0, 'data-tip': `${owner}'s own · ${what}\nTakes no slot; can't be given away. A fresh ${it.kind === 'improvised' ? 'one' : 'set'} every delve.\n${use}` }, itemGlyph(it.kind), it.kind === 'improvised-charge' ? h('small', { class: 'num' }, `${it.amount}`) : '', ' own');
+  // V4.0 (spec 30.2): both kits count their uses (one a level each delve); an old save's single pick reads 1.
+  const n = Math.max(1, it.amount);
+  const pick = it.kind === 'improvised';
+  const what = pick ? `${n} improvised pick${n === 1 ? '' : 's'}` : `${n} improvised explosive${n === 1 ? '' : 's'}`;
+  const use = pick ? 'Each Pick rolls 2 Finesse tries and uses one up, whatever happens. Use: Pick, next to a lock.' : `Blasts like a blasting charge (${V37.blastInner} within 1, ${V37.blastOuter} within 2), spent before bought charges. Use: Set charge or Throw charge.`;
+  return h('span', { class: `dl-own ${small ? 'sm' : ''}`, tabindex: 0, 'data-kit': it.kind, 'data-tip': `${owner}'s own · ${what} left\nTakes no slot; can't be given away. A fresh set every delve: one for each level.\n${use}` }, itemGlyph(it.kind), h('small', { class: 'num' }, `${n}`), ' own');
 }
 
 /** The menu's legend: the marks over figures, on the party cards, and the keys (Legend.dc.html, compact). */

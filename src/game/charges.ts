@@ -8,10 +8,10 @@
 
 import { isEnemy } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { Fuse, HeroInDelve, Item } from './types';
-import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG } from './data';
+import type { Fuse, HeroClass, HeroInDelve, Item, RivalClass } from './types';
+import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG, kitPerDelve } from './data';
 import { say, type Ctx, type DelveX } from './state';
-import { chestLoot, hd, hurtAny, isSatchel, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
+import { chestLoot, hd, hurtAny, isSatchel, makeItem, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
 import { checkWays, wayAtHex } from './ways';
@@ -28,6 +28,37 @@ export { isKit, isSatchel } from './common';
 /** "Improvised explosives" (one left: "Improvised explosive"). */
 export function satchelName(n: number): string {
   return n === 1 ? 'Improvised explosive' : 'Improvised explosives';
+}
+
+/** "Improvised picks (2)" (one left: "Improvised pick"). V4.0 (spec 30.2): one item, `amount` uses. */
+export function pickName(n: number): string {
+  return n === 1 ? 'Improvised pick' : `Improvised picks (${n})`;
+}
+
+/**
+ * V4.0 (spec 30.2, owner): the class kit a hero or crew member brings each delve, one slotless item with a use a level:
+ * a Sapper's improvised explosives, a Burglar's improvised picks. Null for other classes.
+ */
+export function classKit(c: Parameters<typeof makeItem>[0], cls: HeroClass | RivalClass, level: number | undefined): Item | null {
+  const n = kitPerDelve(level);
+  if (cls === 'sapper') return { ...makeItem(c, 'improvised-charge', n, satchelName(n)), slots: 0 };
+  if (cls === 'burglar') return { ...makeItem(c, 'improvised', n, pickName(n)), slots: 0 };
+  return null;
+}
+
+/**
+ * Spend one use of an improvised pick (spec 30.2): one per Pick attempt, whatever happens; the item goes at 0.
+ * An old save's single pick (amount 1, or less) is one use. Returns the uses left.
+ */
+export function spendPick(pack: Item[], item: Item): number {
+  const left = Math.max(1, item.amount) - 1;
+  item.amount = left;
+  item.name = pickName(left);
+  if (left <= 0) {
+    const i = pack.indexOf(item);
+    if (i >= 0) pack.splice(i, 1);
+  }
+  return left;
 }
 
 /** Charges a hero can spend: their improvised explosives plus bought blasting charges in the pack. */
