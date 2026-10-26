@@ -695,3 +695,36 @@ A new campaign enters the castle by the main gate only. The other two ways in ar
 
 - Story contracts lose their "Story" and "Unlocks …" warnings (the board shows story status itself).
 - The balance sim picks among the open entrances (`engine.entrances`), rotating through them.
+
+## 26. V4.0 play-test fixes (owner, 2026-10-26)
+
+Three owner decisions from play. Contract: `HeroInDelve.moveMode`, the `setMoveMode` command, `move.sneak` optional, `Engine.reachable`/`moveNoise`/`calmReach` with `sneak` optional, `MoveRisks.notice[].at`, the `noticed` event's `at` and `faced` (types.ts, api.ts).
+
+### 26.1 Walk/Sneak per hero
+
+- Each hero has their own Walk/Sneak setting for the delve, in engine state: `HeroInDelve.moveMode?: 'walk' | 'sneak'`, set at `startDelve`: Burglars `sneak`, everyone else `walk`. Absent (older saves) = walk. It survives saves and reloads.
+- `{ type: 'setMoveMode', heroId, sneak }`: free, any number, player phase, any active hero; changes only that hero; no events.
+- `move` without `sneak` uses the hero's setting; an explicit `sneak` still wins (the sim bot passes it) and doesn't change the setting. `reachable`, `moveNoise` and `calmReach` without `sneak` use the setting too.
+- The noticing rule's "sneaking" stays the hero's last move mode (`isSneaking`): switching a standing hero to Sneak doesn't hide them, and a Burglar who hasn't moved yet counts as walking.
+- HUD: the Walk/Sneak buttons and S show and change the selected hero's setting; selecting another hero shows theirs; move previews, reach, the noise text and the move command use it. A hero set to sneak has a "◌ Sneak" badge on their party card (hover explains).
+
+### 26.2 Noticing happens when it happens (the move goes on)
+
+- In the player phase, at every hex of a walk, every awake monster on the level (not asleep, not the Gloam, not the Dragon, not buried) that hasn't noticed the moving hero checks `wouldNotice` (the same ranges, facing, light and smoke rules, with the hero's move mode) at that hex. A hero who walks through a field of view and out again is spotted on the hex in view. Arrivals that aren't walks (blink, fall, jump, climb, grapple, a gust push) check once at the landing hex.
+- Order on each hex: the step (the hero faces it), the free swings it provoked (before it), the notice check, then the step's noise and wake rolls. A sleeper woken by a step is awake for the hero's next step; one woken by the last step (or a landing) stays alert until the world phase or the next move.
+- Effects as in the world phase: `noticedIds`, a `noticed` event with `at` (the hero's hex) and `faced`, hunting with focus on that hex (unaware: turns to the hero; already hunting: keeps facing and quarry, 26.3), the orc's first-sight bellow (noise 5). The hero finishes the move. A walk's `moved` event is split at that hex so the view plays the "!" and the log line there.
+- The monster's intent is re-planned when the command ends (`Ctx.replan`, the post-command pass in `engine.apply`), with its old intent's target as the preferred quarry, so the intent shown for the coming world phase is right.
+- Waiting cutthroat crews: the same check for the moving hero at every hex (`crewNotice(c, heroId)`, within 6), the toll demanded there. They still check every hero after every command.
+- Only the moving hero is checked during a move; a hero newly lit by the lantern bearer's walk is noticed in the world phase as before.
+- The world phase's `perceive` stays: monsters that turn or move then can still spot heroes.
+- Move preview: `Reach.risks.notice` lists watchers that would notice at any hex of the path, with `at` the first such hex, taking watchers as they face now (a wake roll or a bellow on the way can turn one: dice the preview can't know). A waiting crew counts only within 6.
+
+### 26.3 When monsters turn
+
+- Unaware monsters (asleep, alert, patrolling) turn toward a noise they hear and toward a hero they newly notice.
+- Hunting monsters don't turn toward noise or toward a hero they newly notice (they still notice: `noticedIds`, event with `faced: false`). They turn on their own turn: toward their quarry as they look round (`perceive`: the hero their intent named while they still make them out, else the nearest), the step they take, what they strike; and when hit.
+- A hit turns the target to face the attacker after the hit resolves (`turnOnHit`): melee and bow attacks, firebolt, night thorn, briar, hamstring, shove, knockback, heroes' free swings, overwatch shots, a hired crew member's hit on a monster. A backstab lands from behind, then the monster faces the stabber. Misses don't turn it.
+- Area damage (fireball, gust, charge blasts, fire, caltrops, traps) doesn't turn a hunting monster. An unaware monster it hits goes hunting toward the caster and so faces them (unchanged).
+- Noticing several heroes at once, a monster faces its quarry, not the last one noticed.
+- A ghoul rising from the bones faces the hero it rose for.
+- Crew members: unchanged for noise and noticing (no turn to noise; they face a hero they notice). Hits now turn them too (they didn't before).

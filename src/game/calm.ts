@@ -14,7 +14,7 @@ import { brightnessOf, dijkstra, dirIndex, doorAt, kindAt, litSet, pathTo, seesH
 import { moveRisks, provokeSwings, stepNoise, wakeRolls } from './stealth';
 import { ventCheck } from './falls';
 import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, seenSet, springTrap, visNow } from './delve';
-import { worldPhase } from './world-phase';
+import { noticeOnMove, worldPhase } from './world-phase';
 import { rivalCaltropsStep } from './crewai';
 
 // ---------------------------------------------------------------- the calm test
@@ -167,6 +167,7 @@ function stepTo(c: Ctx, wk: Walker, p: Pos, sneak: boolean, last: boolean, lit: 
   h.at = { ...p };
   c.visCache = undefined;
   glimpse(c, p);
+  noticeOnMove(c, h, () => flush(c, wk)); // V4.0 (spec 26.2): before the step's noise and wake rolls, as doMove
   const noise = stepNoise(c, p, sneak);
   if (noise) makeNoise(c, p, noise, { quiet: true });
   wakeRolls(c, h, p, last, sneak, lit);

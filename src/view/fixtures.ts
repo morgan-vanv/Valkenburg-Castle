@@ -174,6 +174,8 @@ export function fixtureDelve(castle: CastleDef): GameState {
     overwatch: false,
     veil: 0,
     ward: 0,
+    // V4.0 (spec 26.1): the Burglar starts on Sneak.
+    moveMode: id === 'pim' ? ('sneak' as const) : ('walk' as const),
   }));
   return {
     version: 3,
@@ -451,7 +453,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     calmReach: (s, heroId, sneak) => {
       if (!calmOf(s).calm) return [];
       const vis = visInner(s);
-      return [...longPaths(castle, s, vis, heroId, 60).entries()].map(([, path]) => ({ to: path[path.length - 1]!, cost: path.length, path, risks: risksFor(s, heroId, path, !!sneak) }));
+      return [...longPaths(castle, s, vis, heroId, 60).entries()].map(([, path]) => ({ to: path[path.length - 1]!, cost: path.length, path, risks: risksFor(s, heroId, path, sneak ?? modeOf(s, heroId)) }));
     },
     blastPreview: (s, at) => {
       const pv = blastPreview(castle, s.delve ?? null, at);
@@ -480,7 +482,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       return res;
     },
     reachable(state, heroId, sneak): Reach[] {
-      return reachInner(state, heroId, sneak);
+      return reachInner(state, heroId, sneak ?? modeOf(state, heroId));
     },
     actions(state, heroId): ActionOption[] {
       return actionsInner(state, heroId);
@@ -506,7 +508,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     intents(state) {
       return intentsInner(state);
     },
-    moveNoise: (_s, _h, sneak) => (sneak ? 0 : 1),
+    moveNoise: (s, h, sneak) => ((sneak ?? modeOf(s, h)) ? 0 : 1),
     sightRange(s, heroId) {
       const h = s.delve?.heroes.find((x) => x.heroId === heroId);
       const level = h?.at.level ?? 1;
@@ -656,6 +658,14 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         s.campaign.stash.push(item(`b${Date.now()}`, o.kind, o.name));
         return { state: s, events: [] };
       }
+      // V4.0 (spec 26.1): Walk/Sneak per hero; a move without `sneak` uses it.
+      if (cmd.type === 'setMoveMode' && s.delve) {
+        const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
+        if (!h || h.status !== 'active') return { state, events: [], error: 'No such hero.' };
+        h.moveMode = cmd.sneak ? 'sneak' : 'walk';
+        return { state: s, events: [] };
+      }
+      const mvSneak = cmd.type === 'move' ? (cmd.sneak ?? modeOf(state, cmd.heroId)) : false;
       if (cmd.type === 'face' && s.delve) {
         // V3.9 (24.2): free, unlimited in the player phase.
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
@@ -675,7 +685,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         const trail: Pos[] = [h.at];
         let walked: Pos[] = [];
         let stopped: string | undefined;
-        const risks = risksFor(state, cmd.heroId, cmd.path, !!cmd.sneak);
+        const risks = risksFor(state, cmd.heroId, cmd.path, mvSneak);
         for (const step of cmd.path) {
           h.at = step;
           trail.push(step);
@@ -726,7 +736,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       }
       if (cmd.type === 'move' && s.delve) {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
-        const risks = risksFor(state, cmd.heroId, cmd.path, !!cmd.sneak);
+        const risks = risksFor(state, cmd.heroId, cmd.path, mvSneak);
         const ev: ApplyResult['events'] = [];
         // V3.7 (20.2): free swings as the hero leaves reach, before the move plays.
         for (const sw of risks.swings) {
@@ -748,7 +758,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         for (const k of lit(s)) if (!s.delve.explored.includes(k)) s.delve.explored.push(k);
         ev.push({ type: 'moved', id: cmd.heroId, path: cmd.path });
         if (endF !== undefined) ev.push({ type: 'faced', id: cmd.heroId, facing: endF });
-        ev.push({ type: 'noise', at: h.at, radius: cmd.sneak ? 0 : 1 });
+        ev.push({ type: 'noise', at: h.at, radius: mvSneak ? 0 : 1 });
         // 20.1: wake rolls (the fixture wakes at 50%+) and noticing.
         for (const w of risks.wake) {
           if (w.chance < 50) continue;
@@ -1015,6 +1025,9 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         return { state: s, events: [] };
       }
       return { state, events: [], error: 'The fixture engine does not do that.' };
+  }
+  function modeOf(state: GameState, heroId: string): boolean {
+    return state.delve?.heroes.find((x) => x.heroId === heroId)?.moveMode === 'sneak';
   }
   function reachInner(state: GameState, heroId: string, sneak?: boolean): Reach[] {
     {

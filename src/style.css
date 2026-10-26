@@ -3549,6 +3549,7 @@ input.seed {
 .hud-banner.combat .bn-title { color: #ffb4ac; letter-spacing: 0.1em; }
 .hud-banner.combat .bn-sub { color: var(--parch); text-transform: none; letter-spacing: 0.04em; font-size: 0.85rem; }
 .chip.braced { border-color: #b8bcc4; color: #e8ecf4; }
+.chip.sneak { border-color: #4a5e86; color: #9ec0ff; } /* V4.0 (spec 26.1): set to sneak */
 .chip.shield { border-color: #8a5a2a; color: #e0c8a8; }
 .chip.rooted { border-color: #6aa84a; color: #cfe8b8; }
 .tag-rooted { color: #a8e088; }

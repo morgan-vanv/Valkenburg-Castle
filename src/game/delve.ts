@@ -13,7 +13,7 @@ import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
   LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
-  releaseHold, rivalsOnMap, roll, shieldWalled, valueOf, wakeAdjacent, dropCaptive,
+  releaseHold, rivalsOnMap, roll, shieldWalled, turnOnHit, valueOf, wakeAdjacent, dropCaptive,
 } from './common';
 import {
   adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
@@ -26,7 +26,7 @@ import { lairCheck } from './dragon';
 import { crewAim, crewNotice, rivalOverwatchFire, rivalStats } from './rivals';
 import { capture, rivalCaltropsStep, striker } from './crewai';
 import { parleyTargets } from './parley';
-import { dirIndex, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
+import { dirIndex, faceToward, fleePlan, forgetHeroes, hasNoticed, inRearHalf, moveRisks, noticeHero, provokeSwings, stepNoise, swingersFor, wakeRolls } from './stealth';
 import { hitRange } from './ai';
 import { BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, DREAD_MANA, DREAD_RANGE, DREAD_ROUNDS, DREAD_SLOTS, SNEAK_ATTACK_SLOTS, FACING } from './data';
 import {
@@ -37,6 +37,7 @@ import {
 import { int, pick } from './rng';
 import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
+import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
 
 // ---------------------------------------------------------------- sight bookkeeping
@@ -165,6 +166,20 @@ export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   return b;
 }
 
+/** V4.0 (spec 26.1): the hero's own Walk/Sneak setting (absent = walk). */
+export function sneakSetting(c: Ctx, heroId: string): boolean {
+  return hd(c, heroId)?.moveMode === 'sneak';
+}
+
+/** V4.0 (spec 26.1): the `setMoveMode` command: free, any active hero, player phase. Changes nothing else. */
+export function doSetMoveMode(c: Ctx, heroId: string, sneak: boolean): string | undefined {
+  const h = hd(c, heroId);
+  if (!h) return 'No such hero.';
+  if (h.status !== 'active') return `${heroName(c, heroId)} isn't moving anywhere.`;
+  h.moveMode = sneak ? 'sneak' : 'walk';
+  return undefined;
+}
+
 /**
  * Who a hero can't walk through (spec 19.4): monsters and rivals, except the members of a crew
  * the party has hired. Heroes, the prisoner and hired crew are passed through (never ended on).
@@ -291,6 +306,13 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
     from = p;
     c.visCache = undefined;
     glimpse(c, p);
+    // V4.0 (spec 26.2): enemies already awake notice the hero on this hex, now (before this step's noise and wake
+    // rolls: a sleeper this step wakes notices from the next one); the walk goes on.
+    noticeOnMove(c, h, () => {
+      if (!walked.length) return;
+      c.ev.push({ type: 'moved', id: heroId, path: [...walked] });
+      walked.length = 0;
+    });
     // V3.7 (spec 20.1): noise at every hex (1, 2 on rubble; sneaking silent), and sleepers within 2 roll to wake.
     lastNoise = stepNoise(c, p, sneak);
     if (lastNoise) makeNoise(c, p, lastNoise, { quiet: true });
@@ -358,7 +380,12 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = fa
       say(c, `${heroName(c, h.heroId)} spots a trap.`);
     }
   }
-  if (!walked) wakeAdjacent(c, h.at, sneak, h.heroId);
+  // V4.0 (spec 26.2): where a blink, fall, climb or grapple lands, enemies already awake notice the hero now
+  // (a walk has checked every hex already); sleepers woken by the landing notice from the hero's next move.
+  if (!walked) {
+    noticeOnMove(c, h);
+    wakeAdjacent(c, h.at, sneak, h.heroId);
+  }
   riseGhouls(c, h);
   lairCheck(c, h, sneak);
 }
@@ -375,6 +402,7 @@ export function riseGhouls(c: Ctx, h: HeroInDelve): void {
     m.awareness = 'hunting';
     m.focusAt = { ...h.at };
     m.intent = undefined;
+    faceToward(m, h.at); // it rises facing its quarry (V4.0: noticeHero no longer turns a hunter)
     noticeHero(c, m, h.heroId);
     c.ev.push({ type: 'spawned', id: m.id, at: { ...m.at } });
     c.ev.push({ type: 'awake', id: m.id, awareness: 'hunting' });
@@ -1419,6 +1447,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'cast', by: heroId, spell: 'knockback', targetId: tid, at: figurePos(c, tid) });
       const from = pusherFor(h.at, figurePos(c, tid)!);
       push(c, tid, from, heroId);
+      turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
     case 'overwatch':
@@ -1648,6 +1677,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         const stab = action === 'attack' && sp.modifiers.some((m) => m.startsWith('Backstab'));
         if (stab) say(c, `${heroName(c, heroId)} backstabs ${c.d.monsters.find((m) => m.id === tid)?.name ?? c.d.rivals?.members.find((m) => m.id === tid)?.name ?? 'it'}: ${dmg}.`);
         hurtAny(c, tid, dmg, heroId, { crit: r.perfect, backstab: stab });
+        turnOnHit(c, tid, heroId); // V4.0 (spec 26.3): after the hit (a backstab lands from behind first)
       }
       break;
     }
@@ -1665,6 +1695,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       push(c, tid, h.at, heroId);
       // Perfect: 1 more damage on top of whatever the push did.
       if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
+      turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
     case 'pick': {
@@ -1917,6 +1948,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       }
       c.ev.push({ type: 'hit', attacker: heroId, target: tid, damage: 0, crit: r.perfect });
       rootFigure(c, tid, HAMSTRING_ROUNDS, heroId);
+      turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
     case 'nightthorn': {
@@ -1930,6 +1962,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         break;
       }
       hurtAny(c, tid, r.hits * NIGHTTHORN_DMG + (r.perfect ? 1 : 0), heroId, { crit: r.perfect });
+      turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
     case 'briar': {
@@ -1945,6 +1978,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       }
       hurtAny(c, tid, r.hits * BRIAR_DMG + (r.perfect ? 1 : 0), heroId, { crit: r.perfect });
       if (figurePos(c, tid)) rootFigure(c, tid, r.perfect ? BRIAR_ROOT_PERFECT : BRIAR_ROOT, heroId);
+      turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
     case 'smashProp': {

@@ -479,6 +479,11 @@ export interface HeroInDelve {
   veil: number;
   /** Warded (Hedgewitch): rounds left; takes 1 less per hit while > 0. Draw a shield glint. */
   ward: number;
+  /**
+   * V4.0 (spec 26.1): this hero's Walk/Sneak setting for the delve (Burglars start on 'sneak', everyone
+   * else on 'walk'; absent = walk). A `move` without `sneak` uses it; the `setMoveMode` command changes it.
+   */
+  moveMode?: 'walk' | 'sneak';
 }
 
 export interface Intent {
@@ -870,7 +875,8 @@ export type Command =
    * hex, the castle taking a turn every CALM_STEPS steps, and stops when calm ends. `follow` brings
    * the other active heroes within 3 along behind.
    */
-  | { type: 'move'; heroId: string; path: Pos[]; sneak: boolean; follow?: boolean }
+  | { type: 'move'; heroId: string; path: Pos[]; /** V4.0 (spec 26.1): omitted = the hero's own Walk/Sneak setting */ sneak?: boolean; follow?: boolean }
+  | { type: 'setMoveMode'; heroId: string; sneak: boolean } // V4.0 (spec 26.1): the hero's Walk/Sneak setting; free, player phase
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
   | { type: 'face'; heroId: string; facing: number } // V3.9 (spec 24.2): turn to face a direction; free, player phase
@@ -921,7 +927,7 @@ export type GameEvent =
   | { type: 'betrayed' } // V3.5: sell-swords turn on the party when their deal ends
   | { type: 'villageUnlocked'; story: StoryId } // V3.5, on backToCamp
   // V3.7
-  | { type: 'noticed'; by: string; hero: string } // an awake monster or crew member spots a hero (spec 20.1)
+  | { type: 'noticed'; by: string; hero: string; /** V4.0 (spec 26.2): the hero's hex when it happened */ at?: Pos; /** V4.0 (spec 26.3): the watcher turned toward the hero (false: a hunting monster keeps its facing) */ faced?: boolean } // an awake monster or crew member spots a hero (spec 20.1)
   | { type: 'woke'; id: string; by: string } // a sleeper woken by a passing hero
   | { type: 'swing'; by: string; target: string; hits: number; damage: number } // attack of opportunity (spec 20.2)
   | { type: 'feared'; id: string; by: string }

@@ -114,6 +114,8 @@ export interface Ctx {
   visCache?: Set<string>;
   /** V3.9.3 (spec 24.8): the visible set hearing uses, apart from visCache so hearing never changes what monsters see. */
   hearVis?: { sig: string; set: Set<string> };
+  /** V4.0 (spec 26.2): monsters that noticed a hero during this player-phase command: re-planned when it ends. */
+  replan?: Set<string>;
 }
 
 export function newItemId(s: GameStateX): string {
