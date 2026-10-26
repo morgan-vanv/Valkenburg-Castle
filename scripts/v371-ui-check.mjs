@@ -1,7 +1,7 @@
 // V3.7.1 camp and pack check (spec 21), headless, by DOM text and state, no screenshots:
-// a new campaign opens on the notice post with 90 gold and no hire gate (jobs can be taken),
-// the prepare screen warns when Keven goes alone and the delve starts; the peddler shows the
-// night-eye draught locked ("Brewed at the Gilded Flagon"), the Flagon sells it into the stash;
+// a new campaign opens on the notice post (V4.0: step 1, Job) with 90 gold and no hire gate,
+// Set out warns when Keven goes alone and Delve is enabled; the night-eye draught is on the
+// wagon only once Wim is home, and buying it packs it;
 // a Burglar's pack shows the improvised pick (no slot), and the locked-door hover changes once
 // it is spent. Real engine only.
 //   node scripts/v371-ui-check.mjs <baseUrl>
@@ -22,7 +22,7 @@ const check = (name, ok, extra = '') => {
 const text = () => p.evaluate(() => document.body.innerText);
 const idle = () => p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 60000 });
 const edit = (fn, arg) => p.evaluate(([f, a]) => { const s = structuredClone(window.vc.state()); new Function('s', 'a', f)(s, a); window.vc.load(s); }, [fn, arg]);
-const station = async (id) => { await p.click(`.station[data-station="${id}"]`); await p.waitForTimeout(120); };
+const step = async (id) => { await p.click(`.lg-step[data-step="${id}"]`); await p.waitForTimeout(120); };
 
 await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
@@ -31,34 +31,29 @@ await p.waitForFunction(() => !!window.vc);
 await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });
 await p.waitForTimeout(150);
 
-// 21.1 / 21.2
+// 21.1 / 21.2 (V4.0: Lowgate's four steps)
 check('new campaign: 90 gold', (await p.evaluate(() => window.vc.state().campaign.gold)) === 90);
-await station('board');
-check('no hire gate on the notice post', !(await p.$('.hire-first')));
-check('a hint instead: "Keven stands alone"', /Keven stands alone/.test(await text()));
-check('the campfire glows as a suggestion', !!(await p.$('.station[data-station="tavern"].call')));
-check('"Take the job" is enabled with Keven alone', await p.$eval('.contract .btn-primary', (e) => !e.disabled));
-await p.click('.contract .btn-primary');
-await p.waitForTimeout(150);
+check('lands on the notice post (step 1, Job)', (await p.evaluate(() => document.querySelector('.lowgate')?.dataset.page)) === 'job');
+check('no hire gate: a job is chosen with Keven alone', !!(await p.$('.lg-card[aria-pressed="true"]')));
+await step('party');
+check('Party: "Keven can go alone, but if he falls, it\'s over."', /Keven can go alone, but if he falls, it's over\./.test(await text()));
+check('Party: the first empty slot points at the campfire ("Hire someone below.")', /Hire someone below\./.test(await text()));
+await step('setout');
 const prep = await text();
-check('prepare: "Keven goes in alone. If he falls, it\'s over."', /Keven goes in alone\. If he falls, it's over\./.test(prep));
-check('prepare: the delve button is enabled', await p.$eval('.btn-delve', (e) => !e.disabled));
+check('Set out: "Keven goes in alone. If he falls, it\'s over."', /Keven goes in alone\. If he falls, it's over\./.test(prep));
+check('Set out: the Delve button is enabled', await p.$eval('.lg-delve', (e) => e.getAttribute('aria-disabled') !== 'true'));
 
-// 21.3
-await station('quartermaster');
-const night = await p.$eval('.shop-row[data-kind="nightsight"]', (e) => ({ t: e.innerText, locked: e.classList.contains('locked') })).catch(() => null);
-check('peddler: night-eye locked, "Brewed at the Gilded Flagon: rescue Old Wim"', !!night && night.locked && /Brewed at the Gilded Flagon: rescue Old Wim/.test(night.t), night?.t.slice(0, 100));
+// 21.3: the night-eye draught is Wim's (V4.0: locked stays quiet, so it isn't on the wagon until he is home)
+await step('outfit');
+check('wagon: no night-eye draught while Wim is away', !(await p.$('[data-ware="nightsight"]')));
 await edit('s.campaign.village.innkeeper = true;');
-await station('quartermaster');
-check('peddler: no night-eye once Wim is home (it is at the Flagon)', !(await p.$('.shop-row[data-kind="nightsight"]')));
-await station('tavern');
-const fl = await p.$('.draughts .shop-row[data-kind="nightsight"]:not(.locked)');
-check('the Flagon lists the night-eye draught (taps dry or not)', !!fl);
+const fl = await p.$('[data-ware="nightsight"]');
+check('wagon: the night-eye draught once Wim is home (taps dry or not)', !!fl);
 if (fl) {
-  await p.click('.draughts .shop-row[data-kind="nightsight"] .btn');
+  await p.click('[data-ware="nightsight"]');
   await p.waitForTimeout(150);
   const s = await p.evaluate(() => window.vc.state().campaign);
-  check('bought into the stash for 30', s.gold === 60 && s.stash.some((i) => i.kind === 'nightsight'), `gold ${s.gold}`);
+  check('bought for 30, packed for Keven', s.gold === 60 && s.stash.some((i) => i.kind === 'nightsight') && !!(await p.$('.lg-hero[data-hero="keven"] [data-kind="nightsight"]')), `gold ${s.gold}`);
 }
 
 // 21.4: a Burglar in the delve
