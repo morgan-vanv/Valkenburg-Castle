@@ -13,7 +13,7 @@ import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
   LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
-  releaseHold, rivalsOnMap, roll, shieldWalled, turnOnHit, valueOf, wakeAdjacent, dropCaptive,
+  releaseHold, releaseCrewHold, rivalsOnMap, roll, shieldWalled, turnOnHit, valueOf, wakeAdjacent, dropCaptive,
 } from './common';
 import {
   adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
@@ -866,7 +866,8 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'shutter':
       return c.d.lanternBearer === h.heroId ? [{ id: h.heroId }] : [];
     case 'escape':
-      return h.grabbedBy && onMap(c).some((m) => m.id === h.grabbedBy) ? [{ id: h.grabbedBy }] : [];
+      // V4.0 (spec 28.8): a crew member's grip too (a seized hero, awake again).
+      return h.grabbedBy && (onMap(c).some((m) => m.id === h.grabbedBy) || rivalsOnMap(c).some((r) => r.id === h.grabbedBy && r.dragging === h.heroId)) ? [{ id: h.grabbedBy }] : [];
     case 'leave':
       return canLeaveAt(c, h.at) ? [{ at: h.at }] : [];
     // ---- V3.7 (spec 20.5) kit
@@ -1354,7 +1355,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'kindle': return withMana(simple(`+${KINDLE_LIGHT} light`, 0, KINDLE_LIGHT), 1);
     case 'shutter': return simple(c.d.lanternOpen ? 'Shutter the lantern: no light, no burn. Free.' : 'Open the lantern: light again. Free.');
     case 'escape': {
-      const m = c.d.monsters.find((x) => x.id === t.id)!;
+      const m = (c.d.monsters.find((x) => x.id === t.id) ?? c.d.rivals?.members.find((x) => x.id === t.id))!;
       return base('might', 2, withLight(def.stats.might), ['Still held', `Free of ${m.name}`, `Free of ${m.name}`], 1);
     }
     case 'mend': {
@@ -1922,12 +1923,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     }
     case 'escape': {
       const r = doRoll();
-      const m = c.d.monsters.find((x) => x.id === t.id)!;
+      const m = c.d.monsters.find((x) => x.id === t.id);
+      const rv = m ? undefined : rivalsOnMap(c).find((x) => x.id === t.id);
       makeNoise(c, h.at, 1);
       if (r.hits) {
         say(c, `${name} wrenches free.`);
-        releaseHold(c, m);
-      } else say(c, `${m.name} holds on.`);
+        if (m) releaseHold(c, m);
+        else if (rv) {
+          releaseCrewHold(c, rv); // V4.0 (spec 28.8): out of a crew member's grip
+          say(c, `${rv.name} loses hold of ${name}.`);
+        }
+      } else say(c, `${(m ?? rv)?.name ?? 'It'} holds on.`);
       break;
     }
     case 'torch':
@@ -2181,7 +2187,8 @@ export function checkDelveEnd(c: Ctx): boolean {
 export function endDelve(c: Ctx): void {
   for (const h of c.d.heroes) {
     // V3.7 (spec 20.4): a downed hero in a crew member's hands is carried off, not left to die.
-    const dragger = h.status === 'downed' ? rivalsOnMap(c).find((r) => r.dragging === h.heroId) : undefined;
+    // V4.0 (spec 28.8): or a seized hero awake in a member's grip.
+    const dragger = h.status === 'downed' || (h.status === 'active' && h.grabbedBy) ? rivalsOnMap(c).find((r) => r.dragging === h.heroId) : undefined;
     if (dragger) {
       capture(c, dragger, h as HeroX);
       continue;

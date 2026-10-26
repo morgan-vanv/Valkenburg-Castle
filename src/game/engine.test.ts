@@ -3892,6 +3892,141 @@ describe('V3.7 crews', () => {
     const r2 = ok(t, { type: 'endTurn' });
     expect(member(r2.state, 0).hp).toBe(9);
   });
+
+  // V4.0 (spec 28.8, owner): capture is the surprise, not the default: only a hero left helpless and alone is carried off.
+  describe('spec 28.8: helpless and alone', () => {
+    /** One Ferryman (the Sellsword) at (1,12,7), hostile; the others dead. Brann downed next to it. */
+    function scene(kevenAt: Pos, opts: { dozing?: boolean } = {}) {
+      const s = crewDelve('ferrymen', [at(1, 12, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+      member(s, 1).hp = 0;
+      member(s, 2).hp = 0;
+      put(s, 'keven', kevenAt);
+      put(s, 'brann', at(1, 13, 7));
+      const b = hero(s, 'brann') as HeroX;
+      if (opts.dozing) {
+        b.dozing = true;
+        b.webbed = true;
+      } else {
+        b.status = 'downed';
+        b.hp = 0;
+        b.bleed = 3;
+      }
+      b.pack.push(gold(30, 'bg'));
+      return s;
+    }
+
+    it('downed and alone (no hero up within 4): seized, robbed and dragged', () => {
+      const s = scene(at(1, 2, 8));
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      const r = ok(s, { type: 'endTurn' });
+      expect(r.events.some((x) => x.type === 'robbed' && x.hero === 'brann')).toBe(true);
+      expect(member(r.state, 0).dragging).toBe('brann');
+      expect(r.events.some((x) => x.type === 'say' && /finds Brann down and alone/.test(x.text))).toBe(true);
+    });
+
+    it('downed with a friend within 4 (not at its blade): finished, not carried off; a hero at its blade: it fights the living', () => {
+      const s = scene(at(1, 15, 7)); // Keven 2 from Brann, 3 from the member
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'attack', targetId: 'brann' });
+      const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'died' && x.id === 'brann'));
+      expect(r.events.some((x) => x.type === 'robbed')).toBe(false);
+      expect(hero(r.state, 'brann').status).toBe('dead');
+      expect(member(r.state, 0).dragging).toBeUndefined();
+      // Keven at the member's blade: it turns on him and leaves Brann be.
+      const t = scene(at(1, 11, 7));
+      computeIntentsOf(ctx(t));
+      expect(member(t, 0).intent?.targetId).not.toBe('brann');
+      const r2 = ok(t, { type: 'endTurn' });
+      expect(hero(r2.state, 'brann').status).toBe('downed');
+      expect(r2.events.some((x) => x.type === 'robbed')).toBe(false);
+    });
+
+    it('a dozing hero alone is seized: dragged while out, wakes in the grip, can\'t move, and may Escape (2 Might slots)', () => {
+      const s = scene(at(1, 2, 8), { dozing: true });
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      let r = ok(s, { type: 'endTurn' });
+      expect(r.events.some((x) => x.type === 'say' && /finds Brann drugged and alone/.test(x.text))).toBe(true);
+      let b = hero(r.state, 'brann') as HeroX;
+      expect(member(r.state, 0).dragging).toBe('brann');
+      expect(b.grabbedBy).toBe(member(r.state, 0).id);
+      expect(b.status).toBe('active');
+      expect(b.dozing).toBeUndefined(); // awake for his turn
+      // Held: no walking; Escape is on offer.
+      expect(e.apply(r.state, { type: 'move', heroId: 'brann', path: [at(1, 13, 8)], sneak: false }).error).toBeTruthy();
+      expect(e.actions(r.state, 'brann').some((a) => a.action === 'escape')).toBe(true);
+      // Doing nothing: dragged 3 toward the east exit, trailing.
+      const r2 = ok(r.state, { type: 'endTurn' });
+      expect(distance(member(r2.state, 0).at, at(1, 12, 7))).toBe(3);
+      expect(distance(member(r2.state, 0).at, hero(r2.state, 'brann').at)).toBe(1);
+      expect(hero(r2.state, 'brann').status).toBe('active');
+      // Escape: one hit frees him where he stands.
+      const r3 = until(r.state, { type: 'act', heroId: 'brann', action: 'escape', target: { id: member(r.state, 0).id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'released' && x.id === 'brann'));
+      b = hero(r3.state, 'brann') as HeroX;
+      expect(b.grabbedBy).toBeUndefined();
+      expect(member(r3.state, 0).dragging).toBeUndefined();
+      // With a friend within 4, a dozing hero is not seized.
+      const t = scene(at(1, 15, 8), { dozing: true });
+      computeIntentsOf(ctx(t));
+      expect(member(t, 0).intent?.kind).not.toBe('rob');
+    });
+
+    it('V4.0 (spec 29): paralyzed counts as helpless: seized alone, held through the paralysis; a paralyzed friend is not "up"', () => {
+      const s = scene(at(1, 2, 8), { dozing: true });
+      const b0 = hero(s, 'brann') as HeroX;
+      b0.dozing = undefined;
+      b0.webbed = false;
+      b0.paralyzed = 5;
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      const r = ok(s, { type: 'endTurn' });
+      expect(r.events.some((x) => x.type === 'say' && /finds Brann paralyzed and alone/.test(x.text))).toBe(true);
+      const b = hero(r.state, 'brann') as HeroX;
+      expect(b.grabbedBy).toBe(member(r.state, 0).id);
+      expect(b.status).toBe('active');
+      expect(e.actions(r.state, 'brann')).toEqual([]); // still paralyzed: no Escape yet
+      // Keven within 4 but paralyzed too: not "up", so Brann is still alone.
+      const t = scene(at(1, 15, 8), { dozing: true });
+      const bt = hero(t, 'brann') as HeroX;
+      bt.dozing = undefined;
+      bt.webbed = false;
+      bt.paralyzed = 5;
+      hero(t, 'keven').paralyzed = 5;
+      computeIntentsOf(ctx(t));
+      expect(member(t, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
+      // Keven up within 4: not alone, not seized.
+      const u = scene(at(1, 15, 8), { dozing: true });
+      const bu = hero(u, 'brann') as HeroX;
+      bu.dozing = undefined;
+      bu.webbed = false;
+      bu.paralyzed = 5;
+      computeIntentsOf(ctx(u));
+      expect(member(u, 0).intent?.kind).not.toBe('rob');
+    });
+
+    it('a lone heir downed is fair game: carried off, and the campaign ends', () => {
+      let s = crewDelve('ferrymen', [at(1, 17, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
+      member(s, 1).hp = 0;
+      member(s, 2).hp = 0;
+      put(s, 'brann', at(1, 2, 9));
+      put(s, 'keven', at(1, 16, 7));
+      const k = hero(s, 'keven') as HeroX;
+      k.status = 'downed';
+      k.hp = 0;
+      k.bleed = 3;
+      computeIntentsOf(ctx(s));
+      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'keven' });
+      s = ok(s, { type: 'endTurn' }).state;
+      expect(member(s, 0).dragging).toBe('keven');
+      s = ok(s, { type: 'endTurn' }).state;
+      expect(hero(s, 'keven').status).toBe('captured');
+      s = ok(s, { type: 'act', heroId: 'brann', action: 'leave', target: {}, focus: 0 }).state;
+      const back = e.apply(s, { type: 'backToCamp' });
+      expect(back.state.stage).toBe('over');
+      expect(back.state.overReason).toBe('The heir is taken. Valkenburg stays dark.');
+    });
+  });
 });
 
 // ---------------------------------------------------------------- V3.7 (spec 20.5)

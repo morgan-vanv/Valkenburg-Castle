@@ -161,7 +161,7 @@ export function carrierOf(c: Ctx, id: string): HeroInDelve | undefined {
 /** Paralyzed allies next to `h` that `h` could shoulder: active, paralyzed, nobody's load yet; `h` able and carrying no one. */
 export function shoulderable(c: Ctx, h: HeroInDelve): HeroInDelve[] {
   if (!canStir(h) || h.carrying) return [];
-  return c.d.heroes.filter((o) => o !== h && o.status === 'active' && isParalyzed(o) && adjacent(o.at, h.at) && !carrierOf(c, o.heroId));
+  return c.d.heroes.filter((o) => o !== h && o.status === 'active' && isParalyzed(o) && adjacent(o.at, h.at) && !carrierOf(c, o.heroId) && !o.grabbedBy);
 }
 
 /** Put the load down (set down, or carrying ends). */

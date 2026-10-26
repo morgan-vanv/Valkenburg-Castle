@@ -1,12 +1,13 @@
 // V3.7 (spec 20.4): a hostile crew fights like a squad. Members are built like heroes (rivals.ts
 // `member`/`rivalStats`) and use their packs with the heroes' own item rules, showing each use as
 // an intent the round before. The crew picks one target a round (focus fire), paths to hexes with
-// a line to it and out of the other heroes' sight, robs and drags downed heroes toward the way out.
+// a line to it and out of the other heroes' sight. V4.0 (spec 28.8, owner): it carries off only a hero left helpless
+// (downed, dozing from a sleep dart, or V4.0 spec 29 paralyzed) and alone; a downed hero with friends near is finished instead.
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
 import {
-  BACKSTAB_DMG_MULT, BLAST_INNER_DMG, BLAST_OUTER_DMG, BOW_RANGE, SNEAK_ATTACK_SLOTS, CALTROPS_DMG, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
+  BACKSTAB_DMG_MULT, BLAST_INNER_DMG, CAPTURE_ALONE, BLAST_OUTER_DMG, BOW_RANGE, SNEAK_ATTACK_SLOTS, CALTROPS_DMG, CLASSES, DRAG_MOVE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE,
   KNOCKBACK_RANGE, PYRO_BOLT_CHANCE, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES, RIVAL_POTION_HEAL, SAPPER_CHARGE_RANGE,
   SELLSWORD_SHOVE_CHANCE, SISTER_DART_CHANCE, SPELL_RANGE, THROW_RANGE, VEIL_ROUNDS, WARD_ROUNDS, BLINK_RANGE,
 } from './data';
@@ -101,9 +102,9 @@ export function caster(c: Ctx): RivalX | undefined {
 
 // ---------------------------------------------------------------- focus fire and positioning
 
-/** Hero targets only (not the freed prisoner). */
+/** Hero targets only (not the freed prisoner); spec 28.8: not a hero a member is carrying off (they want them alive). */
 function heroTargets(c: Ctx): Target[] {
-  return targets(c).filter((t) => t.hero);
+  return targets(c).filter((t) => t.hero && !draggedBy(c, t.id));
 }
 
 /** Could this member attack `t` this round (walk plus reach, same level)? */
@@ -254,28 +255,25 @@ function smokeIntent(c: Ctx, r: RivalX): Intent | null {
   return { kind: 'smoke', item: 'smoke', targetId: m.id, to: { ...m.at } };
 }
 
-/** Sleep dart: the lantern bearer first, else the nearest hero in range 5 and sight. */
+/** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the lantern bearer, else the nearest hero in range 5 and sight. */
 function dartIntent(c: Ctx, r: RivalX): Intent | null {
   if (!hasKit(r, 'dart')) return null;
-  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing);
-  const t = seen.find((x) => x.id === c.d.lanternBearer) ?? seen[0];
+  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing && !isParalyzed(t.hero));
+  const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === c.d.lanternBearer) ?? seen[0];
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
 }
 
-/** V4.0 (spec 29.3): heroes within this of another hero who is up are not "alone" for the venom dart. */
-const VENOM_ALONE = 4;
-
 /**
  * V4.0 (spec 29.3, pillar 17): a venom dart at a hero in range 5 and sight the venom can take (not paralyzed already,
- * not envenomed: one dose is enough to count down): a hero alone first (nobody up within 4: nobody to carry them
- * out), else the crew's target, else the nearest.
+ * not envenomed: one dose is enough to count down): a hero alone first (spec 28.8's `alone`: nobody up within 4 to carry
+ * them out, and paralyzed and alone the crew can carry them off), else the crew's target, else the nearest.
  */
 function venomIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   if (!hasKit(r, 'venomdart')) return null;
   const seen = heroesInSight(c, r, THROW_RANGE.venomdart).filter((x) => x.hero && !(x.hero.venom ?? 0) && venomTakes(c, x.id));
   if (!seen.length) return null;
-  const up = activeHeroes(c).filter((h) => !isParalyzed(h) && !(h as HeroX).dozing);
-  const lone = seen.find((x) => !up.some((o) => o.heroId !== x.id && o.at.level === x.at.level && distance(o.at, x.at) <= VENOM_ALONE));
+  // Spec 28.8's "alone" (no other hero who is up within CAPTURE_ALONE): paralyzed and alone, the crew can carry them off.
+  const lone = seen.find((x) => alone(c, x.hero as HeroX));
   const pick = lone ?? (t && seen.find((x) => x.id === t.id)) ?? seen[0]!;
   return { kind: 'venomdart', item: 'venomdart', targetId: pick.id };
 }
@@ -801,25 +799,80 @@ export function rivalCaltropsStep(c: Ctx, h: HeroX, p: Pos): boolean {
   return true;
 }
 
-// ---------------------------------------------------------------- captives (spec 20.4)
+// ---------------------------------------------------------------- captives (spec 20.4; spec 28.8: helpless and alone)
 
-/** A downed hero nobody is dragging who hasn't been robbed yet, within `n` of the member. */
-function robbable(c: Ctx, r: RivalX, n: number): HeroX | undefined {
-  return c.d.heroes.find((h) => h.status === 'downed' && !h.robbed && h.at.level === r.at.level && distance(h.at, r.at) <= n
-    && !rivalsOnMap(c).some((m) => m.dragging === h.heroId));
+/** The member carrying this hero off, if any. */
+export function draggedBy(c: Ctx, heroId: string): RivalX | undefined {
+  return rivalsOnMap(c).find((m) => m.dragging === heroId);
 }
 
-/** Gold and gems out of the downed hero's pack into the member's loot; the member takes hold of them. */
+/** Spec 28.8: heroes who are up: active, awake (not dozing), not paralyzed (spec 29) and not in a crew member's hands. */
+function upHeroes(c: Ctx): HeroX[] {
+  return (activeHeroes(c) as HeroX[]).filter((h) => !h.dozing && !isParalyzed(h) && !draggedBy(c, h.heroId));
+}
+
+/** Spec 28.8: downed, or dozing from a sleep dart; V4.0 (spec 29): or paralyzed. */
+export function helpless(h: HeroX): boolean {
+  return h.status === 'downed' || (h.status === 'active' && (!!h.dozing || isParalyzed(h)));
+}
+
+/** Spec 28.8: no other hero who is up within `CAPTURE_ALONE` hexes (straight-line, same level). */
+export function alone(c: Ctx, h: HeroX): boolean {
+  return !upHeroes(c).some((o) => o !== h && o.at.level === h.at.level && distance(o.at, h.at) <= CAPTURE_ALONE);
+}
+
+/**
+ * Spec 28.8: a helpless hero alone, nobody's captive yet, that the member can stand next to this round (its walk).
+ * Supersedes spec 20.4's "a downed hero within 2" (a hero dropped by a killed dragger may be taken again, if alone).
+ */
+function seizable(c: Ctx, r: RivalX): { h: HeroX; path: Pos[] } | undefined {
+  const move = rivalStats(r).move;
+  const cands = (c.d.heroes as HeroX[])
+    .filter((h) => helpless(h) && h.at.level === r.at.level && distance(h.at, r.at) <= move + 1 && !draggedBy(c, h.heroId) && alone(c, h))
+    .sort((a, b) => distance(a.at, r.at) - distance(b.at, r.at) || (a.heroId < b.heroId ? -1 : 1));
+  for (const h of cands) {
+    if (adjacentTo(h.at, r.at)) return { h, path: [] };
+    const path = approach(c, r.id, r.at, attackSpots(c, h.at, r.id), move, true) ?? [];
+    const end = path[path.length - 1];
+    if (end && adjacentTo(h.at, end)) return { h, path };
+  }
+  return undefined;
+}
+
+/**
+ * Spec 28.8: a downed hero next to the member, not being carried off, when no hero who is up stands next to the member:
+ * it finishes them (an attack; any damage to a downed hero kills). With a hero at its blade it fights the living instead.
+ */
+function finishable(c: Ctx, r: RivalX): HeroX | undefined {
+  if (upHeroes(c).some((h) => adjacentTo(h.at, r.at))) return undefined;
+  return (c.d.heroes as HeroX[]).find((h) => h.status === 'downed' && adjacentTo(h.at, r.at) && !draggedBy(c, h.heroId));
+}
+
+/**
+ * Seize a helpless lone hero (spec 28.8): gold, gems and jewelry out of their pack into the member's loot; the member takes
+ * hold. A dozing hero is held (`grabbedBy` the member): they wake at their next turn in its grip and may Escape (2 Might
+ * slots, 1 hit) or fight it; held, they can't move.
+ */
 export function rob(c: Ctx, r: RivalX, h: HeroX): void {
   const items = h.pack.filter((i) => !i.story && (i.kind === 'gold' || i.kind === 'gem' || i.kind === 'jewelry'));
   h.pack = h.pack.filter((i) => !items.includes(i));
   r.loot.push(...items);
   h.robbed = true;
   r.dragging = h.heroId;
+  if (h.status === 'active') h.grabbedBy = r.id;
   faceToward(r, h.at);
   c.ev.push({ type: 'robbed', hero: h.heroId, by: r.id, items });
   const name = heroName(c, h.heroId);
-  say(c, items.length ? `${r.name} empties ${name}'s purse and takes hold of them.` : `${r.name} finds nothing on ${name} and takes hold of them anyway.`);
+  const how = h.status !== 'active' ? `finds ${name} down and alone` : isParalyzed(h) ? `finds ${name} paralyzed and alone` : `finds ${name} drugged and alone`;
+  say(c, items.length ? `${r.name} ${how}, empties their purse and takes hold of them.` : `${r.name} ${how} and takes hold of them.`);
+}
+
+/** Spec 28.8: the finishing blow on a downed hero next to the member (a roll; any hit kills). */
+function finish(c: Ctx, r: RivalX, h: HeroX): void {
+  const st = rivalStats(r);
+  faceToward(r, h.at);
+  tell(c, r, `${r.name} stands over ${heroName(c, h.heroId)} and strikes.`, h.at);
+  strike(c, r.id, h.heroId, st.slots, st.chance, st.dmg, 'Finishing blow');
 }
 
 /** Where the dragger is heading: the nearest exit on foot. */
@@ -831,15 +884,18 @@ function dragExit(c: Ctx, r: RivalX): Pos | undefined {
 function dragPlan(c: Ctx, r: RivalX): Plan {
   const ex = dragExit(c, r);
   if (!ex) return { intent: { kind: 'wait' }, path: [] };
-  const path = approach(c, r.id, r.at, [ex], DRAG_MOVE, true) ?? [];
+  // Spec 28.8: an awake captive stands in the way like anyone; the dragger may haul them past itself.
+  const path = approach(c, r.id, r.at, [ex], DRAG_MOVE, { stairs: true, ...(r.dragging ? { through: r.dragging } : {}) }) ?? [];
   return { intent: { kind: 'drag', targetId: r.dragging, to: path[path.length - 1] ?? { ...r.at } }, path };
 }
 
 /** Haul the hero along: the member walks, the hero trails one hex behind; on an exit the hero is taken. */
 export function dragAct(c: Ctx, r: RivalX): void {
   const h = r.dragging ? hd(c, r.dragging) : undefined;
-  if (!h || h.status !== 'downed') {
+  // Downed, or (spec 28.8) a seized hero awake in its grip; revived or free, the member lets go.
+  if (!h || !(h.status === 'downed' || (h.status === 'active' && h.grabbedBy === r.id))) {
     r.dragging = undefined;
+    if (h?.grabbedBy === r.id) h.grabbedBy = undefined;
     return;
   }
   const plan = dragPlan(c, r);
@@ -861,6 +917,9 @@ export function capture(c: Ctx, r: RivalX, h: HeroX): void {
   const cr = c.d.rivals!;
   h.status = 'captured';
   h.bleed = 0;
+  h.grabbedBy = undefined;
+  h.dozing = undefined;
+  h.webbed = false;
   r.dragging = undefined;
   r.goneOut = true;
   (cr as { captives?: string[] }).captives ??= [];
@@ -880,12 +939,11 @@ export function capture(c: Ctx, r: RivalX, h: HeroX): void {
 /** What a hostile member shows for the coming world phase. */
 export function hostilePlan(c: Ctx, r: RivalX): Plan {
   if (r.dragging) return dragPlan(c, r);
-  const victim = robbable(c, r, 2);
-  if (victim) {
-    const spots = adjacentTo(victim.at, r.at) ? [r.at] : attackSpots(c, victim.at, r.id);
-    const path = adjacentTo(victim.at, r.at) ? [] : approach(c, r.id, r.at, spots, rivalStats(r).move, true) ?? [];
-    return { intent: { kind: 'rob', targetId: victim.heroId, to: path[path.length - 1] ?? { ...r.at } }, path };
-  }
+  // Spec 28.8: a helpless hero alone is seized; a downed hero next to it is finished while no hero is at its blade.
+  const victim = seizable(c, r);
+  if (victim) return { intent: { kind: 'rob', targetId: victim.h.heroId, to: victim.path[victim.path.length - 1] ?? { ...r.at } }, path: victim.path };
+  const fin = finishable(c, r);
+  if (fin) return { intent: { kind: 'attack', targetId: fin.heroId, to: { ...r.at } }, path: [] };
   const t = currentTarget(c);
   const kit = kitIntent(c, r, t);
   if (kit) return { intent: kit, path: [] };
@@ -912,7 +970,7 @@ export function hostileAct(c: Ctx, r: RivalX): void {
   const it = r.intent;
   if (it && it.kind === 'rob') {
     const h = it.targetId ? (hd(c, it.targetId) as HeroX | undefined) : undefined;
-    if (h && h.status === 'downed' && !h.robbed && !rivalsOnMap(c).some((m) => m.dragging === h.heroId)) {
+    if (h && helpless(h) && !draggedBy(c, h.heroId) && alone(c, h)) {
       if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
       if (!adjacentTo(h.at, r.at)) {
         const path = approach(c, r.id, r.at, attackSpots(c, h.at, r.id), rivalStats(r).move, true) ?? [];
@@ -924,6 +982,16 @@ export function hostileAct(c: Ctx, r: RivalX): void {
         guardCheck(c, r);
         return;
       }
+    }
+  }
+  // Spec 28.8: the finishing blow shown the round before, if the downed hero is still next to it and nobody is at its blade.
+  if (it && it.kind === 'attack' && it.targetId) {
+    const h = hd(c, it.targetId) as HeroX | undefined;
+    if (h && finishable(c, r) === h) {
+      if (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r)) return;
+      finish(c, r, h);
+      guardCheck(c, r);
+      return;
     }
   }
   if (it && KIT.includes(it.kind)) {
@@ -960,9 +1028,9 @@ export function hostileAct(c: Ctx, r: RivalX): void {
     if (stab) tell(c, r, `${r.name} slips behind ${heroName(c, t.id)} and backstabs.`, t.at);
     else if (unnoticed) tell(c, r, `${r.name} strikes before ${heroName(c, t.id)} sees it coming.`, t.at);
     const hit = strike(c, r.id, t.id, slots, st.chance, dmgPer, stab ? 'Backstab' : unnoticed ? 'Sneak attack' : r.cls === 'ranger' ? 'Shot' : 'Attack');
-    // Spec 20.4: a hero this member downs is robbed on the spot and dragged from the next round.
+    // Spec 20.4: a hero this member downs is robbed on the spot and dragged from the next round; spec 28.8: only one left alone.
     const downed = hit ? (hd(c, hit) as HeroX | undefined) : undefined;
-    if (downed && downed.status === 'downed' && !downed.robbed && adjacentTo(downed.at, r.at)) rob(c, r, downed);
+    if (downed && downed.status === 'downed' && adjacentTo(downed.at, r.at) && !draggedBy(c, downed.heroId) && alone(c, downed)) rob(c, r, downed);
   }
   guardCheck(c, r);
 }

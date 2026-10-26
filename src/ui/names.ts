@@ -368,7 +368,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   winch: `Work the winch: the lift runs for the rest of the delve. Noise ${WINCH_NOISE}.`,
   leave: 'Step out of the castle here. Free. This hero is safe, with everything in their pack.',
   shutter: `Free. Shuttered, the lantern burns no oil and gives no light; open it again any time. Level 1 has daylight in most rooms.`,
-  escape: '2 Might slots: 1 hit breaks the ghoul\'s grip. Killing the ghoul frees you too.',
+  escape: '2 Might slots: 1 hit breaks the grip of a ghoul, or of a crew member carrying you off. Killing it frees you too.',
   overwatch: `Spend the action: in the next world phase, shoot the first enemy that moves or acts in sight within ${OVERWATCH_RANGE} (a full roll).`,
   knockback: `2 Finesse slots at range ${KNOCKBACK_RANGE} or less: 2 hits push the target 1 hex away from you (into pits!).`,
   throwCharge: `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; breaks walls within 1 on Levels 1 and 2. Noise ${V37.blastNoise}. You take nothing from your own blast; other heroes take half.`,
@@ -812,7 +812,7 @@ export const STANCE: Record<RivalCrew['stance'], { name: string; text: string; c
   neutral: { name: 'Neutral', text: 'Looting, not fighting.', cls: 'calm' },
   waiting: { name: 'Waiting', text: 'Holding their post. Come within 6 in sight, or make noise 4+ they hear, and they demand a toll.', cls: 'warn' },
   demanding: { name: 'Demanding', text: 'Pay the toll or they attack in the next castle turn.', cls: 'warn' },
-  hostile: { name: 'Hostile', text: 'Fighting you.', cls: 'enemy' },
+  hostile: { name: 'Hostile', text: 'Fighting you. A hero left helpless and alone may be carried off; a downed hero with friends near is finished.', cls: 'enemy' },
   bribed: { name: 'Paid off', text: 'Paid to leave. They are heading out.', cls: 'calm' },
   truce: { name: 'Truce', text: 'Paid not to attack. They never attack unless attacked.', cls: 'calm' },
   hired: { name: 'Hired', text: 'Fighting beside you: they keep within 2 of the hero who hired them and attack monsters in reach.', cls: 'ally' },
@@ -822,7 +822,7 @@ export const DEAL_GLYPH: Record<DealKind, string> = { leave: '⇱', truce: '⚐'
 export const JOB_NAME: Record<JobKind, string> = { winch: 'Work the winch', open: 'Open a lock', scout: 'Scout ahead' };
 export const JOB_TEXT: Record<JobKind, string> = {
   winch: 'They walk to the winch on their level and work it: the lift runs.',
-  open: 'Their lockpicker opens the nearest seen locked door or chest on their level: silent if every slot hits; a lock that holds is tried again, a jammed one gets your coin back.',
+  open: 'Their lockpicker opens the nearest seen locked door or chest on their level: silent if every slot hits; a lock that holds is tried again; if it jams, the job is over and they keep the money.',
   scout: 'Every hex within 8 of each of them is explored now.',
 };
 

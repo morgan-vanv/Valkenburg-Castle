@@ -133,7 +133,7 @@ function lockFor(c: Ctx): Pos | undefined {
 
 const JOB_TEXT: Record<JobKind, string> = {
   winch: 'They walk to the winch and work it: the lift runs.',
-  open: 'Their lockpicker opens the nearest locked door or chest you have seen, silently if every slot hits; a lock that holds is tried again, a jammed one gets your coin back.',
+  open: 'Their lockpicker opens the nearest locked door or chest you have seen, silently if every slot hits; a lock that holds is tried again; if it jams, the job is over and they keep the money.',
   scout: `Everything within ${SCOUT_RANGE} of each of them is mapped for you, now.`,
 };
 
