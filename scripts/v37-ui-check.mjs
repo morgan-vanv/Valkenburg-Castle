@@ -307,7 +307,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       check('hovering the wall: "Wall · a Sapper\'s charge could break it"', /Wall/.test(tip) && /charge could break it/.test(tip), tip.slice(0, 100));
       await unhover();
       const sock = await p.$eval('.dl-rcard.sel .dl-own', (e) => e.dataset.tip ?? e.title).catch(() => '');
-      check('the improvised explosives on the card, as the "own" mark after the slots (no slot, count)', /own · \d improvised explosives?\nTakes no slot; can't be given away/.test(sock), sock.slice(0, 90));
+      check('the improvised explosives on the card, as the "own" mark after the slots (no slot, count)', /own · \d improvised explosives?( left)?\nTakes no slot; can't be given away/.test(sock), sock.slice(0, 90));
       const btn = await p.$('.dl-hotbar [data-action="setCharge"]');
       check('Set charge in the hotbar (among the actions)', !!btn && (await btn.evaluate((e) => !!e.closest('.dl-acts'))));
       if (btn) {

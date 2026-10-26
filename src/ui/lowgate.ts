@@ -5,7 +5,7 @@
 
 import type { Engine } from '../game/api';
 import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
-import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, SAPPER_CHARGES, STORIES, WEAPON_PRICE } from '../game/data';
+import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -1024,11 +1024,13 @@ function packSlots(c: Campaign, l: Loadout, hr: Hero, host: CampHost, page: Camp
 
 /** V4.0 (spec 26.5): class kit the hero brings of their own, under the 4 slots (Burglar, Sapper). */
 function kitLine(hr: Hero): HTMLElement | '' {
-  const k = hr.cls === 'sapper' ? { kind: 'improvised-charge', what: `${SAPPER_CHARGES} improvised explosives` } : hr.cls === 'burglar' ? { kind: 'improvised', what: 'improvised pick' } : null;
+  // V4.0 (spec 30.2): one a level each delve.
+  const n = kitPerDelve(hr.level);
+  const k = hr.cls === 'sapper' ? { kind: 'improvised-charge', what: `${n} improvised explosive${n === 1 ? '' : 's'}` } : hr.cls === 'burglar' ? { kind: 'improvised', what: `${n} improvised pick${n === 1 ? '' : 's'}` } : null;
   if (!k) return '';
   return h(
     'p',
-    { class: 'lg-kit', tabindex: 0, 'data-kit': k.kind, 'data-tip': `${hr.name}'s own · ${k.what}\nDoesn't take a slot; can't be given away. A fresh ${k.kind === 'improvised' ? 'one' : 'set'} every delve.\n${ITEM_EFFECT[k.kind] ?? ''}` },
+    { class: 'lg-kit', tabindex: 0, 'data-kit': k.kind, 'data-tip': `${hr.name}'s own · ${k.what}\nDoesn't take a slot; can't be given away. A fresh ${n === 1 ? 'one' : 'set'} every delve: one for each level ${hr.name} has.\n${ITEM_EFFECT[k.kind] ?? ''}` },
     h('span', { class: 'lg-g', 'aria-hidden': 'true' }, itemGlyph(k.kind)),
     `Brings their own: ${k.what}`,
     h('span', { class: 'lg-kit-s' }, ' · no slot'),

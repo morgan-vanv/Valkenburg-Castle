@@ -130,13 +130,15 @@ check('Keven carries the lantern', !!(await p.$('.lg-hero[data-hero="keven"] .lg
 {
   const cls0 = (await st()).campaign.roster.find((x) => x.id === r0).cls;
   const kitOf = () => p.$eval(`.lg-hero[data-hero="${r0}"] .lg-kit`, (e) => ({ t: e.innerText, tip: e.dataset.tip, afterSlots: e.previousElementSibling?.classList.contains('lg-sl-row') })).catch(() => null);
-  for (const [cls, want] of [['burglar', /Brings their own: improvised pick/], ['sapper', /Brings their own: 3 improvised explosives/]]) {
-    await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls}';`);
+  // V4.0 (spec 30.2): one a level; the hero is set to level 2 for the check ("2 improvised picks").
+  const lv0 = (await st()).campaign.roster.find((x) => x.id === r0).level;
+  for (const [cls, want] of [['burglar', /Brings their own: 2 improvised picks/], ['sapper', /Brings their own: 2 improvised explosives/]]) {
+    await edit(`const h = s.campaign.roster.find((h) => h.id === '${r0}'); h.cls = '${cls}'; h.level = 2;`);
     await p.waitForTimeout(60);
     const k = await kitOf();
     check(`a ${cls}'s loadout card: "${want.source.replace(/\\/g, '')}" under the slots`, !!k && want.test(k.t) && k.afterSlots && /own · .*\nDoesn't take a slot; can't be given away/.test(k.tip ?? ''), k ? `${k.t} | ${(k.tip ?? '').split('\n')[0]}` : 'none');
   }
-  await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls0}';`);
+  await edit(`const h = s.campaign.roster.find((h) => h.id === '${r0}'); h.cls = '${cls0}'; h.level = ${lv0};`);
   await p.waitForTimeout(60);
   check('Keven brings no kit line', !(await p.$('.lg-hero[data-hero="keven"] .lg-kit')));
 }

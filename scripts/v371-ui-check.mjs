@@ -84,9 +84,9 @@ check('the Burglar starts with one improvised pick, no slot', !!burg && burg.pac
 if (burg) {
   // V4.0 HUD: the kit is the "own" mark after the 4 mini slots on the party card; its hover says whose it is and what it does.
   const sock = await p.$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-own`, (e) => ({ title: e.dataset.tip ?? e.title, inSlots: !!e.closest('.dl-minis') })).catch(() => null);
-  check('the card shows the improvised pick as its own mark, with help', !!sock && /One Pick at 2 Finesse tries, used up/.test(sock.title), sock?.title.slice(0, 120));
+  check('the card shows the improvised pick as its own mark, with help', !!sock && /Each Pick rolls 2 Finesse tries and uses one up/.test(sock.title), sock?.title.slice(0, 120));
   check('...after the 4 slots, not inside them', !!sock && !sock.inSlots);
-  check('...hover: "<name>\'s own · improvised pick", takes no slot, can\'t be given away', !!sock && /^\S.*'s own · improvised pick\nTakes no slot; can't be given away\./.test(sock.title), sock?.title.split('\n')[0]);
+  check('...hover: "<name>\'s own · 1 improvised pick left" (V4.0 spec 30.2: one a level), takes no slot, can\'t be given away', !!sock && /^\S.*'s own · \d improvised picks? left\nTakes no slot; can't be given away\./.test(sock.title), sock?.title.split('\n')[0]);
   const minis = await p.$$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-minis .dl-mini`, (els) => els.map((e) => e.className)).catch(() => []);
   check('...the 4 slot boxes are all still there', minis.length === 4, `${minis.length}`);
   const free = await p.$eval(`.dl-rcard[data-hero="${burg.heroId}"] .dl-minis`, (e) => e.dataset.tip ?? e.title).catch(() => '');
@@ -111,7 +111,7 @@ if (burg) {
     check('locked door hover with the improvised pick: Pick, Smash', /Locked door/.test(t1) && /Pick, Smash/.test(t1), t1.slice(0, 100));
     await edit(`const h = s.delve.heroes.find((x) => x.heroId === a); h.pack = h.pack.filter((i) => i.kind !== 'improvised');`, burg.heroId);
     const t2 = await tip();
-    check('...spent: names Gerda\'s lockpicks', /improvised pick is spent/.test(t2) && /lockpicks/.test(t2), t2.slice(0, 120));
+    check('...spent: names Gerda\'s lockpicks', /improvised picks are spent/.test(t2) && /lockpicks/.test(t2), t2.slice(0, 120));
   } else console.log('skip: no locked door in this state');
 }
 console.log(`\n${failed} failed, ${errors} console errors`);

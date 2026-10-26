@@ -13,7 +13,7 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, lightScale, roundsToNext, type LightScale } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE, PARALYSIS_ROUNDS, VENOM_ROUNDS } from '../game/data';
@@ -1310,7 +1310,7 @@ export class Hud {
     const selDef = sel ? this.heroDef(sel.heroId) : undefined;
     const canPick = !!sel && sel.pack.some((i) => itemBase(i.kind) === 'lockpicks' || i.kind === 'improvised');
     const spent = !canPick && selDef?.cls === 'burglar';
-    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised pick is spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
+    const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised picks are spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
     if (t.kind === 'door' && door) {
       if (door.open) act(t.barred ? 'Sally port gate' : 'Open door', 'walk through');
       else if (t.barred && door.locked) act('Barred gate', 'the sally port key opens it (Unbar), or a charge. Then it stays open');
@@ -2475,7 +2475,7 @@ export class Hud {
       const item = o ? { ...o, targets: o.targets.filter((t) => t.itemId === it.id) } : null;
       const key = o ? keyFor(o.action, ACTION_KEY[o.action]) : undefined;
       const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
-      const how = item ? (item.blocked ? `\nCan't now: ${item.blocked}` : `\nClick to use${key ? ` (key ${key.toUpperCase()})` : ''}.`) : val || it.kind === 'heirloom' ? '\nCarry it out.' : '\nNothing to use it on here.';
+      const how = item ? (item.blocked ? `\nCan't now: ${item.blocked}` : `\n${itemClickLine(it.kind, key)}`) : val || it.kind === 'heirloom' ? '\nCarry it out.' : `\nNothing to use it on here.${itemUseLine(it.kind) ? `\n${itemUseLine(it.kind)}` : ''}`;
       const btn = h(
         'button',
         {
@@ -2485,7 +2485,7 @@ export class Hud {
           'data-action': item?.action,
           'data-key': key,
           disabled: this.busy,
-          'data-tip': `${itemTip(it)}${how}`,
+          'data-tip': `${itemTip(it, false)}${how}`,
           onclick: () => (item ? this.startAction(item) : this.toast(val || it.kind === 'heirloom' ? `${itemLabel(it)}: carry it out.` : `${itemLabel(it)}: nothing to use it on here.`)),
         },
         h('span', { class: 'dl-slot-g' }, itemGlyph(it.kind)),
@@ -3370,9 +3370,12 @@ function packMini(pack: Item[], owner: string): HTMLElement {
 
 /** V4.0 (spec 26.5): the hero's own kit, as a small chip ("⌐ own"). */
 function kitChip(it: Item, owner: string, small = false): HTMLElement {
-  const what = it.kind === 'improvised' ? 'improvised pick' : `${it.amount} improvised explosive${it.amount === 1 ? '' : 's'}`;
-  const use = it.kind === 'improvised' ? 'One Pick at 2 Finesse tries, used up whatever happens. Use: Pick, next to a lock.' : `Blasts like a blasting charge (${V37.blastInner} within 1, ${V37.blastOuter} within 2), spent before bought charges. Use: Set charge or Throw charge.`;
-  return h('span', { class: `dl-own ${small ? 'sm' : ''}`, tabindex: 0, 'data-tip': `${owner}'s own · ${what}\nTakes no slot; can't be given away. A fresh ${it.kind === 'improvised' ? 'one' : 'set'} every delve.\n${use}` }, itemGlyph(it.kind), it.kind === 'improvised-charge' ? h('small', { class: 'num' }, `${it.amount}`) : '', ' own');
+  // V4.0 (spec 30.2): both kits count their uses (one a level each delve); an old save's single pick reads 1.
+  const n = Math.max(1, it.amount);
+  const pick = it.kind === 'improvised';
+  const what = pick ? `${n} improvised pick${n === 1 ? '' : 's'}` : `${n} improvised explosive${n === 1 ? '' : 's'}`;
+  const use = pick ? 'Each Pick rolls 2 Finesse tries and uses one up, whatever happens. Use: Pick, next to a lock.' : `Blasts like a blasting charge (${V37.blastInner} within 1, ${V37.blastOuter} within 2), spent before bought charges. Use: Set charge or Throw charge.`;
+  return h('span', { class: `dl-own ${small ? 'sm' : ''}`, tabindex: 0, 'data-kit': it.kind, 'data-tip': `${owner}'s own · ${what} left\nTakes no slot; can't be given away. A fresh set every delve: one for each level.\n${use}` }, itemGlyph(it.kind), h('small', { class: 'num' }, `${n}`), ' own');
 }
 
 /** The menu's legend: the marks over figures, on the party cards, and the keys (Legend.dc.html, compact). */

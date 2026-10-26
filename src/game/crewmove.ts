@@ -19,7 +19,7 @@ import { approach, blocked, strikeDetailed } from './ai';
 import { hearStep, partySees } from './hearing';
 import { faceToward, heroSwings, isSneaking, monsterCanSwing, moodOf, sleepersNear, stepNoise, wakeChance } from './stealth';
 import { lookAll } from './world-phase';
-import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse } from './charges';
+import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse, spendPick } from './charges';
 import { digOut } from './delve';
 import { checkWays } from './ways';
 import { envenom, trapDamage } from './venom';
@@ -388,7 +388,7 @@ function crewDisarm(c: Ctx, r: RivalX, at: Pos): void {
 
 // ---------------------------------------------------------------- locks (spec 28.3)
 
-/** Lockpicks in the member's pack: a Burglar picks at 3 slots, anyone else at 2 (the heroes' table). No picks: null. */
+/** Lockpicks in the member's pack: a Burglar picks at 3 slots, anyone else at 2 (the heroes' table); improvised picks (spec 30.2): 2. No picks: null. */
 export function crewPickSlots(r: RivalX): number | null {
   if (!r.pack?.some((i) => i.kind === 'lockpicks' || i.kind === 'improvised')) return null;
   return r.cls === 'burglar' && r.pack.some((i) => i.kind === 'lockpicks') ? 3 : 2;
@@ -445,6 +445,9 @@ export function crewWorkLock(c: Ctx, r: RivalX, at: Pos, smash = false, log = tr
   const slots = crewPickSlots(r);
   if (slots !== null && !l.jammed && !smash) {
     const rr = roll(c, r.id, 'Pick', slots, crewStat(r, 'finesse'));
+    // V4.0 (spec 30.2): without lockpicks she works an improvised pick, one used up per attempt, as a hero Burglar.
+    const imp = r.pack?.some((i) => i.kind === 'lockpicks') ? undefined : r.pack?.find((i) => i.kind === 'improvised');
+    if (imp && r.pack) spendPick(r.pack, imp);
     if (rr.hits >= slots - 1) {
       unlock(c, at);
       if (rr.hits < slots) {

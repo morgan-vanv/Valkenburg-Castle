@@ -7,7 +7,7 @@ import type {
 } from './types';
 import {
   ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
-  MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SAPPER_CHARGES, SHOP,
+  MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP,
   START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
   ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
   HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
@@ -18,7 +18,7 @@ import { pick, random, shuffle } from './rng';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
-import { isKit, satchelName } from './charges';
+import { classKit, isKit } from './charges';
 import { facingInto } from './stealth';
 import { canEnter, kindAt, type World } from './world';
 import { applyOpenWays, entranceList, isGateKey, mergeDelve, shutWays, startWays, wayOpen } from './ways';
@@ -41,6 +41,33 @@ export function makeHero(id: string, name: string, cls: HeroClass, level = 1): H
   while (h.level < level) levelUp(h);
   if (level > 1) h.xp = LEVEL_XP[level] ?? 0;
   return h;
+}
+
+/**
+ * V4.0 (spec 30.1): a hero made before a class was toned down keeps its stored HP and stats; bring them down to the
+ * class table at the hero's level (base + 2 HP and +5 main stat a level above 1). Only ever lowers; idempotent.
+ * Returns true if anything changed. Today only the Sapper (HP 10 → 9, Might 65 → 60; armor is read from the table).
+ */
+export function fitClass(h: Hero): boolean {
+  if (h.cls !== 'sapper') return false;
+  const c = CLASSES[h.cls];
+  const lv = Math.max(1, h.level);
+  const maxHp = c.hp + 2 * (lv - 1);
+  let changed = false;
+  if (h.maxHp > maxHp) {
+    h.hp = Math.max(1, h.hp - (h.maxHp - maxHp));
+    h.maxHp = maxHp;
+    changed = true;
+  }
+  h.hp = Math.min(h.hp, h.maxHp);
+  for (const k of Object.keys(c.stats) as (keyof Hero['stats'])[]) {
+    const want = c.stats[k] + (k === c.main ? 5 * (lv - 1) : 0);
+    if (h.stats[k] > want) {
+      h.stats[k] = want;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function levelUp(h: Hero): void {
@@ -591,10 +618,11 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       moveMode: h.cls === 'burglar' ? 'sneak' : 'walk',
       ...(ale ? { ale } : {}),
     };
-    // V3.7 (spec 20.3), V4.0 (26.5): the Sapper's own 3 improvised explosives, one slotless pack item; bought charges add to them.
-    if (h.cls === 'sapper') hid.pack.unshift({ ...makeItem({ s }, 'improvised-charge', SAPPER_CHARGES, satchelName(SAPPER_CHARGES)), slots: 0 });
-    // V3.7.1 (spec 21.4): every Burglar brings one improvised pick, outside the 4 slots like the explosives.
-    if (h.cls === 'burglar') hid.pack.push({ ...makeItem({ s }, 'improvised'), slots: 0 });
+    // V3.7 (spec 20.3), V4.0 (26.5, 30.2): class kit, one slotless pack item with a use a hero level: the Sapper's
+    // improvised explosives (first; bought charges add to them), the Burglar's improvised picks (after the slots).
+    const kit = classKit({ s }, h.cls, h.level);
+    if (kit && h.cls === 'sapper') hid.pack.unshift(kit);
+    else if (kit) hid.pack.push(kit);
     // V3.9 (spec 24.2): everyone starts facing into the castle.
     hid.facing = facingInto(w, d, hid.at);
     d.heroes.push(hid);

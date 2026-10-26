@@ -5,7 +5,7 @@ import {
   BLINK_RANGE, BRAZIER_LIGHT, BREATH_DMG, BURN_ROUNDS, CALTROPS_DMG, CLASSES, DIG_NOISE, DRAGON_WAKE_NOISE, FIREBALL_NOISE, FIREBALL_RANGE,
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
-  VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, SAPPER_CHARGES,
+  VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, KIT_PER_LEVEL,
   VENOM_ROUNDS, PARALYSIS_ROUNDS, CARRY_MOVE, VENOM_TRAP_DMG,
 } from '../game/data';
 import * as DATA from '../game/data';
@@ -47,7 +47,6 @@ export const V37 = {
   blastInner: liveNum(4, 'BLAST_DMG_INNER', 'BLAST_INNER_DMG', 'CHARGE_DMG'),
   blastOuter: liveNum(2, 'BLAST_DMG_OUTER', 'BLAST_OUTER_DMG'),
   blastNoise: liveNum(8, 'BLAST_NOISE', 'CHARGE_NOISE'),
-  charges: SAPPER_CHARGES,
   /** Spec 20.5. */
   calmSteps: liveNum(4, 'CALM_STEPS'),
   shieldPrice: liveNum(50, 'SHIELD_PRICE'),
@@ -143,7 +142,7 @@ export const CLASS_GEAR: Record<AnyClass, string> = {
   burglar: 'Dagger (Finesse, 2 slots, 2 dmg) · Armor 0',
   mage: 'Staff (Might, 2 slots, 1 dmg) · Armor 0',
   ranger: 'Longbow (Finesse, 3 slots, 2 dmg, range 6) · Armor 0',
-  sapper: 'Hammer (Might, 3 slots, 2 dmg) · Armor 1',
+  sapper: 'Hammer (Might, 3 slots, 2 dmg) · Armor 0',
   pyromancer: 'Staff (Might, 2 slots, 1 dmg) · Armor 0 · Mana 3',
   shadowmancer: 'Staff (Might, 2 slots, 1 dmg) · Armor 0 · Mana 3',
   hedgewitch: 'Staff (Might, 2 slots, 1 dmg) · Armor 0 · Mana 3',
@@ -161,7 +160,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
   ],
   burglar: [
-    ['Pick', 'ability', 'An improvised pick each delve (2 slots, used up). With the smith\'s lockpicks: 3 slots, kept.'],
+    ['Pick', 'ability', 'Improvised picks, one a level each delve (2 slots, one used up per try). With the smith\'s lockpicks: 3 slots, kept.'],
     ['Quietest feet', 'passive', 'Walks 5 (dash 5) and sneaks 4 (dash 4), quieter than anyone: half the wake chance, noticed only up close.'],
     ['Backstab', 'passive', 'From beside or behind an unaware enemy (a monster\'s sides or straight behind it, straight behind a crew member): +1 slot and double damage per hit, on top of the sneak attack.'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
@@ -178,11 +177,10 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Close quarters', 'passive', 'Adjacent bow shots lose 1 slot.'],
   ],
   sapper: [
-    [`${SAPPER_CHARGES} improvised explosives`, 'passive', `Brings ${SAPPER_CHARGES} improvised explosives of their own every delve: no pack slot, can't be given away; they blast like a blasting charge and go first. Bought charges add to them.`],
+    ['Improvised explosives', 'passive', `Brings one improvised explosive of their own a level every delve (level 3: 3): no pack slot, can't be given away; they blast like a blasting charge and go first. Bought charges add to them.`],
     ['Set charge', 'action', `On a hex, wall, door or chest next to you, fuse 1 or 2 turns: ${V37.blastInner} damage within 1, ${V37.blastOuter} within 2, breaks built walls on Levels 1 and 2. The Sapper takes nothing from their own blast.`],
     ['Throw charge', 'action', `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1.`],
     ['Dig', 'action', `Clear adjacent rubble, a cracked wall or blast rubble, no charge. Noise ${DIG_NOISE}.`],
-    ['Brace', 'action', 'Until your next turn: hits do 1 less, enemies roll −15% against you.'],
   ],
   pyromancer: [
     ['Firebolt', '1 mana', 'Fire at range.'],
@@ -340,7 +338,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
  */
 export const ACTION_HELP: Record<ActionKind, string> = {
   attack: 'Strike an enemy with your weapon. Each slot that hits deals its damage; all slots hit: +1. Your first strike on a monster that has not noticed you: +1 slot (the Burglar +2).',
-  pick: `Work a locked door or chest next to you. Needs a pick. The smith's lockpicks are kept: a Burglar rolls 3 Finesse slots (3 hits silent, 2 opens with noise 2, 1 fails, 0 jams it for good), anyone else 2. A Burglar's improvised pick (one per delve) rolls 2 slots and is used up whatever happens. On 2 slots: 2 hits silent, 1 opens with noise 2, 0 jams it.`,
+  pick: `Work a locked door or chest next to you. Needs a pick. The smith's lockpicks are kept: a Burglar rolls 3 Finesse slots (3 hits silent, 2 opens with noise 2, 1 fails, 0 jams it for good), anyone else 2. A Burglar's improvised picks (one a level each delve) roll 2 slots, and each try uses one up whatever happens. On 2 slots: 2 hits silent, 1 opens with noise 2, 0 jams it.`,
   smash: 'Force a locked door or chest next to you: 2 Might slots. A door needs 2 hits, a chest 1. Noise 4 either way.',
   open: 'Open or close a door next to you (free), or open a chest (uses the action; free for the Burglar). Chest loot lands on the floor: Take it.',
   take: `Pick up loot next to you or underfoot. Free. Each item fills a pack slot (${PACK_SLOTS} per hero); heirlooms and hoard pieces fill 2.`,
@@ -466,31 +464,76 @@ After moving, a second move (a dash, as far again: 4, Burglar 5) spends the acti
   blind: FACING_HELP.rear,
 };
 
-/** Pack: what each item kind does and how to use it ("Use: Items › Torch"). */
+/** Pack: what each item kind does (how to use it: ITEM_USE). */
 export const ITEM_HELP: Record<string, string> = {
-  torch: `${TORCH_ROUNDS} rounds of light around the bearer (radius 2).\nUse: Items › Light torch`,
-  potion: 'Heals 5, or gets a downed hero back up.\nUse: Items › Potion (yourself or a hero next to you)',
-  rope: 'Anchor it at a pit edge to climb down and back up.\nUse: stand at a pit edge, Items › Anchor rope',
-  charge: `A blasting charge on a fuse: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}.\nUse: next to the target, Items › Charge (Sapper: Set charge with a fuse of 1 or 2, or Throw charge)`,
-  smoke: `Smoke for ${SMOKE_ROUNDS} rounds; blocks sight both ways.\nUse: Items › Smoke bomb, then click a hex within ${THROW_RANGE.smoke}`,
-  glue: `Monsters within 1 are stuck for ${GLUE_ROUNDS} rounds.\nUse: Items › Glue bomb, then click a hex within ${THROW_RANGE.glue}`,
-  dart: `1 Finesse slot: a hit puts a monster to sleep. Silent.\nUse: Items › Sleep dart, then click a monster within ${THROW_RANGE.dart}`,
-  caltrops: `The first monster across takes ${CALTROPS_DMG} and stops.\nUse: Items › Caltrops, then click a hex next to you`,
-  hook: 'Climb from a pit landing up a level. Reusable.\nUse: on a pit landing, Items › Grapple up',
-  key: 'Opens one locked door or chest, silently.\nUse: next to the lock, Items › Skeleton key',
-  gatekey: 'The key to the sally port\'s barred gate. Opens it silently, for good. Carry it out and the gate is yours.\nUse: next to the gate, Interact › Unbar the gate',
-  oil: `+${OIL_LIGHT} lantern light (${OIL_LIGHT} more rounds).\nUse: Items › Oil flask`,
-  firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.\nUse: Items › Firecracker, then click a hex within ${THROW_RANGE.firecracker}`,
-  lockpicks: 'The smith\'s proper lockpicks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.\nUse: next to a locked door or chest, Interact › Pick lock',
-  improvised: 'A bent nail and a hairpin: one Pick at 2 Finesse slots, used up whatever happens. Every Burglar brings one each delve; it takes no pack slot.\nUse: next to a locked door or chest, Interact › Pick lock',
-  'improvised-charge': `The Sapper's own: black powder in a tin with a fuse. Blasts like a blasting charge: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}. ${SAPPER_CHARGES} each delve, no pack slot, spent before bought charges; can't be given away.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge`,
-  nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.\nUse: Items › Night-eye draught',
-  venomdart: `1 Finesse slot: a hit envenoms a monster or crew member. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: no moving, no acting. Not the Dragon or the Gloam. Silent.\nUse: click it in the pack, then a target within ${THROW_RANGE.venomdart}`,
-  antidote: 'Draws out venom: an envenomed hero is clean again, a paralyzed one can move again. Drink it, or give it to a hero next to you (an action).\nUse: click it in the pack, then yourself or the hero',
+  torch: `${TORCH_ROUNDS} rounds of light around the bearer (radius 2).`,
+  potion: 'Heals 5, or gets a downed hero back up.',
+  rope: 'Anchor it at a pit edge to climb down and back up.',
+  charge: `A blasting charge on a fuse: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}.`,
+  smoke: `Smoke for ${SMOKE_ROUNDS} rounds; blocks sight both ways.`,
+  glue: `Monsters within 1 are stuck for ${GLUE_ROUNDS} rounds.`,
+  dart: '1 Finesse slot: a hit puts a monster to sleep. Silent.',
+  caltrops: `The first monster across takes ${CALTROPS_DMG} and stops.`,
+  hook: 'Climb from a pit landing up a level. Reusable.',
+  key: 'Opens one locked door or chest, silently.',
+  gatekey: 'The key to the sally port\'s barred gate. Opens it silently, for good. Carry it out and the gate is yours.',
+  oil: `+${OIL_LIGHT} lantern light (${OIL_LIGHT} more rounds).`,
+  firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.`,
+  lockpicks: 'The smith\'s proper lockpicks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.',
+  improvised: `Bent nails and hairpins: each Pick at 2 Finesse slots uses one up, whatever happens. A Burglar brings ${KIT_PER_LEVEL === 1 ? 'one' : KIT_PER_LEVEL} a level each delve; they take no pack slot.`,
+  'improvised-charge': `The Sapper's own: black powder in a tin with a fuse. Blasts like a blasting charge: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}. ${KIT_PER_LEVEL === 1 ? 'One' : KIT_PER_LEVEL} a level each delve, no pack slot, spent before bought charges; can't be given away.`,
+  nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
+  venomdart: `1 Finesse slot: a hit envenoms a monster or crew member. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: no moving, no acting. Not the Dragon or the Gloam. Silent.`,
+  antidote: 'Draws out venom: an envenomed hero is clean again, a paralyzed one can move again. Drink it, or give it to a hero next to you (an action).',
 };
 
+/**
+ * V4.0 (spec 30.5): how each item is used in the V4.0 HUD. `pack`: click it in the pack (the hotbar says "Click to use",
+ * with its key), then `then` (where to aim, or when it can be used). Otherwise `how` names the action that spends it.
+ */
+export const ITEM_USE: Record<string, { pack?: boolean; then?: string; how?: string }> = {
+  torch: { pack: true },
+  potion: { pack: true, then: 'yourself or a hero next to you' },
+  rope: { pack: true, then: 'at a pit edge' },
+  charge: { pack: true, then: 'next to the target (a Sapper: Set charge with a fuse of 1 or 2, or Throw charge)' },
+  smoke: { pack: true, then: `a hex within ${THROW_RANGE.smoke}` },
+  glue: { pack: true, then: `a hex within ${THROW_RANGE.glue}` },
+  dart: { pack: true, then: `a monster within ${THROW_RANGE.dart}` },
+  caltrops: { pack: true, then: 'a hex next to you' },
+  hook: { pack: true, then: 'on a pit landing' },
+  key: { pack: true, then: 'next to the lock' },
+  gatekey: { pack: true, then: 'next to the gate (Unbar)' },
+  oil: { pack: true },
+  firecracker: { pack: true, then: `a hex within ${THROW_RANGE.firecracker}` },
+  lockpicks: { how: 'Pick, next to a locked door or chest' },
+  improvised: { how: 'Pick, next to a locked door or chest' },
+  'improvised-charge': { how: 'Set charge (fuse 1 or 2) or Throw charge' },
+  nightsight: { pack: true },
+  venomdart: { pack: true, then: `a target within ${THROW_RANGE.venomdart}` },
+  antidote: { pack: true, then: 'yourself or the hero' },
+};
+
+/** The "Use: ..." line for an item kind: "Use: click it in the pack, then a hex within 4" / "Use: Pick, next to a lock". */
+export function itemUseLine(kind: string): string {
+  const u = ITEM_USE[itemBase(kind)];
+  if (!u) return '';
+  if (!u.pack) return u.how ? `Use: ${u.how}` : '';
+  if (u.then && WHERE.test(u.then)) return `Use: ${u.then}, click it in the pack`;
+  return `Use: click it in the pack${u.then ? `, then ${u.then}` : ''}`;
+}
+
+const WHERE = /^(at|on|next) /;
+
+/** The hotbar's line for a usable pack item: "Click to use (key Z), then a hex within 4." / "Click to use (key R) at a pit edge." */
+export function itemClickLine(kind: string, key?: string): string {
+  const u = ITEM_USE[itemBase(kind)];
+  const k = key ? ` (key ${key.toUpperCase()})` : '';
+  if (!u?.then) return `Click to use${k}.`;
+  return WHERE.test(u.then) ? `Click to use${k} ${u.then}.` : `Click to use${k}, then ${u.then}.`;
+}
+
 /** Tooltip for one pack socket. */
-export function itemTip(i: Item): string {
+export function itemTip(i: Item, withUse = true): string {
   const base = itemBase(i.kind);
   const name = itemLabel(i);
   const tail = '\nDrop or Give it (free) to make room.';
@@ -500,7 +543,8 @@ export function itemTip(i: Item): string {
   if (i.heavy) return `${i.name} · Heavy: whoever carries it moves 3 at most.${tail}`;
   if (i.kind === 'heirloom') return `${i.name} · The contract heirloom. Fills 2 slots. Carry it out of the castle to finish the job.${tail}`;
   if (i.kind === 'hoard') return `${i.name} · A piece of the Dragon's hoard, worth ${i.amount} gold. Fills 2 slots.${tail}`;
-  return `${name} · ${ITEM_HELP[base] ?? ITEM_EFFECT[base] ?? ''}`;
+  const use = withUse ? itemUseLine(i.kind) : '';
+  return `${name} · ${ITEM_HELP[base] ?? ITEM_EFFECT[base] ?? ''}${use ? `\n${use}` : ''}`;
 }
 
 /** Hotkey per action (letters not used by the global keys). */
@@ -633,8 +677,8 @@ export const ITEM_EFFECT: Record<string, string> = {
   oil: `+${OIL_LIGHT} lantern light. The lantern burns 1 per round while open.`,
   firecracker: 'Throw 6: noise 6 at the target hex. Lure monsters away.',
   lockpicks: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2. Without a pick, nobody picks.',
-  improvised: 'One Pick at 2 Finesse slots, then it is spent. Every Burglar brings one each delve, outside the pack slots.',
-  'improvised-charge': `The Sapper's own: ${SAPPER_CHARGES} each delve, outside the pack slots. Blasts like a blasting charge; spent first.`,
+  improvised: 'Each Pick at 2 Finesse slots uses one up. A Burglar brings one a level each delve, outside the pack slots.',
+  'improvised-charge': "The Sapper's own: one a level each delve, outside the pack slots. Blasts like a blasting charge; spent first.",
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
   venomdart: `Throw 5, 1 Finesse slot: a hit envenoms a monster or crew member; ${VENOM_ROUNDS} turns later it is paralyzed for ${PARALYSIS_ROUNDS}. Silent.`,
   antidote: 'Drink, or give to a hero next to you: draws out venom, even from the paralyzed.',
@@ -851,7 +895,7 @@ export const CLASS_PLAN: Record<AnyClass, { tag: string; best: string }> = {
   sellsword: { tag: 'Front line', best: 'Taking the hits meant for someone else.' },
   burglar: { tag: 'Stealth', best: 'Moving fast and quiet (walk 5, sneak 4) and backstabbing for double damage.' },
   ranger: { tag: 'Ranged', best: 'Knocking enemies into pits from across the room.' },
-  sapper: { tag: 'Loud', best: 'Blowing a new way through walls and doors.' },
+  sapper: { tag: 'Loud', best: 'Blowing a new way through walls and doors. Lighter in a brawl than a Sellsword.' },
   pyromancer: { tag: 'Loud', best: 'Burning crowds and keeping the lantern lit.' },
   shadowmancer: { tag: 'Stealth', best: "Getting the party past what it can't fight." },
   hedgewitch: { tag: 'Support', best: 'Keeping everyone standing: mend, ward, gust.' },
@@ -880,7 +924,7 @@ export const CLASS_ABILITIES: Record<AnyClass, AbilityChip[]> = {
     BRACE_CHIP,
   ],
   burglar: [
-    { name: 'Pick locks', kind: 'Ability', plain: "Opens locked doors and chests quietly: a bent nail each delve, or the smith's proper picks.", nums: 'improvised: 2 Finesse slots, used up · lockpicks: 3 slots, kept' },
+    { name: 'Pick locks', kind: 'Ability', plain: "Opens locked doors and chests quietly: bent nails, more as they level, or the smith's proper picks.", nums: `improvised: ${KIT_PER_LEVEL} a level each delve, 2 Finesse slots, one used up a try · lockpicks: 3 slots, kept` },
     { name: 'Quietest feet', kind: 'Passive', plain: 'Walks farther than anyone, sneaks at walking pace and barely wakes anything.', nums: `walk 5 · sneak 4 · ${V39.burglarWakeSneak}% to wake a sleeper per hex (others ${V37.wakeSneak}%) · noticed at ${V39.burglarNoticeLitSneak} lit` },
     { name: 'Backstab', kind: 'Passive', plain: "Strikes twice as hard from behind an enemy that hasn't noticed them.", nums: `+${V39.backstabSlots} slot · ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage · not the Dragon or the Gloam` },
     { name: 'Light fingers', kind: 'Passive', plain: 'Opens chests without spending the action.', nums: 'free · silent' },
@@ -892,11 +936,10 @@ export const CLASS_ABILITIES: Record<AnyClass, AbilityChip[]> = {
     { name: 'Hamstring', kind: 'Action', plain: 'A shot at the legs: a hit pins the target where it stands.', nums: `1 Finesse slot at −${V37.hamstringPenalty}% · range ${V37.hamstringRange} · rooted ${V37.hamstringRounds} rounds · noise 1` },
   ],
   sapper: [
-    { name: 'Improvised explosives', kind: 'Passive', plain: 'Brings explosives of their own on every delve. They take no pack slot and are spent before bought charges.', nums: `${SAPPER_CHARGES} per delve · same blast as a blasting charge · bought ones add to them` },
+    { name: 'Improvised explosives', kind: 'Passive', plain: 'Brings explosives of their own on every delve, more as they level. They take no pack slot and are spent before bought charges.', nums: `${KIT_PER_LEVEL} a level per delve · same blast as a blasting charge · bought ones add to them` },
     { name: 'Set charge', kind: 'Action', plain: 'Sets a charge on a fuse and blows walls, doors and anything near them open.', nums: `fuse 1 or 2 · ${V37.blastInner} dmg within 1, ${V37.blastOuter} within 2 · noise ${V37.blastNoise}` },
     { name: 'Throw charge', kind: 'Action', plain: 'Lobs a lit charge.', nums: `range ${THROW_CHARGE_RANGE} · fuse 1` },
     { name: 'Dig', kind: 'Action', plain: 'Clears rubble or a cracked wall, no charge needed.', nums: `next to you · noise ${DIG_NOISE}` },
-    BRACE_CHIP,
   ],
   pyromancer: [
     { name: 'Firebolt', kind: 'Spell', plain: 'Hurls fire at range.', nums: '1 mana · 3 Wits slots · 2 dmg · range 5 · noise 3' },

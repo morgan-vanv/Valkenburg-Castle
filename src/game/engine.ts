@@ -10,7 +10,7 @@ import { calmReach } from './calm';
 import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
 import { sightWash } from './stealth';
 import { edgeRiskAt, fallInfo } from './falls';
-import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
+import { aleOffers, backToCamp, campCommand, fitClass, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
@@ -274,6 +274,13 @@ export function createEngine(castle: CastleDef): Engine {
         const d = s.delve as DelveX | null;
         // V4.0 (spec 26.5): a Sapper's satchel saved mid-delve becomes their improvised explosives.
         for (const h of d?.heroes ?? []) for (const i of h.pack) migrateSatchel(i);
+        // V4.0 (spec 30.1): Sappers saved before the class was toned down come down to the class table (HP, Might);
+        // one mid-delve keeps their wounds and is capped at the new maximum.
+        for (const h of [...s.campaign.roster, ...(s.campaign.recruits ?? []).map((r) => r.hero), ...(s.campaign.captives ?? []).map((x) => x.hero)]) fitClass(h);
+        for (const dh of d?.heroes ?? []) {
+          const def = s.campaign.roster.find((x) => x.id === dh.heroId);
+          if (def?.cls === 'sapper' && dh.hp > def.maxHp) dh.hp = def.maxHp;
+        }
         if (d && !d.ways) {
           d.ways = startWays(w, s);
           applyOpenWays(w, d);
