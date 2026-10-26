@@ -16,6 +16,16 @@ Open ideas, newest batch last. Built-then-shelved features with code are in `doc
 - **Collapse ceilings and seal hallways with charges** (2026-10-25): a charge against a hallway's roof or a doorway brings it down, filling hexes with rock that blocks movement and sight (Dig clears it slowly).
 - **A full economy pass** (2026-10-25): prices, bounties and loot were tuned piecemeal (V3.4, V3.7.1); look at the whole curve once the systems settle.
 
+### Crew parity, pass 2 (design pillar 17, after spec 28)
+
+Crews play by the party's rules (spec 28 did movement, sneaking, noise and wake rolls, monsters vs crews, locks, traps, the Burglar's backstab, the Sapper's dig and blast). Still to give them, each visible and named in the log:
+- **Rope, jump, climb, grapple** (2026-10-26): crews rope down into the pit, jump to a lower level, climb back up, grapple out; prospectors racing the party down levels.
+- **Light** (2026-10-26): crews carry their own light in the fiction but not in the rules (litSet ignores them; monsters see them by the unlit ranges unless fixed light reaches them). Give them a lantern or torches that light hexes, and let them light braziers. Then the Gloam can hunt unlit crew members on Level 3 the same way it hunts heroes (left out of spec 28 on purpose).
+- **Focus, flanking, brace** (2026-10-26): crews spend Focus on key rolls, flank (+1 slot with a member across the target), and their Heir, Sellsword and Sapper brace.
+- **The missing spells** (2026-10-26): Sleep, Dread, Night thorn, Briar, Kindle for crew mages (the Shadowmancer sister putting an orc to sleep to pass it).
+- **Revive** (2026-10-26): a member downed instead of killed, and a crewmate reviving them.
+- **Smaller gaps** (2026-10-26): the party's caltrops catching crews; grab, web, drag, steal and hamstring by monsters on crew members (they attack instead today); the Dragon going for crews; crews picking or blasting locked doors on their way when they aren't the Sapper; a crew Burglar's improvised pick.
+
 ## Shelved (code exists)
 
 - **Free exploration outside combat** (shelved 2026-10-25): BG3-style exploration (V3.8) and the earlier calm free move (V3.7). Code, findings and how to resume: `docs/shelved/exploration-mode.md` (branch `shelf/exploration-mode`; the calm walk is on `main` behind `FREE_MOVE.enabled`). The owner wants to return to it.

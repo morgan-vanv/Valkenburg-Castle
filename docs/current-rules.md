@@ -205,7 +205,7 @@ Code: world-phase.ts `worldPhase`, `computeIntents`; delve.ts `moveKind`, `canDo
 
 ### 5.1 Movement
 
-- Walk 4 (Burglar 5, V4.0). Sneak 2 (Burglar 4; Smuggler's Mead 4). A dash goes as far as a first move. Escorting the prisoner: 3 at most. Carrying a heavy item: 3 at most (both cap the Burglar too). Crew members move 4 whatever their class (section 12).
+- Walk 4 (Burglar 5, V4.0). Sneak 2 (Burglar 4; Smuggler's Mead 4). A dash goes as far as a first move. Escorting the prisoner: 3 at most. Carrying a heavy item: 3 at most (both cap the Burglar too). V4.0 (spec 28): crew members move as heroes of their class, walk or sneak, and dash (section 12.2).
 - Walk or sneak is each hero's own setting for the delve (`HeroInDelve.moveMode`, V4.0): Burglars start on `sneak`, everyone else on `walk` (absent, as in older saves: walk). The free `setMoveMode` command (`{ heroId, sneak }`) changes it for that hero only. A `move` without `sneak` uses it, as do `reachable`, `moveNoise` and `calmReach` when their `sneak` argument is left out; an explicit `sneak` on a move wins and doesn't change the setting.
 - Rubble costs 2. Stairs: stepping from a stairs hex to its linked hex costs 1. Lift: the same, once the winch is worked.
 - Can't enter walls, pillars, props, tall props, braziers, pits, cracked walls, the sealed stair, locked closed doors, or a hex with a monster or non-hired crew member. Heroes pass through heroes, the prisoner and hired crew members; they can't end on anyone.
@@ -243,6 +243,8 @@ Noise is a ripple of radius R; a hex hears it if its path distance from the sour
 
 Effects of noise on monsters (not the Gloam, not buried ghouls): every monster that hears it and isn't hunting turns to face it (V4.0: a hunting monster keeps its facing, section 6.1). Asleep or patrolling → alert at the source, searching 3 rounds (berserkers go hunting). Alert → re-focus on the source and restart the search. The Dragon wakes on noise ≥ 4. A waiting cutthroat crew hears noise ≥ 4 made in the player phase and demands its toll.
 
+V4.0 (spec 28): crew members make the heroes' noises for the same deeds: walking 1 per hex (rubble 2; sneaking silent), pick one short 2, smash and dig 4, a trap set off 2, charges 8.
+
 ### 5.3 Wake rolls (sleepers hear only)
 
 Sleepers never notice anyone by sight. For each hex a hero steps on within 2 of a sleeping monster (not the Dragon or the Gloam):
@@ -255,6 +257,7 @@ Sleepers never notice anyone by sight. For each hex a hero steps on within 2 of 
 - Per-hex chances halve when the hero's hex is unlit.
 - Walking noise (1 per hex) also wakes any sleeper within path distance 1 for sure.
 - Arriving without walking (fall, climb, grapple, blink) next to a sleeper: wakes it for sure, 25% if the arrival counts as quiet (blink).
+- V4.0 (spec 28.1): crew members roll the same wake rolls at every hex they step on (walking or sneaking; a crew Burglar's quiet feet), after the step's noise. A sleeper they wake goes alert at their hex ("The orc stirs as Ferryman Joost passes." when the party sees it).
 - A woken sleeper goes alert at the hero's hex.
 
 ### 5.4 Noticing (awake monsters and waiting/hostile crews)
@@ -290,6 +293,7 @@ When (V4.0, spec 26.2, 27): monsters look whenever anything moves.
 - In the world phase it hunts its quarry: the hero its intent named, while it still makes them out, else the nearest perceived hero. A monster forgets who it noticed when it loses its quarry, is put to sleep, or is smoked out.
 - Veiled heroes are not targets at all.
 - Waiting cutthroats use the crew noticing rule capped at 6 (`CUTTHROAT_SIGHT`).
+- **V4.0 (spec 28.2): crew members are looked at like heroes.** Monsters look for every crew member on the map (unveiled, hired or not) by the same rules: its last move mode (`Rival.sneaked`), a crew Burglar's quiet feet, plain sight once noticed (`noticedIds` holds crew ids too). They look at every crew step as well (`lookAll` in the world phase), cascade included. A monster hunts and strikes the nearest figure it makes out, hero or crew member. Its `noticed` event for a crew member goes out only when the party sees the monster or the member.
 
 ### 5.5 Monster awareness states and moods
 
@@ -309,7 +313,7 @@ When (V4.0, spec 26.2, 27): monsters look whenever anything moves.
 
 The preview plays the move through the eyes of every monster the party has seen (V4.0, spec 27), hex by hex as the move does: wake rolls along the path for seen sleepers, with chance; `notice`: each (watcher, hero) pair that would happen, in order, for watchers visible now, `at` the mover's hex then and `hero` the hero seen (the mover, or a friend whose cover the move blows: a cascade, or the lantern carried past); free swings leaving provokes from seen enemies (including one that noticed the mover earlier on the path), with damage range (blindside slot included). It follows what can be known: doors opened on the way, a swing turning its swinger, walking noise and an orc's bellow turning heads and sending monsters searching, sleepers woken for sure (100%). Dice can't be previewed: a sleeper that may wake is taken as asleep, a hero who may be downed by a swing walks on. A waiting crew is checked for the mover within 6. Unseen enemies still roll and act; they are just not previewed. The HUD: "👁 Orc will see you, then Fenna".
 
-Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`, `smokeOut`, `doAct` (`veil`); camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the look after an `act` that changed the light, the `replan` pass); stealth.ts `wouldNotice`, `bearingOf`, `moodOf`, `isSearching`, `lookRound`, `sightedHeroes`, `perceivable`, `isSneaking`, `noticeHero`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `lookAll`, `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `SIDE_NOTICE_WALK`, `SIDE_NOTICE_ADJACENT`, `BURGLAR_SIDE_QUIET`, `BELLOW_NOISE`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
+Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`, `smokeOut`, `doAct` (`veil`); camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the look after an `act` that changed the light, the `replan` pass); stealth.ts `wouldNotice`, `bearingOf`, `moodOf`, `isSearching`, `lookRound`, `sightedHeroes` (heroes, then crew members), `perceivable`, `isSneaking`, `noticeHero`, `noticeFigure`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `lookAll` (`anyPhase` for crew steps), `chooseTarget` (`foes`), `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `SIDE_NOTICE_WALK`, `SIDE_NOTICE_ADJACENT`, `BURGLAR_SIDE_QUIET`, `BELLOW_NOISE`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
 
 ---
 
@@ -350,8 +354,8 @@ Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetti
 
 During the world phase, a monster or crew member the party can't see that makes a sound within a hero's hearing creates a `Heard` entry (`Delve.heard`) and a `heard` event: where, not who. Entries last through the next player phase and are cleared when the following world phase starts. Deduplicated per hex and kind. Heard enemies stay unseen.
 
-- **Footsteps** (`steps`): each hex an unseen enemy steps onto, heard by a hero within path distance: rats, spiders 2; ghouls, cutpurses 3; orcs, archers, captains, crew members 4; berserkers 5; the Dragon 8. Feared figures +1. The Gloam is silent.
-- **Loud** (`loud` with `what`), heard within the sound's own path radius: `clash` (enemy strikes and free swings 2; enemy noise-making attacks at their noise), `shout` (5), `crash` (a locked door forced 4; crew winch 6; crew gust 2), `blast` (charges 8, crew fireball 6, crew firecracker 6), `roar` (breath 6), `scream` (a monster or crew member hurt out of sight 2; a hero downed by an unseen attacker 3).
+- **Footsteps** (`steps`): each hex an unseen enemy steps onto, heard by a hero within path distance: rats, spiders 2; ghouls, cutpurses 3; orcs, archers, captains, crew members 4; berserkers 5; the Dragon 8. Feared figures +1. The Gloam is silent. V4.0 (spec 28.1): a sneaking crew member is silent, as a sneaking hero.
+- **Loud** (`loud` with `what`), heard within the sound's own path radius: `clash` (enemy strikes and free swings 2; enemy noise-making attacks at their noise), `shout` (5), `crash` (a locked door forced 4; crew winch 6; crew gust 2), `blast` (charges 8, crew fireball 6, crew firecracker 6), `roar` (breath 6), `scream` (a monster or crew member hurt out of sight 2; a hero downed by an unseen attacker 3). V4.0 (spec 28): `lock` (a crew member's pick one short, 2: "Something forcing a lock to the north"), `dig` (a crew Sapper digging, 4); a crew's smash or sprung trap is a `crash`; monsters and crews fighting out of sight a `clash`.
 - Hearing never changes what monsters see or do.
 
 Code: world.ts `dirIndex`, `inFrontHalf`, `blindCone`, `seesHex`, `visibleSet`, `glimpseSet`; stealth.ts `faceToward`, `noticeHero`, `inRearHalf` (outside the front), `bearingOf`, `wouldNotice`, `facingInto`; common.ts `turnOnHit`, `makeNoise`, `goHunting`; world-phase.ts `perceive`; ai.ts `blindside`, `unseenStrike`; delve.ts `setFacing`, `refreshSight`, `noteSeen`, `seenSet`; hearing.ts (`STEP_RANGE`, `CREW_STEP_RANGE`, `FLEE_STEP_BONUS`, `CLASH_HEAR`, `DOWNED_HEAR`, `FORCED_DOOR_HEAR`, `hearStep`, `hearLoud`, `clearHeard`); data.ts `FACING`, `HEARING`, `BLINDSIDE_SLOTS`.
@@ -442,11 +446,13 @@ Damage to a monster or crew member per hit: max(1, weapon damage − armor), min
 - Damage per hit: max(0, max(1, damage − hero armor) − ward 1 − brace 1 − shield (ranged only: 1, or 2 braced)); Perfect +1.
 - Hero armor = class armor + armor tier. Ranged for the shield: attack labels matching shot, firebolt, overwatch, arrow, bolt, dart.
 - Guard: hits aimed at the Sellsword's guarded ally hit the Sellsword instead.
+- V4.0 (spec 28.5): a crew member's weapon attack on a hero who hasn't noticed it (`RivalX.seenBy`: heroes who have seen it with their own eyes, forgotten once no hero sees it) gets the sneak attack's +1 slot; a crew Burglar's melee strike from the hero's blind cone on such a hero is a backstab: double damage before armor (its extra slot is the blindside slot).
 - No roll, armor ignored: falls, blasts, fire vents, forge, breath, the Gloam, burning, traps, caltrops, slams from shoves.
 
 ### 8.4 Free swings (attacks of opportunity)
 
 - A hero stepping from a hex adjacent to an enemy to one not adjacent provokes one swing per enemy per move: hunting monsters that have noticed the hero, and hostile crew members. Not: asleep, alert, patrol, stuck, holding, feared, the Dragon, the Gloam. The enemy's attack with 1 slot fewer (min 1), no Focus. Sneaking doesn't avoid it. Jumping into a pit from next to an enemy provokes. Shoves, drags, blinks, gusts, climbs and the hook don't.
+- V4.0 (spec 28.2): a crew member stepping out of the reach of a hunting monster that has noticed it gets the same swing (one slot fewer), hired or not.
 - Heroes swing too: an enemy (monster, or a hostile crew member) stepping out of reach of an active hero whose action is unspent gets a swing: weapon slots − 1 (min 1), a bow 1 slot, a braced hero full slots. The action is not spent. A swing can kill the enemy mid-walk.
 
 ### 8.5 Downed, bleeding, death
@@ -552,6 +558,8 @@ Pick outcomes: all slots hit: opens silently; one short: opens, noise 2; on 3 sl
 
 Other ways in: Smash (section 9.2), a blasting charge, the skeleton key (one use, anyone, silent, not on jammed locks), a crew's paid "open" job.
 
+V4.0 (spec 28.3): crew members open locks by these rules: with lockpicks a Burglar picks at 3 Finesse slots, anyone else at 2 (same outcomes); without, or on a jammed lock, Smash (2 Might slots, noise 4); a crew Sapper blasts a locked door that is its short way (12.3).
+
 V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or a blast within 1 opens it (section 3.1).
 
 ### 9.5 Items
@@ -655,7 +663,7 @@ Rival entrances: east breach, sally port. V4.0: the Sisters make their own entra
 
 ### 12.2 Members
 
-Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; move 4 (a crew Burglar too: the hero Burglar's walk 5 is not theirs, V4.0); range 6 with a bow else 1. Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
+Built as heroes of their class at the crew level: HP = class HP + 2 × (level − 1); weapon chance = weapon stat + 5 × (level − 1) if it is the main stat, + 10 × weapon tier; armor = class armor + armor tier; V4.0 (spec 28.1): move as a hero of the class: walk 4 (Burglar 5), sneak 2 (Burglar 4), dash as far again (legacy members without a level: 4); range 6 with a bow else 1. A crew Sapper also brings improvised explosives (3, slotless, its own kit, spent first, not dropped when it dies). Spell chance = Wits + 5 × (level − 1). Dart chance = Finesse + 5 × (level − 1) for Finesse classes. Mana 3 for mages. Chances clamp at 95.
 
 | Crew | Level | Tiers | Members (pack) |
 | --- | --- | --- | --- |
@@ -675,6 +683,14 @@ Cutthroat members each carry a purse: 30 gold (level 2–3), 50 (the Wake). The 
 - Kit by class (shown as intents first): any member below half HP with a potion steps back and drinks (+5). Burglar: sleep dart (lantern bearer first; a hit means the hero loses their next move and action), smoke when a member below half has two heroes with a line on them. Ranger: knockback shot on a hero at an unrailed edge, hamstring a hero within 3, caltrops on the nearest hero's way in (these catch heroes: 2 damage, walk ends), overwatch when no hero is in bow reach (front field of view only). Sellsword: edge shove (60%), glue on two adjacent heroes (they can't move next turn) when nobody is at his blade; guards the caster when adjacent. Sapper: charge with fuse 1 (behind a hero at an edge, at a hero 2–3 away, or set on the way in toward a hero 3–5 away). Pyromancer: fireball where 3 heroes stand within 1 of a hex, else firebolt (3 slots, 2 dmg, range 5, noise 3). Shadowmancer: blink away below half, veil the striker, firecracker at a hero's feet near 2+ non-hunting monsters, smoke. Hedgewitch: mend a member below half (+4), gust a hero at an edge, ward the striker.
 - **Captives**: a hostile member robs a downed hero within 2 (or one it just downed): gold, gems and jewelry go to its loot and it takes hold. It drags them 3 hexes a round toward the nearest exit, the hero trailing behind; a dragged hero doesn't bleed. Killing or fearing the dragger drops the hero where they lie. If the dragger reaches an exit, the hero is `captured` and the member leaves with them. A downed hero being dragged when the delve ends is captured too.
 - Heroes never free-swing at neutral, truce, bribed or hired crew walking past. Crew members path with stairs (and a working lift) allowed.
+- **V4.0, crews play by the party's rules (spec 28, design pillar 17):**
+  - **Walk or sneak, and dash.** Each walk is a walk or a sneak (`Rival.sneaked`, drawn crouched): at peace (prospectors, truce, bribed, a job) they sneak when a monster they can see that isn't hunting lies within 3 of their path, or a hero within 5; hostile members sneak while they stalk (unseen by the party, their target within 6 and not having noticed them); hired members as their hirer last moved; feared and dragging members walk. A member that moves and doesn't act may dash (a second move as far): toward loot, a job, the way out, its post, its hirer, or a hostile member that can't strike this round (stopping short of any hex next to a hero).
+  - **Each step** as a hero's: footsteps heard (walking), step noise and wake rolls, every awake monster looks, hunting monsters that noticed it get a free swing as it leaves their reach, traps spring. Paths keep out of traps the crew knows and live charges' blasts.
+  - **Monsters and crews.** Monsters notice, hunt and strike crew members like heroes (section 5.4, nearest first). A member a monster attacked this world phase fights it (not hired: they fight monsters anyway); a crew at peace also fights a hunting monster next to it that has noticed it. Prospectors stay neutral to the party. Crew hits on monsters: +20 on a sleeper, +1 slot sneak attack, a crew Burglar's backstab from outside its front.
+  - **Locks.** A locked chest is no longer free: it is left to the crew's lockpicker (others smash it when she's gone); a lock that holds is tried again next round, a jammed chest left alone (section 9.4).
+  - **Traps.** Stepping on one: 3 damage, gone, noise 2. Ending a walk next to one, a member rolls 1 Wits slot (no darkness penalty) to spot it; the crew walks round it after, and if the party sees her mark it they know it too. A crew Burglar whose way round a known trap is longer disarms it (2 Finesse slots).
+  - **The Sapper.** On any walk, a crew Sapper digs a cracked wall or rubble (noise 4) or blasts a locked door or breakable wall with a charge (fuse 1, then waits for it) when that saves 6 hexes of walking to its goal or opens a way where there was none; digging first.
+  - **Named.** Every new verb gets a log line naming the member when the party can see it ("Little Mags sneaks past the sleeping rats.", "... picks the chest's lock without a sound.", "Ferryman Brecht sets a charge on the locked door and steps clear."); unseen, the noisy ones are heard. Planned special actions show as intents: pick, smash, disarm, dig (🔓 🔨 ✂ ⛏), a charge (✹), a sneaking move "sneaks".
 
 ### 12.4 Parley (`deals`, `deal` command)
 
@@ -684,7 +700,7 @@ Any active hero within 4 of a visible, unveiled member in line of sight may deal
 | --- | --- | --- | --- |
 | Leave | 40 / 60 | not hired, not already bribed | Stance `bribed`, goal leave now; they drop any heirloom they carry |
 | Truce | 25 / 40; the toll while demanding; 50 / 75 if hostile | not hired, no truce yet | Stance `truce`: they don't attack unless attacked; prospectors keep looting, cutthroats return to their post |
-| Job: winch / open / scout | 30 / 45 | neutral, truce or waiting, no job in progress | Winch: the nearest member works the winch on their level. Open: the nearest seen locked door or chest on their level, silently (a chest so opened is left to the party). Scout: every hex within 8 of each member is explored now |
+| Job: winch / open / scout | 30 / 45 | neutral, truce or waiting, no job in progress | Winch: the nearest member works the winch on their level. Open: the nearest seen locked door or chest on their level, unjammed; V4.0 (spec 28.3): only a crew with lockpicks, done by their lockpicker's pick: all slots silent, one short a clunk (noise 2, said honestly), holds: tried again next round, jammed: the price is handed back (a chest so opened is left to the party). Scout: every hex within 8 of each member is explored now |
 | Hire | 60 / 90 | not hostile, not hired | Stance `hired` 5 rounds: keep within 2 of the hirer, fight monsters in reach, use potions, the Hedgewitch mends heroes below half. When the rounds end: if the party carries 150+ in value, 25% they turn hostile (`betrayed`); otherwise prospectors go neutral, cutthroats truce |
 | Fight | free | not hostile | Hostile now |
 
@@ -692,7 +708,7 @@ Any active hero within 4 of a visible, unveiled member in line of sight may deal
 - Payment from the active heroes' packs: gold first, then gems and jewelry smallest first, no change. Heirlooms, hoard and story items are never handed over. Short: blocked with "You carry X; they want Y."
 - Any attack on a bribed, truce or hired crew makes it hostile; they keep what they were paid.
 
-Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `makeEntrance`, `lootAct`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); ai.ts `exitsBy`, `exitOpen`; crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `hostilePlan`, `hostileAct`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_LIGHT`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
+Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `makeEntrance`, `lootGoals`, `lootAct`, `jobAct`, `refundJob`, `defendTarget`, `defendAct`, `hitMonster`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); crewmove.ts (V4.0 spec 28: `crewBudget`, `wantSneak`, `crewApproach`, `crewWalk`, `crewGo`, `routeIntent`, `noteSeenBy`, `forgetSeenBy`, `heroNoticed`, `crewWorkLock`, `crewPicker`, `crewOpenChest`, `springCrewTrap`, `crewSpotTraps`, `sapperWay`, `crewDoWay`, `crewCharges`, `spendCrewCharge`, `tell`); ai.ts `exitsBy`, `exitOpen`, `foes`, `crewTargets`, `strikeCrew`; crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `attackPlan`, `hostilePlan`, `hostileAct`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`, `lockFor`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_LIGHT`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `CREW_CAUTION`, `CREW_PARTY_CAUTION`, `CREW_STALK_RANGE`, `CREW_LOOKOUT`, `SAPPER_SHORTCUT`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
 
 ---
 
@@ -738,6 +754,7 @@ The Dragon and the Gloam can't be pushed.
 - Hidden. A hero ending any move (including landings, blinks, climbs) within 1 of an unspotted trap rolls 1 Wits slot (brightness penalty applies): a hit spots it.
 - Stepping onto a trap, spotted or not: 3 damage, trap gone, noise 2; the walk continues if the hero is still up.
 - Disarm: section 9.2.
+- V4.0 (spec 28.4): crew members spring traps the same way (3 damage, noise 2), spot them ending a walk (1 Wits slot), walk round the ones they know, and a crew Burglar disarms one on her way (2 Finesse slots).
 
 ### 13.5 Fire vents, the forge, burning
 

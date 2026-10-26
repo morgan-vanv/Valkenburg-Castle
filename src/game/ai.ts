@@ -5,15 +5,16 @@ import { CLASH_HEAR, DOWNED_HEAR, FORCED_DOOR_HEAR, hearLoud, hearStep, isEnemy,
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent } from './types';
 import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
-import { say, type Ctx, type MonsterX } from './state';
+import { say, type Ctx, type MonsterX, type RivalX } from './state';
 import {
   armorOf, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
-  rangedLabel, roll, rootFigure, turnOnHit,
+  rangedLabel, rivalsOnMap, roll, rootFigure, turnOnHit,
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
 import { wayAtEntrance, wayOpen } from './ways';
 import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
+import { rivalStats } from './rivals';
 
 // ---------------------------------------------------------------- perception
 
@@ -22,6 +23,8 @@ export interface Target {
   at: Pos;
   armor: number;
   hero?: HeroInDelve;
+  /** V4.0 (spec 28.2): a crew member (monsters go for them as for heroes). */
+  rival?: RivalX;
 }
 
 /** Heroes (active, unveiled) and the freed prisoner: what monsters and hostile rivals go for. */
@@ -34,6 +37,16 @@ export function targets(c: Ctx): Target[] {
   const pr = c.d.prisoner;
   if (pr && pr.freed && !pr.dead && !pr.out) out.push({ id: pr.id, at: pr.at, armor: 0 });
   return out;
+}
+
+/** V4.0 (spec 28.2, pillar 17): crew members on the map (hired or not, unveiled), as monsters see them. */
+export function crewTargets(c: Ctx): Target[] {
+  return rivalsOnMap(c).filter((r) => (r.veil ?? 0) <= 0).map((r) => ({ id: r.id, at: r.at, armor: rivalStats(r).armor, rival: r }));
+}
+
+/** V4.0 (spec 28.2): what a monster goes for: the heroes and the freed prisoner (`targets`), and crew members. */
+export function foes(c: Ctx): Target[] {
+  return [...targets(c), ...crewTargets(c)];
 }
 
 /** Monster sight (spec 16.1). */
@@ -193,6 +206,9 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
     const to = figurePosOf(c, targetId);
     if (me && to) faceToward(me, to);
   }
+  // V4.0 (spec 28.2): a crew member struck (by a monster, or a free swing): the heroes' rules, its own armor and ward.
+  const rv = rivalsOnMap(c).find((x) => x.id === targetId);
+  if (rv) return strikeCrew(c, attacker, rv, slots, p, dmg, what);
   let tid = targetId;
   const g = guardFor(c, tid);
   if (g) {
@@ -221,6 +237,28 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   else hurtPrisoner(c, total, attacker);
   if (h && wasUp && h.status !== 'active' && unseenAttacker) hearLoud(c, h.at, DOWNED_HEAR, 'scream', { seen: false });
   return { hit: tid, hits: r.hits, damage: total };
+}
+
+/**
+ * V4.0 (spec 28.2): an attack on a crew member: +1 slot from its blind cone (as on a hero), damage per hit
+ * max(1, dmg − armor) less its ward, Perfect +1; a hit turns it to face the attacker. Heard when unseen. It
+ * remembers who attacked it this world phase (it fights back). The Sellsword guarding it takes the hit (hurtAny).
+ */
+function strikeCrew(c: Ctx, attacker: string, r: RivalX, slots: number, p: number, dmg: number, what: string): { hit: string | null; hits: number; damage: number } {
+  const from = figurePosOf(c, attacker);
+  const extra = from && inRearHalf(r, from) ? BLINDSIDE_SLOTS : 0;
+  const rr = roll(c, attacker, extra ? `${what} from behind` : what, slots + extra, p);
+  if (from && isEnemy(c, attacker) && !partySees(c, from) && !partySees(c, r.at)) hearLoud(c, from, CLASH_HEAR, 'clash', { seen: false });
+  if (c.d.monsters.some((m) => m.id === attacker)) r.attackedBy = attacker;
+  if (!rr.hits) {
+    c.ev.push({ type: 'miss', attacker, target: r.id });
+    return { hit: null, hits: 0, damage: 0 };
+  }
+  const st = rivalStats(r);
+  const total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0)) + (rr.perfect ? 1 : 0);
+  hurtAny(c, r.id, total, attacker, { crit: rr.perfect });
+  turnOnHit(c, r.id, attacker);
+  return { hit: r.id, hits: rr.hits, damage: total };
 }
 
 // ---------------------------------------------------------------- blindsided (spec 24.2)

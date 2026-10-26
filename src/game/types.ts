@@ -498,7 +498,11 @@ export interface Intent {
    * targetId one hex toward it (`to`). grab: the ghoul holds targetId. Rivals also use
    * overwatch / smoke / veil / dart (spec 16.5): `to` = the hex a bomb lands on.
    */
-  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink' | 'hamstring';
+  kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink' | 'hamstring'
+    /** V4.0 (spec 28, pillar 17): crews play by the party's rules: pick or smash a lock, disarm a trap, dig through (a Sapper). */
+    | 'pick' | 'smash' | 'disarm' | 'dig';
+  /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
+  sneak?: boolean;
   /** V3.7 `item` intents: which item. */
   item?: ItemKind;
   /** breath: the marked hexes. */
@@ -605,6 +609,8 @@ export interface Rival {
   noticedIds?: string[];
   /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar: no walking. */
   stuck?: number;
+  /** V4.0 (spec 28.1, pillar 17): the member's last move was a sneak (monsters notice by it; the view draws it crouched). */
+  sneaked?: boolean;
 }
 
 export interface RivalCrew {
@@ -628,7 +634,7 @@ export interface RivalCrew {
   /** Rounds of sell-sword service left. */
   hiredRounds?: number;
   /** A job paid for and not yet done. */
-  job?: { kind: JobKind; at?: Pos };
+  job?: { kind: JobKind; at?: Pos; /** V4.0 (spec 28.3): what was paid and by whom (a jammed lock is refunded) */ price?: number; by?: string };
   spotted: boolean;
   /** Round they enter; they're off the map before it. */
   entersRound: number;
@@ -640,7 +646,7 @@ export interface Heard {
   at: Pos;
   /** steps: footsteps (a walking monster or crew member); loud: a fight, a shout, a smash, a blast, a roar. */
   kind: 'steps' | 'loud';
-  /** For loud sounds, what it sounded like: 'clash' | 'shout' | 'crash' | 'blast' | 'roar' | 'scream'. */
+  /** For loud sounds, what it sounded like: 'clash' | 'shout' | 'crash' | 'blast' | 'roar' | 'scream'; V4.0 (spec 28): 'lock' (a lock forced), 'dig'. */
   what?: string;
   /** Order heard within the world phase (for a footstep trail). */
   n: number;
@@ -702,7 +708,8 @@ export interface Delve {
   chests: ChestState[];
   ground: GroundLoot[];
   /** Traps still armed, by posKey; `spotted` = visible to the player. */
-  traps: Record<string, { spotted: boolean }>;
+  /** `spotted`: by the party. V4.0 (spec 28.4): `crewSpotted`: by the rival crew (they walk round it; their Burglar disarms it). */
+  traps: Record<string, { spotted: boolean; crewSpotted?: boolean }>;
   /** Braziers lit, by posKey (includes campaign.litBraziers). */
   lit: string[];
   /** Cracked walls blown open, built walls broken, and rubble/cracked walls dug out, by posKey. Engine kindAt treats these as floor (rubble for broken walls, spec 20.3). */
@@ -928,7 +935,7 @@ export type GameEvent =
   | { type: 'betrayed' } // V3.5: sell-swords turn on the party when their deal ends
   | { type: 'villageUnlocked'; story: StoryId } // V3.5, on backToCamp
   // V3.7
-  | { type: 'noticed'; by: string; hero: string; /** V4.0 (spec 26.2): the hero's hex when it happened */ at?: Pos; /** V4.0 (spec 26.3): the watcher turned toward the hero (false: a hunting monster keeps its facing) */ faced?: boolean } // an awake monster or crew member spots a hero (spec 20.1)
+  | { type: 'noticed'; by: string; /** the figure noticed: a hero, or (V4.0, spec 28.2) a crew member, then only when the party sees one of them */ hero: string; /** V4.0 (spec 26.2): the hero's hex when it happened */ at?: Pos; /** V4.0 (spec 26.3): the watcher turned toward the hero (false: a hunting monster keeps its facing) */ faced?: boolean } // an awake monster or crew member spots a hero (spec 20.1)
   | { type: 'woke'; id: string; by: string } // a sleeper woken by a passing hero
   | { type: 'swing'; by: string; target: string; hits: number; damage: number } // attack of opportunity (spec 20.2)
   | { type: 'feared'; id: string; by: string }

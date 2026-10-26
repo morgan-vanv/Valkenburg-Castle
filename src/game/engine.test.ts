@@ -2728,7 +2728,9 @@ describe('V3.5', () => {
       expect(r.events.some((x) => x.type === 'blast')).toBe(false);
       expect(s.delve!.fuses).toMatchObject([{ at: at(2, 16, 1), rounds: 1, by: sap.id }]);
       expect(hero(s, 'brann').hp).toBe(hp);
-      expect(s.delve!.rivals!.members[2]!.pack!.filter((i) => i.kind === 'charge').length).toBe(1); // one of two thrown
+      // V4.0 (spec 28.6): the crew Sapper's improvised explosives go first, as a hero Sapper's: 2 of 3 left, both bought ones kept.
+      expect(s.delve!.rivals!.members[2]!.pack!.filter((i) => i.kind === 'charge').length).toBe(2);
+      expect(s.delve!.rivals!.members[2]!.pack!.find((i) => i.kind === 'improvised-charge')).toMatchObject({ amount: 2, slots: 0 });
       const r2 = ok(s, { type: 'endTurn' });
       expect(r2.events).toContainEqual({ type: 'noise', at: at(2, 16, 1), radius: 8 });
       expect(r2.events.some((x) => x.type === 'blast' && 'by' in x && x.by === sap.id)).toBe(true);
@@ -3509,7 +3511,7 @@ describe('V3.7 crews', () => {
     expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
       ['sellsword', 16, 4, 2, 1], ['hedgewitch', 13, 4, 2, 1], ['shadowmancer', 12, 4, 2, 1], ['sapper', 16, 4, 2, 1],
     ]);
-    expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['charge', 'charge', 'charge']]);
+    expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['improvised-charge', 'charge', 'charge', 'charge']]); // V4.0 (spec 28.6): class kit
     expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
     // Sellsword: Sword 3 slots at Might 70 + 15 (three levels) + 20 (weapon 2); armor 1 + 1; move 4.
     expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 105, dmg: 2, armor: 2, move: 4, range: 1 });
