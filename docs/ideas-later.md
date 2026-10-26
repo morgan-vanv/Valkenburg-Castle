@@ -24,6 +24,7 @@ Crews play by the party's rules (spec 28 did movement, sneaking, noise and wake 
 - **Focus, flanking, brace** (2026-10-26): crews spend Focus on key rolls, flank (+1 slot with a member across the target), and their Heir, Sellsword and Sapper brace.
 - **The missing spells** (2026-10-26): Sleep, Dread, Night thorn, Briar, Kindle for crew mages (the Shadowmancer sister putting an orc to sleep to pass it).
 - **Revive** (2026-10-26): a member downed instead of killed, and a crewmate reviving them.
+- **Venom, the crew side (spec 29)** (2026-10-26): crews are envenomed and paralyzed by the party's rules, their Burglar throws venom darts at heroes and their Hedgewitch mends venom out, but they don't yet Shoulder a paralyzed crewmate and carry them out (the crew's walk, dash and Sapper ways would each need the carried member placed after every step: not a clean fit in pass 1, so a paralyzed member simply waits it out), carry antidotes, or dart monsters with venom.
 - **Smaller gaps** (2026-10-26): the party's caltrops catching crews; grab, web, drag, steal and hamstring by monsters on crew members (they attack instead today); the Dragon going for crews; crews picking or blasting locked doors on their way when they aren't the Sapper; a crew Burglar's improvised pick.
 
 ## Shelved (code exists)
