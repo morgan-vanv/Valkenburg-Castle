@@ -28,6 +28,9 @@ const text = (sel) => p.$eval(sel, (e) => e.innerText).catch(() => '');
 const shown = (sel) => p.$eval(sel, (e) => !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none').catch(() => false);
 const settings = (extra = {}) => p.evaluate((x) => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, ...x })), extra);
 
+// Generous timeouts: the 3D view renders in software here; a busy machine makes a reload slow, not wrong.
+p.setDefaultNavigationTimeout(180000);
+p.setDefaultTimeout(180000);
 await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.welcome.v40', '1'); });
 await settings();
