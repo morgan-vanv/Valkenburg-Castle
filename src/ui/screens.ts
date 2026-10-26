@@ -1,10 +1,9 @@
-// Full-screen pages: title, summary, game over. The camp (Lowgate) is src/ui/lowgate.ts.
+// Full-screen pages: title, game over. The return report is src/ui/return.ts. The camp (Lowgate) is src/ui/lowgate.ts.
 
 import type { Engine } from '../game/api';
 import type { Command, GameState } from '../game/types';
-import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
-import { STORY, classGlyph, className } from './names';
+import { classGlyph, className } from './names';
 
 /** What the title, summary and game-over pages need from the app. */
 export interface ScreenHost {
@@ -66,10 +65,6 @@ export function titleScreen(el: HTMLElement, host: ScreenHost): void {
 
 export { campScreen, captiveContract, contractCaptive, villageOf, type CampHost, type CampPage, type Loadout, type Step } from './lowgate';
 
-function cap(t: string): string {
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
-
 function stat(label: string, value: string, cls = ''): HTMLElement {
   return h('div', { class: `stat ${cls}` }, h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value num' }, value));
 }
@@ -80,65 +75,7 @@ function classBadge(cls: string): HTMLElement {
 
 // ------------------------------------------------------------ summary and game over
 
-export function summaryScreen(el: HTMLElement, s: GameState, host: ScreenHost): void {
-  clear(el);
-  const sm = s.summary;
-  if (!sm) {
-    el.append(h('div', { class: 'screen-panel' }, h('p', null, 'No summary.'), h('button', { class: 'btn', onclick: () => host.send({ type: 'backToCamp' }) }, 'Back to camp')));
-    return;
-  }
-  const name = (id: string) => s.campaign.roster.find((x) => x.id === id)?.name ?? id;
-  /** 17.2: what each survivor carries home (HP stays until the infirmary heals it). */
-  const outHp = (id: string) => {
-    const hd = s.delve?.heroes.find((x) => x.heroId === id);
-    const max = s.campaign.roster.find((x) => x.id === id)?.maxHp ?? 0;
-    return hd ? `${hd.hp}/${max} HP` : 'out';
-  };
-  const heirDead = sm.dead.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
-  // V3.7 (20.4): heroes a crew carried off.
-  const taken = (s.delve?.heroes ?? []).filter((x) => x.status === 'captured').map((x) => x.heroId);
-  const heirTaken = taken.some((id) => s.campaign.roster.find((x) => x.id === id)?.cls === 'heir');
-  const crewName = s.delve?.rivals?.name ?? 'a crew';
-  el.append(
-    h(
-      'div',
-      { class: `screen-panel summary ${sm.contractDone ? 'won' : 'lost'}` },
-      h('div', { class: 'kicker' }, s.delve?.contract.story ? `For Lowgate · ${s.delve.contract.title}` : (s.delve?.contract.title ?? 'Delve over')),
-      h('h1', { class: 'screen-title' }, sm.contractDone ? 'Contract done' : 'Contract failed'),
-      h('div', { class: 'ledger' }, stat('Bounty', `${sm.bounty}`, 'stat-gold'), stat('Loot', `${sm.lootValue}`, 'stat-gold'), stat('Out alive', `${sm.survivors.length}`), stat('Dead', `${sm.dead.length}`)),
-      h(
-        'div',
-        { class: 'cols' },
-        h(
-          'div',
-          null,
-          h('h2', null, 'The party'),
-          h(
-            'ul',
-            { class: 'hero-list' },
-            ...[...sm.survivors, ...sm.dead.filter((x) => !sm.survivors.includes(x)), ...taken.filter((x) => !sm.survivors.includes(x) && !sm.dead.includes(x))].map((id) =>
-              h(
-                'li',
-                { class: sm.dead.includes(id) ? 'dead' : taken.includes(id) ? 'taken' : '' },
-                h('b', null, name(id)),
-                h('span', { class: 'dim small' }, sm.dead.includes(id) ? ' fell' : taken.includes(id) ? ` taken by ${crewName}` : ` out · ${outHp(id)}`),
-                sm.xp[id] ? h('span', { class: 'small pos' }, ` +${sm.xp[id]} XP`) : '',
-                sm.levelUps.includes(id) ? h('span', { class: 'chip good' }, 'Level up!') : '',
-              ),
-            ),
-          ),
-        ),
-        h('div', null, h('h2', null, 'Notes'), sm.notes.length ? h('ul', { class: 'loot-list' }, ...sm.notes.map((n) => h('li', null, n))) : h('p', { class: 'dim' }, 'Nothing worth a song.')),
-      ),
-      s.delve?.contract.story && sm.contractDone ? h('p', { class: 'prep-story' }, h('span', { class: 'seal-mini' }, '✦'), ` ${cap(STORY[s.delve.contract.story].who)} ${s.delve.contract.kind === 'rescue' ? 'is' : 'goes'} on the way home to Lowgate. Wins back: ${STORY[s.delve.contract.story].unlocks.toLowerCase()}.`) : '',
-      taken.length && !heirTaken ? h('p', { class: 'warn-heir taken-line' }, h('span', { class: 'seal-mini seal-cap' }, '⛓'), ` ${taken.map(name).join(' and ')} ${taken.length === 1 ? 'was' : 'were'} dragged out by ${crewName}. Gold and gems are theirs now; the hero is held at their hideout at 1 HP. A "Bring back" job goes up on the notice post.`) : '',
-      heirTaken ? h('p', { class: 'warn-heir' }, 'The heir is taken. Valkenburg stays dark.') : '',
-      heirDead ? h('p', { class: 'warn-heir' }, 'Keven did not come back.') : '',
-      h('div', { class: 'screen-actions' }, h('button', { class: 'btn btn-primary btn-big', onclick: () => host.send({ type: 'backToCamp' }) }, heirDead || heirTaken ? 'Continue' : 'Back to camp')),
-    ),
-  );
-  if (sm.levelUps.length) sfx.play('levelup');
-}
+// V4.0: the summary after a delve is the return report, src/ui/return.ts.
 
 export function overScreen(el: HTMLElement, s: GameState, host: ScreenHost): void {
   clear(el);

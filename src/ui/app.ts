@@ -11,7 +11,8 @@ import { Diorama } from '../view/diorama';
 import { wasBackstab } from '../view/stealth';
 import { clear, h } from './dom';
 import { Hud } from './hud';
-import { overScreen, summaryScreen, titleScreen, type ScreenHost } from './screens';
+import { overScreen, titleScreen, type ScreenHost } from './screens';
+import { returnScreen } from './return';
 import { campScreen, freshLoadout, type CampHost, type CampPage, type Loadout } from './lowgate';
 import { CREW, STANCE, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
@@ -346,7 +347,7 @@ export class App {
         }
         return campScreen(this.screen, s, this.campHost(s));
       case 'summary':
-        return summaryScreen(this.screen, s, host);
+        return returnScreen(this.screen, s, host);
       case 'over':
         return overScreen(this.screen, s, host);
     }
@@ -447,21 +448,35 @@ export class App {
       for (const text of heardLines(heard, ears, d?.doors ?? {}, 2)) this.hud.log(text, 'log-heard');
       heard = [];
     };
-    for (const e of events) {
+    for (const [ei, e] of events.entries()) {
       if (!this.root.isConnected) return;
       // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
-      if (world && !instant()) {
+      if (world) {
         const at = this.enemyFocus(e);
-        if (at) {
+        // V4.0 HUD: each enemy that acts where you can see it counts in the folded hotbar ("1 of 3 moves").
+        const actor = at ? enemyActor(e) : null;
+        if (actor && !this.isHero(actor)) this.hud.castleActor(actor);
+        if (at && !instant()) {
           await this.dio.panTo(at);
           panned = true;
         }
+        if (e.type === 'hit' || e.type === 'miss' || e.type === 'downed' || e.type === 'died' || e.type === 'shoved' || e.type === 'fell' || e.type === 'grabbed') this.hud.actResult(e);
       }
       if (e.type === 'phase') {
-        if (e.phase === 'world') world = true;
-        else {
+        if (e.phase === 'world') {
+          world = true;
+          // The enemies you will see act this castle turn, for the count.
+          const ids = new Set<string>();
+          for (const x of events.slice(ei + 1)) {
+            if (x.type === 'phase') break;
+            const id = this.enemyFocus(x) ? enemyActor(x) : null;
+            if (id && !this.isHero(id)) ids.add(id);
+          }
+          this.hud.phase('world', e.round, ids.size);
+        } else {
           logHeard();
           world = false;
+          this.hud.phase('player', e.round);
           if (panned) this.returnToSelected();
           panned = false;
         }
@@ -934,5 +949,32 @@ export class App {
         this.render(false);
       },
     };
+  }
+}
+
+/** V4.0 HUD: who acts in this event (an enemy's move, roll, swing, shove...), for the castle's-turn count. */
+function enemyActor(e: GameEvent): string | null {
+  switch (e.type) {
+    case 'moved':
+      return e.id;
+    case 'roll':
+      return e.who;
+    case 'hit':
+    case 'miss':
+      return e.attacker;
+    case 'breath':
+    case 'swing':
+    case 'cast':
+    case 'thrown':
+    case 'fuseSet':
+      return e.by;
+    case 'shout':
+      return e.id;
+    case 'grabbed':
+    case 'stolen':
+    case 'robbed':
+      return e.by;
+    default:
+      return null;
   }
 }

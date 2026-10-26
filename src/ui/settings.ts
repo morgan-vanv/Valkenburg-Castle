@@ -10,9 +10,11 @@ export interface Settings {
   noEndTurnAsk: boolean;
   /** V3.4: lower walls between the camera and the focus (the diorama's cutaway). Off by default. */
   cutaway: boolean;
+  /** V4.0 HUD: hover cards always show the full rules card (as if Alt were held), for touch screens. */
+  fullCards: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false };
 
 export function loadSettings(): Settings {
   try {
