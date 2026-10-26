@@ -4,6 +4,7 @@
 // here, last turn" and the hearing help); the log's summary lines on `heard` events (by direction, "beyond
 // the door", at most two); a real castle turn with an unseen walker; a stale shove intent draws no arrow
 // (the tag still names it) while a fresh one does.
+// V4.0 HUD: the hover card (full, via the fullCards setting) in place of the old pinned tooltip.
 //   node scripts/v393-ui-check.mjs <baseUrl>     (http://localhost:5187/, the real engine; ?fixture=1 works too)
 //   SHOTS=<dir> saves v393-footsteps.png (a footstep trail beyond a closed door).
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
@@ -43,14 +44,14 @@ const fixture = /fixture=1/.test(base);
 const idle = () => p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 60000 });
 const state = () => p.evaluate(() => window.vc.state());
 const load = (st) => p.evaluate((x) => window.vc.load(x), st);
-const hoverTip = (at, unit = null) => p.evaluate(([a, u]) => { window.vc.hud.onHover(a, u); return document.querySelector('.hud-tip')?.textContent ?? ''; }, [at, unit]);
+const hoverTip = (at, unit = null) => p.evaluate(([a, u]) => { window.vc.hud.onHover(a, u); const el = document.querySelector('.dl-card'); return el && !el.classList.contains('hidden') ? el.textContent : ''; }, [at, unit]);
 const unhover = () => p.evaluate(() => window.vc.hud.onHover(null, null));
 const click = (at, unit = null) => p.evaluate(([a, u]) => window.vc.hud.onClick(a, u, { button: 0 }), [at, unit]);
 const logText = () => p.evaluate(() => `${window.vc.state().delve?.log.join('\n') ?? ''}\n${window.__log.join('\n')}`);
 const select = (id) => p.evaluate((x) => window.vc.hud.select(x), id);
 
 await p.goto(base);
-await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
+await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, fullCards: true })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
 // Every HUD log line (live lines give way to the engine's log after playback), for the log checks.

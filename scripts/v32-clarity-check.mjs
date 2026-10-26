@@ -3,6 +3,8 @@
 //     "Stairs here", the "↓ L2" marker, and clicking the button puts him on Level 2;
 //   - a blocked take (pack full next to loot) shows a greyed button with its reason and flashes it;
 //   - the goal box names the objective's location once its hex is explored, and the beacon tag shows.
+// V4.0 HUD: the stairs are a glowing "Stairs" button (T) in the hotbar, the job panel replaces the goal box, the
+// hover card on your own hex replaces the hint line under the old bar, and End turn shows one dot per ready hero.
 //
 //   node scripts/v32-clarity-check.mjs <baseUrl> [seed=1980]      (SHOT=/path/to.png takes one 1280x800 shot on the stairs)
 
@@ -54,8 +56,8 @@ await idle();
 await p.waitForTimeout(300);
 
 // Goal box before the objective is seen: the brief, no location line.
-const goal0 = await p.evaluate(() => ({ brief: document.querySelector('.hud-goal .goal-brief')?.textContent ?? '', where: !!document.querySelector('.goal-where') }));
-check('goal box shows the brief before the objective is seen', goal0.brief.length > 0 && !goal0.where, goal0.brief);
+const goal0 = await p.evaluate(() => { const e = document.querySelector('.dl-job'); return { where: e?.querySelector('.dl-job-where')?.textContent ?? '', tip: e?.dataset.tip ?? '', brief: window.vc.state().delve.contract.brief }; });
+check('job panel before the objective is seen: where the brief says, "not yet seen", the brief on hover', /not yet seen/.test(goal0.where) && goal0.tip.includes(goal0.brief), `${goal0.where} | ${goal0.brief}`);
 
 // Walk Keven to the stairs through the engine: a BFS over the level's tiles (closed doors count
 // as passable, we open them on the way) gives the distance field; each move picks the reach entry
@@ -120,29 +122,35 @@ if (walk.ok) {
   });
   await idle();
   await p.waitForTimeout(300);
-  const bar = await p.evaluate(() => ({
-    link: document.querySelector('.act.act-link .act-label')?.textContent ?? '',
-    key: document.querySelector('.act.act-link kbd')?.textContent ?? '',
-    hint: document.querySelector('.hud-hint')?.textContent ?? '',
-    marker: [...document.querySelectorAll('.link-tag')].filter((e) => e.style.display !== 'none').map((e) => e.textContent),
-    groups: [...document.querySelectorAll('.bar-group-name')].map((e) => e.textContent),
-    end: document.querySelector('.bar-end-note')?.textContent ?? '',
-  }));
-  check('bar offers "Take stairs ↓ Level 2"', bar.link === 'Take stairs ↓ Level 2', bar.link);
+  const bar = await p.evaluate(() => {
+    const link = document.querySelector('.dl-hotbar [data-action="link"]');
+    const end = document.querySelector('.dl-end');
+    const ready = window.vc.state().delve.heroes.filter((h) => h.status === 'active' && (!h.moved || !h.acted)).length;
+    return {
+      tip: link?.dataset.tip ?? '',
+      glow: !!link?.classList.contains('glow'),
+      key: link?.querySelector('.dl-kb')?.textContent ?? '',
+      marker: [...document.querySelectorAll('.link-tag')].filter((e) => e.style.display !== 'none').map((e) => e.textContent),
+      order: [...document.querySelector('.dl-hotbar').children].map((e) => e.className.split(' ')[0]),
+      dots: end?.querySelectorAll('.dl-end-dots i').length ?? -1,
+      ready,
+    };
+  });
+  check('hotbar offers the stairs: a glowing button, "Take stairs ↓ Level 2" on hover', bar.glow && /^Take stairs ↓ Level 2/.test(bar.tip), bar.tip.split('\n')[0]);
   check('stairs button has hotkey T', bar.key === 'T');
-  check('context hint says "Stairs ↓ L2 here"', /Stairs ↓ L2 here/.test(bar.hint), bar.hint);
   check('"↓ L2" marker floats over the explored stairs', bar.marker.includes('↓ L2'), bar.marker.join(','));
-  check('bar is grouped (Move first)', bar.groups[0] === 'Move', bar.groups.join(' · '));
-  check('End turn shows who is waiting', /waiting|spent/.test(bar.end), bar.end);
+  check('one row: who and Walk/Sneak first, End turn last', bar.order[0] === 'dl-who' && bar.order[bar.order.length - 1] === 'dl-end', bar.order.join(' · '));
+  check('End turn: one dot per hero who can still act', bar.dots === bar.ready, `${bar.dots} dots, ${bar.ready} ready`);
   // Hover the stairs hex: tooltip names the interaction.
   const tip = await p.evaluate(() => {
     const vc = window.vc;
     const id = vc.state().campaign.roster.find((r) => r.cls === 'heir').id;
     const h = vc.state().delve.heroes.find((x) => x.heroId === id);
     vc.hud.onHover(h.at, null);
-    return document.querySelector('.hud-tip')?.textContent ?? '';
+    const el = document.querySelector('.dl-card');
+    return el && !el.classList.contains('hidden') ? el.textContent : '';
   });
-  check('stairs tooltip names the interaction', /Stairs.*down to the Crossing.*Take stairs/.test(tip), tip);
+  check('hover card on the stairs names the interaction', /Stairs.*down to the Crossing.*Take stairs/.test(tip), tip);
   if (process.env.SHOT) {
     await p.waitForTimeout(400);
     await p.screenshot({ path: process.env.SHOT, timeout: 90000 });
@@ -150,7 +158,7 @@ if (walk.ok) {
   }
   await p.evaluate(() => window.vc.hud.onHover(null, null));
   // Click the button.
-  await p.click('.act.act-link');
+  await p.click('.dl-hotbar [data-action="link"]');
   await idle();
   await p.waitForTimeout(200);
   const after = await p.evaluate(() => {
@@ -186,15 +194,15 @@ const blocked = await p.evaluate(() => {
   vc.hud.select(hob.heroId);
   vc.hud.refresh();
   const opt = E.actions(vc.state(), hob.heroId).find((o) => o.action === 'take');
-  const btn = document.querySelector('.act.blocked[data-action="take"]');
-  return { engineBlocked: opt?.blocked ?? null, drawn: !!btn, why: btn?.querySelector('.act-why')?.textContent ?? '', items: pile.items.map((i) => i.name) };
+  const btn = document.querySelector('.dl-hotbar .blocked[data-action="take"]');
+  return { engineBlocked: opt?.blocked ?? null, drawn: !!btn, why: btn?.dataset.tip ?? '', items: pile.items.map((i) => i.name) };
 });
 if (blocked.skip) console.log('skip blocked take:', blocked.skip);
 else {
   check('engine returns take with a blocked reason', !!blocked.engineBlocked, blocked.engineBlocked ?? 'none');
   if (blocked.engineBlocked) {
-    check('blocked take is drawn greyed with its reason', blocked.drawn && blocked.why === blocked.engineBlocked, blocked.why);
-    await p.click('.act.blocked[data-action="take"]', { force: true });
+    check('blocked take is drawn greyed with its reason on hover', blocked.drawn && blocked.why.includes(`Can't now: ${blocked.engineBlocked}`), blocked.why.split('\n')[1]);
+    await p.click('.dl-hotbar .blocked[data-action="take"]', { force: true });
     await p.waitForTimeout(150);
     const toast = await p.evaluate(() => document.querySelector('.hud-toast:not(.hidden)')?.textContent ?? '');
     check('clicking it flashes the reason', toast === blocked.engineBlocked, toast);
@@ -203,11 +211,11 @@ else {
   const beacon = await p.evaluate(() => ({
     obj: window.vc.dio.objectiveAt(),
     tag: document.querySelector('.beacon-tag:not(.hidden)')?.textContent ?? '',
-    where: document.querySelector('.goal-where')?.textContent ?? '',
+    where: document.querySelector('.dl-job-where')?.textContent ?? '',
   }));
   if (beacon.obj) {
     check('beacon tag shows the objective', beacon.tag.length > 0, beacon.tag);
-    check('goal box names the location', /Level \d/.test(beacon.where), beacon.where);
+    check('job panel names the location (seen or in sight)', /· (seen|in sight)$/.test(beacon.where.trim()) && !/not yet seen/.test(beacon.where), beacon.where);
   } else console.log('note: the staged pile is not the contract objective; beacon not checked here');
 }
 

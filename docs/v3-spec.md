@@ -784,6 +784,10 @@ Owner-approved; design pillar 16 (intuitive rules, creative approaches). Superse
 - HUD: "👁 Orc will see you, then Fenna"; the eye tag's title names the same.
 - Tests (src/game/sight.test.ts) check, over 40 seeded scenes, that the preview's pairs equal the move's `noticed` events whenever no swing landed.
 
+### 27.5a The hover shading (V4.0 HUD)
+
+- Contract (read-only, optional): `Engine.sightWash(state, watcherId, sneaking?, quiet?)` → `{ front, side }`: every floor hex within notice range on the watcher's level where a hero moving as given would be noticed now (`wouldNotice`), split into where it looks properly (`front`: ahead; the sides of a searching or hunting monster, or of a crew member) and the corner of an unaware monster's eye (`side`). Straight behind is never listed. The HUD shades the visible ones while a monster or crew member is hovered (walking hero), and uses the hero's own mode for its "it will / won't see you" line.
+
 ### 27.6 Hooks for crew parity (pillar 17, a later pass)
 
 - `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only. (Used by spec 28: crew members are in `sightedHeroes`, `lookAll` runs after their steps, `noticeFigure` covers them.)

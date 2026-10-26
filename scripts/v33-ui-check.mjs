@@ -1,6 +1,8 @@
 // V3.3 (spec 16) presentation checks, headless, by DOM assertions. Runs on the fixture engine
 // (?fixture=1, test castle) so it works whatever the real engine's state; `vc.load()` injects
 // delve states for the patrol route, the Gloam, a grabbed hero and the new monsters.
+// V4.0 HUD: the lantern panel in the top strip is the shutter toggle (and L; "Open/Shut the lantern" in More);
+// the dark and held states show as icons on the party card; the hint line under the old bar is retired.
 //
 //   node scripts/v33-ui-check.mjs <baseUrl>          (SHOTS=<dir> also takes three reduced shots:
 //                                                     shutter, patrol route, gloam)
@@ -58,32 +60,32 @@ check('the shutter is remembered in vc.loadout.v33', remembered);
 
 // 1. Shutter: the delve started shuttered (the app sent the free action), the meter says so.
 const m0 = await p.evaluate(() => ({
-  state: document.querySelector('.light-state')?.textContent ?? '',
-  stage: document.querySelector('.light-stage')?.textContent ?? '',
+  state: document.querySelector('.dl-lantern-ctx')?.textContent ?? '',
+  stage: document.querySelector('.dl-lantern-stage')?.textContent ?? '',
   open: window.vc.state().delve.lanternOpen,
-  toggle: document.querySelector('.light-toggle')?.textContent ?? '',
+  toggle: document.querySelector('.dl-lantern')?.dataset.tip ?? '',
   saveKey: Object.keys(localStorage).find((k) => k.startsWith('vc.save.')) ?? null,
 }));
-check('delve starts shuttered when asked; meter says "Shuttered · not burning"', m0.open === false && /Shuttered · not burning/.test(m0.state) && m0.stage === 'Shuttered', `${m0.state} | ${m0.stage}`);
-check('meter toggle offers Open', /Open/.test(m0.toggle), m0.toggle);
+check('delve starts shuttered when asked; the lantern says "Shut · no light, no burn"', m0.open === false && /no light, no burn/.test(m0.state) && m0.stage === 'Shut', `${m0.state} | ${m0.stage}`);
+check('the lantern panel offers to open it (click or L)', /Click or L to open it/.test(m0.toggle), m0.toggle.split('\n').slice(-2, -1)[0]);
 check('a save is written (current key, V3.9: vc.save.v39)', m0.saveKey === 'vc.save.v39', String(m0.saveKey));
 await shot('01-shuttered');
 // The bar's Lantern group for the bearer (hotkey L), then L opens it.
 const bar0 = await p.evaluate(() => {
   const vc = window.vc;
   vc.hud.select(vc.state().delve.lanternBearer);
-  const btn = document.querySelector('.act-shutter');
-  return { label: btn?.textContent ?? '', key: btn?.dataset.key, group: !!document.querySelector('.bar-group-lantern') };
+  const btn = document.querySelector('.dl-more [data-action="shutter"]');
+  return { label: btn?.textContent ?? '', key: btn?.dataset.key };
 });
-check('bar has a Lantern group with the shutter button on L', bar0.group && bar0.key === 'l' && /Open/.test(bar0.label), bar0.label);
+check('the bearer\'s More menu has "Open the lantern" on L', bar0.key === 'l' && /Open the lantern/.test(bar0.label), bar0.label);
 await p.keyboard.press('l');
 await idle();
 await p.waitForTimeout(150);
-const m1 = await p.evaluate(() => ({ state: document.querySelector('.light-state')?.textContent ?? '', open: window.vc.state().delve.lanternOpen, hint: document.querySelector('.light-hint')?.textContent ?? '', log: [...document.querySelectorAll('.log-line')].map((e) => e.textContent).join(' | ') }));
-check('L opens the lantern: "Open · burning"', m1.open === true && /Open · burning/.test(m1.state), m1.state);
-check('Level 1 daylight hint shows while open', /Daylight/.test(m1.hint), m1.hint);
-// The meter button shutters it again.
-await p.click('.light-toggle');
+const m1 = await p.evaluate(() => ({ state: document.querySelector('.dl-lantern-ctx')?.textContent ?? '', stage: document.querySelector('.dl-lantern-stage')?.textContent ?? '', open: window.vc.state().delve.lanternOpen, log: [...document.querySelectorAll('.dl-chron-line')].map((e) => e.textContent).join(' | ') }));
+check('L opens the lantern: a stage word, not "Shut"', m1.open === true && m1.stage !== 'Shut', `${m1.stage} ${m1.state}`);
+check('Level 1 daylight line shows while open', /daylight: shut it to save oil/.test(m1.state), m1.state);
+// The lantern panel itself shutters it again.
+await p.click('.dl-lantern');
 await idle();
 await p.waitForTimeout(100);
 const m2 = await p.evaluate(() => window.vc.state().delve.lanternOpen);
@@ -102,15 +104,14 @@ const dark = await p.evaluate(() => {
   const unlit = d.heroes.filter((h) => h.status === 'active' && !E.heroLit(s, h.heroId));
   return {
     unlit: unlit.map((h) => h.heroId),
-    chips: [...document.querySelectorAll('.chip.dark')].map((e) => e.textContent),
-    darkCards: document.querySelectorAll('.hcard.dark').length,
-    hint: document.querySelector('.hint-dark')?.textContent ?? '',
+    chips: [...document.querySelectorAll('.dl-si.dark')].map((e) => e.dataset.tip ?? ''),
+    darkCards: document.querySelectorAll('.dl-rcard.dark').length,
     vignette: document.querySelector('.hud-vignette')?.dataset.b,
     sight: E.sightRange(s, d.lanternBearer),
   };
 });
-check('unlit heroes get the dark card badge', dark.unlit.length > 0 && dark.darkCards === dark.unlit.length && dark.chips.every((c) => /In the dark · (sight \d|night-eye)/.test(c)), `${dark.unlit.length} unlit, chips: ${dark.chips.join(', ')}`);
-check('context hint leads with "In the dark: sight N"', new RegExp(`In the dark: sight ${dark.sight}`).test(dark.hint), dark.hint);
+check('unlit heroes get the dark card and icon', dark.unlit.length > 0 && dark.darkCards === dark.unlit.length && dark.chips.length === dark.unlit.length && dark.chips.every((c) => /^In the dark · /.test(c)), `${dark.unlit.length} unlit, icons: ${dark.chips.map((c) => c.split('\n')[0]).join(', ')}`);
+check('the dark icon names the sight left', dark.chips.some((c) => new RegExp(`sees only ${dark.sight} hex|night-eye: sight ${dark.sight}`).test(c)), dark.chips[0]?.split('\n')[0]);
 check('vignette is dark for an unlit selected hero', dark.vignette === 'dark' || dark.vignette === 'pitch', dark.vignette);
 
 // 3. Patrols and 6. new monsters/intents, through an injected state (the fixture engine has no AI).
@@ -163,15 +164,15 @@ const inj = await p.evaluate(() => {
   return {
     routeObjects: dio['routes'].children.length,
     patrolTag: document.querySelector('.unit-tag[data-id="pat"] .tag-patrol')?.textContent ?? '',
-    heldTag: document.querySelector(`.unit-tag[data-id="${hob.heroId}"] .tag-grab`)?.textContent ?? '',
+    heldIcon: document.querySelector(`.dl-rcard[data-hero="${hob.heroId}"] .dl-si.grab`)?.dataset.tip ?? '',
     ghoulHold: document.querySelector('.unit-tag[data-id="gho"] .tag-grab')?.textContent ?? '',
     buriedDrawn: units.has('bur'),
     models: ['cap', 'arc', 'gho', 'sis1', 'sis2', 'sis3'].map((id) => units.get(id)?.key),
-    intents: [...document.querySelectorAll('.intent')].map((e) => e.className.replace('intent ', '')).sort(),
+    intents: [...document.querySelectorAll('.intent')].map((e) => [...e.classList].find((c) => c.startsWith('intent-')) ?? '').sort(),
     shoutMarks: dio['breathMarks'].children.filter((g) => g.userData.shout).length,
-    heldLine: document.querySelector('.bar-held')?.textContent ?? '',
-    heldChip: [...document.querySelectorAll('.chip.grab')].length,
-    turn: document.querySelector('.bar-turn')?.textContent ?? '',
+    escape: !!document.querySelector('.dl-hotbar [data-action="escape"]'),
+    heldChip: [...document.querySelectorAll('.dl-si.grab')].length,
+    turn: document.querySelector(`.dl-rcard[data-hero="${hob.heroId}"] .dl-pip`)?.dataset.tip ?? '',
     sisterTags: ['sis1', 'sis2'].map((id) => document.querySelector(`.unit-tag[data-id="${id}"] b`)?.textContent ?? ''),
   };
 });
@@ -181,7 +182,7 @@ check('new monster models: captain, archer, ghoul; sisters by class', JSON.strin
 check('buried ghoul is not drawn', inj.buriedDrawn === false);
 check('intent tags: shout, attack, grab, overwatch, veil, dart', ['intent-attack', 'intent-dart', 'intent-grab', 'intent-overwatch', 'intent-shout', 'intent-veil'].every((c) => inj.intents.includes(c)), inj.intents.join(','));
 check('shout draws the radius-8 ring', inj.shoutMarks === 1, `${inj.shoutMarks}`);
-check('held hero: chain tag, ghoul chain tag, bar "Held by", card chip', /Held/.test(inj.heldTag) && inj.ghoulHold === '⛓' && /Held by Ghoul/.test(inj.heldLine) && inj.heldChip === 1 && /^Held/.test(inj.turn), `${inj.heldTag} | ${inj.heldLine} | ${inj.turn}`);
+check('held hero: ghoul chain tag, "Held · by Ghoul" on the card, move pip says can\'t move', /^Held · by Ghoul/.test(inj.heldIcon) && inj.ghoulHold === '⛓' && inj.heldChip === 1 && /Can't move/.test(inj.turn), `${inj.heldIcon.split('\n')[0]} | ${inj.turn.split('\n')[0]} | escape button ${inj.escape}`);
 check('sister tags: overwatch, veiled', inj.sisterTags[0] === 'overwatch' && inj.sisterTags[1] === 'veiled', inj.sisterTags.join(','));
 await shot('02-patrol-intents');
 
@@ -240,7 +241,7 @@ const gl = await p.evaluate(() => {
   const dio = vc.dio;
   const E = window.vcEngine;
   const unlit = d.heroes.filter((h) => h.status === 'active' && !E.heroLit(s, h.heroId)).length;
-  return { tiles: dio['gloamEdge'].count, unlit, lit: E.visibility(s).lit.size, line: !document.querySelector('.hud-gloam').classList.contains('hidden'), rings: dio['darkRings'].children.length };
+  return { tiles: dio['gloamEdge'].count, unlit, lit: E.visibility(s).lit.size, line: !document.querySelector('.dl-gloam').classList.contains('hidden'), rings: dio['darkRings'].children.length };
 });
 check('gloam present: dark rings under unlit heroes', gl.rings === gl.unlit && gl.unlit > 0, `${gl.rings} rings, ${gl.unlit} unlit`);
 check('gloam creeping-darkness tiles drawn at the light edge (or none when nothing is lit)', gl.lit === 0 ? gl.tiles === 0 : gl.tiles > 0, `${gl.tiles} tiles, ${gl.lit} lit hexes`);
@@ -263,7 +264,7 @@ const gl3 = await p.evaluate(() => {
   vc.load(s);
   const E = window.vcEngine;
   const st = vc.state();
-  return { line: !document.querySelector('.hud-gloam').classList.contains('hidden'), text: document.querySelector('.hud-gloam').textContent, vignette: document.querySelector('.hud-vignette').dataset.b, sel: vc.hud.selectedId, hob: hob.heroId, lit: E.heroLit(st, hob.heroId), lvl: st.delve.heroes.find((h) => h.heroId === hob.heroId).at.level, gloam: st.delve.monsters.map((m) => m.kind).join() };
+  return { line: !document.querySelector('.dl-gloam').classList.contains('hidden'), text: document.querySelector('.dl-gloam').textContent, vignette: document.querySelector('.hud-vignette').dataset.b, sel: vc.hud.selectedId, hob: hob.heroId, lit: E.heroLit(st, hob.heroId), lvl: st.delve.heroes.find((h) => h.heroId === hob.heroId).at.level, gloam: st.delve.monsters.map((m) => m.kind).join() };
 });
 check('warning line "The dark here is awake" while a hero on L3 is unlit and the Gloam is up', gl3.line && /dark here is awake/.test(gl3.text), JSON.stringify(gl3));
 check('vignette pitch for an unlit hero on L3', gl3.vignette === 'pitch', gl3.vignette);

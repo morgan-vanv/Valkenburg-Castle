@@ -42,20 +42,20 @@ const burglar = await p.evaluate(() => {
 });
 check('a delve with Keven and a Burglar', !!burglar, burglar ?? 'no seed offered a Burglar');
 if (!burglar) process.exit(1);
-await p.waitForSelector('.bar-modes');
+await p.waitForSelector('.dl-seg');
 
 const mode = (id) => p.evaluate((x) => window.vc.state().delve.heroes.find((h) => h.heroId === x).moveMode, id);
-const buttons = () => p.$$eval('.bar-modes button', (els) => els.map((e) => `${e.textContent.trim().split(' ')[0]}:${e.classList.contains('on') ? 'on' : 'off'}`).join(' '));
+const buttons = () => p.$$eval('.dl-seg button', (els) => els.map((e) => `${e.textContent.trim().split(' ')[0]}:${e.classList.contains('on') ? 'on' : 'off'}`).join(' '));
 const select = async (id) => { await p.evaluate((x) => window.vc.hud.select(x), id); await p.waitForTimeout(80); };
-const badge = (id) => p.$(`.hcard[data-hero="${id}"] .chip.sneak`);
+const badge = (id) => p.$(`.dl-rcard[data-hero="${id}"] .dl-si.sneak`);
 
 // ---- 26.1 Walk/Sneak per hero
 check('the Burglar starts on Sneak, Keven on Walk (engine state)', (await mode(burglar)) === 'sneak' && (await mode('keven')) === 'walk');
 await select('keven');
 check('Keven selected: Walk is on', /Walk:on/.test(await buttons()) && /Sneak:off/.test(await buttons()), await buttons());
 check('the Burglar\'s card shows the Sneak badge, Keven\'s none', !!(await badge(burglar)) && !(await badge('keven')));
-const tip = await p.$eval(`.hcard[data-hero="${burglar}"] .chip.sneak`, (e) => e.title).catch(() => '');
-check('the badge explains itself on hover', /set to Sneak/.test(tip) && /own Walk\/Sneak/.test(tip), tip.split('\n')[0]);
+const tip = await p.$eval(`.dl-rcard[data-hero="${burglar}"] .dl-si.sneak`, (e) => e.dataset.tip ?? e.title).catch(() => '');
+check('the badge explains itself on hover', /set to sneak/i.test(tip) && /own Walk\/Sneak/.test(tip), tip.split('\n')[0]);
 await p.keyboard.press('s');
 await p.waitForTimeout(120);
 check('S sets Keven to Sneak', (await mode('keven')) === 'sneak' && /Sneak:on/.test(await buttons()), await buttons());
@@ -63,7 +63,7 @@ check('...and only Keven: the Burglar is unchanged', (await mode(burglar)) === '
 check('Keven\'s card shows the badge now', !!(await badge('keven')));
 check('the move preview follows Keven\'s setting (reach 2)', await p.evaluate(() => Math.max(...window.vcEngine.reachable(window.vc.state(), 'keven').map((r) => r.cost)) === 2));
 await select(burglar);
-await p.click('.bar-modes button:first-child'); // Walk
+await p.click('.dl-seg button:first-child'); // Walk
 await p.waitForTimeout(120);
 check('the Walk button sets the selected Burglar to Walk', (await mode(burglar)) === 'walk' && /Walk:on/.test(await buttons()), await buttons());
 await select('keven');
@@ -111,10 +111,10 @@ if (plan) {
   await p.evaluate((x) => window.vc.load(x.s), plan);
   await select('keven');
   const round = await p.evaluate(() => window.vc.state().delve.round);
-  // The HUD's live log lines show while the command plays back (the next render keeps only the engine's log): record them.
+  // The Chronicle's lines as the command plays back: record them.
   await p.evaluate(() => {
     window.__lines = [];
-    new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => window.__lines.push(n.textContent)))).observe(document.querySelector('.hud-log'), { childList: true });
+    new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => window.__lines.push(n.textContent)))).observe(document.querySelector('.dl-chron'), { childList: true, subtree: true });
   });
   await p.evaluate((x) => window.vc.send({ type: 'move', heroId: 'keven', path: x.path }), plan);
   await p.waitForFunction(() => !window.vc.busy());
