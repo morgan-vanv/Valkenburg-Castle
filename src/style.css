@@ -3374,6 +3374,32 @@ input.seed {
   pointer-events: none;
 }
 
+/* ================================================================ V3.9 eyes front (spec 24.5) */
+
+/* the Burglar's backstab spots: a small dagger on the hex */
+.backstab-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #eafff0;
+  background: rgba(10, 30, 18, 0.86);
+  border: 1px solid #8fd8a4;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(143, 216, 164, 0.55);
+  pointer-events: none;
+  animation: risk-pop 0.18s ease-out;
+}
+.chip.back-exposed { border-style: dashed; }
+.btn-face.on { box-shadow: 0 0 0 1px var(--ember, #ff9a40) inset; }
+.tip-stab { color: #9fe0b0; }
+
 /* 20.2: fear */
 .tag-fear { color: var(--fear); }
 .fear-word { color: var(--fear); }

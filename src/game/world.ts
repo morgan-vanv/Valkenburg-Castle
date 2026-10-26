@@ -1,7 +1,7 @@
 // Static castle indexes plus geometry that depends on the delve's runtime
 // state: tiles, doors, line of sight, light, sight and path finding.
 
-import { distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
+import { DIRS, distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
 import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { DARK_SIGHT, FIXED_LIGHT_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
@@ -208,12 +208,45 @@ function parsePos(k: string): Pos {
   return { level: Number(lv), q, r };
 }
 
+// ---------------------------------------------------------------- facing (spec 20.1, 24.1, 24.2)
+
+/** The DIRS index nearest to the direction from `from` to `to` (exact for neighbours; ties go to the lower index). */
+export function dirIndex(from: Hex, to: Hex): number {
+  const A = hexToWorld(from);
+  const B = hexToWorld(to);
+  const vx = B.x - A.x;
+  const vz = B.z - A.z;
+  let best = 0;
+  let bestDot = -Infinity;
+  DIRS.forEach((d, i) => {
+    const D = hexToWorld(d);
+    const dot = D.x * vx + D.z * vz;
+    if (dot > bestDot + 1e-9) {
+      bestDot = dot;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/**
+ * V3.9 (spec 24.1, 24.2): the front half: the three hex directions centred on `facing` (dirIndex of the
+ * offset, as the view's dirIndexOf). Everything else on the level is the rear half. No facing: all round.
+ */
+export function inFrontHalf(f: { at: Pos; facing?: number }, p: Pos): boolean {
+  if (f.facing === undefined || samePos(p, f.at)) return true;
+  if (p.level !== f.at.level) return false;
+  const i = dirIndex(f.at, p);
+  return i === f.facing || i === (f.facing + 1) % 6 || i === (f.facing + 5) % 6;
+}
+
 /**
  * Can a hero at `from` see hex `p` right now: within 1, or in line of sight and either
  * within the sight range or lit (up to LIT_SIGHT). A smoked hex is only seen from next to it.
  */
-export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>): boolean {
+export function seesHex(w: World, d: DelveX, from: Pos, p: Pos, lit: Set<string>, facing?: number): boolean {
   if (from.level !== p.level) return false;
+  if (!inFrontHalf({ at: from, facing }, p)) return false; // V3.9 (spec 24.2): only the front half
   const dist = distance(from, p);
   if (dist <= 1) return true;
   if (smoky(d, p)) return false;
@@ -373,12 +406,15 @@ export const LIT_SIGHT = 14;
 
 /**
  * Hexes whose layout a hero at `from` can make out: every tile in line of
- * sight within the sight range, lit or not.
+ * sight within the sight range, lit or not, in the front half of `facing` (none: all round).
  */
-export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>): Pos[] {
+export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>, facing?: number): Pos[] {
   const seen = new Set<string>();
+  const eye = { at: from, facing };
   for (const h of range(from, sightRangeAt(w, d, from, lit))) {
     const p = { level: from.level, ...h };
+    // V3.9 (spec 24.2): only the front half, adjacent hexes included.
+    if (!inFrontHalf(eye, p)) continue;
     if (w.tile(p) && (distance(from, p) <= 1 || (!smoky(d, from) && los(w, d, from, p)))) seen.add(posKey(p));
   }
   addEdgeWalls(w, d, seen);
@@ -388,7 +424,9 @@ export function glimpseSet(w: World, d: DelveX, from: Pos, lit?: Set<string>): P
 /**
  * Hexes the active heroes see now (units there are seen): every hex within 1,
  * every hex in line of sight within the sight range (lit or not), and, up to
- * LIT_SIGHT, the far lights of `farLit` (spec 17.4).
+ * LIT_SIGHT, the far lights of `farLit` (spec 17.4). V3.9 (spec 24.2): each hero sees only the front
+ * half of their facing (adjacent rear hexes unseen); the union covers each other's backs. Figures that
+ * struck a hero unseen (`revealed`) stand out until the next player phase ends.
  */
 export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> {
   const L = lit ?? litSet(w, d);
@@ -403,6 +441,7 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
       if (!w.tile(p)) continue;
       const k = posKey(p);
       if (out.has(k)) continue;
+      if (!inFrontHalf(h, p)) continue;
       const dist = distance(h.at, p);
       if (dist <= 1) {
         out.add(k);
@@ -418,6 +457,10 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
   // distant fire shows the fire, not the room. Daylight still floods its whole patch.
   addEdgeWalls(w, d, out);
   for (const k of distant) out.add(k);
+  for (const id of Object.keys(d.revealed ?? {})) {
+    const f = d.monsters.find((m) => m.id === id && !m.buried) ?? d.rivals?.members.find((r) => r.id === id && r.hp > 0 && !r.goneOut);
+    if (f) out.add(posKey(f.at));
+  }
   return out;
 }
 

@@ -5,7 +5,7 @@
 import type { ActionOption, Engine, FallInfo, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
 import { DIRS, distance, hexKey, posKey, posNeighbors, range, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, AleOffer, ApplyResult, CastleDef, Command, CrewId, DealOption, GameState, Hero, HeroClass, Intent, Item, Rival, RivalCrew, ShopOffer, StoryId } from '../game/types';
-import { backDirs, blastPreview, blastRings, breakableWall } from './stealth';
+import { backDirs, backstabFrom, blastPreview, blastRings, breakableWall, dirToward, inFrontHalf, pathEndFacing } from './stealth';
 import { longPaths } from './pathing';
 
 function hero(id: string, name: string, cls: HeroClass, maxHp: number, stats: Hero['stats']): Hero {
@@ -150,9 +150,12 @@ export function fixtureDelve(castle: CastleDef): GameState {
   const c = fixtureCampaign();
   const heroIds = ['keven', 'brann', 'pim', 'aldous'];
   const spots = [at0, near(at0, 0), near(at0, 2), near(at0, 1)];
+  // V3.9 (24.2): everyone faces into the castle; Aldous at the back faces back the way they came (covering the others).
+  const inward = dirToward(e, at0);
   const heroes = heroIds.map((id, i) => ({
     heroId: id,
     at: spots[i]!,
+    facing: id === 'aldous' ? (inward + 3) % 6 : inward,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
     pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }, item('i17', 'improvised', 'Improvised pick', 1, 0)] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i15', 'charge', 'Satchel: 3 charges', 3, 0), item('i14', 'lockpicks', 'Lockpicks'), item('i16', 'torch', 'Torch')] : [],
@@ -275,8 +278,27 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     }
     return back.has(best);
   };
-  /** V3.7 (20.1, 20.2): what a path risks, the fixture way (no line of sight, lit = the lantern's reach). */
+  /** V3.9 (24.4): enemies the party has seen this delve (the fixture keeps it here, not in the delve). */
+  const seenIds = new Set<string>();
+  const noteSeen = (s: GameState, visible: Set<string>) => {
+    const d = s.delve;
+    if (!d) return;
+    for (const m of d.monsters) if (m.hp > 0 && visible.has(posKey(m.at))) seenIds.add(m.id);
+    for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && visible.has(posKey(r.at))) seenIds.add(r.id);
+  };
+  /** V3.7 (20.1, 20.2): what a path risks, the fixture way (no line of sight, lit = the lantern's reach). V3.9: seen enemies only. */
   const risksFor = (s: GameState, heroId: string, path: Pos[], sneak: boolean): MoveRisks => {
+    const all = risksAll(s, heroId, path, sneak);
+    const vis = visInner(s).visible;
+    noteSeen(s, vis);
+    const posOf = (id: string) => s.delve!.monsters.find((m) => m.id === id)?.at ?? s.delve!.rivals?.members.find((r) => r.id === id)?.at;
+    return {
+      wake: all.wake.filter((w) => seenIds.has(w.id)),
+      notice: all.notice.filter((n) => { const p = posOf(n.id); return !!p && vis.has(posKey(p)); }),
+      swings: all.swings.filter((sw) => seenIds.has(sw.id)),
+    };
+  };
+  const risksAll = (s: GameState, heroId: string, path: Pos[], sneak: boolean): MoveRisks => {
     const d = s.delve!;
     const h = d.heroes.find((x) => x.heroId === heroId)!;
     const end = path[path.length - 1] ?? h.at;
@@ -467,7 +489,15 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       return previewInner(_s, heroId, action, _t);
     },
     visibility(state): Visibility {
-      return visInner(state);
+      const v = visInner(state);
+      noteSeen(state, v.visible);
+      return v;
+    },
+    seenEnemies(state) {
+      noteSeen(state, visInner(state).visible);
+      const d = state.delve;
+      const alive = new Set([...(d?.monsters ?? []).filter((m) => m.hp > 0).map((m) => m.id), ...(d?.rivals?.members ?? []).filter((r) => r.hp > 0).map((r) => r.id)]);
+      return new Set([...seenIds].filter((id) => alive.has(id)));
     },
     brightness: (s) => {
       const L = s.delve?.light ?? 60;
@@ -623,6 +653,16 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         s.campaign.stash.push(item(`b${Date.now()}`, o.kind, o.name));
         return { state: s, events: [] };
       }
+      if (cmd.type === 'face' && s.delve) {
+        // V3.9 (24.2): free, unlimited in the player phase.
+        const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
+        if (!h || h.status !== 'active') return { state, events: [], error: 'No such hero.' };
+        if (s.delve.phase !== 'player') return { state, events: [], error: 'Not now.' };
+        const f = ((Math.round(cmd.facing) % 6) + 6) % 6;
+        if (h.facing === f) return { state: s, events: [] };
+        h.facing = f;
+        return { state: s, events: [{ type: 'faced', id: h.heroId, facing: f }] };
+      }
       if (cmd.type === 'move' && s.delve && calmOf(state).calm && cmd.path.length > 0) {
         // V3.7 (20.5): free move: the whole path, the castle turning every 4 steps, followers in file.
         const d = s.delve;
@@ -664,6 +704,11 @@ export function fixtureEngine(castle0: CastleDef): Engine {
           }
         }
         if (walked.length) ev.push({ type: 'moved', id: cmd.heroId, path: walked });
+        const calmF = pathEndFacing(trail[Math.max(0, trail.length - 2)]!, [trail[trail.length - 1]!], h.facing);
+        if (calmF !== undefined && calmF !== h.facing) {
+          h.facing = calmF;
+          ev.push({ type: 'faced', id: cmd.heroId, facing: calmF });
+        }
         followers.forEach((f, i) => {
           const spot = trail[Math.max(0, trail.length - 2 - i)]!;
           if (!samePos(f.at, spot)) ev.push({ type: 'moved', id: f.heroId, path: [spot] });
@@ -688,14 +733,19 @@ export function fixtureEngine(castle0: CastleDef): Engine {
           ev.push(hits ? { type: 'hit', attacker: sw.id, target: cmd.heroId, damage, crit: false } : { type: 'miss', attacker: sw.id, target: cmd.heroId });
           if (damage) h.hp = Math.max(1, h.hp - damage);
         }
+        const startAt = h.at;
         h.at = cmd.path[cmd.path.length - 1]!;
+        const endF = pathEndFacing(startAt, cmd.path, h.facing);
+        if (endF !== undefined) h.facing = endF;
         if (h.moved) {
           h.dashed = true;
           h.acted = true;
         }
         h.moved = true;
         for (const k of lit(s)) if (!s.delve.explored.includes(k)) s.delve.explored.push(k);
-        ev.push({ type: 'moved', id: cmd.heroId, path: cmd.path }, { type: 'noise', at: h.at, radius: cmd.sneak ? 0 : 1 });
+        ev.push({ type: 'moved', id: cmd.heroId, path: cmd.path });
+        if (endF !== undefined) ev.push({ type: 'faced', id: cmd.heroId, facing: endF });
+        ev.push({ type: 'noise', at: h.at, radius: cmd.sneak ? 0 : 1 });
         // 20.1: wake rolls (the fixture wakes at 50%+) and noticing.
         for (const w of risks.wake) {
           if (w.chance < 50) continue;
@@ -739,6 +789,24 @@ export function fixtureEngine(castle0: CastleDef): Engine {
           if (m.hp <= 0) ev.push({ type: 'monsterDied', id: m.id });
         }
         d.monsters = d.monsters.filter((m) => m.hp > 0);
+        // V3.9 (24.2): an awake, unfeared monster next to a hero strikes it; from the hero's rear half it is
+        // blindsided, and when no hero can see the attacker the hit lands as `unseenHit`.
+        {
+          const seenNow = visInner(state).visible;
+          for (const m of d.monsters) {
+            if (m.awareness === 'asleep' || m.feared || m.kind === 'dragon' || m.kind === 'gloam') continue;
+            const hx = d.heroes.find((x) => x.status === 'active' && x.at.level === m.at.level && distance(x.at, m.at) === 1);
+            if (!hx) continue;
+            m.facing = dirToward(m.at, hx.at);
+            const blind = hx.facing !== undefined && !inFrontHalf(hx.at, hx.facing, m.at);
+            const dmg = blind ? 3 : 2;
+            if (!seenNow.has(posKey(m.at))) {
+              ev.push({ type: 'say', text: `Something strikes ${s.campaign.roster.find((x) => x.id === hx.heroId)?.name ?? hx.heroId} from behind.` }, { type: 'unseenHit', target: hx.heroId });
+            }
+            ev.push({ type: 'hit', attacker: m.id, target: hx.heroId, damage: dmg, crit: false });
+            hx.hp = Math.max(1, hx.hp - dmg);
+          }
+        }
         // 20.3: fuses burn down; at 0 the charge goes off.
         const left: typeof d.fuses = [];
         for (const f of d.fuses ?? []) {
@@ -905,12 +973,23 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         }
         if (cmd.action === 'attack' && cmd.target.id) {
           const m = s.delve.monsters.find((x) => x.id === cmd.target.id)!;
-          const results = [true, false, true].slice(0, 3);
-          m.hp -= 2;
-          const ev: ApplyResult['events'] = [
-            { type: 'roll', who: cmd.heroId, what: 'Attack', roll: { slots: 3, chance: 55, focus: cmd.focus, results, hits: 2, perfect: false } },
-            { type: 'hit', attacker: cmd.heroId, target: m.id, damage: 2, crit: false },
-          ];
+          // V3.9 (24.3): a Burglar from the rear half on an unaware target: +1 slot, double damage.
+          const stab = backstabFrom(state, cmd.heroId, m.id, h.at);
+          const results = stab ? [true, false, true, true] : [true, false, true];
+          const dmg = stab ? 6 : 2;
+          m.hp -= dmg;
+          const ev: ApplyResult['events'] = [];
+          const f = dirToward(h.at, m.at);
+          if (h.facing !== f) {
+            h.facing = f;
+            ev.push({ type: 'faced', id: h.heroId, facing: f });
+          }
+          if (m.awareness === 'asleep') m.awareness = 'hunting';
+          ev.push(
+            { type: 'roll', who: cmd.heroId, what: stab ? 'Backstab' : 'Attack', roll: { slots: results.length, chance: 55, focus: cmd.focus, results, hits: stab ? 3 : 2, perfect: false } },
+            { type: 'hit', attacker: cmd.heroId, target: m.id, damage: dmg, crit: false },
+          );
+
           if (m.hp <= 0) {
             s.delve.monsters = s.delve.monsters.filter((x) => x !== m);
             ev.push({ type: 'monsterDied', id: m.id });
@@ -1016,9 +1095,9 @@ export function fixtureEngine(castle0: CastleDef): Engine {
   }
   function previewInner(_s: GameState, heroId: string, action: ActionKind, _t: ActionTarget): RollPreview {
     {
-      void _s;
-      void _t;
       const fb = action === 'firebolt';
+      const hh = _s.delve?.heroes.find((x) => x.heroId === heroId);
+      const stab = action === 'attack' && !!_t.id && !!hh && backstabFrom(_s, heroId, _t.id, hh.at);
       if (action === 'hamstring') return { ok: true, stat: 'finesse', slots: 1, chance: 55, modifiers: ['Legs −20%'], maxFocus: 3, outcomes: ['Miss', 'Rooted 2 rounds'], noise: 1, light: 0 };
       if (action === 'nightthorn' || action === 'briar') return { ok: true, stat: 'wits', slots: 2, chance: 70, modifiers: ['Dim −10%'], maxFocus: 3, outcomes: ['Miss', action === 'briar' ? '1 dmg, rooted 1 round' : '1 dmg (ignores armor)', action === 'briar' ? '2 dmg, rooted 2 rounds' : '2 dmg (ignores armor)'], noise: action === 'briar' ? 1 : 0, light: 0 };
       if (action === 'dread' || action === 'sleep')
@@ -1026,11 +1105,11 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       return {
         ok: true,
         stat: fb ? 'wits' : 'might',
-        slots: fb ? 3 : heroId === 'pim' ? 2 : 3,
+        slots: fb ? 3 : (heroId === 'pim' ? 2 : 3) + (stab ? 2 : 0),
         chance: fb ? 75 : 55,
-        modifiers: ['Dim −10%', 'Target asleep +20%', 'Sneak attack +1 slot'],
+        modifiers: stab ? ['Dim −10%', 'Sneak attack +1 slot', 'Backstab: +1 slot, double damage'] : ['Dim −10%', 'Target asleep +20%', 'Sneak attack +1 slot'],
         maxFocus: 3,
-        outcomes: fb ? ['Miss', '2 dmg', '4 dmg', '6 dmg, +1 perfect'] : ['Miss', '2 dmg', '4 dmg', '6 dmg +1 (perfect)'],
+        outcomes: fb ? ['Miss', '2 dmg', '4 dmg', '6 dmg, +1 perfect'] : stab ? ['Miss', '4 dmg', '8 dmg', '12 dmg', '16 dmg +2 (perfect)'] : ['Miss', '2 dmg', '4 dmg', '6 dmg +1 (perfect)'],
         noise: fb ? 3 : 2,
         light: 0,
       };
@@ -1042,9 +1121,14 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       if (!d) return { visible: new Set(), explored: new Set(), lit: new Set() };
       const l = lit(state);
       const visible = new Set<string>();
+      // V3.9 (24.2): each active hero sees their own hex and their front half only; the party sees the union.
       for (const h of d.heroes) {
+        if (h.status !== 'active') continue;
+        visible.add(posKey(h.at));
         for (const x of range(h.at, 8)) {
-          const k = posKey({ level: h.at.level, ...x });
+          const p = { level: h.at.level, ...x };
+          const k = posKey(p);
+          if (h.facing !== undefined && !inFrontHalf(h.at, h.facing, p)) continue;
           if (l.has(k) || distance(x, h.at) <= 1) visible.add(k);
         }
       }

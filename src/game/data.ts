@@ -118,7 +118,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
   sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.', 'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.'] },
   burglar: {
     role: 'Quiet: picks locks, sneaks fast.',
-    abilities: ['Pick locks.', 'Sneak 4.', 'Backstab: +1 slot on monsters not hunting.', 'Opens chests silently and takes loot without using the action.'],
+    abilities: ['Pick locks.', 'Sneaks at full pace, with the quietest feet.', "Backstab: from behind an enemy that hasn't noticed you, +1 slot and double damage.", 'Opens chests silently and takes loot without using the action.'],
   },
   ranger: {
     role: 'Eyes: shoots from range, holds a lane.',
@@ -250,6 +250,16 @@ export const WAKE_END_SNEAK = 25;
 /** Noticing ranges by light and move mode; in the Hollow light doesn't matter. The blind arc halves the walking range. */
 /** V3.7.1 (spec 21.5): walking ranges +2 (lit 8, unlit 5, Hollow 8); sneaking unchanged. */
 export const NOTICE = { litWalk: 8, litSneak: 4, unlitWalk: 5, unlitSneak: 1, hollowWalk: 8, hollowSneak: 3 } as const;
+/** V3.9 (spec 24.3): the Burglar's quiet feet: a sneaking Burglar is noticed within 2 lit, adjacent unlit, 2 in the Hollow. */
+export const NOTICE_QUIET = { litSneak: 2, unlitSneak: 1, hollowSneak: 2 } as const;
+/** V3.9 (spec 24.3): a sneaking Burglar's sound rolls on sleepers: 5% per hex (others 10), ending adjacent 10% (others 25). */
+export const WAKE_SNEAK_QUIET = 5;
+export const WAKE_END_SNEAK_QUIET = 10;
+/** V3.9 (spec 24.2): an attack on a hero from their rear half. */
+export const BLINDSIDE_SLOTS = 1;
+/** V3.9 (spec 24.3): backstab: +1 slot and this many times the weapon damage per hit (before armor). */
+export const BACKSTAB_SLOTS = 1;
+export const BACKSTAB_DMG_MULT = 2;
 /** Sneak attack: +1 slot on a monster that hasn't noticed the attacker. */
 export const SNEAK_ATTACK_SLOTS = 1;
 /** Free swings: the usual attack with one slot fewer (min 1); a bow swings with 1 slot. */

@@ -173,6 +173,8 @@ export interface Engine {
   ales(state: GameState): AleOffer[];
   /** V3.7 (spec 20.3): what a blast at `at` would do, for the coloured overlay before committing. */
   blastPreview(state: GameState, at: Pos): { broke: Pos[]; collapsed: Pos[]; rubbled: Pos[]; /** ids of figures the blast would damage */ hit: string[] };
+  /** V3.9 (spec 24.4): enemies the party has seen this delve (ids), for previews and markers. */
+  seenEnemies(state: GameState): Set<string>;
   /** V3.7 (spec 20.5): while calm, every explored hex the hero could walk to (any length), with path and risks. */
   calmReach(state: GameState, heroId: string, sneak: boolean): Reach[];
   /** V3.7 (spec 20.5): is the party calm (free movement on)? With a reason when not ("An orc hunts Pim"). */

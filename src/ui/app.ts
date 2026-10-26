@@ -7,13 +7,14 @@ import { posKey, type Pos } from '../game/hex';
 import type { Command, GameEvent, GameState } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { Diorama } from '../view/diorama';
+import { wasBackstab } from '../view/stealth';
 import { clear, h } from './dom';
 import { Hud } from './hud';
 import { campScreen, overScreen, summaryScreen, titleScreen, type Loadout, type ScreenHost, type Station } from './screens';
 import { CREW, STANCE, STORY, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
-export const SAVE_KEY = 'vc.save.v37';
+export const SAVE_KEY = 'vc.save.v39';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -370,6 +371,13 @@ export class App {
 
   // ------------------------------------------------------------ event player
 
+  /** "the orc" for a monster, a crew member's name otherwise (for the backstab line). */
+  private monsterWords(id: string, before: GameState): string {
+    const m = before.delve?.monsters.find((x) => x.id === id) ?? this.state?.delve?.monsters.find((x) => x.id === id);
+    if (m) return /^[A-Z][a-z]+$/.test(m.name) && m.name.toLowerCase() === m.kind ? `the ${m.kind}` : m.name;
+    return this.hud.nameOf(id);
+  }
+
   private isHero(id: string): boolean {
     return !!this.state?.campaign.roster.some((x) => x.id === id);
   }
@@ -383,6 +391,9 @@ export class App {
     let panned = false;
     /** 18.6: a deal already says what the crew now does; skip the stance line that follows it. */
     let dealt = false;
+    /** V3.9 (24.3): the last roll and whether a free swing introduced it (a swing is never a backstab). */
+    let lastRoll: { who: string; what: string } | null = null;
+    let swingNext = false;
     for (const e of events) {
       if (!this.root.isConnected) return;
       // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
@@ -418,6 +429,8 @@ export class App {
           continue;
         }
         case 'roll': {
+          lastRoll = { who: e.who, what: swingNext ? 'swing' : e.what };
+          swingNext = false;
           const enemy = !this.isHero(e.who);
           if (instant()) {
             this.hud.log(`${this.hud.nameOf(e.who)} · ${e.what}: ${e.roll.hits}/${e.roll.slots}${e.roll.perfect ? ' PERFECT' : ''}`, enemy ? 'log-enemy' : 'log-roll');
@@ -442,6 +455,14 @@ export class App {
             if (!this.settings.reduceShake) this.dio.rig.addShake(0.45);
           } else sfx.play(heroHurt ? 'hurt' : 'sword');
           if (heroHurt) this.hud.pulse('hurt');
+          // V3.9 (24.3): the Burglar's backstab: its own strike and log line, then the hit.
+          const stab = !!e.backstab || !heroHurt && this.isHero(e.attacker) && lastRoll?.who === e.attacker && lastRoll.what !== 'swing' && (/backstab/i.test(lastRoll.what) || wasBackstab(before, e.attacker, e.target));
+          if (stab) {
+            sfx.play('sword', { pitch: 1.5, gain: 0.8 });
+            if (!events.some((x) => x.type === 'say' && /backstabs/.test(x.text))) this.hud.log(`${this.hud.nameOf(e.attacker)} backstabs ${this.monsterWords(e.target, before)}: ${e.damage}`, 'log-ally');
+            if (!instant()) await this.dio.playBackstab(e.attacker, e.target);
+          }
+          lastRoll = null;
           await this.dio.playEvent(e);
           this.hud.hideRoll();
           continue;
@@ -554,8 +575,20 @@ export class App {
           await this.dio.playEvent(e);
           continue;
         case 'swing':
+          swingNext = true;
           sfx.play('whoosh', { pitch: 1.3, gain: 0.5 });
           await this.dio.playEvent(e);
+          continue;
+        // ---- V3.9 (24.2): facing and unseen hits
+        case 'faced':
+          await this.dio.playEvent(e);
+          continue;
+        case 'unseenHit':
+          sfx.play('whoosh', { pitch: 0.7, gain: 0.7 });
+          // The engine says it too (a `say` line); log it only when it doesn't.
+          if (!events.some((x) => x.type === 'say' && /from behind/.test(x.text))) this.hud.log(`Something strikes ${this.hud.nameOf(e.target)} from behind.`, 'log-enemy');
+          this.hud.pulse('hurt');
+          if (!instant()) await this.dio.playEvent(e);
           continue;
         case 'feared':
           sfx.play('gloam', { pitch: 1.6, gain: 0.5 });
@@ -802,6 +835,8 @@ export class App {
       case 'robbed':
       case 'captured':
         return d.unitPos(e.hero);
+      case 'unseenHit':
+        return d.unitPos(e.target);
       case 'rooted':
         return this.isHero(e.id) || d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
       case 'propSmashed':

@@ -20,7 +20,7 @@ import {
 } from './common';
 import { canEnter, distField, doorAt, kindAt, los, within, type World } from './world';
 import { approach, attackSpots, blocked, exitsBy, overwatchCheck, strike, targets, walk, type Target } from './ai';
-import { faceToward, fleePlan, isSneaking, wouldNotice } from './stealth';
+import { faceToward, fleePlan, inFrontHalf, isSneaking, quietFeet, wouldNotice } from './stealth';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
 
@@ -236,7 +236,7 @@ export function crewNotice(c: Ctx): void {
   const ts = targets(c).filter((t) => t.hero);
   let seen = false;
   for (const r of rivalsOnMap(c)) {
-    const t = ts.find((x) => within(x.at, r.at, CUTTHROAT_SIGHT) && wouldNotice(c, r, x.at, isSneaking(x.hero!), lit));
+    const t = ts.find((x) => within(x.at, r.at, CUTTHROAT_SIGHT) && wouldNotice(c, r, x.at, isSneaking(x.hero!), lit, quietFeet(c, x.id)));
     if (!t) continue;
     seen = true;
     faceToward(r, t.at);
@@ -312,7 +312,7 @@ export function rivalOverwatchFire(c: Ctx, heroId: string): void {
   const h = hd(c, heroId);
   if (!h || h.status !== 'active' || h.veil > 0) return;
   for (const r of rivalsOnMap(c)) {
-    if (!r.overwatch || !within(r.at, h.at, BOW_RANGE) || !los(c.w, c.d, r.at, h.at)) continue;
+    if (!r.overwatch || !within(r.at, h.at, BOW_RANGE) || !inFrontHalf(r, h.at) || !los(c.w, c.d, r.at, h.at)) continue; // V3.9: front half only
     r.overwatch = false;
     const st = rivalStats(r);
     say(c, `${r.name} looses an arrow at ${heroName(c, heroId)}.`);

@@ -364,12 +364,12 @@ export function checkHolds(c: Ctx): void {
 }
 
 /** Damage to any creature by id (monster, rival, prisoner, hero). Hero damage here ignores armor. */
-export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts: { crit?: boolean; noise?: boolean } = {}): void {
+export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts: { crit?: boolean; noise?: boolean; backstab?: boolean } = {}): void {
   const m = c.d.monsters.find((x) => x.id === id);
   if (m) {
     if (m.kind === 'gloam') return;
     m.hp -= dmg;
-    c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit });
+    c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
     if (m.awareness !== 'hunting') {
       const src = by ? hd(c, by) : undefined;
       goHunting(c, m, src?.at);
@@ -391,7 +391,7 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       r = g;
     }
     r.hp -= dmg;
-    c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: r.id, damage: dmg, crit: !!opts.crit });
+    c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: r.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
     if (by && hd(c, by)) makeHostile(c);
     if (r.hp <= 0) {
       r.hp = 0;

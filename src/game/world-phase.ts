@@ -672,6 +672,9 @@ export function worldPhase(c: Ctx): void {
   refreshSight(c);
   if (checkDelveEnd(c)) return;
   d.phase = 'world';
+  // V3.9 (spec 24.2): figures revealed by an unseen strike show until the end of the player phase just past.
+  for (const [id, until] of Object.entries(d.revealed ?? {})) if (until <= d.round) delete d.revealed![id];
+  c.visCache = undefined;
   c.ev.push({ type: 'phase', phase: 'world', round: d.round });
   const webbedBefore = new Set(d.heroes.filter((h) => h.webbed).map((h) => h.heroId));
   // 1. Light (an open lantern burns), torches, bleeding, fire.

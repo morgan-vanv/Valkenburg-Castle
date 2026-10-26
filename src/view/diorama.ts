@@ -14,8 +14,8 @@ import { LevelView } from './level';
 import { makeBook, makeChest, makeCoins, makeCopper, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
 import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
-import { COLORS, FLOOR_TOP, HEX, WALL_HEIGHT, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
-import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, fuseSide } from './stealth';
+import { CLASS_COLORS, COLORS, FLOOR_TOP, HEX, WALL_HEIGHT, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
+import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, facingOf, fuseSide } from './stealth';
 import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, linkEnds, linkMarker, prizeInHand } from './links';
@@ -168,10 +168,14 @@ export class Diorama {
   /** 16.2: the Gloam's creeping darkness at the edge of the party's light (Level 3). */
   private gloamEdge: THREE.InstancedMesh;
   private gloamEdgeKey = '';
-  /** V3.7 (20.1): facing wedges on awake monsters and crew members; blind arcs when a sneaking hero is selected. */
+  /** V3.7 (20.1): facing wedges on awake monsters and crew members; V3.9 (24.5): and on heroes, in their colour. */
   private facingMarks = new THREE.Group();
   private facingKey = '';
-  private blindOn = false;
+  /** V3.9 (24.5): the enemy whose rear half is shown faintly (hover), and the Burglar's backstab spots. */
+  private rearOf: string | null = null;
+  private stabSpots: { at: Pos; target: string }[] = [];
+  /** V3.9: the facing a move or a Face will leave (a wedge at the path end or on the hero). */
+  private facePreview = new THREE.Group();
   private blindFill: THREE.InstancedMesh;
   private blindMarks = new THREE.Group();
   private blindTags: { el: HTMLElement; at: THREE.Vector3 }[] = [];
@@ -274,8 +278,8 @@ export class Diorama {
     this.gloamEdge.count = 0;
     this.gloamEdge.renderOrder = 1;
     this.gloamEdge.frustumCulled = false;
-    // V3.7 (20.1): blind-arc tiles: a dark, slightly blue wash on the hexes an enemy can't see.
-    this.blindFill = new THREE.InstancedMesh(new THREE.CircleGeometry(0.88, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0a1028, transparent: true, opacity: 0.42, depthWrite: false }), 600);
+    // V3.9 (24.5): the rear half of a hovered enemy: a faint cool wash (the V3.7 sneaking wash is gone).
+    this.blindFill = new THREE.InstancedMesh(new THREE.CircleGeometry(0.88, 6, Math.PI / 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x6f9cff, transparent: true, opacity: 0.13, depthWrite: false, blending: THREE.AdditiveBlending }), 600);
     this.blindFill.count = 0;
     this.blindFill.renderOrder = 1;
     this.blindFill.frustumCulled = false;
@@ -289,7 +293,20 @@ export class Diorama {
     // copy drawn only where a wall is in front of them (GreaterDepth): a hex picked behind a wall
     // still shows its ring.
     for (const m of [this.pathEnd, this.hoverMesh, this.ring]) m.add(throughWall(m));
-    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.riskRings, this.fuseMarks, this.collapseDebris);
+    this.overlay.add(this.pathDots, this.pathEnd, this.hoverMesh, this.ring, this.rippleMesh, this.intentLines, this.lips, this.landing, this.breathMarks, this.lootGlow, this.linkPulse, this.exitPulse, this.exitRings, this.beacon, this.routes, this.darkRings, this.crewRings, this.gloamEdge, this.blindFill, this.blindMarks, this.facingMarks, this.facePreview, this.riskRings, this.fuseMarks, this.collapseDebris);
+    // V3.9: the facing a move or a Face leaves: an ember wedge with an arrow.
+    {
+      const col = COLORS.emberHot;
+      const R = Math.sqrt(3) * HEX * 1.05;
+      const cone = new THREE.Mesh(new THREE.CircleGeometry(R, 12, -Math.PI / 3, (Math.PI * 2) / 3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }));
+      cone.rotation.y = -Math.PI / 2;
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.36, 3), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthWrite: false }));
+      arrow.rotation.x = Math.PI / 2;
+      arrow.position.z = Math.sqrt(3) * HEX * 0.62;
+      this.facePreview.add(cone, arrow);
+      this.facePreview.visible = false;
+      this.facePreview.renderOrder = 3;
+    }
     // 16.2: the bearer's lantern: an iron frame on a short hook, a flame and a glow sprite.
     {
       const iron = new THREE.MeshLambertMaterial({ color: 0x2a2420, flatShading: true });
@@ -1152,6 +1169,11 @@ export class Diorama {
       v.dead = false;
       v.setOpacity(1);
       this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, h.heroId === d.lanternBearer, this.lanternOpen, draggers.get(h.heroId), !!hero?.shield));
+      // V3.9 (24.2): heroes turn to their facing too.
+      if (h.facing !== undefined && !v.busy && h.status === 'active') {
+        const a = facingAngle(h.facing);
+        v.face(Math.sin(a), Math.cos(a));
+      }
       this.setShield(v, !!hero?.shield);
     }
     // V3.7 (20.1): figures turn to their engine facing when it is known (and they aren't mid-animation).
@@ -1477,12 +1499,14 @@ export class Diorama {
     this.exitPulse.visible = false;
   }
 
-  showPath(path: Pos[] | null): void {
+  showPath(path: Pos[] | null, endFacing?: number): void {
     if (!path || !path.length) {
       this.pathDots.count = 0;
       this.pathEnd.visible = false;
+      this.showFacing(null);
       return;
     }
+    this.showFacing(path[path.length - 1]!, endFacing);
     const m = new THREE.Matrix4();
     let n = 0;
     for (const p of path.slice(0, -1)) {
@@ -1808,10 +1832,30 @@ export class Diorama {
       return;
     }
     const list = facedUnits(d).filter((u) => u.at.level === this.shownLevel);
-    const key = `#${this.shownLevel}|${d.rivals?.stance ?? ''}|` + list.map((u) => `${u.id}:${u.facing}:${u.feared ? 'f' : ''}`).join('|');
+    // V3.9 (24.5): heroes' wedges, smaller, in the hero's colour.
+    const heroes = d.heroes.filter((h) => h.status === 'active' && h.at.level === this.shownLevel && facingOf(h) !== undefined);
+    const key = `#${this.shownLevel}|${d.rivals?.stance ?? ''}|` + list.map((u) => `${u.id}:${u.facing}:${u.feared ? 'f' : ''}`).join('|') + '|H' + heroes.map((h) => `${h.heroId}:${h.facing}`).join('|');
     if (key === this.facingKey) return;
     this.facingKey = key;
     this.facingMarks.clear();
+    for (const h of heroes) {
+      const cls = this.state?.campaign.roster.find((r) => r.id === h.heroId)?.cls ?? '';
+      const col = CLASS_COLORS[cls] ?? COLORS.parchment;
+      const g = new THREE.Group();
+      const R = Math.sqrt(3) * HEX * 1.0;
+      const cone = new THREE.Mesh(new THREE.CircleGeometry(R, 12, -Math.PI / 3, (Math.PI * 2) / 3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }));
+      cone.rotation.y = -Math.PI / 2;
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.32, 3), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthWrite: false }));
+      arrow.rotation.x = Math.PI / 2;
+      arrow.position.z = Math.sqrt(3) * HEX * 0.6;
+      // V3.9 (owner: cones are clutter): the arrow only; the sector stays built but unused, for a quick revisit.
+      void cone;
+      g.add(arrow);
+      g.rotation.y = facingAngle(facingOf(h)!);
+      g.userData = { unit: h.heroId, level: h.at.level, hero: true };
+      g.renderOrder = 2;
+      this.facingMarks.add(g);
+    }
     const st = d.rivals?.stance;
     for (const u of list) {
       const col = u.feared ? 0x9a6aff : u.crew ? (st === 'hired' ? 0x7fe07a : st === 'hostile' ? COLORS.danger : st === 'demanding' ? 0xffb35c : 0xb8ad98) : 0xffa040;
@@ -1821,7 +1865,8 @@ export class Diorama {
       const cone = new THREE.Mesh(new THREE.CircleGeometry(R, 14, -Math.PI / 3, (Math.PI * 2) / 3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
       // CircleGeometry's arc starts on +x; rotate so the sector's middle points down +z (our forward), then by the facing.
       cone.rotation.y = -Math.PI / 2;
-      g.add(cone);
+      // V3.9 (owner: cones are clutter): the arrow only.
+      void cone;
       const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.4, 3), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthWrite: false }));
       arrow.rotation.x = Math.PI / 2;
       arrow.position.z = Math.sqrt(3) * HEX * 0.62;
@@ -1833,58 +1878,72 @@ export class Diorama {
     }
   }
 
-  /** 20.1: on while a sneaking hero is selected: the blind arcs behind every awake enemy are shaded. */
-  showBlindArcs(on: boolean): void {
-    if (on === this.blindOn) return;
-    this.blindOn = on;
+  /** V3.9 (24.5): show the rear half of this enemy faintly (hover a seen awake enemy); null hides it. */
+  showRearHalf(unitId: string | null): void {
+    if (unitId === this.rearOf) return;
+    this.rearOf = unitId;
     this.blindKey = '';
     this.refreshBlindArcs();
+  }
+
+  /** V3.9 (24.5): dagger markers on the hexes a selected Burglar could backstab from ([] hides them). */
+  showBackstab(spots: { at: Pos; target: string }[]): void {
+    const a = spots.map((x) => `${posKey(x.at)}>${x.target}`).join('|');
+    const b = this.stabSpots.map((x) => `${posKey(x.at)}>${x.target}`).join('|');
+    if (a === b) return;
+    this.stabSpots = spots;
+    this.blindKey = '';
+    this.refreshBlindArcs();
+  }
+
+  /** V3.9: the facing a move or Face would leave, as a wedge on `at`; null hides it. */
+  showFacing(at: Pos | null, facing?: number): void {
+    if (!at || facing === undefined || at.level !== this.shownLevel) {
+      this.facePreview.visible = false;
+      return;
+    }
+    this.facePreview.visible = true;
+    this.facePreview.position.copy(this.worldOf(at, 0.05));
+    this.facePreview.rotation.y = facingAngle(facing);
   }
 
   private refreshBlindArcs(): void {
     const d = this.state?.delve;
     const lv = this.levels.get(this.shownLevel)?.def as LevelDef | undefined;
-    const list = this.blindOn && d ? facedUnits(d).filter((u) => u.at.level === this.shownLevel && !u.feared && this.vis.visible.has(posKey(u.at))) : [];
-    const key = `#${this.blindOn ? 1 : 0}|${this.shownLevel}|` + list.map((u) => `${u.id}:${posKey(u.at)}:${u.facing}`).join('|');
+    const rear = d && this.rearOf ? facedUnits(d).find((u) => u.id === this.rearOf && u.at.level === this.shownLevel && this.vis.visible.has(posKey(u.at))) : undefined;
+    const stabs = this.stabSpots.filter((x) => x.at.level === this.shownLevel);
+    const key = `#${this.shownLevel}|${rear ? `${rear.id}:${posKey(rear.at)}:${rear.facing}` : ''}|` + stabs.map((x) => posKey(x.at)).join('|');
     if (key === this.blindKey) return;
     this.blindKey = key;
     this.blindFill.count = 0;
     this.blindMarks.clear();
     for (const t of this.blindTags) t.el.remove();
     this.blindTags = [];
-    if (!list.length || !lv) {
-      this.blindFill.instanceMatrix.needsUpdate = true;
-      return;
-    }
     const m = new THREE.Matrix4();
     let n = 0;
-    const done = new Set<string>();
-    const occupied = new Set<string>([...this.units.values()].filter((v) => v.shown).map((v) => posKey(v.at)));
-    for (const u of list) {
-      const arc = blindArc(lv, u.at, u.facing, 4);
-      for (const p of arc.hexes) {
-        const k = posKey(p);
-        if (done.has(k) || n >= 600) continue;
-        done.add(k);
+    if (rear && lv) {
+      for (const p of blindArc(lv, rear.at, rear.facing, 3).hexes) {
+        if (n >= 600) break;
         m.makeTranslation(this.worldOf(p, 0.028));
         this.blindFill.setMatrixAt(n++, m);
-      }
-      if (arc.behind && !occupied.has(posKey(arc.behind))) {
-        const ring = new THREE.Mesh(hexRing(0.58, 0.8), new THREE.MeshBasicMaterial({ color: 0x9ec0ff, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
-        ring.position.copy(this.worldOf(arc.behind, 0.045));
-        ring.userData = { unit: u.id, phase: n * 0.7 };
-        ring.renderOrder = 3;
-        this.blindMarks.add(ring);
-        const el = document.createElement('div');
-        el.className = 'blind-tag';
-        el.textContent = 'sneak up here';
-        el.title = 'The hex directly behind it: a sneaking hero here is never noticed by it. Your first strike on a monster that has not noticed you gets +1 slot.';
-        this.fx.appendChild(el);
-        this.blindTags.push({ el, at: this.worldOf(arc.behind, 0.5) });
       }
     }
     this.blindFill.count = n;
     this.blindFill.instanceMatrix.needsUpdate = true;
+    stabs.forEach((x, i) => {
+      const ring = new THREE.Mesh(hexRing(0.56, 0.76), new THREE.MeshBasicMaterial({ color: 0xcfe8d0, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
+      ring.position.copy(this.worldOf(x.at, 0.045));
+      ring.userData = { unit: x.target, phase: i * 0.7 };
+      ring.renderOrder = 3;
+      this.blindMarks.add(ring);
+      const el = document.createElement('div');
+      el.className = 'backstab-tag';
+      el.textContent = '🗡';
+      el.dataset.target = x.target;
+      el.title = `Backstab from here: ${this.nameOf(x.target)} has not noticed the Burglar. A melee strike from its rear half gets +1 slot and double damage per hit (before armor), on top of the sneak attack.`;
+      this.fx.appendChild(el);
+      this.blindTags.push({ el, at: this.worldOf(x.at, 0.35) });
+    });
   }
 
   /**
@@ -1900,7 +1959,8 @@ export class Diorama {
     const mk = (id: string, cls: string, html: string, title: string, color: number) => {
       const v = this.units.get(id);
       const pos = v?.at;
-      if (!pos || pos.level !== this.shownLevel) return;
+      // 24.4: never mark an enemy the party can't see (the engine filters too).
+      if (!v || !pos || pos.level !== this.shownLevel || !v.shown || !this.vis.visible.has(posKey(pos))) return;
       const ring = new THREE.Mesh(hexRing(0.6, 0.9), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, depthTest: false }));
       ring.position.copy(this.worldOf(pos, 0.05));
       ring.userData = { phase: Math.random() * 3 };
@@ -2349,6 +2409,26 @@ export class Diorama {
         this.refreshIntentVisibility();
         this.facingKey = '';
         this.refreshFacing();
+        return;
+      }
+      case 'faced': {
+        // V3.9 (24.2): a hero (or anyone) turns; the wedge follows.
+        const v = this.units.get(e.id);
+        const d = this.state?.delve;
+        const h = d?.heroes.find((x) => x.heroId === e.id);
+        if (h) h.facing = e.facing;
+        const n = this.nextState?.delve?.heroes.find((x) => x.heroId === e.id);
+        if (n) n.facing = e.facing;
+        if (v) {
+          const a = facingAngle(e.facing);
+          v.face(Math.sin(a), Math.cos(a));
+        }
+        this.facingKey = '';
+        this.refreshFacing();
+        return;
+      }
+      case 'unseenHit': {
+        await this.playUnseenHit(e.target);
         return;
       }
       case 'levelChanged': {
@@ -3126,6 +3206,76 @@ export class Diorama {
     this.flashLight.position.copy(at);
     this.flashLight.color.setHex(color);
     this.flashLight.intensity = power;
+  }
+
+  /**
+   * V3.9 (24.2): something the party can't see strikes a hero from behind: an arrow-streak flies in
+   * from the hero's back, the hero flashes and a "From behind!" floater pops.
+   */
+  async playUnseenHit(heroId: string): Promise<void> {
+    const t = this.units.get(heroId);
+    if (!t) return;
+    const h = (this.nextState ?? this.state)?.delve?.heroes.find((x) => x.heroId === heroId);
+    const f = h ? facingOf(h) : undefined;
+    const back = f === undefined ? new THREE.Vector3(0, 0, -1) : (() => {
+      const a = facingAngle((f + 3) % 6);
+      return new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+    })();
+    const end = t.root.position.clone().add(new THREE.Vector3(0, t.height * 0.55, 0));
+    const start = end.clone().add(back.clone().multiplyScalar(Math.sqrt(3) * HEX * 2.2));
+    const dart = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.7, 5).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffe0d0, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }));
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 4).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff3a2a, transparent: true, opacity: 1, depthWrite: false, depthTest: false }));
+    head.position.z = 0.42;
+    const trail = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 1.4).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff5a40, transparent: true, opacity: 0.45, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+    trail.position.z = -0.6;
+    dart.add(shaft, head, trail);
+    dart.renderOrder = 9;
+    dart.position.copy(start);
+    dart.lookAt(end);
+    this.overlay.add(dart);
+    this.floatText(t.root.position.clone().add(new THREE.Vector3(0, t.height + 0.55, 0)), 'From behind!', 'warn', 1.4);
+    await this.clock.tween(0.22, (k) => dart.position.lerpVectors(start, end, easeInOut(k)));
+    this.overlay.remove(dart);
+    dart.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (o.material as THREE.Material).dispose();
+      }
+    });
+    t.flash(new THREE.Color(1, 0.35, 0.3), 1);
+    if (!this.reduceShake) this.rig.addShake(0.18);
+    this.flash(end, 0xff4030, 3);
+    await this.clock.wait(0.12);
+    t.flash(new THREE.Color(0, 0, 0), 0);
+  }
+
+  /**
+   * V3.9 (24.3): the Burglar's backstab: a pale crescent slash across the target, a cold flash, a
+   * longer hit-stop and a "Backstab!" floater. Played before the ordinary hit.
+   */
+  async playBackstab(attackerId: string, targetId: string): Promise<void> {
+    const t = this.units.get(targetId);
+    const a = this.units.get(attackerId);
+    if (!t || !t.root.visible) return;
+    const at = t.root.position.clone().add(new THREE.Vector3(0, t.height * 0.6, 0));
+    const slash = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.045, 4, 24, Math.PI * 0.9), new THREE.MeshBasicMaterial({ color: 0xe8fff0, transparent: true, opacity: 1, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+    slash.position.copy(at);
+    if (a) slash.lookAt(a.root.position.clone().setY(at.y));
+    slash.rotateZ(-Math.PI * 0.7);
+    slash.renderOrder = 9;
+    this.overlay.add(slash);
+    this.floatText(t.root.position.clone().add(new THREE.Vector3(0, t.height + 0.6, 0)), 'Backstab!', 'gold', 1.5);
+    this.flash(at, 0xc8ffd8, 4);
+    this.clock.hitStop(180);
+    await this.clock.tween(0.24, (k) => {
+      slash.rotation.z += 0.18;
+      slash.scale.setScalar(0.7 + k * 0.6);
+      (slash.material as THREE.MeshBasicMaterial).opacity = 1 - k;
+    });
+    this.overlay.remove(slash);
+    slash.geometry.dispose();
+    (slash.material as THREE.Material).dispose();
   }
 
   private async lunge(a: UnitView, t: UnitView): Promise<void> {

@@ -1,6 +1,6 @@
 // V3.7 presentation helpers (pure): facing, blind arcs, breakable walls, blast rings.
 import { describe, expect, it } from 'vitest';
-import { DIRS, hexKey } from '../game/hex';
+import { DIRS, hexKey, range } from '../game/hex';
 import type { LevelDef } from '../game/types';
 import { testCastle } from '../game/test/testCastle';
 import { backDirs, blastRings, blindArc, blownWalls, breakableWall, dirIndexOf, facingOf } from './stealth';
@@ -96,3 +96,52 @@ function parse(k: string): { q: number; r: number } {
   const [q, r] = k.split(',').map(Number);
   return { q: q ?? 0, r: r ?? 0 };
 }
+
+describe('V3.9 presentation: eyes front helpers', () => {
+  it('front and rear halves split the six directions', async () => {
+    const { frontDirs, inFrontHalf, inRearHalf, rearNeighbours } = await import('./stealth');
+    expect(frontDirs(0)).toEqual([5, 0, 1]);
+    const at = { level: 1, q: 0, r: 0 };
+    DIRS.forEach((d, i) => {
+      const p = { level: 1, ...d };
+      expect(inFrontHalf(at, 0, p)).toBe([5, 0, 1].includes(i));
+      expect(inRearHalf(at, 0, p)).toBe([2, 3, 4].includes(i));
+    });
+    expect(rearNeighbours(at, 0)[0]).toEqual({ level: 1, ...DIRS[3]! });
+  });
+
+  it('pathEndFacing: the last step', async () => {
+    const { pathEndFacing } = await import('./stealth');
+    const at = { level: 1, q: 0, r: 0 };
+    expect(pathEndFacing(at, [{ level: 1, ...DIRS[2]! }])).toBe(2);
+    expect(pathEndFacing(at, [], 4)).toBe(4);
+  });
+});
+
+describe('V3.9 presentation: back exposed and backstab spots', () => {
+  const lv = openLevel();
+  const castle = { ...testCastle, levels: [lv] } as typeof testCastle;
+  const hero = (heroId: string, q: number, r: number, facing: number) => ({ heroId, at: { level: 1, q, r }, facing, status: 'active' }) as never;
+  const delve = (heroes: unknown[], monsters: unknown[] = []) => ({ heroes, monsters, rivals: null, round: 1 }) as never;
+  it('back to back is covered; a lone hero is exposed', async () => {
+    const { backExposed } = await import('./stealth');
+    // A faces east (0); B stands behind A (west) facing west (3).
+    const d = delve([hero('a', 0, 0, 0), hero('b', -1, 0, 3)]);
+    expect(backExposed(castle, d, 'a', new Set())).toBe(false);
+    expect(backExposed(castle, d, 'b', new Set())).toBe(false);
+    const lone = delve([hero('a', 0, 0, 0)]);
+    expect(backExposed(castle, lone, 'a', new Set())).toBe(true);
+    expect(backExposed(castle, lone, 'a', new Set(['1:-1,0']))).toBe(false);
+  });
+  it('backstab spots: rear neighbours of a seen unaware enemy, for a Burglar only', async () => {
+    const { backstabSpots } = await import('./stealth');
+    const m = { id: 'm', kind: 'orc', at: { level: 1, q: 2, r: 0 }, hp: 5, awareness: 'asleep', facing: 0 };
+    const s = { campaign: { roster: [{ id: 'pim', cls: 'burglar' }, { id: 'kev', cls: 'heir' }] }, delve: delve([hero('pim', 0, 0, 0), hero('kev', 0, 2, 0)], [m]) } as never;
+    const vis = new Set(['1:2,0']);
+    const reach = range({ q: 0, r: 0 }, 3).map((h) => ({ level: 1, ...h }));
+    const spots = backstabSpots(s, 'pim', reach, new Set(['m']), vis);
+    expect(spots.map((x) => hexKey(x.at)).sort()).toEqual(['1,0', '1,1', '2,-1'].sort());
+    expect(backstabSpots(s, 'pim', reach, new Set(), vis)).toEqual([]);
+    expect(backstabSpots(s, 'kev', reach, new Set(['m']), vis)).toEqual([]);
+  });
+});

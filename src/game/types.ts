@@ -389,6 +389,8 @@ export type Awareness = 'asleep' | 'alert' | 'hunting' | 'patrol';
 export interface HeroInDelve {
   heroId: string;
   at: Pos;
+  /** V3.9 (spec 24.2): the hex direction (0..5, hex.ts DIRS) the hero faces; they see only their front half. */
+  facing?: number;
   hp: number;
   focus: number;
   /** Pack, 4 slots. */
@@ -485,6 +487,8 @@ export interface Monster {
   shoutCooldown?: number;
   /** Buried ghoul: not on the map until it rises. */
   buried?: boolean;
+  /** V3.7 (spec 20.1): heroes this monster has noticed (sneak attack and backstab apply to the others). */
+  noticedIds?: string[];
   /** V3.7 (spec 20.1): the hex direction (0..5, see hex.ts DIRS) it faces: the way it last moved or looked. */
   facing?: number;
   /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
@@ -802,6 +806,7 @@ export type Command =
   | { type: 'move'; heroId: string; path: Pos[]; sneak: boolean; follow?: boolean }
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
+  | { type: 'face'; heroId: string; facing: number } // V3.9 (spec 24.2): turn to face a direction; free, player phase
   | { type: 'deal'; heroId: string; deal: DealKind; job?: JobKind } // V3.5 parley (spec 18.6), free
   | { type: 'abandon' } // everyone still active flees: only heroes on exits get out
   // after the delve
@@ -825,7 +830,7 @@ export type GameEvent =
   | { type: 'moved'; id: string; path: Pos[] }
   | { type: 'levelChanged'; id: string; from: number; to: number }
   | { type: 'roll'; who: string; what: string; roll: SlotRoll }
-  | { type: 'hit'; attacker: string; target: string; damage: number; crit: boolean }
+  | { type: 'hit'; attacker: string; target: string; damage: number; crit: boolean; /** V3.9: a Burglar's backstab */ backstab?: boolean }
   | { type: 'miss'; attacker: string; target: string }
   | { type: 'downed'; id: string }
   | { type: 'revived'; id: string }
@@ -857,6 +862,8 @@ export type GameEvent =
   | { type: 'blast'; at: Pos; by: string; broke: Pos[]; collapsed?: Pos[]; rubbled?: Pos[] } // a charge went off; walls broken, floor dropped into the pit, floor turned to rubble
   | { type: 'captured'; hero: string; by: string } // dragged out of the castle by a crew
   | { type: 'robbed'; hero: string; by: string; items: Item[] }
+  | { type: 'faced'; id: string; facing: number } // V3.9: a hero turned (free) or turned by moving/acting
+  | { type: 'unseenHit'; target: string } // V3.9 (spec 24.2): something the party can't see attacked this hero from behind
   | { type: 'calm'; calm: boolean; why?: string } // spec 20.5: free movement starts or ends ("An orc has seen Pim")
   | { type: 'walkStopped'; heroId: string; at: Pos; why: string } // spec 20.5: a calm walk halted early while still calm (a trap, a new monster in sight)
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }

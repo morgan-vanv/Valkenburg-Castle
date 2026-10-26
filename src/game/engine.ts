@@ -12,7 +12,7 @@ import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
-import { abandon, actions, checkDelveEnd, doAct, doMove, moveNoise, reachable, refreshSight, spec } from './delve';
+import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, moveNoise, reachable, refreshSight, seenSet, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
 
@@ -62,6 +62,9 @@ export function createEngine(castle: CastleDef): Engine {
         break;
       case 'endTurn':
         worldPhase(c);
+        break;
+      case 'face':
+        err = doFace(c, command.heroId, command.facing);
         break;
       case 'deal':
         err = doDeal(c, command.heroId, command.deal, command.job);
@@ -202,6 +205,11 @@ export function createEngine(castle: CastleDef): Engine {
 
     shop: (state) => shopOffers(state),
     ales: (state) => aleOffers(state),
+    seenEnemies(state) {
+      const c = rctx(state);
+      if (!c || state.stage !== 'delve') return new Set<string>();
+      return seenSet(c, visibleSet(w, c.d));
+    },
     calmReach(state, heroId, sneak) {
       const c = rctx(state);
       return c ? calmReach(c, heroId, sneak) : [];
