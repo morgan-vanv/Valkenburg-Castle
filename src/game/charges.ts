@@ -1,5 +1,5 @@
 // V3.7 (spec 20.3): the Sapper. Fused charges, the blast (damage rings, push,
-// noise, locks, broken walls), the blast shield, the satchel and breakable walls.
+// noise, locks, broken walls), the blast shield, the Sapper's improvised explosives and breakable walls.
 //
 // A charge is a `Fuse` in `Delve.fuses`: it counts down at the end of each world
 // phase and goes off when `rounds` reaches 0 (fuse 1 = the end of the coming
@@ -11,7 +11,7 @@ import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex'
 import type { Fuse, HeroInDelve, Item } from './types';
 import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG } from './data';
 import { say, type Ctx, type DelveX } from './state';
-import { chestLoot, hd, hurtAny, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
+import { chestLoot, hd, hurtAny, isSatchel, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
 import { checkWays, wayAtHex } from './ways';
@@ -21,28 +21,21 @@ export interface FuseX extends Fuse {
   armedInWorld?: boolean;
 }
 
-// ---------------------------------------------------------------- the satchel
+// ---------------------------------------------------------------- class kit: improvised explosives, the improvised pick
 
-/** The Sapper's satchel: one pack item, no slots, `amount` charges left. */
-export function isSatchel(i: Item): boolean {
-  return i.kind === 'charge' && i.slots === 0;
-}
+export { isKit, isSatchel } from './common';
 
-/** Per-delve kit outside the slots: the satchel (20.3) and the Burglar's improvised pick (21.4). Not dropped, given or banked. */
-export function isKit(i: Item): boolean {
-  return isSatchel(i) || i.kind === 'improvised';
-}
-
+/** "Improvised explosives" (one left: "Improvised explosive"). */
 export function satchelName(n: number): string {
-  return `Satchel: ${n} charge${n === 1 ? '' : 's'}`;
+  return n === 1 ? 'Improvised explosive' : 'Improvised explosives';
 }
 
-/** Charges a hero can spend: the satchel's plus bought ones in the pack. */
+/** Charges a hero can spend: their improvised explosives plus bought blasting charges in the pack. */
 export function chargeCount(h: HeroInDelve): number {
-  return h.pack.reduce((n, i) => n + (i.kind === 'charge' ? (isSatchel(i) ? i.amount : 1) : 0), 0);
+  return h.pack.reduce((n, i) => n + (isSatchel(i) ? i.amount : i.kind === 'charge' ? 1 : 0), 0);
 }
 
-/** Spend one charge: the satchel first, then a bought one. Returns the item spent from (null if none). */
+/** Spend one charge: improvised explosives first, then a bought one. Returns the item spent from (null if none). */
 export function spendCharge(h: HeroInDelve): Item | null {
   const sat = h.pack.find(isSatchel);
   if (sat && sat.amount > 0) {
@@ -51,9 +44,17 @@ export function spendCharge(h: HeroInDelve): Item | null {
     if (sat.amount === 0) h.pack.splice(h.pack.indexOf(sat), 1);
     return sat;
   }
-  const i = h.pack.findIndex((x) => x.kind === 'charge');
+  const i = h.pack.findIndex((x) => x.kind === 'charge' && !isSatchel(x));
   if (i < 0) return null;
   return h.pack.splice(i, 1)[0]!;
+}
+
+/** Old saves (V3.7 to V4.0): the slotless 'charge' satchel becomes improvised explosives. */
+export function migrateSatchel(i: Item): void {
+  if (i.kind === 'charge' && i.slots === 0) {
+    i.kind = 'improvised-charge';
+    i.name = satchelName(i.amount);
+  }
 }
 
 // ---------------------------------------------------------------- breakable walls

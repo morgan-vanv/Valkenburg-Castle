@@ -126,6 +126,20 @@ await p.waitForTimeout(80);
 check('"Next: Outfit" goes to step 3', (await page()) === 'outfit');
 check('one loadout card per party hero, the first "Packing"', (await p.$$('.lg-hero')).length === 2 && /Packing/i.test(await p.$eval('.lg-hero.sel', (e) => e.innerText)));
 check('Keven carries the lantern', !!(await p.$('.lg-hero[data-hero="keven"] .lg-lantern')));
+// V4.0 (26.5): class kit shows under the 4 slots: "Brings their own: ...". Keven has none.
+{
+  const cls0 = (await st()).campaign.roster.find((x) => x.id === r0).cls;
+  const kitOf = () => p.$eval(`.lg-hero[data-hero="${r0}"] .lg-kit`, (e) => ({ t: e.innerText, tip: e.dataset.tip, afterSlots: e.previousElementSibling?.classList.contains('lg-sl-row') })).catch(() => null);
+  for (const [cls, want] of [['burglar', /Brings their own: improvised pick/], ['sapper', /Brings their own: 3 improvised explosives/]]) {
+    await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls}';`);
+    await p.waitForTimeout(60);
+    const k = await kitOf();
+    check(`a ${cls}'s loadout card: "${want.source.replace(/\\/g, '')}" under the slots`, !!k && want.test(k.t) && k.afterSlots && /own · .*\nDoesn't take a slot; can't be given away/.test(k.tip ?? ''), k ? `${k.t} | ${(k.tip ?? '').split('\n')[0]}` : 'none');
+  }
+  await edit(`s.campaign.roster.find((h) => h.id === '${r0}').cls = '${cls0}';`);
+  await p.waitForTimeout(60);
+  check('Keven brings no kit line', !(await p.$('.lg-hero[data-hero="keven"] .lg-kit')));
+}
 check('the metalwork collapses into one dashed tile while the smith is away', (await p.$$('[data-ware="metalwork"]')).length === 1 && !(await p.$('[data-ware="hook"]')) && !(await p.$('[data-ware="lockpicks"]')));
 check('no forge row or ale box while locked', !(await p.$('.lg-gear-row')));
 await edit(`s.campaign.gold = 100;`);

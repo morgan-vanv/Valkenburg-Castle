@@ -5,7 +5,7 @@ import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type 
 import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
 import type { ActionOption } from './api';
 import {
-  HEAVY_MOVE, SMUGGLER_SNEAK, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
+  HEAVY_MOVE, SMUGGLER_SNEAK, BURGLAR_WALK, WALK_MOVE, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
   BURGLAR_PICK_SLOTS, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
   THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
 } from './data';
@@ -160,8 +160,9 @@ export function setLight(c: Ctx, value: number): void {
 
 export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   const cls = heroDef(c, h.heroId)?.cls;
-  let b = sneak ? (cls === 'burglar' || h.ale === 'smuggler' ? SMUGGLER_SNEAK : 2) : 4;
-  if (h.escorting) b = Math.min(b, 3);
+  // V4.0 (spec 26.4): the Burglar walks 5 (dash 5) and sneaks 4; everyone else walks 4.
+  let b = sneak ? (cls === 'burglar' || h.ale === 'smuggler' ? SMUGGLER_SNEAK : 2) : cls === 'burglar' ? BURGLAR_WALK : WALK_MOVE;
+  if (h.escorting) b = Math.min(b, 3); // the prisoner's pace caps a Burglar too
   // Spec 18.3: the brewing copper is heavy: its carrier moves 3 at most (dash too).
   if (h.pack.some((i) => i.heavy)) b = Math.min(b, HEAVY_MOVE);
   return b;

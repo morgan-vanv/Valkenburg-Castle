@@ -3467,6 +3467,24 @@ input.seed {
 .pk-sock.pk-satchel { border-style: dashed; border-color: var(--fuse); color: var(--fuse); }
 .pk-sock.pk-satchel small { color: #fff3d0; }
 .pk-sock.pk-improvised { border-color: #b9a77a; color: #e8dcb8; }
+/* V4.0 (26.5): class kit sits apart from the pack slots, after them: the hero's own, no slot. */
+.pk-kit { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 4px; border-left: 1px solid var(--line-hi); }
+.pk-kit-lab { font-family: var(--mono); font-size: 0.46rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--parch-dim); }
+.pk-kit .pk-sock { width: 18px; height: 20px; font-size: 0.72rem; }
+/* With kit on the row the slot boxes narrow a little so the row still fits the card. */
+.hc-pack.has-kit .pk-socks { gap: 2px; }
+.hc-pack.has-kit .pk-socks .pk-sock { width: 22px; }
+.hc-pack.has-kit .pk-socks .pk-sock.wide { width: 46px; }
+.hc-pack.has-kit .pk-free { margin-left: 5px; letter-spacing: 0.04em; }
+@media (max-width: 1200px) {
+  .hc-pack.has-kit .pk-socks .pk-sock { width: 19px; }
+  .hc-pack.has-kit .pk-socks .pk-sock.wide { width: 40px; }
+  .hc-pack.has-kit .pk-free { margin-left: 4px; }
+}
+.pk-sock.pk-improvised-charge { color: var(--fuse); }
+.lg-kit { margin: -4px 0 0; font-size: 14px; color: var(--lg-ink-3); display: flex; align-items: center; gap: 6px; }
+.lg-kit .lg-g { color: var(--lg-ink-2); }
+.lg-kit-s { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lg-ink-4); }
 
 /* 20.4: crews that fight back */
 .tag-lvl {

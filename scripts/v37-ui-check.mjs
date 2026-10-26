@@ -101,8 +101,8 @@ let s = await state();
 check('in the delve', !!s.delve);
 if (!fixture) {
   // No Sapper or Shadowmancer for hire this seed: turn the second and third heroes into one each (the
-  // engine reads the class off the roster), with a satchel and mana, so the real rules run for both.
-  await edit(`const others = s.campaign.roster.filter((h) => h.cls !== 'heir' && s.delve.heroes.some((x) => x.heroId === h.id)); if (!s.campaign.roster.some((h) => h.cls === 'sapper') && others[0]) { others[0].cls = 'sapper'; const hd = s.delve.heroes.find((x) => x.heroId === others[0].id); hd.pack = hd.pack.filter((i) => i.kind !== 'charge'); hd.pack.push({ id: 'sat', kind: 'charge', name: 'Satchel: 3 charges', amount: 3, slots: 0 }); } if (!s.campaign.roster.some((h) => h.cls === 'shadowmancer')) { const o = others.find((h) => h.cls !== 'sapper'); if (o) { o.cls = 'shadowmancer'; const hd = s.delve.heroes.find((x) => x.heroId === o.id); hd.mana = 3; } }`);
+  // engine reads the class off the roster), with improvised explosives and mana, so the real rules run for both.
+  await edit(`const others = s.campaign.roster.filter((h) => h.cls !== 'heir' && s.delve.heroes.some((x) => x.heroId === h.id)); if (!s.campaign.roster.some((h) => h.cls === 'sapper') && others[0]) { others[0].cls = 'sapper'; const hd = s.delve.heroes.find((x) => x.heroId === others[0].id); hd.pack = hd.pack.filter((i) => i.kind !== 'charge' && i.kind !== 'improvised-charge'); hd.pack.push({ id: 'sat', kind: 'improvised-charge', name: 'Improvised explosives', amount: 3, slots: 0 }); } if (!s.campaign.roster.some((h) => h.cls === 'shadowmancer')) { const o = others.find((h) => h.cls !== 'sapper'); if (o) { o.cls = 'shadowmancer'; const hd = s.delve.heroes.find((x) => x.heroId === o.id); hd.mana = 3; } }`);
   s = await state();
 }
 const castle = await p.evaluate(() => window.vcEngine.castle());
@@ -297,14 +297,14 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       }
     }
     if (placed) {
-      await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; h.dashed = false; if (!h.pack.some((i) => i.kind === 'charge')) h.pack.push({ id: 'sat', kind: 'charge', name: 'Satchel: 3 charges', amount: 3, slots: 0 }); if (!s.delve.explored.includes('1:' + a.wall.q + ',' + a.wall.r)) s.delve.explored.push('1:' + a.wall.q + ',' + a.wall.r);`, { id: sap.heroId, at: placed.at, wall: placed.wall });
+      await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; h.dashed = false; if (!h.pack.some((i) => i.kind === 'charge' || i.kind === 'improvised-charge')) h.pack.push({ id: 'sat', kind: 'improvised-charge', name: 'Improvised explosives', amount: 3, slots: 0 }); if (!s.delve.explored.includes('1:' + a.wall.q + ',' + a.wall.r)) s.delve.explored.push('1:' + a.wall.q + ',' + a.wall.r);`, { id: sap.heroId, at: placed.at, wall: placed.wall });
       await p.evaluate((id) => window.vc.hud.select(id), sap.heroId);
       await p.waitForTimeout(200);
       const tip = await hoverTip(placed.wall);
       check('hovering the wall: "Wall · a Sapper\'s charge could break it"', /Wall/.test(tip) && /charge could break it/.test(tip), tip.slice(0, 100));
       await unhover();
-      const sock = await p.$eval('.hcard.sel .pk-sock.pk-satchel', (e) => e.title).catch(() => '');
-      check('the satchel socket on the card (no slot, count)', /Satchel · \d charge/.test(sock), sock.slice(0, 60));
+      const sock = await p.$eval('.hcard.sel .pk-kit .pk-sock.pk-improvised-charge', (e) => e.title).catch(() => '');
+      check('the improvised explosives on the card, in the kit mark after the slots (no slot, count)', /own: \d improvised explosives?\. Do(n't|esn't) take a slot; can't be given away/.test(sock), sock.slice(0, 90));
       const btn = await p.$('.hud-bar .act[data-action="setCharge"]');
       check('Set charge in the bar (Abilities)', !!btn && (await btn.evaluate((e) => !!e.closest('.bar-group-abilities'))));
       if (btn) {
@@ -396,7 +396,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
       if (f) { placed = { edge: c, at: f }; break; }
     }
     if (placed) {
-      await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; h.dashed = false; if (!h.pack.some((i) => i.kind === 'charge')) h.pack.push({ id: 'sat2', kind: 'charge', name: 'Satchel: 3 charges', amount: 3, slots: 0 }); for (const k of [a.at, a.edge]) { const kk = '1:' + k.q + ',' + k.r; if (!s.delve.explored.includes(kk)) s.delve.explored.push(kk); }`, { id: sap.heroId, at: placed.at, edge: placed.edge });
+      await edit(`const h = s.delve.heroes.find((x) => x.heroId === a.id); h.at = a.at; h.moved = false; h.acted = false; h.dashed = false; if (!h.pack.some((i) => i.kind === 'charge' || i.kind === 'improvised-charge')) h.pack.push({ id: 'sat2', kind: 'improvised-charge', name: 'Improvised explosives', amount: 3, slots: 0 }); for (const k of [a.at, a.edge]) { const kk = '1:' + k.q + ',' + k.r; if (!s.delve.explored.includes(kk)) s.delve.explored.push(kk); }`, { id: sap.heroId, at: placed.at, edge: placed.edge });
       await p.evaluate((id) => window.vc.hud.select(id), sap.heroId);
       await p.waitForTimeout(200);
       const tip = await hoverTip(placed.edge);

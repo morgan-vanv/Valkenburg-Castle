@@ -2,14 +2,17 @@ import { FREE_MOVE } from './data';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
-import { distance, posKey, samePos, type Pos } from './hex';
+import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, Command, GameEvent, GameState, HeroClass, ItemKind, Monster, MonsterKind, SlotRoll } from './types';
 import { MONSTERS } from './data';
 import { brightnessOf, glimpseSet, noiseField, World } from './world';
-import type { DelveX, GameStateX, HeroX, MonsterX } from './state';
+import type { DelveX, GameStateX, HeroX, MonsterX, RivalX } from './state';
 import { dirIndex, moveRisks, wakeChance, wouldNotice } from './stealth';
 import { litSet } from './world';
-import { makeNoise } from './common';
+import { addToPack, isKit, killHero, makeNoise, packUsed } from './common';
+import { chargeCount } from './charges';
+import { rob } from './crewai';
+import { payable } from './parley';
 import { makeHero } from './camp';
 
 const e = createEngine(testCastle);
@@ -324,7 +327,9 @@ describe('exploring by line of sight', () => {
   it('every step of a walk reveals what that hex can see, lit or not', () => {
     let s = alarm(delve({ heroes: ['keven', 'pim'] })); // not calm: a 4-step walk would turn the castle and burn the last of the light
     s.delve!.light = 1; // dark: the lantern lights almost nothing
-    const reach = e.reachable(s, 'pim', false).sort((a, b) => b.path.length - a.path.length)[0]!;
+    // V4.0 (26.4): Pim the Burglar walks 5; a 5-step walk here opens the gate door on the way, and the
+    // glimpse from a hex before it (taken after, through the open door) would see more than it did.
+    const reach = e.reachable(s, 'pim', false).filter((r) => r.path.length <= 4).sort((a, b) => b.path.length - a.path.length)[0]!;
     expect(reach.path.length).toBeGreaterThan(2);
     s = e.apply(s, { type: 'move', heroId: 'pim', path: reach.path, sneak: false }).state;
     const ex = e.visibility(s).explored;
@@ -1388,8 +1393,8 @@ describe('15.3 classes', () => {
 
   it('sapper: a satchel of 3 charges, throws a charge up to 3, digs rubble and cracked walls (noise 4)', () => {
     const s = delve({ heroes: ['sam'], extra: [['sam', 'Sam', 'sapper']] });
-    // V3.7 (spec 20.3): the satchel is one slotless pack item holding 3 charges.
-    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'charge')).toMatchObject([{ amount: 3, slots: 0 }]);
+    // V3.7 (spec 20.3), V4.0 (26.5): the Sapper's own improvised explosives: one slotless pack item holding 3.
+    expect(hero(s, 'sam').pack.filter((i) => i.kind === 'improvised-charge')).toMatchObject([{ amount: 3, slots: 0 }]);
     put(s, 'sam', at(2, 12, 3));
     s.delve!.light = 20;
     const o = option(s, 'sam', 'throwCharge')!;
@@ -1403,7 +1408,7 @@ describe('15.3 classes', () => {
     const r = act(s, 'sam', 'throwCharge', { at: at(2, 15, 3) });
     expect(r.events.some((x) => x.type === 'thrown' && x.kind === 'charge')).toBe(true);
     expect(r.events).toContainEqual({ type: 'fuseSet', at: at(2, 15, 3), rounds: 1, by: 'sam' });
-    expect(hero(r.state, 'sam').pack.find((i) => i.kind === 'charge')!.amount).toBe(2);
+    expect(hero(r.state, 'sam').pack.find((i) => i.kind === 'improvised-charge')!.amount).toBe(2);
     const r2 = ok(r.state, { type: 'endTurn' });
     expect(r2.events.some((x) => x.type === 'blast')).toBe(true);
     expect(r2.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBe(MONSTERS.orc.hp - 4);
@@ -5099,5 +5104,184 @@ describe('V4.0 play-test fixes (spec 26)', () => {
       const r2 = ok(t, { type: 'endTurn' });
       expect(mon(r2.state, m.id).facing).toBe(0);
     });
+  });
+});
+
+describe('V4.0 play-test fixes: the Burglar walks 5, class kit is the hero\'s own (spec 26.4, 26.5)', () => {
+  const maxCost = (s: GameState, id: string, sneak: boolean) => Math.max(0, ...e.reachable(s, id, sneak).map((r) => r.cost));
+  const sapperDelve = () => delve({ heroes: ['sam', 'brann', 'pim'], extra: [['sam', 'Sam', 'sapper']] });
+
+  it('the Burglar walks 5 and sneaks 4; dash 5; everyone else walks 4 (sneak 2)', () => {
+    const s = alarm(delve());
+    put(s, 'pim', PITHALL);
+    put(s, 'brann', at(1, 9, 7));
+    expect(maxCost(s, 'pim', false)).toBe(5);
+    expect(maxCost(s, 'pim', true)).toBe(4);
+    expect(maxCost(s, 'brann', false)).toBe(4);
+    expect(maxCost(s, 'brann', true)).toBe(2);
+    // The dash after a first move goes as far again.
+    const first = e.reachable(s, 'pim', false).find((r) => r.cost === 1)!;
+    const step = ok(s, { type: 'move', heroId: 'pim', path: first.path, sneak: false }).state;
+    expect(e.reachable(step, 'pim', false).every((r) => r.dash)).toBe(true);
+    expect(maxCost(step, 'pim', false)).toBe(5);
+    expect(maxCost(step, 'pim', true)).toBe(4);
+  });
+
+  it('a heavy item or the prisoner caps the Burglar at 3 too', () => {
+    const s = alarm(delve());
+    put(s, 'pim', PITHALL);
+    hero(s, 'pim').pack.push({ id: 'cu', kind: 'hoard', name: 'Brewing copper', amount: 0, slots: 2, heavy: true });
+    expect(maxCost(s, 'pim', false)).toBe(3);
+    hero(s, 'pim').pack.pop();
+    hero(s, 'pim').escorting = 'prisoner';
+    expect(maxCost(s, 'pim', false)).toBe(3);
+  });
+
+  it('the Sapper starts with "Improvised explosives" ×3: their own item kind, no slot, not counted in the pack', () => {
+    const s = sapperDelve();
+    const sam = hero(s, 'sam');
+    expect(sam.pack).toMatchObject([{ kind: 'improvised-charge', name: 'Improvised explosives', amount: 3, slots: 0 }]);
+    expect(sam.pack.some((i) => i.kind === 'charge')).toBe(false);
+    expect(packUsed(sam.pack)).toBe(0);
+    expect(packUsed(hero(s, 'pim').pack)).toBe(0); // the improvised pick
+    expect(chargeCount(sam)).toBe(3);
+    // Four bought things still fit beside them.
+    for (let i = 0; i < 4; i++) expect(addToPack(ctx(s), sam.pack, { id: `p${i}`, kind: 'potion', name: 'Potion', amount: 1, slots: 1 })).toBeNull();
+    expect(packUsed(sam.pack)).toBe(4);
+  });
+
+  it('improvised explosives are set and thrown like charges and go before bought ones; the name counts down', () => {
+    let s = sapperDelve();
+    put(s, 'sam', at(1, 16, 7));
+    s.delve!.light = 20;
+    const bought = give(s, 'sam', 'charge', 'Blasting charge');
+    expect(chargeCount(hero(s, 'sam'))).toBe(4);
+    const t = option(s, 'sam', 'setCharge')!.targets[0]!;
+    s = act(s, 'sam', 'setCharge', t).state;
+    expect(hero(s, 'sam').pack.find((i) => i.kind === 'improvised-charge')).toMatchObject({ amount: 2, name: 'Improvised explosives' });
+    hero(s, 'sam').acted = false;
+    const th = option(s, 'sam', 'throwCharge')!.targets.find((x) => !samePos(x.at!, t.at!) && distance(x.at!, t.at!) > 0)!;
+    s = act(s, 'sam', 'throwCharge', th).state;
+    expect(hero(s, 'sam').pack.find((i) => i.kind === 'improvised-charge')).toMatchObject({ amount: 1, name: 'Improvised explosive' });
+    expect(s.delve!.fuses).toHaveLength(2);
+    // The last one goes, then the bought charge.
+    hero(s, 'sam').acted = false;
+    s.delve!.fuses = [];
+    s = act(s, 'sam', 'setCharge', t).state;
+    expect(hero(s, 'sam').pack.map((i) => i.id)).toEqual([bought]);
+    hero(s, 'sam').acted = false;
+    s.delve!.fuses = [];
+    s = act(s, 'sam', 'setCharge', t).state;
+    expect(hero(s, 'sam').pack).toHaveLength(0);
+    expect(option(s, 'sam', 'setCharge')).toBeUndefined();
+  });
+
+  it('an improvised explosive blasts exactly like a bought blasting charge', () => {
+    const blastWith = (improvised: boolean) => {
+      const s = sapperDelve();
+      put(s, 'sam', at(1, 16, 7));
+      put(s, 'brann', at(1, 4, 7));
+      put(s, 'pim', at(1, 4, 8));
+      if (!improvised) {
+        hero(s, 'sam').pack = [];
+        give(s, 'sam', 'charge', 'Blasting charge');
+      }
+      const t = option(s, 'sam', 'setCharge')!.targets.find((x) => x.fuse === 1)!;
+      const spot = posNeighbors(t.at!).find((p) => !samePos(p, hero(s, 'sam').at) && distance(p, hero(s, 'sam').at) > 1 && e.reachable(s, 'sam', false).some((r) => samePos(r.to, p)))!;
+      const m = monster(s, 'orc', spot, 'asleep');
+      const r = ok(act(s, 'sam', 'setCharge', t).state, { type: 'endTurn' });
+      expect(r.events.some((x) => x.type === 'blast')).toBe(true);
+      return { hp: r.state.delve!.monsters.find((x) => x.id === m.id)?.hp ?? 0, left: chargeCount(hero(r.state, 'sam')) };
+    };
+    const imp = blastWith(true);
+    const bought = blastWith(false);
+    expect(imp.hp).toBe(bought.hp);
+    expect(imp.hp).toBeLessThan(MONSTERS.orc.hp);
+    expect(imp.left).toBe(2);
+    expect(bought.left).toBe(0);
+  });
+
+  it('kit is never dropped or given', () => {
+    const s = sapperDelve();
+    put(s, 'sam', at(1, 16, 7));
+    put(s, 'pim', at(1, 17, 7));
+    put(s, 'brann', at(1, 15, 7));
+    const kitIds = [...hero(s, 'sam').pack, ...hero(s, 'pim').pack].filter(isKit).map((i) => i.id);
+    expect(kitIds).toHaveLength(2);
+    for (const id of ['sam', 'pim']) {
+      for (const a of ['drop', 'give'] as const) expect((option(s, id, a)?.targets ?? []).some((t) => kitIds.includes(t.itemId!))).toBe(false);
+    }
+    const sam = hero(s, 'sam').pack[0]!.id;
+    expect(e.apply(s, { type: 'act', heroId: 'sam', action: 'drop', target: { itemId: sam }, focus: 0 }).error).toBeTruthy();
+    expect(e.apply(s, { type: 'act', heroId: 'sam', action: 'give', target: { id: 'brann', itemId: sam }, focus: 0 }).error).toBeTruthy();
+  });
+
+  it('a cutpurse never lifts kit: with only kit it strikes instead; with a potion beside it, it takes the potion', () => {
+    const s = sapperDelve();
+    put(s, 'sam', GATE);
+    put(s, 'brann', at(1, 18, 7));
+    put(s, 'pim', at(1, 18, 8));
+    const cp = monster(s, 'cutpurse', at(1, 5, 7), 'hunting');
+    cp.intent = { kind: 'steal', targetId: 'sam' };
+    const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === cp.id && x.roll.hits > 0));
+    expect(r.events.some((x) => x.type === 'stolen')).toBe(false);
+    expect(hero(r.state, 'sam').pack.filter(isKit)).toHaveLength(1);
+    // With a potion too, the potion is what goes, whatever the dice.
+    hero(s, 'sam').pack.push({ id: 'pot', kind: 'potion', name: 'Potion', amount: 1, slots: 1 });
+    let thefts = 0;
+    for (let i = 0; i < 12; i++) {
+      const t = structuredClone(s);
+      t.rng = (i + 3) * 2654435761 >>> 0;
+      const rr = e.apply(t, { type: 'endTurn' });
+      const st = rr.events.find((x) => x.type === 'stolen');
+      if (st && st.type === 'stolen') {
+        thefts++;
+        expect(st.item.id).toBe('pot');
+      }
+      expect(hero(rr.state, 'sam').pack.filter(isKit)).toHaveLength(1);
+    }
+    expect(thefts).toBeGreaterThan(0);
+  });
+
+  it('kit is never robbed by a crew or paid over in a parley', () => {
+    const s = sapperDelve();
+    const c = ctx(s);
+    const sam = hero(s, 'sam') as HeroX;
+    sam.pack.push({ id: 'g', kind: 'gold', name: '20 gold', amount: 20, slots: 1 });
+    expect(payable(c)).toBe(20);
+    sam.status = 'downed';
+    const member = { id: 'r1', name: 'Hackett', at: { ...sam.at }, loot: [] as Item[] } as unknown as RivalX;
+    rob(c, member, sam);
+    expect(member.loot.map((i) => i.id)).toEqual(['g']);
+    expect(sam.pack.filter(isKit)).toHaveLength(1);
+  });
+
+  it('kit is not banked, and goes with a hero who dies (it does not drop as loot)', () => {
+    let s = sapperDelve();
+    const c = ctx(s);
+    const pim = hero(s, 'pim');
+    const pick = pim.pack.find(isKit)!;
+    pim.pack.push({ id: 'pt', kind: 'potion', name: 'Potion', amount: 1, slots: 1 });
+    killHero(c, pim);
+    const ground = s.delve!.ground.filter((g) => samePos(g.at, pim.at)).flatMap((g) => g.items);
+    expect(ground.map((i) => i.id)).toEqual(['pt']);
+    expect(s.delve!.ground.flatMap((g) => g.items).some(isKit)).toBe(false);
+    expect((s.delve as DelveX).lostIds).not.toContain(pick.id);
+    put(s, 'sam', at(1, 18, 7));
+    s = act(s, 'sam', 'leave', {}).state;
+    put(s, 'brann', at(1, 18, 7));
+    s = act(s, 'brann', 'leave', {}).state;
+    s = ok(s, { type: 'backToCamp' }).state;
+    expect(s.campaign.stash.some(isKit)).toBe(false);
+    expect(s.campaign.stash.some((i) => i.kind === 'improvised-charge' || i.kind === 'charge')).toBe(false);
+  });
+
+  it('an old save mid-delve: the slotless "charge" satchel loads as improvised explosives', () => {
+    const s = sapperDelve();
+    const sat = hero(s, 'sam').pack[0]!;
+    Object.assign(sat, { kind: 'charge', name: 'Satchel: 2 charges', amount: 2 });
+    const back = e.deserialize(e.serialize(s))!;
+    expect(hero(back, 'sam').pack).toMatchObject([{ kind: 'improvised-charge', name: 'Improvised explosives', amount: 2, slots: 0 }]);
+    expect(chargeCount(hero(back, 'sam'))).toBe(2);
   });
 });

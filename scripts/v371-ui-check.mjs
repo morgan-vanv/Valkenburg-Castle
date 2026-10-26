@@ -82,8 +82,13 @@ await p.waitForTimeout(300);
 const burg = await p.evaluate(() => { const s = window.vc.state(); const id = s.campaign.roster.find((h) => h.cls === 'burglar')?.id; return s.delve?.heroes.find((h) => h.heroId === id); });
 check('the Burglar starts with one improvised pick, no slot', !!burg && burg.pack.filter((i) => i.kind === 'improvised' && i.slots === 0).length === 1);
 if (burg) {
-  const sock = await p.$eval(`.hcard[data-hero="${burg.heroId}"] .pk-sock.pk-improvised`, (e) => ({ title: e.title, span: e.dataset.span })).catch(() => null);
+  const sock = await p.$eval(`.hcard[data-hero="${burg.heroId}"] .pk-sock.pk-improvised`, (e) => ({ title: e.title, span: e.dataset.span, inKit: !!e.closest('.pk-kit'), inSlots: !!e.closest('.pk-socks') })).catch(() => null);
   check('pack shows the improvised pick in its own socket with help', !!sock && sock.span === '0' && /Improvised pick · one Pick at 2 Finesse slots, used up/.test(sock.title), sock?.title.slice(0, 80));
+  // V4.0 (26.5): it sits in the kit mark after the slots, not in the slot boxes, and says whose it is.
+  check('...in the kit mark after the 4 slots, not inside them', !!sock && sock.inKit && !sock.inSlots);
+  check('...hover: "<name>\'s own: improvised pick. Doesn\'t take a slot; can\'t be given away."', !!sock && /^\S.*'s own: improvised pick\. Doesn't take a slot; can't be given away\./.test(sock.title), sock?.title.split('\n')[0]);
+  const slotBoxes = await p.$$eval(`.hcard[data-hero="${burg.heroId}"] .pk-socks .pk-sock`, (els) => els.length).catch(() => 0);
+  check('...the 4 slot boxes are all still there', slotBoxes === 4, `${slotBoxes}`);
   const free = await p.$eval(`.hcard[data-hero="${burg.heroId}"] .pk-free`, (e) => e.textContent).catch(() => '');
   check('it takes no slot: 4 free', /4 free/.test(free), free);
   // Locked-door hover: Pick while the pick lasts, the spent line after.

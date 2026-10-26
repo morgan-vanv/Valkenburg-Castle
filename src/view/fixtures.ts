@@ -158,7 +158,7 @@ export function fixtureDelve(castle: CastleDef): GameState {
     facing: id === 'aldous' ? (inward + 3) % 6 : inward,
     hp: id === 'brann' ? 7 : (c.roster.find((h) => h.id === id)?.maxHp ?? 8),
     focus: 3,
-    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }, item('i17', 'improvised', 'Improvised pick', 1, 0)] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i15', 'charge', 'Satchel: 3 charges', 3, 0), item('i14', 'lockpicks', 'Lockpicks'), item('i16', 'torch', 'Torch')] : [],
+    pack: id === 'pim' ? [item('i9', 'gold', 'Gold', 35), item('i10', 'torch', 'Torch'), { ...item('i12', 'gem', 'Ruby', 60) }, item('i17', 'improvised', 'Improvised pick', 1, 0)] : id === 'keven' ? [item('i11', 'potion', 'Potion'), item('i13', 'nightsight', 'Night-eye draught')] : id === 'brann' ? [item('i15', 'improvised-charge', 'Improvised explosives', 3, 0), item('i14', 'lockpicks', 'Lockpicks'), item('i16', 'torch', 'Torch')] : [],
     nightEyes: id === 'brann' ? 5 : undefined,
     ale: id === 'keven' ? ('reserve' as const) : id === 'pim' ? ('smuggler' as const) : undefined,
     status: 'active' as const,
@@ -911,11 +911,11 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         }
         // V3.7 (20.3): set or throw a charge: a fuse on the hex, nothing else yet.
         if ((cmd.action === 'setCharge' || cmd.action === 'throwCharge' || cmd.action === 'charge') && cmd.target.at) {
-          const sat = h.pack.find((i) => i.kind === 'charge');
+          const sat = h.pack.find((i) => i.kind === 'improvised-charge') ?? h.pack.find((i) => i.kind === 'charge');
           if (sat) {
             if (sat.slots === 0 && sat.amount > 1) {
               sat.amount--;
-              sat.name = `Satchel: ${sat.amount} charge${sat.amount === 1 ? '' : 's'}`;
+              sat.name = sat.amount === 1 ? 'Improvised explosive' : 'Improvised explosives';
             } else h.pack = h.pack.filter((i) => i !== sat);
           }
           const rounds = cmd.action === 'setCharge' ? (cmd.target.fuse ?? 1) : 1;
@@ -1084,7 +1084,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         const sleepers = d.monsters.filter((m) => m.awareness !== 'asleep' && m.kind !== 'dragon' && distance(m.at, h.at) <= 5 && m.at.level === h.at.level);
         if (sleepers.length) out.push({ action: 'sleep', label: 'Sleep', targets: sleepers.map((m) => ({ id: m.id, at: m.at })), rolls: true, pick: 'enemy', mana: 1 });
       }
-      if (cls === 'sapper' && h.pack.some((i) => i.kind === 'charge')) {
+      if (cls === 'sapper' && h.pack.some((i) => i.kind === 'charge' || i.kind === 'improvised-charge')) {
         // 20.3: adjacent floor hexes and breakable walls/doors/chests, each with fuse 1 and 2 (like the engine).
         const spots = posNeighbors(h.at).filter((p) => {
           const t = tile(p);

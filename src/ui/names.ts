@@ -76,7 +76,7 @@ export const FACING_HELP = {
   backExposed: `Back exposed: nobody else can see the hex straight behind this hero. Something coming from there is unseen, and a hit from straight behind a hero is blindsided: +${V39.blindsideSlots} slot to the attacker. Have another hero stand where they can see it.`,
   blindsided: `Blindsided: an attack from the cone straight behind a hero gets +${V39.blindsideSlots} slot (monsters, crews, free swings, overwatch shots alike). If no hero can see the attacker, it strikes unseen ("Something strikes … from behind") and stays visible until your next turn ends.`,
   backstab: `Backstab (Burglar): a melee strike from a monster's side or from straight behind it (straight behind a crew member) on a monster or crew member that has not noticed the Burglar (asleep, or awake without having noticed them): +${V39.backstabSlots} slot and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage per hit (before armor), on top of the sneak attack's +${V37.sneakSlots}. Not the Dragon or the Gloam. With a Burglar selected, a 🗡 marks the hexes to strike from.`,
-  quietFeet: `Quietest feet (Burglar): sneaks at full pace (4, dash 4), rubble no louder. Sleepers roll only ${V39.burglarWakeSneak}% per hex a sneaking Burglar passes (others ${V37.wakeSneak}%), ${V39.burglarWakeEndSneak}% for ending next to one (others ${V37.wakeEndSneak}%). Awake enemies notice a sneaking Burglar ahead of them only within ${V39.burglarNoticeLitSneak} lit (others ${V37.noticeLitSneak}), when adjacent unlit, ${V39.burglarNoticeHollowSneak} in the Hollow (others ${V37.noticeHollowSneak}); an unaware monster misses one sneaking right beside it.`,
+  quietFeet: `Quietest feet (Burglar): walks 5 (dash 5) and sneaks 4 (dash 4), rubble no louder. Sleepers roll only ${V39.burglarWakeSneak}% per hex a sneaking Burglar passes (others ${V37.wakeSneak}%), ${V39.burglarWakeEndSneak}% for ending next to one (others ${V37.wakeEndSneak}%). Awake enemies notice a sneaking Burglar ahead of them only within ${V39.burglarNoticeLitSneak} lit (others ${V37.noticeLitSneak}), when adjacent unlit, ${V39.burglarNoticeHollowSneak} in the Hollow (others ${V37.noticeHollowSneak}); an unaware monster misses one sneaking right beside it.`,
   hearing: 'Hearing: your heroes hear what they can\'t see. In the castle\'s turn, footsteps of unseen monsters and crews within earshot (a few hexes by path, closed doors count double; rats and spiders quietest, the Dragon loudest) show as 👣 trails, and fights, shouts, smashes and blasts out of sight as pulsing rings. Where, not who: they stay unseen. The marks last until the castle moves again. Monsters gain nothing from this.',
   rear: `Monster sight by mood (the mark over its head). Unaware (at its post, on patrol): sees ahead; at its sides only a walker within ${V37.sideWalk} or anyone right beside it; nothing straight behind. Searching (?) and hunting (!): sees ahead and at its sides. Straight behind, any monster notices only a walker right behind it, a sneaking hero never. Heroes and crew members are blind only straight behind. Sleepers see nothing; they wake by sound. Monsters look whenever anything moves; one that spots a hero turns to them and looks again, so a careless hero can give away friends near them. An unaware monster turns toward a noise; one already hunting keeps facing its quarry, but any hit that lands turns it to face the attacker.`,
 };
@@ -129,7 +129,7 @@ export const CLASS_BLURB: Record<AnyClass, string> = {
   burglar: 'Picks locks, sneaks fast, backstabs the unwary.',
   mage: 'Firebolt, Kindle the lantern, Mend wounds. Fragile.',
   ranger: 'Longbow at range 6.',
-  sapper: 'Hammer and a satchel of charges on fuses.',
+  sapper: 'Hammer and improvised explosives on fuses.',
   pyromancer: 'Staff, mana 3.',
   shadowmancer: 'Staff, mana 3.',
   hedgewitch: 'Staff, mana 3.',
@@ -161,7 +161,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
   ],
   burglar: [
     ['Pick', 'ability', 'An improvised pick each delve (2 slots, used up). With the smith\'s lockpicks: 3 slots, kept.'],
-    ['Quietest feet', 'passive', 'Sneaks at full pace (4, dash 4), quieter than anyone: half the wake chance, noticed only up close.'],
+    ['Quietest feet', 'passive', 'Walks 5 (dash 5) and sneaks 4 (dash 4), quieter than anyone: half the wake chance, noticed only up close.'],
     ['Backstab', 'passive', 'From beside or behind an unaware enemy (a monster\'s sides or straight behind it, straight behind a crew member): +1 slot and double damage per hit, on top of the sneak attack.'],
     ['Light fingers', 'passive', 'Opens and takes from chests silently.'],
   ],
@@ -177,7 +177,7 @@ export const CLASS_KIT: Record<AnyClass, [string, string, string][]> = {
     ['Close quarters', 'passive', 'Adjacent bow shots lose 1 slot.'],
   ],
   sapper: [
-    [`${SAPPER_CHARGES} free charges`, 'passive', `Starts every delve with ${SAPPER_CHARGES} blasting charges; bought ones add to them.`],
+    [`${SAPPER_CHARGES} improvised explosives`, 'passive', `Brings ${SAPPER_CHARGES} improvised explosives of their own every delve: no pack slot, can't be given away; they blast like a blasting charge and go first. Bought charges add to them.`],
     ['Set charge', 'action', `On a hex, wall, door or chest next to you, fuse 1 or 2 turns: ${V37.blastInner} damage within 1, ${V37.blastOuter} within 2, breaks built walls on Levels 1 and 2. The Sapper takes nothing from their own blast.`],
     ['Throw charge', 'action', `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1.`],
     ['Dig', 'action', `Clear adjacent rubble, a cracked wall or blast rubble, no charge. Noise ${DIG_NOISE}.`],
@@ -450,8 +450,8 @@ export const AWARENESS_TEXT: Record<string, string> = {
 export const MOVE_HELP = {
   calm: `Free move: nothing hunts the party, so the castle only turns every ${V37.calmSteps} steps you take. Click any explored hex to walk there, however far; the hex-by-hex rules still apply (noise, wake rolls, traps). The walk stops the moment something notices you, a sleeper wakes or a trap goes off, and your party acts first.`,
   follow: 'Follow: every other active hero within 3 comes along behind in single file, the lantern with them. Off: only the selected hero walks.',
-  walk: `Walk: up to 4 hexes, noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you ahead of them within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (a searching or hunting one at its sides too); an unaware one at its sides within ${V37.sideWalk}; straight behind only when adjacent. They notice you on the step that brings you into view, even if you walk on out of it. Hovering a hex shows what the move risks.
-After moving, a second move (a dash) spends the action. Each hero keeps their own Walk/Sneak setting.`,
+  walk: `Walk: up to 4 hexes (Burglar 5), noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you ahead of them within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (a searching or hunting one at its sides too); an unaware one at its sides within ${V37.sideWalk}; straight behind only when adjacent. They notice you on the step that brings you into view, even if you walk on out of it. Hovering a hex shows what the move risks.
+After moving, a second move (a dash, as far again: 4, Burglar 5) spends the action. Each hero keeps their own Walk/Sneak setting.`,
   sneak: `Sneak (S): up to 2 hexes (Burglar 4, dash 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (Burglar ${V39.burglarWakeSneak}%; half unlit; ending next to one ${V37.wakeEndSneak}%, Burglar ${V39.burglarWakeEndSneak}%). Awake monsters notice you ahead of them (a searching or hunting one at its sides too) within ${V37.noticeLitSneak} lit (Burglar ${V39.burglarNoticeLitSneak}), ${V37.noticeDarkSneak} unlit; an unaware one at its sides only right beside it (never a Burglar), and none straight behind (hovering an enemy says which way it faces). Your first strike on a monster that has not noticed you gets +${V37.sneakSlots} slot. S switches only the selected hero; Burglars start on Sneak.`,
   swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once as you leave its reach, with 1 slot fewer. Sneaking does not avoid it. Your heroes swing the same way at enemies that leave their reach while their action is still ready.',
   blind: FACING_HELP.rear,
@@ -474,6 +474,7 @@ export const ITEM_HELP: Record<string, string> = {
   firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.\nUse: Items › Firecracker, then click a hex within ${THROW_RANGE.firecracker}`,
   lockpicks: 'The smith\'s proper lockpicks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.\nUse: next to a locked door or chest, Interact › Pick lock',
   improvised: 'A bent nail and a hairpin: one Pick at 2 Finesse slots, used up whatever happens. Every Burglar brings one each delve; it takes no pack slot.\nUse: next to a locked door or chest, Interact › Pick lock',
+  'improvised-charge': `The Sapper's own: black powder in a tin with a fuse. Blasts like a blasting charge: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}. ${SAPPER_CHARGES} each delve, no pack slot, spent before bought charges; can't be given away.\nUse: Abilities › Set charge (fuse 1 or 2) or Throw charge`,
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.\nUse: Items › Night-eye draught',
 };
 
@@ -572,6 +573,7 @@ export const ITEM_GLYPH: Record<string, string> = {
   firecracker: '✺',
   lockpicks: '⚲',
   improvised: '⌐',
+  'improvised-charge': '⊛',
   nightsight: '◉',
 };
 
@@ -614,6 +616,7 @@ export const ITEM_EFFECT: Record<string, string> = {
   firecracker: 'Throw 6: noise 6 at the target hex. Lure monsters away.',
   lockpicks: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2. Without a pick, nobody picks.',
   improvised: 'One Pick at 2 Finesse slots, then it is spent. Every Burglar brings one each delve, outside the pack slots.',
+  'improvised-charge': `The Sapper's own: ${SAPPER_CHARGES} each delve, outside the pack slots. Blasts like a blasting charge; spent first.`,
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
 };
 
@@ -826,7 +829,7 @@ export function dealLine(crew: string, deal: DealKind, job: JobKind | undefined,
 export const CLASS_PLAN: Record<AnyClass, { tag: string; best: string }> = {
   heir: { tag: 'Leader', best: 'Keeping the squad sharp: Rally and Brace.' },
   sellsword: { tag: 'Front line', best: 'Taking the hits meant for someone else.' },
-  burglar: { tag: 'Stealth', best: 'Sneaking at full pace and backstabbing for double damage.' },
+  burglar: { tag: 'Stealth', best: 'Moving fast and quiet (walk 5, sneak 4) and backstabbing for double damage.' },
   ranger: { tag: 'Ranged', best: 'Knocking enemies into pits from across the room.' },
   sapper: { tag: 'Loud', best: 'Blowing a new way through walls and doors.' },
   pyromancer: { tag: 'Loud', best: 'Burning crowds and keeping the lantern lit.' },
@@ -858,7 +861,7 @@ export const CLASS_ABILITIES: Record<AnyClass, AbilityChip[]> = {
   ],
   burglar: [
     { name: 'Pick locks', kind: 'Ability', plain: "Opens locked doors and chests quietly: a bent nail each delve, or the smith's proper picks.", nums: 'improvised: 2 Finesse slots, used up · lockpicks: 3 slots, kept' },
-    { name: 'Quietest feet', kind: 'Passive', plain: 'Sneaks at full pace and barely wakes anything.', nums: `sneak 4 · ${V39.burglarWakeSneak}% to wake a sleeper per hex (others ${V37.wakeSneak}%) · noticed at ${V39.burglarNoticeLitSneak} lit` },
+    { name: 'Quietest feet', kind: 'Passive', plain: 'Walks farther than anyone, sneaks at walking pace and barely wakes anything.', nums: `walk 5 · sneak 4 · ${V39.burglarWakeSneak}% to wake a sleeper per hex (others ${V37.wakeSneak}%) · noticed at ${V39.burglarNoticeLitSneak} lit` },
     { name: 'Backstab', kind: 'Passive', plain: "Strikes twice as hard from behind an enemy that hasn't noticed them.", nums: `+${V39.backstabSlots} slot · ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage · not the Dragon or the Gloam` },
     { name: 'Light fingers', kind: 'Passive', plain: 'Opens chests without spending the action.', nums: 'free · silent' },
   ],
@@ -869,7 +872,7 @@ export const CLASS_ABILITIES: Record<AnyClass, AbilityChip[]> = {
     { name: 'Hamstring', kind: 'Action', plain: 'A shot at the legs: a hit pins the target where it stands.', nums: `1 Finesse slot at −${V37.hamstringPenalty}% · range ${V37.hamstringRange} · rooted ${V37.hamstringRounds} rounds · noise 1` },
   ],
   sapper: [
-    { name: 'Satchel', kind: 'Passive', plain: 'Brings charges of their own on every delve.', nums: `${SAPPER_CHARGES} charges · bought ones add to them` },
+    { name: 'Improvised explosives', kind: 'Passive', plain: 'Brings explosives of their own on every delve. They take no pack slot and are spent before bought charges.', nums: `${SAPPER_CHARGES} per delve · same blast as a blasting charge · bought ones add to them` },
     { name: 'Set charge', kind: 'Action', plain: 'Sets a charge on a fuse and blows walls, doors and anything near them open.', nums: `fuse 1 or 2 · ${V37.blastInner} dmg within 1, ${V37.blastOuter} within 2 · noise ${V37.blastNoise}` },
     { name: 'Throw charge', kind: 'Action', plain: 'Lobs a lit charge.', nums: `range ${THROW_CHARGE_RANGE} · fuse 1` },
     { name: 'Dig', kind: 'Action', plain: 'Clears rubble or a cracked wall, no charge needed.', nums: `next to you · noise ${DIG_NOISE}` },

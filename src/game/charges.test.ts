@@ -90,7 +90,7 @@ describe('V3.7 sapper', () => {
     it('holds 3 charges in one slotless pack item; bought charges add; it is spent first and never dropped, given or stashed', () => {
       const s = delve();
       const sam = hero(s, 'sam');
-      expect(sam.pack.filter((i) => i.kind === 'charge')).toMatchObject([{ amount: 3, slots: 0, name: 'Satchel: 3 charges' }]);
+      expect(sam.pack.filter((i) => i.kind === 'improvised-charge')).toMatchObject([{ amount: 3, slots: 0, name: 'Improvised explosives' }]);
       expect(chargeCount(sam)).toBe(3);
       give(s, 'sam', 'charge');
       expect(chargeCount(hero(s, 'sam'))).toBe(4);

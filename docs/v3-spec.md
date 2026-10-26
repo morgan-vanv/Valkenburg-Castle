@@ -698,7 +698,7 @@ A new campaign enters the castle by the main gate only. The other two ways in ar
 
 ## 26. V4.0 play-test fixes (owner, 2026-10-26)
 
-Three owner decisions from play. Contract: `HeroInDelve.moveMode`, the `setMoveMode` command, `move.sneak` optional, `Engine.reachable`/`moveNoise`/`calmReach` with `sneak` optional, `MoveRisks.notice[].at`, the `noticed` event's `at` and `faced` (types.ts, api.ts).
+Owner decisions from play (26.1 to 26.3 first, then 26.4 and 26.5). Contract: `HeroInDelve.moveMode`, the `setMoveMode` command, `move.sneak` optional, `Engine.reachable`/`moveNoise`/`calmReach` with `sneak` optional, `MoveRisks.notice[].at`, the `noticed` event's `at` and `faced` (types.ts, api.ts).
 
 ### 26.1 Walk/Sneak per hero
 
@@ -728,3 +728,21 @@ Three owner decisions from play. Contract: `HeroInDelve.moveMode`, the `setMoveM
 - Noticing several heroes at once, a monster faces its quarry, not the last one noticed.
 - A ghoul rising from the bones faces the hero it rose for.
 - Crew members: unchanged for noise and noticing (no turn to noise; they face a hero they notice). Hits now turn them too (they didn't before).
+
+### 26.4 The Burglar walks 5 (owner)
+
+- The Burglar walks one further than they sneak: walk 5 (dash 5), sneak 4 (dash 4) as before. Everyone else: walk 4, sneak 2 (Smuggler's Mead: sneak 4). `moveBudget` (delve.ts); data.ts `WALK_MOVE` 4, `BURGLAR_WALK` 5.
+- The caps still apply on top: escorting the prisoner 3 at most, carrying a heavy item (`HEAVY_MOVE`) 3 at most. Free move while calm has no budget, unchanged.
+- Crews don't get it: every crew member moves `RIVAL_MOVE` 4 whatever its class, the Burglar sister and the Gallows Choir's burglar included. Crews have no Walk/Sneak, so "one further than they sneak" means nothing for them, and a faster thief that robs, drags and flees would be a difficulty change nobody asked for.
+- Help text: the Quiet feet lines (class kit, recruit chips, the Sneak button's hover), the Walk help ("up to 4 hexes (Burglar 5)") and the dash line.
+
+### 26.5 Class kit is the hero's own (owner)
+
+Contract: a new `ItemKind`, `'improvised-charge'` (types.ts).
+
+- Class kit: the Sapper's **improvised explosives** and the Burglar's **improvised pick** (21.4). Both are pack items with `slots: 0`, made fresh at `startDelve`. `isKit` (common.ts, re-exported by charges.ts) recognises them.
+- The Sapper's free charges are their own item now, not a slotless `'charge'`: kind `'improvised-charge'`, one item with `amount` 3 (`SAPPER_CHARGES`), named "Improvised explosives" ("Improvised explosive" with 1 left; `satchelName`). Same blast, fuse, set and throw rules as a bought blasting charge (they only feed `setCharge`/`throwCharge`); `spendCharge` spends them before bought charges; `chargeCount` counts both. A bought "Blasting charge" stays its own 1-slot `'charge'` item.
+- Bound to the hero: no pack slot (`packUsed` never counts them); not offered to Drop or Give (and refused if sent); a cutpurse never lifts them (`stealable`, world-phase.ts: not the heirloom, the sally key or kit; with only kit to take it strikes instead); a crew's rob takes only gold, gems and jewelry, and parley payment only gold, gems and jewelry, so neither touches kit; `backToCamp` never banks them.
+- A hero who dies takes their kit with them: `killHero` drops the rest of the pack, not the kit, and kit is never in `lostIds`. (Before, the dead Sapper's slotless satchel dropped as loot that anyone could pick up and carry without a slot.)
+- Old saves: `deserialize` turns a slotless `'charge'` in a delve hero's pack into improvised explosives (`migrateSatchel`); `isSatchel` still reads the old shape. No save-key bump.
+- UI: names.ts glyph ⊛ (the blasting charge stays ✹), item help saying it's the Sapper's own. The in-delve party card draws kit apart from the 4 slot boxes, in a small "kit" mark after them (the slot boxes narrow a little so the row fits); hover "Fenna's own: improvised pick. Doesn't take a slot; can't be given away." and the item's use. The "N free" count ignores kit. Lowgate's Outfit card shows a line under the 4 slots: "Brings their own: improvised pick" / "Brings their own: 3 improvised explosives" (heroes have no pronoun in the data, so "their").

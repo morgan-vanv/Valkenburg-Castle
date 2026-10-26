@@ -154,9 +154,26 @@ const SINGLE: Record<ItemKind, string> = {
   charge: 'Blasting charge', heirloom: 'Heirloom', hoard: 'Hoard',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', hook: 'Grappling hook',
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
-  lockpicks: 'Lockpicks', improvised: 'Improvised pick', nightsight: 'Night-eye draught',
+  lockpicks: 'Lockpicks', improvised: 'Improvised pick', 'improvised-charge': 'Improvised explosive', nightsight: 'Night-eye draught',
   gatekey: 'Sally port key',
 };
+
+/**
+ * The Sapper's improvised explosives (V4.0, spec 26.5; the V3.7 "satchel"): one slotless pack item,
+ * `amount` left. A satchel from an older save (kind 'charge', 0 slots) counts too until it is migrated.
+ */
+export function isSatchel(i: Item): boolean {
+  return i.kind === 'improvised-charge' || (i.kind === 'charge' && i.slots === 0);
+}
+
+/**
+ * Class kit (spec 20.3, 21.4, 26.5): the Sapper's improvised explosives and the Burglar's improvised pick.
+ * The hero's own: no pack slot; never dropped, given, stolen, robbed, paid over or banked; gone with the
+ * hero if they die. A fresh set each delve.
+ */
+export function isKit(i: Item): boolean {
+  return isSatchel(i) || i.kind === 'improvised';
+}
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {
   return {
@@ -250,7 +267,8 @@ export function killHero(c: Ctx, h: HeroInDelve): void {
   (c.d.diedAt ??= {})[h.heroId] = { ...h.at };
   c.ev.push({ type: 'died', id: h.heroId });
   say(c, `${heroName(c, h.heroId)} is dead.`);
-  const drop = h.pack;
+  // V4.0 (spec 26.5): class kit is the hero's own and goes with them; it doesn't drop as loot.
+  const drop = h.pack.filter((i) => !isKit(i));
   (c.d.lostIds ??= []).push(...drop.filter((i) => i.kind !== 'heirloom').map((i) => i.id));
   putOnGround(c, h.at, drop);
   h.pack = [];
