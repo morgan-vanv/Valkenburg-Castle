@@ -2970,3 +2970,16 @@ div.dl-deal { cursor: default; }
 .dl-card-l.rk.bad svg { color: var(--dl-red-soft); }
 .dl-card-l.rk.warn { color: #ffe39a; }
 .dl-who-calm { font-size: 12px; color: #9cc8ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- V4.0 (spec 29): venom and paralysis */
+:root { --venom: #6fdc5a; --venom-dim: #2f5a28; }
+.dl-si.venom { color: var(--venom); gap: 1px; }
+.dl-si.venom b { font-size: 11px; line-height: 1; font-weight: 700; color: var(--venom); }
+.dl-si.venom.para { color: var(--venom); }
+.dl-si.carry { color: var(--dl-cream); }
+.dl-rcard.paralyzed { border-color: var(--venom-dim); }
+.dl-rcard.paralyzed.sel { border-color: var(--venom); }
+.dl-rcard-fate.para { color: var(--venom); font-size: 12px; }
+.tag-venom, .tag-para { display: inline-flex; align-items: center; gap: 1px; color: var(--venom); font-weight: 700; }
+.tag-para { font-size: 0.68rem; letter-spacing: 0.02em; }
+.tag-venom .ic, .tag-para .ic { color: var(--venom); }

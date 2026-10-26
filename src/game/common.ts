@@ -156,6 +156,7 @@ const SINGLE: Record<ItemKind, string> = {
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
   lockpicks: 'Lockpicks', improvised: 'Improvised pick', 'improvised-charge': 'Improvised explosive', nightsight: 'Night-eye draught',
   gatekey: 'Sally port key',
+  antidote: 'Antidote', venomdart: 'Venom dart',
 };
 
 /**
@@ -251,9 +252,10 @@ export function valueOf(items: { kind: string; amount: number }[]): number {
 
 export function passLanternIfNeeded(c: Ctx): void {
   const b = hd(c, c.d.lanternBearer);
-  if (b && b.status === 'active') return;
+  // V4.0 (spec 29.2): a paralyzed bearer drops it too.
+  if (b && b.status === 'active' && !((b.paralyzed ?? 0) > 0)) return;
   const from = b?.at;
-  const cands = activeHeroes(c);
+  const cands = activeHeroes(c).filter((h) => !((h.paralyzed ?? 0) > 0));
   if (!cands.length) return;
   const far = (p: Pos) => (from && p.level === from.level ? distance(p, from) : 99);
   cands.sort((x, y) => far(x.at) - far(y.at));
@@ -534,7 +536,8 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
   if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
   for (const m of c.d.monsters) {
-    if (m.kind === 'gloam' || m.buried) continue;
+    // V4.0 (spec 29.2): a paralyzed monster can't turn or go anywhere for a noise.
+    if (m.kind === 'gloam' || m.buried || (m.paralyzed ?? 0) > 0) continue;
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;

@@ -97,7 +97,7 @@ export function createEngine(castle: CastleDef): Engine {
     if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
       // V4.0 (spec 26.2): monsters that noticed a hero during the command re-plan (keeping their quarry), so the shown intent is right.
-      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
+      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried && !((m.paralyzed ?? 0) > 0) && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
       c.replan = undefined;
       // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
       updateCalm(c);

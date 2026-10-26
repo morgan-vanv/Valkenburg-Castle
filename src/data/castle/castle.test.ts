@@ -334,7 +334,7 @@ describe('castle', () => {
     expect(castle.spawns.some((s) => s.name === 'Grub the Jailer' && !s.asleep)).toBe(true);
     expect(castle.spawns.some((s) => s.name === 'Ugluk Red-Hand' && s.kind === 'berserker')).toBe(true);
     for (const lv of [1, 2, 3]) {
-      expect(castle.traps.filter(on(lv)).length).toBe(2);
+      expect(castle.traps.filter(on(lv)).filter((t) => !t.venom).length).toBe(2);
       expect(castle.coins.filter(on(lv)).length).toBeGreaterThan(0);
       expect(castle.chests.filter(on(lv)).length).toBeGreaterThan(0);
     }
@@ -359,6 +359,18 @@ describe('castle', () => {
 
 describe('story sites (19.1)', () => {
   const story = castle.contractSites.filter((s) => s.story);
+
+  it('V4.0 (spec 29.5): lays one or two venom traps on Level 2 only, in corridors, clear of contract sites', () => {
+    const venom = castle.traps.filter((t) => t.venom);
+    expect(venom.length).toBeGreaterThanOrEqual(1);
+    expect(venom.length).toBeLessThanOrEqual(2);
+    for (const t of venom) {
+      expect(t.at.level).toBe(2);
+      const walkable = posNeighbors(t.at).filter((p) => ['floor', 'door', 'rubble'].includes(tile(p)?.kind ?? '')).length;
+      expect(walkable).toBeLessThanOrEqual(2); // a corridor: no stepping round it
+      for (const s of castle.contractSites) if (s.at.level === 2) expect(distance(s.at, t.at)).toBeGreaterThan(2);
+    }
+  });
 
   it('has one site per story villager in the named room, on floor, clear of spawns, chests, coins, traps and other sites', () => {
     const want: Record<string, [number, string, string]> = {

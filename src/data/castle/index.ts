@@ -141,6 +141,9 @@ export const castle: CastleDef = {
     { at: L1(24, 22) }, // gate passage
     { at: L2(14, 3) }, // officers' corridor, by the locked door
     { at: L2(5, 19) }, // archive to cellblock, by the door
+    // V4.0 (spec 29.5): two venom traps on Level 2, off the main ways but in a corridor you can't step round.
+    { at: L2(34, 13), venom: true }, // the east ledge, on the way down to the forge
+    { at: L2(15, 23), venom: true }, // the cellblock's east passage, by the door to the winch room
     { at: L3(19, 8) }, // nest tunnel
     { at: L3(16, 25) }, // drain tunnel
   ],

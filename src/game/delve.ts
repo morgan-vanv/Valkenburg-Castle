@@ -41,6 +41,8 @@ import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
 import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
+import { CARRY_MOVE, VENOM_ROUNDS } from './data';
+import { canStir, carryFollow, checkCarries, cureVenom, endCarry, envenom, isEnvenomed, isParalyzed, shoulderable, trapDamage, venomTakes } from './venom';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -133,6 +135,7 @@ export function doFace(c: Ctx, heroId: string, facing: number): string | undefin
   if (!Number.isInteger(facing) || facing < 0 || facing > 5) return 'Face one of the six sides.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't turn.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
+  if (isParalyzed(h)) return `${heroName(c, heroId)} is paralyzed.`;
   setFacing(c, h, facing);
   refreshSight(c);
   return undefined;
@@ -168,6 +171,8 @@ export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   if (h.escorting) b = Math.min(b, 3); // the prisoner's pace caps a Burglar too
   // Spec 18.3: the brewing copper is heavy: its carrier moves 3 at most (dash too).
   if (h.pack.some((i) => i.heavy)) b = Math.min(b, HEAVY_MOVE);
+  // V4.0 (spec 29.4): a paralyzed ally on the shoulders: 3 at most (dash too).
+  if (h.carrying) b = Math.min(b, CARRY_MOVE);
   return b;
 }
 
@@ -203,7 +208,7 @@ function trapPenalty(c: Ctx, p: Pos): number {
 
 /** Can this hero move now? 'walk' = first move; 'dash' = second move that spends the action (spec 15.2). */
 export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
-  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing || (h.rooted ?? 0) > 0) return null;
+  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing || (h.rooted ?? 0) > 0 || isParalyzed(h)) return null;
   if (!h.moved) return 'walk';
   if (!h.acted && !h.dashed) return 'dash';
   return null;
@@ -248,6 +253,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
   if (h.webbed) return `${heroName(c, heroId)} is stuck in a web.`;
   if (h.grabbedBy) return `${heroName(c, heroId)} is held fast. Break free first.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
+  if (isParalyzed(h)) return `${heroName(c, heroId)} is paralyzed.`;
   if ((h.rooted ?? 0) > 0) return `${heroName(c, heroId)} is rooted to the spot for ${h.rooted} more ${h.rooted === 1 ? 'round' : 'rounds'}.`;
   const mk = moveKind(h);
   if (!mk) return h.dashed ? `${heroName(c, heroId)} has already dashed.` : `${heroName(c, heroId)} has already moved.`;
@@ -342,6 +348,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
   ventCheck(c, h);
   afterHeroMove(c, h, sneak, true);
   checkHolds(c);
+  checkCarries(c);
   rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
@@ -349,10 +356,14 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
 }
 
 export function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
+  const trap = c.d.traps[posKey(at)];
   delete c.d.traps[posKey(at)];
-  c.ev.push({ type: 'trap', at, id: h.heroId, damage: 3 });
-  say(c, `A trap bites ${heroName(c, h.heroId)}.`);
-  hurtHero(c, h, 3, 'trap');
+  // V4.0 (spec 29.5): a venom trap bites for 1 and envenoms.
+  const dmg = trapDamage(trap);
+  c.ev.push({ type: 'trap', at, id: h.heroId, damage: dmg, ...(trap?.venom ? { venom: true } : {}) });
+  say(c, trap?.venom ? `A venom needle bites ${heroName(c, h.heroId)}.` : `A trap bites ${heroName(c, h.heroId)}.`);
+  hurtHero(c, h, dmg, 'trap');
+  if (trap?.venom) envenom(c, h.heroId, 'trap');
   makeNoise(c, at, 2);
 }
 
@@ -369,6 +380,8 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = fa
       c.ev.push({ type: 'moved', id: pr.id, path: [spot] });
     }
   }
+  // V4.0 (spec 29.4): the ally on the carrier's shoulders comes along.
+  if (h.carrying) carryFollow(c, h);
   if (h.status !== 'active') return;
   for (const [k, t] of Object.entries(c.d.traps)) {
     if (t.spotted) continue;
@@ -381,8 +394,8 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = fa
     const r1 = roll(c, h.heroId, 'Spot trap', 1, p);
     if (r1.hits) {
       t.spotted = true;
-      c.ev.push({ type: 'trapSpotted', at });
-      say(c, `${heroName(c, h.heroId)} spots a trap.`);
+      c.ev.push({ type: 'trapSpotted', at, ...(t.venom ? { venom: true } : {}) });
+      say(c, t.venom ? `${heroName(c, h.heroId)} spots a venom trap: a needle in the floor.` : `${heroName(c, h.heroId)} spots a trap.`);
     }
   }
   // V4.0 (spec 26.2): where a blink, fall, climb or grapple lands, enemies already awake notice the hero now
@@ -421,7 +434,7 @@ setAfterLanding((c, h) => {
 
 // ---------------------------------------------------------------- targets
 
-const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley'];
+const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown'];
 
 function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean; barred?: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
@@ -681,6 +694,27 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
         .filter((t) => c.d.monsters.find((m) => m.id === t.id)?.awareness !== 'asleep')
         .map((t) => ({ ...t, itemId: it.id }));
     }
+    case 'venomdart': {
+      // V4.0 (spec 29.3): a monster (not the Dragon or the Gloam) or crew member in sight within 5, not paralyzed already.
+      const it = itemOf(h, 'venomdart');
+      if (!it) return [];
+      return enemiesInSight(c, h, THROW_RANGE.venomdart, { noDragon: true }).filter((t) => venomTakes(c, t.id!)).map((t) => ({ ...t, itemId: it.id }));
+    }
+    case 'antidote': {
+      // V4.0 (spec 29.6): yourself while envenomed, or a hero next to you envenomed or paralyzed (up or downed).
+      const it = itemOf(h, 'antidote');
+      if (!it) return [];
+      const out: ActionTarget[] = [];
+      if (isEnvenomed(h)) out.push({ id: h.heroId, itemId: it.id });
+      for (const o of others) {
+        if ((o.status === 'active' || o.status === 'downed') && adjacent(o.at, h.at) && ((o.venom ?? 0) > 0 || isParalyzed(o))) out.push({ id: o.heroId, itemId: it.id });
+      }
+      return out;
+    }
+    case 'shoulder':
+      return shoulderable(c, h).map((o) => ({ id: o.heroId, at: o.at }));
+    case 'setDown':
+      return h.carrying ? [{ id: h.heroId }] : [];
     case 'caltrops': {
       const it = itemOf(h, 'caltrops');
       if (!it) return [];
@@ -821,8 +855,9 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return mage('pyromancer', 1) && c.d.light < LIGHT_MAX ? [{ id: h.heroId }] : [];
     case 'mend': {
       if (!mage('hedgewitch', 1)) return [];
+      // V4.0 (spec 29.6): Mend draws out venom too: a hero envenomed or paralyzed is a target even at full HP.
       return c.d.heroes
-        .filter((o) => o.status === 'active' && within(o.at, h.at, 3) && o.hp < heroDef(c, o.heroId)!.maxHp)
+        .filter((o) => o.status === 'active' && within(o.at, h.at, 3) && (o.hp < heroDef(c, o.heroId)!.maxHp || (o.venom ?? 0) > 0 || isParalyzed(o)))
         .map((o) => ({ id: o.heroId }));
     }
     case 'passLantern':
@@ -877,12 +912,13 @@ const LABELS: Record<ActionKind, string> = {
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught', unbar: 'Unbar the gate',
   brace: 'Brace', hamstring: 'Hamstring', nightthorn: 'Night thorn', briar: 'Briar', smashProp: 'Smash',
+  venomdart: 'Venom dart', antidote: 'Antidote', shoulder: 'Shoulder', setDown: 'Set down',
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
 const ORDER: ActionKind[] = [
-  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'potion', 'mend',
-  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
+  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'shoulder', 'setDown', 'potion', 'antidote', 'mend',
+  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
@@ -896,6 +932,7 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', unbar: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
   brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
+  venomdart: 'enemy', antidote: 'ally', shoulder: 'ally', setDown: 'self',
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2 };
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
@@ -906,6 +943,8 @@ const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
 
 function canDo(h: HeroInDelve, action: ActionKind): boolean {
   if ((h as HeroX).dozing) return false;
+  // V4.0 (spec 29.2): the paralyzed do nothing at all, free actions included.
+  if (isParalyzed(h)) return false;
   if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted && !((h.rooted ?? 0) > 0);
   if (FREE.includes(action)) return true;
   return !h.acted;
@@ -1079,6 +1118,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   if (h.status !== 'active') return no(`${heroName(c, heroId)} can't act.`);
   if (c.d.phase !== 'player') return no('Wait for your turn.');
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
+  if (isParalyzed(h)) return no(`${heroName(c, heroId)} is paralyzed.`);
   if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
   if (!t) return no('No valid target.');
@@ -1196,6 +1236,22 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       return base('finesse', 1, p, ['Miss', 'Asleep'], 0);
     }
+    case 'venomdart': {
+      const f = foe(c, t.id)!;
+      let p = withLight(def.stats.finesse);
+      if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
+      const v = (f.monster ?? f.rival)?.venom ?? 0;
+      const n = v > 0 ? Math.max(1, v - 1) : VENOM_ROUNDS;
+      return base('finesse', 1, p, ['Miss', `${v > 0 ? 'More venom' : 'Envenomed'}: paralyzed in ${n} ${n === 1 ? 'turn' : 'turns'}`], 0);
+    }
+    case 'antidote': {
+      const o = hd(c, t.id!)!;
+      return simple(isParalyzed(o) ? `${heroName(c, o.heroId)} can move again` : 'Draws out the venom');
+    }
+    case 'shoulder':
+      return simple(`Carry ${heroName(c, t.id!)}: they come along on every move. You move ${CARRY_MOVE} at most while you carry them`);
+    case 'setDown':
+      return simple(`Set ${heroName(c, h.carrying ?? '')} down here. Free.`);
     case 'caltrops':
       return simple('The first monster to step here takes 2 and stops');
     case 'firecracker':
@@ -1238,8 +1294,10 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const outcomes = l.chest ? ['Holds, noise 4', 'Opens, noise 4', 'Opens, noise 4'] : ['Holds, noise 4', 'Holds, noise 4', 'Opens, noise 4'];
       return base('might', 2, withLight(def.stats.might), outcomes, 4);
     }
-    case 'disarm':
-      return base('finesse', 2, withLight(def.stats.finesse), ['Sets it off: 3 dmg', 'Disarmed', 'Disarmed'], 2);
+    case 'disarm': {
+      const tr = c.d.traps[posKey(t.at!)];
+      return base('finesse', 2, withLight(def.stats.finesse), [tr?.venom ? `Sets it off: ${trapDamage(tr)} dmg and venom` : `Sets it off: ${trapDamage(tr)} dmg`, 'Disarmed', 'Disarmed'], 2);
+    }
     case 'shove': {
       const f = foe(c, t.id)!;
       const o = pushOutcome(c, h.at, f.at, t.id);
@@ -1300,7 +1358,10 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const m = (c.d.monsters.find((x) => x.id === t.id) ?? c.d.rivals?.members.find((x) => x.id === t.id))!;
       return base('might', 2, withLight(def.stats.might), ['Still held', `Free of ${m.name}`, `Free of ${m.name}`], 1);
     }
-    case 'mend': return withMana(simple('Heal 4'), 1);
+    case 'mend': {
+      const o = hd(c, t.id!);
+      return withMana(simple(o && ((o.venom ?? 0) > 0 || isParalyzed(o)) ? 'Heal 4 and draw out the venom' : 'Heal 4'), 1);
+    }
     case 'passLantern': return simple(`${heroName(c, t.id!)} carries the lantern`);
     case 'leave': return simple('Leave the castle');
     // ---- V3.7 (spec 20.5) kit
@@ -1586,6 +1647,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'blinked', id: heroId, from, to: { ...h.at } });
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
+      endCarry(c, h); // V4.0 (spec 29.4): nobody blinks with a load
       glimpse(c, h.at);
       ventCheck(c, h);
       afterHeroMove(c, h, true);
@@ -1645,6 +1707,39 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       else c.ev.push({ type: 'miss', attacker: heroId, target: m.id });
       break;
     }
+    case 'venomdart': {
+      useItem(h, t.itemId);
+      const r = doRoll();
+      const tid = t.id!;
+      const at = figurePos(c, tid)!;
+      throwEv('venomdart', at);
+      if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
+      // Silent, and a prick it hardly feels: like the sleep dart, it doesn't make the monster hunt.
+      if (r.hits) {
+        c.ev.push({ type: 'hit', attacker: heroId, target: tid, damage: 0, crit: r.perfect });
+        envenom(c, tid, heroId);
+      } else c.ev.push({ type: 'miss', attacker: heroId, target: tid });
+      break;
+    }
+    case 'antidote': {
+      useItem(h, t.itemId);
+      const o = hd(c, t.id!)!;
+      const was = isParalyzed(o);
+      cureVenom(c, o.heroId, 'antidote', heroId);
+      const on = heroName(c, o.heroId);
+      say(c, o === h ? `${name} drinks the antidote. The venom is drawn out.` : was ? `${name} pours the antidote into ${on}. ${on} can move again.` : `${name} gives ${on} the antidote. The venom is drawn out.`);
+      break;
+    }
+    case 'shoulder': {
+      const o = hd(c, t.id!)!;
+      h.carrying = o.heroId;
+      c.ev.push({ type: 'shouldered', by: heroId, id: o.heroId });
+      say(c, `${name} hoists ${heroName(c, o.heroId)} onto their shoulders.`);
+      break;
+    }
+    case 'setDown':
+      endCarry(c, h, `${name} sets ${heroName(c, h.carrying ?? '')} down.`);
+      break;
     case 'caltrops':
       useItem(h, t.itemId);
       throwEv('caltrops', t.at!);
@@ -1676,6 +1771,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       levelHeal(c, h);
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
+      endCarry(c, h); // V4.0 (spec 29.4): the load is set down at the foot of the climb
       glimpse(c, h.at);
       afterHeroMove(c, h);
       break;
@@ -1756,10 +1852,13 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         delete c.d.traps[posKey(at)];
         say(c, `${name} disarms the trap.`);
       } else {
+        const tr = c.d.traps[posKey(at)];
         delete c.d.traps[posKey(at)];
-        c.ev.push({ type: 'trap', at, id: heroId, damage: 3 });
-        say(c, `The trap goes off in ${name}'s hands.`);
-        hurtHero(c, h, 3, 'trap');
+        const dmg = trapDamage(tr);
+        c.ev.push({ type: 'trap', at, id: heroId, damage: dmg, ...(tr?.venom ? { venom: true } : {}) });
+        say(c, tr?.venom ? `The venom needle goes off in ${name}'s hands.` : `The trap goes off in ${name}'s hands.`);
+        hurtHero(c, h, dmg, 'trap');
+        if (tr?.venom) envenom(c, heroId, 'trap');
         makeNoise(c, at, 2);
       }
       break;
@@ -1891,6 +1990,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       }
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
+      endCarry(c, h);
       ventCheck(c, h);
       afterHeroMove(c, h);
       break;
@@ -1899,6 +1999,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       // V3.7 (spec 20.2): leaving an enemy's side by jumping provokes its free swing first.
       provokeSwings(c, h, h.at, t.at!, new Set());
       if (h.status !== 'active') break;
+      endCarry(c, h);
       say(c, `${name} jumps.`);
       c.ev.push({ type: 'moved', id: heroId, path: [{ ...t.at! }] });
       fall(c, heroId, t.at!, null);
@@ -1945,6 +2046,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'mend': {
       const o = hd(c, t.id!)!;
       o.hp = Math.min(heroDef(c, o.heroId)!.maxHp, o.hp + 4);
+      // V4.0 (spec 29.6): Mend draws out venom, paralysis too.
+      if (cureVenom(c, o.heroId, 'mend', heroId)) say(c, o === h ? `${name}'s mending draws the venom out.` : `${name}'s mending draws the venom out of ${heroName(c, o.heroId)}.`);
       break;
     }
     case 'passLantern':
@@ -2020,7 +2123,8 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     }
   }
   checkHolds(c);
-  if (action !== 'shutter' && action !== 'leave' && action !== 'parley') rivalOverwatchFire(c, heroId);
+  checkCarries(c);
+  if (action !== 'shutter' && action !== 'leave' && action !== 'parley' && action !== 'setDown') rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
   return undefined;
@@ -2038,6 +2142,16 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
   h.status = 'out';
   c.ev.push({ type: 'out', id: h.heroId });
   say(c, `${heroName(c, h.heroId)} is out.`);
+  // V4.0 (spec 29.4, 29.6): the ally on their shoulders comes out with them; outside, the venom is drawn out.
+  const x = h.carrying ? hd(c, h.carrying) : undefined;
+  h.carrying = undefined;
+  if (x && x.status === 'active' && adjacent(x.at, h.at)) {
+    x.status = 'out';
+    c.ev.push({ type: 'out', id: x.heroId });
+    say(c, `${heroName(c, h.heroId)} carries ${heroName(c, x.heroId)} out.`);
+    if (cureVenom(c, x.heroId, 'out')) noteVenomOut(c, x.heroId);
+  }
+  if (cureVenom(c, h.heroId, 'out')) noteVenomOut(c, h.heroId);
   const pr = c.d.prisoner;
   if (pr && h.escorting === pr.id && !pr.dead && adjacent(pr.at, h.at)) {
     pr.out = true;
@@ -2049,9 +2163,14 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
   passLanternIfNeeded(c);
 }
 
+/** V4.0 (spec 29.6): a line in the return report for a hero who came out with venom in them. */
+function noteVenomOut(c: Ctx, heroId: string): void {
+  noteOnce(c, `${heroName(c, heroId)} came out with venom in them; the open air drew it out.`);
+}
+
 export function abandon(c: Ctx): void {
   for (const h of c.d.heroes) {
-    if (h.status === 'active' && canLeaveAt(c, h.at)) leaveCastle(c, h);
+    if (canStir(h) && canLeaveAt(c, h.at)) leaveCastle(c, h);
   }
   endDelve(c);
 }
@@ -2059,7 +2178,8 @@ export function abandon(c: Ctx): void {
 /** No active heroes left: the delve is over. */
 export function checkDelveEnd(c: Ctx): boolean {
   if (c.s.stage !== 'delve') return true;
-  if (c.d.heroes.some((h) => h.status === 'active')) return false;
+  // V4.0 (spec 29.2): the paralyzed don't keep the delve going; left inside, they are lost like the downed.
+  if (c.d.heroes.some((h) => canStir(h))) return false;
   endDelve(c);
   return true;
 }

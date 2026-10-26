@@ -19,7 +19,8 @@ import { visNow } from './delve';
 export function parleyTargets(c: Ctx, heroId: string): { id: string; at: Pos }[] {
   const h = hd(c, heroId);
   const cr = c.d.rivals;
-  if (!h || h.status !== 'active' || !cr || c.d.phase !== 'player' || c.s.stage !== 'delve') return [];
+  // V4.0 (spec 29.2): a paralyzed hero can't talk terms.
+  if (!h || h.status !== 'active' || (h.paralyzed ?? 0) > 0 || !cr || c.d.phase !== 'player' || c.s.stage !== 'delve') return [];
   const vis = visNow(c);
   return rivalsOnMap(c)
     .filter((r) => (r.veil ?? 0) <= 0 && vis.has(posKey(r.at)) && within(r.at, h.at, DEAL_RANGE) && los(c.w, c.d, h.at, r.at))

@@ -74,6 +74,9 @@ export const ICONS = {
   minus: { vb: 16, d: 'M3 8 H13', w: 1.6 },
   target: { vb: 16, d: 'M8 2 A6 6 0 1 1 8 14 A6 6 0 1 1 8 2 Z M8 0.5 V4 M8 12 V15.5 M0.5 8 H4 M12 8 H15.5', w: 1.3 },
   sound: { vb: 16, d: 'M2 6 H5 L9 3 V13 L5 10 H2 Z M11 6 C12 7 12 9 11 10', w: 1.3 },
+  // V4.0 (spec 29): a drop of venom, and a hero shouldering another.
+  venom: { vb: 16, d: 'M8 1.5 C10.5 5.5 13 8 13 10.5 A5 5 0 0 1 3 10.5 C3 8 5.5 5.5 8 1.5 Z', fill: 'M6 10 A1.2 1.2 0 1 1 6 12.4 A1.2 1.2 0 1 1 6 10 Z', w: 1.4 },
+  carry: { vb: 16, d: 'M6 2.5 A1.8 1.8 0 1 1 6 6.1 A1.8 1.8 0 1 1 6 2.5 Z M6 6.5 V11 M6 11 L4 15 M6 11 L8 15 M6 8 H14 M10 6.5 H15', w: 1.4 },
 } as const satisfies Record<string, IconDef>;
 
 export type IconName = keyof typeof ICONS;
@@ -120,6 +123,7 @@ export const INTENT_ICON: Partial<Record<string, IconName>> = {
   firecracker: 'blast',
   blink: 'blink',
   hamstring: 'shoot',
+  venomdart: 'venom', // V4.0 (spec 29)
   // V4.0 (spec 28): crews play by the party's rules.
   pick: 'lock',
   smash: 'hammer',

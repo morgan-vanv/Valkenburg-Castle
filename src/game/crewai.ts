@@ -2,7 +2,7 @@
 // `member`/`rivalStats`) and use their packs with the heroes' own item rules, showing each use as
 // an intent the round before. The crew picks one target a round (focus fire), paths to hexes with
 // a line to it and out of the other heroes' sight. V4.0 (spec 28.8, owner): it carries off only a hero left helpless
-// (downed, or dozing from a sleep dart) and alone; a downed hero with friends near is finished instead.
+// (downed, dozing from a sleep dart, or V4.0 spec 29 paralyzed) and alone; a downed hero with friends near is finished instead.
 
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
@@ -21,6 +21,7 @@ import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
 import { faceToward, inRearHalf } from './stealth';
 import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals';
+import { cureVenom, envenom, isParalyzed, venomTakes } from './venom';
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 
 // ---------------------------------------------------------------- the pack
@@ -257,9 +258,24 @@ function smokeIntent(c: Ctx, r: RivalX): Intent | null {
 /** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the lantern bearer, else the nearest hero in range 5 and sight. */
 function dartIntent(c: Ctx, r: RivalX): Intent | null {
   if (!hasKit(r, 'dart')) return null;
-  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing);
+  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing && !isParalyzed(t.hero));
   const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === c.d.lanternBearer) ?? seen[0];
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
+}
+
+/**
+ * V4.0 (spec 29.3, pillar 17): a venom dart at a hero in range 5 and sight the venom can take (not paralyzed already,
+ * not envenomed: one dose is enough to count down): a hero alone first (spec 28.8's `alone`: nobody up within 4 to carry
+ * them out, and paralyzed and alone the crew can carry them off), else the crew's target, else the nearest.
+ */
+function venomIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
+  if (!hasKit(r, 'venomdart')) return null;
+  const seen = heroesInSight(c, r, THROW_RANGE.venomdart).filter((x) => x.hero && !(x.hero.venom ?? 0) && venomTakes(c, x.id));
+  if (!seen.length) return null;
+  // Spec 28.8's "alone" (no other hero who is up within CAPTURE_ALONE): paralyzed and alone, the crew can carry them off.
+  const lone = seen.find((x) => alone(c, x.hero as HeroX));
+  const pick = lone ?? (t && seen.find((x) => x.id === t.id)) ?? seen[0]!;
+  return { kind: 'venomdart', item: 'venomdart', targetId: pick.id };
 }
 
 /**
@@ -460,6 +476,9 @@ function shadowIntent(c: Ctx, r: RivalX): Intent | null {
 function witchIntent(c: Ctx, r: RivalX): Intent | null {
   const mana = manaOf(r);
   if (mana < 1) return null;
+  // V4.0 (spec 29.6): Mend draws out venom too: a paralyzed or envenomed member first.
+  const sick = rivalsOnMap(c).filter((m) => ((m.venom ?? 0) > 0 || isParalyzed(m)) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)) || (a.id < b.id ? -1 : 1))[0];
+  if (sick) return { kind: 'mend', targetId: sick.id };
   const hurt = rivalsOnMap(c).filter((m) => belowHalf(m) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => a.hp - b.hp || (a.id < b.id ? -1 : 1))[0];
   if (hurt) return { kind: 'mend', targetId: hurt.id };
   for (const t of heroesInSight(c, r, GUST_RANGE + 1)) {
@@ -481,7 +500,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   if (potion) return potion;
   switch (r.cls) {
     case 'burglar':
-      return dartIntent(c, r) ?? smokeIntent(c, r);
+      return venomIntent(c, r, t) ?? dartIntent(c, r) ?? smokeIntent(c, r);
     case 'ranger':
       return knockbackIntent(c, r) ?? rangerHamstring(c, r, t) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
     case 'sellsword':
@@ -499,7 +518,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   return null;
 }
 
-export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring'];
+export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring'];
 
 /** A sleep dart on a hero: a hit costs them their next move and action (spec 16.5). */
 function throwDart(c: Ctx, r: RivalX, t: Target): void {
@@ -616,6 +635,20 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       throwDart(c, r, t);
       return true;
     }
+    case 'venomdart': {
+      // V4.0 (spec 29.3): the heroes' venom dart turned on them: 1 Finesse slot, a hit envenoms.
+      if (!hasKit(r, 'venomdart') || !t?.hero || !within(t.at, r.at, THROW_RANGE.venomdart) || !los(c.w, c.d, r.at, t.at)) return false;
+      faceToward(r, t.at);
+      spendKit(r, 'venomdart');
+      c.ev.push({ type: 'thrown', by: r.id, kind: 'venomdart', from: { ...r.at }, to: { ...t.at } });
+      const rr = roll(c, r.id, 'Venom dart', 1, dartChance(r));
+      c.ev.push({ type: 'cast', by: r.id, spell: 'venomdart', targetId: t.id, at: { ...t.at } });
+      if (rr.hits) {
+        c.ev.push({ type: 'hit', attacker: r.id, target: t.id, damage: 0, crit: false });
+        envenom(c, t.id, r.id);
+      } else c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
+      return true;
+    }
     case 'fuse': {
       // The charge lands (or is set) where the intent showed and burns a fuse of 1: it goes off at the end of the next world phase.
       if (!hasKit(r, 'charge') || !it.to || fuseAt(c.d, it.to)) return false;
@@ -722,7 +755,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       const before = member.hp;
       member.hp = Math.min(member.maxHp, member.hp + 4);
       c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: member.id });
-      say(c, `${r.name} mends ${member.name} (+${member.hp - before}).`);
+      const drawn = cureVenom(c, member.id, 'mend', r.id);
+      say(c, `${r.name} mends ${member.name} (+${member.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
       return true;
     }
     case 'ward': {
@@ -772,14 +806,14 @@ export function draggedBy(c: Ctx, heroId: string): RivalX | undefined {
   return rivalsOnMap(c).find((m) => m.dragging === heroId);
 }
 
-/** Spec 28.8: heroes who are up: active, awake (not dozing) and not in a crew member's hands. */
+/** Spec 28.8: heroes who are up: active, awake (not dozing), not paralyzed (spec 29) and not in a crew member's hands. */
 function upHeroes(c: Ctx): HeroX[] {
-  return (activeHeroes(c) as HeroX[]).filter((h) => !h.dozing && !draggedBy(c, h.heroId));
+  return (activeHeroes(c) as HeroX[]).filter((h) => !h.dozing && !isParalyzed(h) && !draggedBy(c, h.heroId));
 }
 
-/** Spec 28.8: downed, or dozing from a sleep dart. */
+/** Spec 28.8: downed, or dozing from a sleep dart; V4.0 (spec 29): or paralyzed. */
 export function helpless(h: HeroX): boolean {
-  return h.status === 'downed' || (h.status === 'active' && !!h.dozing);
+  return h.status === 'downed' || (h.status === 'active' && (!!h.dozing || isParalyzed(h)));
 }
 
 /** Spec 28.8: no other hero who is up within `CAPTURE_ALONE` hexes (straight-line, same level). */
@@ -829,7 +863,7 @@ export function rob(c: Ctx, r: RivalX, h: HeroX): void {
   faceToward(r, h.at);
   c.ev.push({ type: 'robbed', hero: h.heroId, by: r.id, items });
   const name = heroName(c, h.heroId);
-  const how = h.status === 'active' ? `finds ${name} drugged and alone` : `finds ${name} down and alone`;
+  const how = h.status !== 'active' ? `finds ${name} down and alone` : isParalyzed(h) ? `finds ${name} paralyzed and alone` : `finds ${name} drugged and alone`;
   say(c, items.length ? `${r.name} ${how}, empties their purse and takes hold of them.` : `${r.name} ${how} and takes hold of them.`);
 }
 
@@ -1006,6 +1040,11 @@ export function hiredKit(c: Ctx, r: RivalX): Intent | null {
   const potion = potionIntent(c, r);
   if (potion) return potion;
   if (r.cls === 'hedgewitch' && manaOf(r) >= 1) {
+    // V4.0 (spec 29.6): a hero with venom in them first (paralyzed before envenomed), then the most hurt below half.
+    const sick = activeHeroes(c)
+      .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && ((h.venom ?? 0) > 0 || isParalyzed(h)))
+      .sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)))[0];
+    if (sick) return { kind: 'mend', targetId: sick.heroId };
     const hurt = activeHeroes(c)
       .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && h.hp * 2 < (c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? 0))
       .sort((a, b) => a.hp - b.hp)[0];
@@ -1025,7 +1064,8 @@ export function hiredUse(c: Ctx, r: RivalX, it: Intent): boolean {
     const before = h.hp;
     h.hp = Math.min(max, h.hp + 4);
     c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: h.heroId });
-    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before}).`);
+    const drawn = cureVenom(c, h.heroId, 'mend', r.id);
+    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
     return true;
   }
   return false;

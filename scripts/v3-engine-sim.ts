@@ -39,6 +39,11 @@
 // it that nobody sees; a Burglar sneaks round behind a seen sleeper in reach and backstabs it. The
 // report prints enemy strikes from behind, unseen hits and backstabs.
 //
+// V4.0 (spec 29): venom. The bot buys an antidote for Level 2 and 3 contracts (one, when it can spare 20 gold),
+// drinks it when envenomed, gives it to an envenomed or paralyzed friend next to it, mends venom out with a
+// Hedgewitch, and shoulders a paralyzed friend it has no cure for. The report prints heroes envenomed and
+// paralyzed, cures by kind, carries, and heroes lost paralyzed.
+//
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
@@ -87,6 +92,8 @@ let gloamStrikes = 0;
 const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, hamstrung: 0 };
 let stabbing = false;
 /** V4.0 (spec 28): crews play by the party's rules: what crew members did, and what monsters did to them. */
+/** V4.0 (spec 29): venom on heroes and monsters. */
+const venom = { heroDoses: 0, heroParalyzed: 0, monsterDoses: 0, monsterParalyzed: 0, crewParalyzed: 0, antidotes: 0, mends: 0, worn: 0, out: 0, shoulders: 0, carriedOut: 0, lostParalyzed: 0, venomTraps: 0, darts: 0, bought: 0 };
 const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarms: 0, trapsSprung: 0, trapsSpotted: 0, woke: 0, fuses: 0, backstabs: 0, sneakAttacks: 0, killedByMonsters: 0, lootedPiles: 0, leftWithLoot: 0, members: 0 };
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
@@ -122,6 +129,25 @@ function run(s: GameState, cmd: Command): GameState {
     const after = r.state.delve?.traps ?? {};
     for (const [k, t] of Object.entries(after)) if (t.crewSpotted && !s.delve?.traps[k]?.crewSpotted) parity.trapsSpotted++;
     for (const x of r.events) if (x.type === 'trap' && crewIds.has(x.id)) parity.trapsSprung++;
+  }
+  {
+    const heroIds = new Set((s.delve?.heroes ?? []).map((h) => h.heroId));
+    const crewIds = new Set((s.delve?.rivals?.members ?? []).map((m) => m.id));
+    for (const ev of r.events) {
+      if (ev.type === 'envenomed') heroIds.has(ev.id) ? venom.heroDoses++ : venom.monsterDoses++;
+      if (ev.type === 'paralyzed') heroIds.has(ev.id) ? venom.heroParalyzed++ : crewIds.has(ev.id) ? venom.crewParalyzed++ : venom.monsterParalyzed++;
+      if (ev.type === 'cured' && heroIds.has(ev.id)) {
+        if (ev.how === 'antidote') venom.antidotes++;
+        if (ev.how === 'mend') venom.mends++;
+        if (ev.how === 'worn') venom.worn++;
+        if (ev.how === 'out') venom.out++;
+      }
+      if (ev.type === 'shouldered') venom.shoulders++;
+      if (ev.type === 'trap' && ev.venom && heroIds.has(ev.id)) venom.venomTraps++;
+      if (ev.type === 'thrown' && ev.kind === 'venomdart') venom.darts++;
+      if (ev.type === 'out' && (s.delve?.heroes.find((h) => h.heroId === ev.id)?.paralyzed ?? 0) > 0) venom.carriedOut++;
+      if (ev.type === 'died' && (s.delve?.heroes.find((h) => h.heroId === ev.id)?.paralyzed ?? 0) > 0) venom.lostParalyzed++;
+    }
   }
   for (const ev of r.events) {
     if (ev.type !== 'heard') continue;
@@ -512,7 +538,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   s = backstabCheck(s, id);
   if (s.stage !== 'delve') return s;
   const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
-  const alive = () => s.stage === 'delve' && hero()?.status === 'active';
+  const alive = () => s.stage === 'delve' && hero()?.status === 'active' && !((hero()?.paralyzed ?? 0) > 0);
   const tryAct = (): boolean => {
     if (!alive() || hero()!.acted) return false;
     const me = hero()!;
@@ -531,7 +557,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       }
     }
     // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
-    const order: ActionKind[] = ['escape', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
+    const order: ActionKind[] = ['escape', 'antidote', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'shoulder', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
       const o = option(s, id, a);
       if (!o) continue;
@@ -550,6 +576,23 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         o.targets.sort((x, y) => hpOf(x.id!) - hpOf(y.id!));
       }
       if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50)) continue;
+      // V4.0 (spec 29.6): venom first: the paralyzed, then the envenomed; else the badly hurt.
+      const sick = (t: ActionTarget) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return !!x && ((x.paralyzed ?? 0) > 0 || (x.venom ?? 0) > 0); };
+      if (a === 'antidote') {
+        const t = o.targets.find((x) => (s.delve!.heroes.find((y) => y.heroId === x.id)?.paralyzed ?? 0) > 0) ?? o.targets[0]!;
+        const before = s;
+        s = act(s, id, a, t, 0);
+        if (s !== before) return true;
+        continue;
+      }
+      if (a === 'mend' && o.targets.some(sick)) {
+        const before = s;
+        s = act(s, id, a, o.targets.find(sick)!, 0);
+        if (s !== before) return true;
+        continue;
+      }
+      // Shoulder a paralyzed friend only when nobody near has a cure for them.
+      if (a === 'shoulder' && s.delve!.heroes.some((x) => x.status === 'active' && !((x.paralyzed ?? 0) > 0) && (x.pack.some((i) => i.kind === 'antidote') || (e.heroById(s, x.heroId)?.cls === 'hedgewitch' && x.mana > 0)))) continue;
       if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
       if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
       if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
@@ -786,6 +829,12 @@ for (let i = 0; i < N; i++) {
   crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
+  // V4.0 (spec 29.6): an antidote for the deeper levels (spiders, venom traps, the Gallows Choir), when 20 gold can be spared.
+  if (k.level >= 2 && !s.campaign.stash.some((it) => it.kind === 'antidote') && s.campaign.gold >= 40) {
+    const before = s;
+    s = run(s, { type: 'buy', kind: 'antidote' });
+    if (s !== before) venom.bought++;
+  }
   // Lockpicks (spec 19.2): once the smith is home, one reusable pair for the party, carried by a non-Burglar.
   if (s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
   const packs: Record<string, string[]> = {};
@@ -795,6 +844,7 @@ for (let i = 0; i < N; i++) {
   const carry = [
     ...(k.level >= 3 ? s.campaign.stash.filter((it) => it.kind === 'oil').slice(0, 1) : []),
     ...s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2),
+    ...(k.level >= 2 ? s.campaign.stash.filter((it) => it.kind === 'antidote').slice(0, 1) : []),
   ];
   carry.forEach((it, j) => {
     (packs[fit[j % fit.length]!] ??= []).push(it.id);
@@ -818,7 +868,8 @@ for (let i = 0; i < N; i++) {
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
-    for (const h of s.delve!.heroes.filter((x) => x.status === 'active')) {
+    // V4.0 (spec 29.2): the paralyzed sit the turn out.
+    for (const h of s.delve!.heroes.filter((x) => x.status === 'active' && !((x.paralyzed ?? 0) > 0))) {
       if (s.stage !== 'delve') break;
       s = heroTurn(s, h);
     }
@@ -921,6 +972,7 @@ console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).le
 console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes dead in crew fights ${crewStats.heroesDead}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
 for (const f of fightLog) console.log(`  ${f}`);
 console.log(`crew parity (spec 28): members ${parity.members}, killed by monsters (no party fight) ${parity.killedByMonsters}, left with loot ${parity.leftWithLoot}, piles/chests looted ${parity.lootedPiles}; monster strikes on crew ${parity.monsterHits}, crew strikes on monsters ${parity.hitsOnMonsters}; picks ${parity.picks}, smashes ${parity.smashes}, traps spotted ${parity.trapsSpotted} / disarmed ${parity.disarms} / sprung in sight ${parity.trapsSprung}; sleepers woken by crews ${parity.woke}; crew fuses ${parity.fuses}; crew backstabs ${parity.backstabs}, sneak attacks ${parity.sneakAttacks}`);
+console.log(`venom (spec 29): hero doses ${venom.heroDoses} (venom traps ${venom.venomTraps}), heroes paralyzed ${venom.heroParalyzed}; cures: antidotes ${venom.antidotes}, Mend ${venom.mends}, worn off ${venom.worn}, drawn out leaving ${venom.out}; shouldered ${venom.shoulders}, carried out paralyzed ${venom.carriedOut}, lost paralyzed ${venom.lostParalyzed}; antidotes bought ${venom.bought}; venom darts thrown ${venom.darts}; monsters dosed ${venom.monsterDoses}, paralyzed ${venom.monsterParalyzed}, crew paralyzed ${venom.crewParalyzed}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
 console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
 for (const lv of [1, 2, 3]) {

@@ -1262,7 +1262,7 @@ export class Diorama {
         // V3.7 (20.4): level badge, feared and dragging marks.
         const lvl = r.level && r.level > 1 ? `<b class="tag-lvl" title="Level ${r.level}${r.weaponTier ? `, weapon +${r.weaponTier}` : ''}${r.armorTier ? `, armor +${r.armorTier}` : ''}">L${r.level}</b>` : '';
         const marks = (r.feared ?? 0) > 0 ? '<b class="tag-fear">feared</b>' : r.dragging ? `<b class="tag-dragging">dragging ${state.campaign.roster.find((x) => x.id === r.dragging)?.name ?? ''}</b>` : (r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : '';
-        this.setTag(r.id, lvl + pipsHtml(r.hp, r.maxHp, pip) + flag + marks);
+        this.setTag(r.id, lvl + pipsHtml(r.hp, r.maxHp, pip) + flag + marks + venomMark(r));
       }
     }
     if (d.prisoner && !d.prisoner.out && !d.prisoner.dead) {
@@ -1354,7 +1354,9 @@ export class Diorama {
       const key = `trap:${k}`;
       keep.add(key);
       const at = parsePos(k);
-      this.ensureProp(key, makeTrap, at);
+      const want = tr.venom ? 'venom' : 'plain';
+      if (this.props.get(key) && this.props.get(key)!.state !== want) this.removeProp(key);
+      this.ensureProp(key, () => makeTrap(!!tr.venom), at).state = want;
     }
     for (const k of d.ropes) {
       const key = `rope:${k}`;
@@ -2741,6 +2743,19 @@ export class Diorama {
       case 'propSmashed':
         await this.playSmash(e);
         return;
+      // V4.0 (spec 29): venom, paralysis and the cure, as words over the figure.
+      case 'envenomed':
+      case 'paralyzed':
+      case 'cured': {
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        const at = v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0));
+        const text = e.type === 'envenomed' ? (e.dose > 1 ? 'More venom' : 'Venom') : e.type === 'paralyzed' ? 'Paralyzed' : e.how === 'worn' ? 'Can move again' : e.how === 'out' ? '' : 'Venom drawn out';
+        if (text) this.floatText(at, text, e.type === 'cured' ? 'heal' : 'warn', 1.3);
+        if (e.type === 'paralyzed') this.flash(v.root.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x6fdc5a, 3);
+        await clock.wait(0.15);
+        return;
+      }
       case 'rooted': {
         const v = this.units.get(e.id);
         if (!v || !v.root.visible) return;
@@ -2804,15 +2819,16 @@ export class Diorama {
       case 'trap': {
         const at = this.worldOf(e.at, 0.4);
         this.flash(at, 0xff4030, 4);
-        this.floatText(at.clone().add(new THREE.Vector3(0, 1, 0)), `Trap! −${e.damage}`, 'damage', 1.4);
+        this.floatText(at.clone().add(new THREE.Vector3(0, 1, 0)), e.venom ? `Venom! −${e.damage}` : `Trap! −${e.damage}`, 'damage', 1.4);
         if (!this.reduceShake) this.rig.addShake(0.15);
         await clock.wait(0.25);
         return;
       }
       case 'trapSpotted': {
-        this.floatText(this.worldOf(e.at, 0.8), 'Trap spotted', 'warn', 1.4);
+        this.floatText(this.worldOf(e.at, 0.8), e.venom ? 'Venom trap spotted' : 'Trap spotted', 'warn', 1.4);
         const key = `trap:${posKey(e.at)}`;
-        const p = this.ensureProp(key, makeTrap, e.at);
+        const p = this.ensureProp(key, () => makeTrap(!!e.venom), e.at);
+        p.state = e.venom ? 'venom' : 'plain';
         p.obj.visible = e.at.level === this.shownLevel;
         await clock.wait(0.2);
         return;
@@ -3658,6 +3674,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   firecracker: '✺',
   blink: '⟿',
   hamstring: '➴',
+  venomdart: '➶', // V4.0 (spec 29)
   pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
@@ -3693,13 +3710,14 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   firecracker: 'throws a firecracker to',
   blink: 'blinks away to',
   hamstring: 'shoots the legs of',
+  venomdart: 'throws a venom dart at', // V4.0 (spec 29)
   pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
 const BEACON_COLOR: Record<'recover' | 'rescue' | 'slay', number> = { recover: 0xffd36a, rescue: 0x8fe07a, slay: 0xff5a4a };
 
-const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
+const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, venomdart: 0x6fdc5a, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
 const SPELL_COLOR: Partial<Record<string, number>> = {
   firebolt: 0xff7a20,
   fireball: 0xff5a10,
@@ -3778,7 +3796,16 @@ function monsterTag(m: Monster): string {
   const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
   const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
   const stuck = (m.stuck ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted or glued: can't move for ${m.stuck} more round${m.stuck === 1 ? '' : 's'}; it can still act">rooted · ${m.stuck}</b>` : '';
-  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}${stuck}`;
+  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}${stuck}${venomMark(m)}`;
+}
+
+/** V4.0 (spec 29): an envenomed figure's drop and countdown, or the paralyzed mark (monsters and crew members). */
+export function venomMark(f: { venom?: number; paralyzed?: number }): string {
+  const p = f.paralyzed ?? 0;
+  if (p > 0) return `<b class="tag-para" title="Paralyzed: can't move or act for ${p} more turn${p === 1 ? '' : 's'}">${iconSvg('venom', 11)}paralyzed</b>`;
+  const v = f.venom ?? 0;
+  if (v > 0) return `<b class="tag-venom" title="Envenomed: paralyzed in ${v} turn${v === 1 ? '' : 's'}">${iconSvg('venom', 11)}${v}</b>`;
+  return '';
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

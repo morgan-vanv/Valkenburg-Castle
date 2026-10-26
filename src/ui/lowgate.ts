@@ -1202,7 +1202,7 @@ function peddler(el: HTMLElement, s: GameState, l: Loadout, host: CampHost): voi
   const offers = host.engine.shop(s);
   const packed = packedIds(l);
   const metal = offers.filter((o) => o.needs === 'smith');
-  const order = ['torch', 'oil', 'potion', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'smoke', 'glue', 'firecracker', 'caltrops'];
+  const order = ['torch', 'oil', 'potion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
   const shown = offers.filter((o) => !o.locked).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   for (const g of ['light', 'around', 'quiet'] as const) {
     const list = shown.filter((o) => (WARE[o.kind]?.group ?? 'around') === g);
