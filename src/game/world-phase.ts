@@ -4,7 +4,7 @@
 
 import { clearHeard } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { HeroInDelve, Intent } from './types';
+import type { HeroInDelve, Intent, Item } from './types';
 import {
   ARCHER_KEEP, ARCHER_RANGE, BURN_DMG, CAPTAIN_SHOUT_COOLDOWN, CAPTAIN_SHOUT_RANGE, GLOAM_CALM_FADE, GLOAM_DMG, GLOAM_MOVE, GLOAM_RISE_MAX,
   GLOAM_RISE_MIN, HICCUP_NOISE, ORC_SHOVE_CHANCE, SHOUT_NOISE,
@@ -12,7 +12,7 @@ import {
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  activeHeroes, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
+  activeHeroes, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, isKit, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
   onMap, releaseHold, rivalsOnMap, roll,
 } from './common';
 import { canEnter, dijkstra, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within } from './world';
@@ -40,8 +40,13 @@ const WAIT: Plan = { intent: { kind: 'wait' }, path: [] };
 /** Abilities that must be shown as an intent the round before they go off (spec 16.4). */
 const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove', 'hamstring'];
 
+/** What a cutpurse can lift: never the heirloom, the sally key (V4.0) or class kit (spec 26.5). */
+function stealable(i: Item): boolean {
+  return i.kind !== 'heirloom' && i.kind !== 'gatekey' && !isKit(i);
+}
+
 function canSteal(t: Target): boolean {
-  return !!t.hero && t.hero.pack.some((i) => i.kind !== 'heirloom');
+  return !!t.hero && t.hero.pack.some(stealable);
 }
 
 function chooseTarget(c: Ctx, m: MonsterX, lit: Set<string>, prefer?: string): Target | null {
@@ -590,7 +595,7 @@ function monsterAct(c: Ctx, m: MonsterX): void {
         c.ev.push({ type: 'miss', attacker: m.id, target: t.id });
         break;
       }
-      const pool = t.hero.pack.filter((i) => i.kind !== 'heirloom' && i.kind !== 'gatekey'); // V4.0: never the sally key
+      const pool = t.hero.pack.filter(stealable);
       if (!pool.length) {
         hurtHero(c, t.hero, Math.max(1, st.dmg - t.armor), m.id);
         break;

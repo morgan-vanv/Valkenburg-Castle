@@ -118,7 +118,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
   sellsword: { role: 'Tough: holds the line, shoves hard.', abilities: ['Guard: take the hits meant for an adjacent ally.', 'Shove: +1 slot.', 'Brace: until your next turn, hits do 1 less and enemies roll −15% against you.'] },
   burglar: {
     role: 'Quiet: picks locks, sneaks fast.',
-    abilities: ['Pick locks.', 'Sneaks at full pace, with the quietest feet.', "Backstab: from behind an enemy that hasn't noticed you, +1 slot and double damage.", 'Opens chests without using the action.'],
+    abilities: ['Pick locks.', 'Walks 5 and sneaks 4, with the quietest feet.', "Backstab: from behind an enemy that hasn't noticed you, +1 slot and double damage.", 'Opens chests without using the action.'],
   },
   ranger: {
     role: 'Eyes: shoots from range, holds a lane.',
@@ -389,7 +389,7 @@ export const START_GOLD = 90;
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
 export const TAVERN_SIZE = 4;
-/** V3.7 (spec 20.3): the satchel. */
+/** V3.7 (spec 20.3): the Sapper's own charges each delve (V4.0, spec 26.5: improvised explosives). */
 export const SAPPER_CHARGES = 3;
 export const BLAST_INNER_DMG = 4;
 export const BLAST_OUTER_DMG = 2;
@@ -515,6 +515,9 @@ export const CASK_GOOD_CHANCE = 0.7;
 export const RESERVE_FOCUS = 4;
 export const HEAVYHEAD_FOCUS = 1;
 export const SMUGGLER_SNEAK = 4;
+/** V4.0 (spec 26.4): heroes walk 4; the Burglar walks 5 (one further than they sneak). Dash the same. */
+export const WALK_MOVE = 4;
+export const BURGLAR_WALK = 5;
 export const FIRESIDE_HEAL = 3;
 export const HICCUP_NOISE = 1;
 export const HEAVY_MOVE = 3;
@@ -557,7 +560,7 @@ export const PROSPECTOR_ENTERS: [number, number] = [6, 9];
 export const PROSPECTOR_KEEP_OFF = 6;
 /** Spec 20.4: the Wake on Level 3 contracts. */
 export const WAKE_CHANCE = 0.6;
-/** Crew members walk 4 (like heroes). */
+/** Crew members move 4, whatever their class (V4.0, spec 26.4: a crew Burglar does not get the hero Burglar's walk 5). */
 export const RIVAL_MOVE = 4;
 /** Spec 20.4: members at or below half HP back off a hex and drink a potion (heals 5, like a hero's). */
 export const RIVAL_POTION_HEAL = 5;
