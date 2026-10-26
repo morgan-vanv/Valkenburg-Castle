@@ -786,7 +786,7 @@ Owner-approved; design pillar 16 (intuitive rules, creative approaches). Superse
 
 ### 27.6 Hooks for crew parity (pillar 17, a later pass)
 
-- `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only.
+- `Sighted` (`id`, `at`, `sneaking`, `quiet`) is not hero-specific; `sightedHeroes(c)` builds the list monsters look for (add crew members there); `isSneaking` reads any figure's `sneaked` flag; `lookAll(c, firstId)` can be called after a crew member's step. Effects (`noticeHero`) are still hero-only. (Used by spec 28: crew members are in `sightedHeroes`, `lookAll` runs after their steps, `noticeFigure` covers them.)
 
 ## 28. V4.0 crews play by the party's rules (owner, 2026-10-26)
 
