@@ -4432,6 +4432,11 @@ describe('V3.7.2 prospectors keep off the party\'s way in (spec 23.2)', () => {
 
 import { inFrontHalf, inRearHalf } from './stealth';
 import { overwatchCheck } from './ai';
+import { FACING } from './data';
+// V3.9.1: tests written for the shelved facing mechanic run with it on; 'V3.9.1 facing shelved' tests it off.
+FACING.faceCommand = true;
+FACING.turnOnAction = true;
+
 
 describe('V3.9 eyes front', () => {
   const L2 = (col: number, row: number) => at(2, col, row);
@@ -4720,3 +4725,26 @@ describe('V3.9 eyes front', () => {
     });
   });
 });
+
+describe('V3.9.1 facing shelved (spec 24.6)', () => {
+  beforeAll(() => {
+    FACING.faceCommand = false;
+    FACING.turnOnAction = false;
+  });
+  afterAll(() => {
+    FACING.faceCommand = true;
+    FACING.turnOnAction = true;
+  });
+  it('heroes face their last step; the face command is refused', () => {
+    let s = delve({ heroes: ['brann'] });
+    put(s, 'brann', GATE);
+    const r = e.apply(s, { type: 'face', heroId: 'brann', facing: 3 });
+    expect(r.error).toMatch(/face the way they last moved/);
+    const reach = e.reachable(s, 'brann', false).find((x) => x.path.length === 1)!;
+    s = ok(s, { type: 'move', heroId: 'brann', path: reach.path, sneak: false }).state;
+    const f = hero(s, 'brann').facing;
+    expect(f).toBeDefined();
+    expect(hero(s, 'brann').facing).toBe(f);
+  });
+});
+

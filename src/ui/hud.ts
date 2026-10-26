@@ -13,7 +13,7 @@ import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTool
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
-import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE } from '../game/data';
+import { BRAZIER_LIGHT, CLASSES, DARK_SIGHT, FOCUS_MAX, KINDLE_LIGHT, LIGHT_MAX, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, VEIL_BREAK_NOISE, FACING } from '../game/data';
 import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
 import type { Settings } from './settings';
 
@@ -524,7 +524,9 @@ export class Hud {
       const r = unitId ? d.rivals?.members.find((x) => x.id === unitId) : undefined;
       const u = m ?? r;
       const awake = !!u && (m ? m.awareness !== 'asleep' && m.kind !== 'dragon' && m.kind !== 'gloam' : d.rivals?.stance !== 'hired');
-      this.dio.showRearHalf(awake && u && this.vis?.visible.has(posKey(u.at)) && facingOf(u) !== undefined ? u.id : null);
+      // V3.9.1 (spec 24.6): no rear-half wash on hover (simplicity); kept for a later return.
+      void awake;
+      this.dio.showRearHalf(null);
     }
     // V3.9 (24.2): Face mode: the wedge on the hero turns toward the hovered hex.
     if (this.facing) {
@@ -581,7 +583,7 @@ export class Hud {
         const def = this.heroDef(hero.heroId);
         lines.push(`<b>${def?.name ?? hero.heroId}</b> <span class="dim">${def ? className(def.cls) : ''}</span>`, `HP ${hero.hp}/${def?.maxHp ?? '?'} · Focus ${hero.focus}`);
         const hf = facingOf(hero);
-        if (hf !== undefined && hero.status === 'active') lines.push(`<span class="dim">Faces ${this.facingWords(hero.at, hf)}: sees only that half. Turn with Face (F).</span>`);
+        if (hf !== undefined && hero.status === 'active') lines.push(`<span class="dim">Faces ${this.facingWords(hero.at, hf)} (the way they last moved): sees only that half.</span>`);
         if (this.backExposed(hero.heroId)) lines.push('<span class="neg">Back exposed: nobody covers the hex behind them.</span>');
       } else if (rival && d.rivals) {
         const st = STANCE[d.rivals.stance];
@@ -1672,7 +1674,7 @@ export class Hud {
       { class: 'bar-modes' },
       h('button', { class: `btn btn-small ${!this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(false), disabled: this.busy, title: `Walk · noise 1 per hex\n${MOVE_HELP.walk}` }, 'Walk'),
       h('button', { class: `btn btn-small ${this.sneak ? 'on' : ''}`, onclick: () => this.setSneak(true), disabled: this.busy, title: `Sneak · silent · key S\n${MOVE_HELP.sneak}${def?.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}` }, 'Sneak ', h('kbd', null, 'S')),
-      h('button', { class: `btn btn-small btn-face ${this.facing ? 'on' : ''}`, onclick: () => this.setFacing(!this.facing), disabled: this.busy || !sel || sel.status !== 'active', 'data-action': 'face', title: `Face · free · key F\n${FACING_HELP.face}` }, 'Face ', h('kbd', null, 'F')),
+      FACING.faceCommand ? h('button', { class: `btn btn-small btn-face ${this.facing ? 'on' : ''}`, onclick: () => this.setFacing(!this.facing), disabled: this.busy || !sel || sel.status !== 'active', 'data-action': 'face', title: `Face · free · key F\n${FACING_HELP.face}` }, 'Face ', h('kbd', null, 'F')) : '',
     );
     const move = h('div', { class: 'bar-group' }, h('span', { class: 'bar-group-name' }, 'Move'), modes);
     // 20.5: free move while calm: the state line and the Follow toggle.
@@ -2421,7 +2423,7 @@ export class Hud {
       if (sel && this.dealsFor(sel.heroId).length) return this.openParley();
     }
     if (k === 's') return this.setSneak(!this.sneak);
-    if (k === 'f') return this.setFacing(!this.facing);
+    if (k === 'f' && FACING.faceCommand) return this.setFacing(!this.facing);
     if (k === 'e') return this.endTurn();
     // 16.2: L shutters/opens the lantern unless the selected hero has a Light/Oil button on L.
     if (k === 'l' && !this.bar.querySelector('button.act[data-key="l"]:not(.act-shutter)')) return this.toggleShutter();

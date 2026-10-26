@@ -154,35 +154,19 @@ if (fit([[3, 1], [1, 1], [0, 1], [0, 2]])) {
   await p.waitForTimeout(80);
   const wedges = await p.evaluate(() => window.vc.dio.facingMarks.children.filter((g) => g.userData.hero).map((g) => g.userData.unit));
   check('a facing wedge on every active hero', wedges.length === 2 && wedges.includes(a) && wedges.includes(burglarId), JSON.stringify(wedges));
-  const faceBtn = await p.$eval('.hud-bar button[data-action="face"]', (e) => ({ title: e.title, text: e.textContent })).catch(() => null);
-  check('the bar has Face (F) with its help', !!faceBtn && /Face/.test(faceBtn.text) && /front half/.test(faceBtn.title), faceBtn?.title.slice(0, 80));
+  // V3.9.1 (spec 24.6): Face is shelved: no button, F does nothing.
+  const faceBtn = await p.$('.hud-bar button[data-action="face"]');
+  check('no Face button (shelved)', !faceBtn);
   await p.keyboard.press('f');
   await p.waitForTimeout(60);
-  check('F enters Face mode (button on)', await p.evaluate(() => window.vc.hud.facing === true && !!document.querySelector('.hud-bar button[data-action="face"].on')));
-  const tip = await hoverTip(step(P, 1));
-  check('hovering a hex in Face mode: wedge preview and "Face … · free"', /Face .* · free/.test(tip) && (await p.evaluate(() => window.vc.dio.facePreview.visible)), tip.slice(0, 80));
-  await click(step(P, 1));
-  await idle();
-  s = await state();
-  const fa = s.delve.heroes.find((h) => h.heroId === a).facing;
-  if (fa === F(1)) {
-    check('clicking sends `face`: the hero faces the clicked hex', true);
-    const rot = await p.evaluate((id) => window.vc.dio.facingMarks.children.find((g) => g.userData.unit === id)?.rotation.y, a);
-    const want = await p.evaluate(async (f) => (await import('/src/view/stealth.ts')).facingAngle(f), F(1));
-    check('...and the wedge turns with it', Math.abs((rot ?? 99) - want) < 1e-6, `${rot} vs ${want}`);
-  } else skip('Face turns the hero', `engine left facing ${fa} (no \`face\` yet?)`);
-  check('Face mode ends after the click', await p.evaluate(() => window.vc.hud.facing === false));
-  // Esc cancels Face mode.
-  await p.keyboard.press('f');
-  await p.keyboard.press('Escape');
-  check('Esc leaves Face mode', await p.evaluate(() => window.vc.hud.facing === false));
+  check('F does not enter Face mode', await p.evaluate(() => window.vc.hud.facing !== true));
   // The move preview shows the facing the move leaves.
   const r = await p.evaluate(() => window.vc.hud.reach.find((x) => x.path.length >= 2));
   if (r) {
     await hoverTip(r.to);
     const fp = await p.evaluate(() => ({ vis: window.vc.dio.facePreview.visible, rot: window.vc.dio.facePreview.rotation.y }));
     const want = await p.evaluate(async (rr) => { const m = await import('/src/view/stealth.ts'); return m.facingAngle(m.pathEndFacing(rr.path[rr.path.length - 2], [rr.to])); }, r);
-    check('move preview: a wedge at the path end, facing the last step', fp.vis && Math.abs(fp.rot - want) < 1e-6, JSON.stringify(fp));
+    check('move preview: an arrow at the path end, facing the last step', fp.vis && Math.abs(fp.rot - want) < 1e-6, JSON.stringify(fp));
     await unhover();
   } else skip('path-end facing', 'no reach');
 }
@@ -197,7 +181,7 @@ if (fit([[3, 1], [3, 2], [2, 1], [4, 1]])) {
   await scene({ [a]: { at: P, facing: F(0) }, [burglarId]: { at: step(P, 3), facing: F(0) } }, []);
   c = await chips();
   check('the one behind turns away: its back is exposed (one badge)', c.length === 1, JSON.stringify(c));
-  check('...with a tooltip that says what to do', !!c[0] && /Back exposed/.test(c[0].title) && /blindsided/.test(c[0].title) && /Face another hero/.test(c[0].title), c[0]?.title.slice(0, 120));
+  check('...with a tooltip that says what to do', !!c[0] && /Back exposed/.test(c[0].title) && /blindsided/.test(c[0].title) && /facing this way/.test(c[0].title), c[0]?.title.slice(0, 120));
   await scene({ [a]: { at: P, facing: F(0) } }, []);
   c = await chips();
   check('a hero alone shows the badge', c.length === 1);
@@ -221,7 +205,7 @@ if (fit([[0, 1], [0, 2], [0, 3]])) {
   if (visibleM) {
     const tip = await hoverTip(M, 'aw');
     const n = await p.evaluate(() => window.vc.dio.blindFill.count);
-    check('hovering a seen awake enemy shades its rear half', n > 0, `${n} hexes`);
+    check('hovering a seen awake enemy shades nothing (V3.9.1: no rear-half wash)', n === 0, `${n} hexes`);
     check('...and the tip says it sees only its front half', /front half/.test(tip) && /rear half/.test(tip), tip.slice(0, 160));
     await unhover();
     check('unhover: the rear half is gone', (await p.evaluate(() => window.vc.dio.blindFill.count)) === 0);

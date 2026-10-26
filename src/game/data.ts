@@ -280,6 +280,11 @@ export const CALM_STEPS = 4;
  * turn-based. The code stays for a later return (see docs/shelved/exploration-mode.md).
  */
 export const FREE_MOVE = { enabled: false };
+/**
+ * V3.9.1 (spec 24.6): the managed facing mechanic is shelved. Heroes face the way they last moved;
+ * the free `face` command and turning toward an action's target are off. Flip these to bring them back.
+ */
+export const FACING = { faceCommand: false, turnOnAction: false };
 /** Brace (heir, sellsword, sapper): hits do 1 less, enemies roll this much lower, until the next player phase. */
 export const BRACE_DMG = 1;
 export const BRACE_CHANCE = -15;

@@ -22,6 +22,8 @@ Camp → take a contract from Hobart's bounty board → pick up to 4 heroes and 
 
 ## Since launch
 
+- **V3.9.1, simpler facing (2026-10-25 late night):** no more Face button: a hero simply faces the way they last moved, and turning means moving. Front-half sight, blindsided hits and the Burglar's backstab stay. The move preview shows a small arrow for where the hero will face, and hovering an enemy no longer shades its back.
+
 - **V3.9, eyes front (2026-10-25 late night):** heroes and enemies see only what's in front of them. Enemies are blind behind; sleepers only hear. Each hero faces the way they last moved or struck, and Face (F) turns them for free; the party sees what any hero faces, so stand together to cover each other's backs. Hits from behind get an extra slot, and something you can't see striking from behind shows up as "Something strikes Pim from behind". The Burglar is the sneak: full-pace sneaking, quietest feet (5% to wake a sleeper, spotted at 2 when lit), and Backstab from behind on an unaware target for an extra slot and double damage, marked with a dagger when a Burglar is selected. The move preview only warns about enemies you've seen; walking into an unscouted room is on you. The free-swing confirmation and the shaded blind arcs are gone; facing shows as small arrows.
 
 - **V3.7.2, back to turns (2026-10-25 night):** V3.8's exploration mode is shelved for later and the game is entirely turn-based again, including switching off V3.7's step-counting free move. The Lantern Sisters no longer come in by your way in: they use another entrance, arrive between rounds 6 and 9, and wait while you're near their door. Everything else from V3.7 and V3.7.1 stays.

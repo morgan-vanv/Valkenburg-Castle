@@ -498,7 +498,8 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   check('end turn with everyone moved but not acted: no prompt (they are ready, not idle)', !modal, modal.slice(0, 60));
   await idle();
   await p.evaluate(() => { localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: false })); });
-  await edit(`for (const h of s.delve.heroes) { h.moved = false; h.acted = false; }`);
+  // The end turn above runs a world phase that may down heroes (V3.9 hits from behind): stand everyone back up.
+  await edit(`s.stage = 'delve'; s.summary = null; s.delve.phase = 'player'; for (const h of s.delve.heroes) { h.status = 'active'; h.hp = Math.max(h.hp, 5); h.moved = false; h.acted = false; }`);
   await p.evaluate(() => { window.vc.hud.host?.settings && (window.vc.hud.host.settings.noEndTurnAsk = false); });
   await p.waitForTimeout(100);
   const note = await p.$eval('.bar-end-note', (e) => e.innerText);

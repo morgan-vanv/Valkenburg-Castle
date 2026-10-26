@@ -12,6 +12,11 @@ import { kindAt, World } from './world';
 import type { DelveX, GameStateX } from './state';
 import { makeHero } from './camp';
 import { blastPreview, breakableWall, chargeCount } from './charges';
+import { FACING } from './data';
+// V3.9.1: tests written for the shelved facing mechanic run with it on; 'V3.9.1 facing shelved' tests it off.
+FACING.faceCommand = true;
+FACING.turnOnAction = true;
+
 
 const e = createEngine(testCastle);
 const w = new World(testCastle);
