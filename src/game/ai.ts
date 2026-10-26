@@ -12,6 +12,7 @@ import {
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
+import { wayAtEntrance, wayOpen } from './ways';
 import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
 
 // ---------------------------------------------------------------- perception
@@ -106,7 +107,14 @@ export function hitRange(slots: number, dmg: number, armor: number): [number, nu
 
 export function exitsBy(c: Ctx, from: Pos): Pos[] {
   const field = distField(c.w, c.d, [from], { stairs: true });
-  return [...c.w.exits].filter((e) => field.has(posKey(e))).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
+  // V4.0 (spec 25): only exits whose way is open (never one behind a shut gate or rubble).
+  return [...c.w.exits].filter((e) => field.has(posKey(e)) && exitOpen(c, e)).sort((a, b) => field.get(posKey(a))! - field.get(posKey(b))!);
+}
+
+/** V4.0 (spec 25): is this exit's way open (exits that aren't shut ways always are)? */
+export function exitOpen(c: Ctx, e: Pos): boolean {
+  const way = wayAtEntrance(c.w.castle, e);
+  return !way || wayOpen(c.s, way.id);
 }
 
 /**

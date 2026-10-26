@@ -1,6 +1,6 @@
-# Current rules (V3.9.4)
+# Current rules (V4.0)
 
-Current rules at V3.9.4 (2026-10-26). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
+Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
 
 Scope: the rules engine (src/game) and castle data (src/data/castle) as they stand on `main` at V3.9.4 (commit bc3f1fd). Presentation is mentioned only where it carries a rule. Every number below was read from the code. Section 18 lists where the spec disagrees.
 
@@ -12,7 +12,7 @@ Conventions: "slot" is one die in a slot roll; "level" means a castle level (1 t
 
 Keven (id `keven`, class `heir`), son of the late Lord Hobart, retakes Castle Valkenburg from Lowgate, a derelict village under its walls. A campaign is one roguelite run on one fixed three-level castle.
 
-Loop: in camp, pick a contract from the notice post, pick 1 to 4 heroes, fill their packs from the stash, pick one of three entrances, delve. A delve is a turn-based extraction: reach the objective, get out through an exit. The summary is applied in camp, the board and recruits refresh, repeat. The campaign ends when Keven dies or is carried off by a crew. There is no win state in code.
+Loop: in camp, pick a contract from the notice post, pick 1 to 4 heroes, fill their packs from the stash, pick an open entrance (a new campaign has only the main gate; section 3.1), delve. A delve is a turn-based extraction: reach the objective, get out through an exit. The summary is applied in camp, the board and recruits refresh, repeat. The campaign ends when Keven dies or is carried off by a crew. There is no win state in code.
 
 Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`, `campCommand`, `startDelve`, `buildSummary`, `backToCamp`). Stages: `Stage` = 'camp' | 'delve' | 'summary' | 'over' (types.ts).
 
@@ -24,6 +24,7 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 
 - Gold 90 (`START_GOLD`). Reputation 0. Roster: Keven alone. Village: nothing won back.
 - Keven may delve alone; the camp does not force a hire.
+- Entrances: only the main gate is open (`campaign.opened = {}`); the sally port and the east breach are shut until opened in play (section 3.1). Castle memory empty (`campaign.explored = {}`).
 
 ### 2.2 Village stations and who unlocks them
 
@@ -39,6 +40,8 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 Refusal texts name the fix (`LOCKED` in camp.ts).
 
 ### 2.3 Story contracts
+
+Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board shows story status itself); only "Level N" and the copper's "Heavy" line.
 
 | Story | Kind | Site | On the board when | Bounty | Unlocks |
 | --- | --- | --- | --- | --- | --- |
@@ -116,6 +119,8 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 - The dead go to `campaign.fallen`. Their pack drops where they died; non-heirloom, non-hoard items from fallen heroes persist as ground loot in later delves (`lostGear`).
 - Items taken in and not carried out are lost. Gold carried out goes to camp gold; other items to the stash. The satchel and the improvised pick never reach the stash.
 - Lit braziers stay lit for the campaign (`litBraziers`). Hoard pieces carried out never come back (`hoardTaken`).
+- V4.0: ways in opened during the delve (`Delve.ways`) are merged into `campaign.opened`; a hero who gets out carrying the sally port key opens the sally port for good ("With its key in hand, the sally port gate is yours. It stays open."). The key never reaches the stash and is never lost gear.
+- V4.0: every hex the delve explored is merged into `campaign.explored` (hex keys "q,r" by level), the campaign's memory of the castle (`castleMemory`).
 
 ### 2.10 Captives
 
@@ -142,7 +147,8 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 
 - Squad: 1 to 4 distinct heroes from the roster (`partyProblem`). No fitness check.
 - Packs: up to 4 slots per hero from the stash; each item in one pack only.
-- Entrances (`castle.entrances`, index order): 0 main gate L1, 1 sally port L1, 2 east breach L1. Heroes are placed on the entrance and the nearest free hexes.
+- Entrances (`castle.entrances`, index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21). Only an open one may be used (section 3.1); `startDelve` refuses a shut one: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate." Heroes are placed on the entrance and the nearest free hexes.
+- Ways already opened this campaign stand open (the gate open and unlocked, the rubble in `blown`). While the sally port is shut, its key lies in the library at L1 (3, 1).
 - Lantern: full (20), open; the bearer is Keven if he goes, else the first hero.
 - Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. The Sapper gets the satchel (3 charges, slotless). Every Burglar gets one improvised pick (slotless).
 - Every hero faces "into the castle": toward the centroid of floor hexes within 6.
@@ -151,7 +157,23 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 - Coins, chests, traps, lost gear, lit braziers from the castle data and campaign.
 - A rival crew is rolled (section 12).
 
-Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.ts `placeHoard`; stealth.ts `facingInto`.
+### 3.1 Shut entrances (V4.0)
+
+| Entrance | New campaign | Shut by | Opens with | Engine state |
+| --- | --- | --- | --- | --- |
+| Main gate | open | | always open | `open` |
+| Sally port | shut | a barred gate at L1 (2, 14), between the exit and the kitchens | its key (Unbar), or a blast within 1 (a charge, a Sapper's charge) | `locked` |
+| East breach | shut | two rubble heaps at L1 (42, 21) and (43, 21), between the exit and the chapel | a blast within 1 or a Dig on each heap; open once a walkable path joins the exit to the main gate | `blocked` |
+
+- Once opened, a way stays open for the rest of the campaign: as an entrance and as an exit. Until then its exit can't be used to Leave, and no crew or cutpurse paths out through it.
+- The barred gate is a locked door (`barred`): Pick, Smash, the skeleton key and a crew's open job never work on it. The heaps are cracked tiles (`heap`): they block sight and passage like a cracked wall until cleared.
+- The sally port key (`gatekey`): 1 slot, worth 0, never sold, never handed over in parley, never stolen by a cutpurse, ignored by prospectors looting. Unbar: action, silent, anyone, next to the gate; the key stays in the lock. Carried out of the castle, it opens the gate for good. One copy lies in the library while the gate is shut and has never been opened; a second comes with the Lantern Sisters when they enter by the shut sally port (section 12.1).
+- Log lines: "The sally port gate swings open. It stays open." and "The east breach is clear. A new way in." (when a blast, a Dig, the key or a crew opens them).
+- `Engine.entrances(s)`: one entry per entrance, index order: `{ index, name, state: 'open' | 'locked' | 'blocked', known, hint? }`. `known`: open, or the exit hex or the gate/rubble in the campaign's memory (or this delve's explored hexes). `hint` while shut: "A barred gate. It wants its key, or a charge." / "Choked with rubble."
+- `Engine.castleMemory(s)`: `{ level, hexes }` per castle level, hex keys "q,r" the campaign has explored (empty on a new campaign).
+- Saves from before V4.0 (no `campaign.opened`) keep all three entrances open; their memory starts empty.
+
+Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.ts `placeHoard`; stealth.ts `facingInto`; ways.ts (`shutWays`, `campaignOpen`, `wayOpen`, `startWays`, `applyOpenWays`, `checkWays`, `mergeDelve`, `entranceList`, `castleMemory`, `isGateKey`); data/castle/index.ts `entranceNames`, `shutWays`.
 
 ---
 
@@ -437,7 +459,8 @@ Nerve is not used by any rule.
 | Attack | Weapon: melee on an adjacent visible enemy; Ranger on a visible enemy in line of sight within 6 |
 | Shove | 2 Might slots (Sellsword 3) on an adjacent visible enemy (not the Dragon); 2+ hits push it 1 hex straight away (section 13.2); Perfect +1 damage; noise 2 |
 | Pick | Needs lockpicks or the improvised pick (section 9.4) |
-| Smash | 2 Might slots on an adjacent (or own-hex) locked door or chest, jammed included; door opens on 2 hits, chest on 1; noise 4 either way |
+| Smash | 2 Might slots on an adjacent (or own-hex) locked door or chest, jammed included (not the barred gate); door opens on 2 hits, chest on 1; noise 4 either way |
+| Unbar | V4.0: with the sally port key, next to the barred gate: opens it, silent, for the campaign (section 3.1) |
 | Smash crate/barrel | Adjacent crate or barrel; noise 4; 60% gold 3–12, 20% torch/potion/firecracker/caltrops, 20% nothing; the hex becomes floor |
 | Open (free) | Toggle an adjacent unlocked door (not one someone stands in); open an adjacent unlocked chest (action, free for Burglar); loot rolls onto the chest hex |
 | Take (free) | Everything that fits from one pile on or next to the hero, contract item first; blocked with a reason when nothing fits |
@@ -452,7 +475,7 @@ Nerve is not used by any rule.
 | Free | Adjacent prisoner: frees them (first time) and makes this hero the escort; another adjacent hero can take over the escort |
 | Escape | Grabbed: 2 Might slots, 1 hit frees; noise 1 |
 | Pass lantern, Shutter | Section 7.1 |
-| Leave (free) | On an exit hex: the hero is out; the prisoner goes out too if this hero escorts them and they are adjacent |
+| Leave (free) | On an exit hex whose way is open (section 3.1): the hero is out; the prisoner goes out too if this hero escorts them and they are adjacent |
 | Parley (free) | Opens the deal card (section 12.4) |
 
 ### 9.3 Class abilities
@@ -502,6 +525,8 @@ Pick outcomes: all slots hit: opens silently; one short: opens, noise 2; on 3 sl
 
 Other ways in: Smash (section 9.2), a blasting charge, the skeleton key (one use, anyone, silent, not on jammed locks), a crew's paid "open" job.
 
+V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or a blast within 1 opens it (section 3.1).
+
 ### 9.5 Items
 
 - Pack: 4 slots. Most items 1 slot; heirlooms and hoard pieces 2; the copper 2 and heavy; satchel and improvised pick 0. Gold stacks to 100 per slot.
@@ -515,6 +540,7 @@ Other ways in: Smash (section 9.2), a blasting charge, the skeleton key (one use
 - Caltrops: an adjacent free floor hex: the first monster stepping there takes 2 and stops. Lasts the delve. The party's own caltrops never catch heroes.
 - Firecracker: throw 6: noise 6 at the hex.
 - Skeleton key, lockpicks: section 9.4.
+- Sally port key (V4.0): section 3.1.
 - Grappling hook, rope: section 13.1.
 - Blasting charge (bought): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw.
 
@@ -593,11 +619,11 @@ One crew at most per delve, by contract level:
 
 | Contract | Crew | Chance | Arrival |
 | --- | --- | --- | --- |
-| Level 1 | The Lantern Sisters (prospectors) | 50% | Round 6–9, at a rival entrance more than 6 from the party's entrance (the farthest such); waits while any hero is within 6 of it |
+| Level 1 | The Lantern Sisters (prospectors) | 50% | Round 6–9, at a rival entrance more than 6 from the party's entrance, picked by the seeded RNG (V4.0); waits while any hero is within 6 of it |
 | Level 2 | The Ferrymen or the Gallows Choir (cutthroats, seeded pick) | 60% | From round 1, waiting at a random Level 2 post |
 | Level 3 | The Wake (cutthroats) | 60% | From round 1, waiting at a random Level 3 post |
 
-Rival entrances: east breach, sally port. Level 2 posts: west and east ends of the main bridge, the arcade end of the north bridge, the winch room. Level 3 posts: the lift base, the Bone Pile's narrowing toward the Lair.
+Rival entrances: east breach, sally port. V4.0: the Sisters make their own entrance when theirs is shut. By the sally port, the Burglar sister carries the sally port key (in her pack; it drops with her pack if she dies) and unlocks the gate as they come in ("A key turns in the sally port's bar. The Lantern Sisters let themselves in."), silently. By the east breach, they blast the rubble as they come in ("The Lantern Sisters set a charge in the rubble of the east breach."): a real blast at the heap nearest the exit, then the other, set by the Burglar sister (the crew is still outside and unhurt; noise 8, heard by the party as a blast). Either way the way is open for the rest of the campaign. Level 2 posts: west and east ends of the main bridge, the arcade end of the north bridge, the winch room. Level 3 posts: the lift base, the Bone Pile's narrowing toward the Lair.
 
 ### 12.2 Members
 
@@ -614,7 +640,7 @@ Cutthroat members each carry a purse: 30 gold (level 2–3), 50 (the Wake). The 
 
 ### 12.3 Stances and behaviour
 
-- **Prospectors (neutral)**: walk to the nearest unopened, unjammed chest or ground pile (not one a hero stands on; piles at opened chests only for the Burglar sister, or if it holds an heirloom) and take everything. Goal becomes `leave` after 3 pickups, when the lantern is at 9 or less, or when nothing is left; then they walk to the nearest exit and go. On first being spotted, the Shadowmancer veils the crew's striker (or herself).
+- **Prospectors (neutral)**: walk to the nearest unopened, unjammed chest or ground pile (not one a hero stands on; piles at opened chests only for the Burglar sister, or if it holds an heirloom) and take everything. Goal becomes `leave` after 3 pickups, when the lantern is at 9 or less, or when nothing is left; then they walk to the nearest open exit and go (never one behind a shut gate or rubble; the same for a crew dragging a hero and a fleeing cutpurse). On first being spotted, the Shadowmancer veils the crew's striker (or herself).
 - They turn **hostile** if a hero damages, gusts or dreads any member, or if they are spotted, neutral, and blocked from moving toward their goal 2 rounds running.
 - **Cutthroats (waiting)**: stand at their post. Noticing a hero (section 5.4, within 6) or hearing noise ≥ 4 in the player phase: stance `demanding`, toll = max(50, half the party's carried value rounded to 5). They don't attack that world phase. At the next world phase, still demanding → hostile.
 - **Hostile crews**: pick one target a round for the whole crew (the lantern bearer if any member can reach them, else the lowest-HP hero in reach, else the nearest hero on foot); path to hexes with a line to the target and least exposure to other heroes. Each member first checks its kit (below), else attacks.
@@ -638,7 +664,7 @@ Any active hero within 4 of a visible, unveiled member in line of sight may deal
 - Payment from the active heroes' packs: gold first, then gems and jewelry smallest first, no change. Heirlooms, hoard and story items are never handed over. Short: blocked with "You carry X; they want Y."
 - Any attack on a bribed, truce or hired crew makes it hostile; they keep what they were paid.
 
-Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `lootAct`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `hostilePlan`, `hostileAct`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_LIGHT`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
+Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `makeEntrance`, `lootAct`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); ai.ts `exitsBy`, `exitOpen`; crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `hostilePlan`, `hostileAct`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_LIGHT`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
 
 ---
 
@@ -674,6 +700,7 @@ The Dragon and the Gloam can't be pushed.
 ### 13.3 Doors, locks, chests
 
 - Doors block sight and light when closed and halve noise reach (count 2). Locked doors: Pick, Smash, charge, key, crew job. A jammed lock: only Smash or a charge. A blasted door is opened and unlocked (it can be closed again).
+- V4.0: the sally port's barred gate (a locked door with `barred`): only its key (Unbar) or a blast. Its hover: "Barred gate · the sally port key opens it (Unbar), or a charge. Then it stays open".
 - Monsters and crews path through unlocked doors (opening them); they can't pass locked ones (the Gloam can).
 - Chests: tier 1–3. Loot roll on opening (d6 + tier): 2–3 gold 15T–30T; 4–5 gold 25T–50T plus a torch or potion (50/50); 6–7 a gem worth 40T–80T; 8+ jewelry worth 80T–140T.
 - Locked chests: Pick, Smash (1 hit), charge, key.
@@ -701,6 +728,7 @@ The Dragon and the Gloam can't be pushed.
 
 - Crates and barrels: Smash (section 9.2). The smashed hex is floor.
 - Cracked walls: a charge within 1 or Dig turns them to floor.
+- V4.0: rubble heaps (cracked tiles with `heap`) choke the east breach: same rules as a cracked wall, drawn as a mound of boulders; the hover says "Rubble · fallen stone chokes the east breach · a charge clears it, or a Sapper's Dig" (section 3.1).
 - Breakable built walls: on Levels 1 and 2 only; a wall hex with two floor-like neighbours that aren't adjacent to each other; not `unbreakable` (outer curtain walls, the tower stair shaft, the guard post landing, the winch room); not cave rock (every floor beside it rock or earth); never pillars. A blast within 1 turns them to rubble (`blown`), move cost 2, until dug.
 
 ### 13.8 Charges and blasts
@@ -712,7 +740,7 @@ The Dragon and the Gloam can't be pushed.
 - Collapse and rubble are decided from the map before the blast (no chain collapse).
 - Noise 8, also heard on the levels above and below.
 
-Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast`, `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `SAPPER_CHARGES`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
+Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast` (calls ways.ts `checkWays`), `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `SAPPER_CHARGES`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
 
 ---
 
@@ -721,7 +749,7 @@ Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeN
 ### 14.1 Level 1: the Ruined Keep
 
 - Rooms: Great Hall (with the pit mouth and the High Table dais), Gatehouse, Gate passage, Courtyard, Kitchens, Servants' passage, Library, Tower stair, Armory, Chapel, East breach, Sally port.
-- Exits (also the party's entrances): main gate (24, 31), sally port (1, 14), east breach (44, 21). Tower stair down to Level 2.
+- Exits (also the party's entrances): main gate (24, 31), sally port (1, 14), east breach (44, 21). Tower stair down to Level 2. V4.0: the sally port is shut by a barred gate at (2, 14) and the east breach by rubble at (42, 21) and (43, 21) until opened (section 3.1); the sally port key lies in the library at (3, 1) while its gate is shut. The daylight that lit the two passages now sits on the exit hexes (1, 14) and (44, 21).
 - Light: abundant daylight (courtyard, gatehouse, round the hall's pit mouth, open corridors, the chapel's nave and south aisle, the kitchens' chimney, the tower top), sconces in library, kitchens, hall, tower, armory. Library and armory stay dim.
 - Locked: the armory door (36, 12), the armory chest. Cracked wall (40, 16). Brazier in the chapel. Traps: servants' passage, gate passage. Railing: a few hexes on the pit mouth.
 - Chests: library, kitchens, chapel (tier 1); tower, armory (tier 2). Coins 10, 15, 20.
@@ -745,25 +773,25 @@ Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeN
 - Contract sites: l3-rescue-nest, l3-recover-grove, l3-recover-drain (also the cask book), l3-slay-dragon; hideouts for the Ferrymen (the Drain), Gallows Choir (Tunnels), the Wake (Bone Pile).
 - **The Dragon**: 30 HP, armor 1, bite 4 slots at 65% for 3, moves 3, never leaves the Lair. Not affected by shoves, falls, sleep, darts, dread, briar, hamstring, knockback, glue or backstab. It never takes free swings itself, but heroes get free swings at it when it steps out of their reach. Starts asleep. Wakes when a hero walks (not sneaks) into the Lair, ends next to it (unless a sneaking Burglar), or noise ≥ 4 reaches it. Awake, it sees heroes within 10 in line of sight. Its first action awake is breath, then it alternates: a breath round (intent `breath`: a straight 5-hex line toward the nearest seen hero, stopped by walls; next world phase every hero on those hexes takes 4, no roll, no armor, no ward; noise 6), then a non-breath round: tail sweep if 2+ heroes are adjacent (each pushed 1 hex), else bite an adjacent hero, else close in. Hoard: 3 pieces worth 300, 2 slots each, around its spawn; taking is free and silent.
 
-Code: src/data/castle/index.ts (`castle`: links, entrances, rivalEntrances, rivalPosts, spawns, chests, coins, traps, braziers, contractSites), level1.ts, level2.ts, level3.ts, regions.ts, shapes.ts, build.ts; dragon.ts (`lairCheck`, `planDragon`, `breathLine`, `dragonSpecial`, `placeHoard`); data.ts `BREATH_DMG`, `BREATH_LEN`, `BREATH_NOISE`, `DRAGON_WAKE_NOISE`, `HOARD_PIECES`, `HOARD_VALUE`.
+Code: src/data/castle/index.ts (`castle`: links, entrances, entranceNames, shutWays, rivalEntrances, rivalPosts, spawns, chests, coins, traps, braziers, contractSites), level1.ts, level2.ts, level3.ts, regions.ts, shapes.ts, build.ts; dragon.ts (`lairCheck`, `planDragon`, `breathLine`, `dragonSpecial`, `placeHoard`); data.ts `BREATH_DMG`, `BREATH_LEN`, `BREATH_NOISE`, `DRAGON_WAKE_NOISE`, `HOARD_PIECES`, `HOARD_VALUE`.
 
 ---
 
 ## 15. Win, lose and extraction
 
-- Extraction: a hero on an exit hex uses Leave (free). Exits: three on Level 1, the cave mouth on Level 3. Leaving with the escorted prisoner adjacent takes the prisoner out.
+- Extraction: a hero on an exit hex uses Leave (free). Exits: three on Level 1 (V4.0: only those whose way is open), the cave mouth on Level 3. Leaving with the escorted prisoner adjacent takes the prisoner out.
 - Prisoner: 5 HP (a captive hero 1). Freed (action, adjacent), they follow their escort to a free adjacent hex after each of the escort's moves (not onto doors or traps). Monsters target a freed prisoner. If they die, the contract fails.
 - Delve over when no hero is active; summary: contract done, bounty, value carried out, survivors, survivors below full HP (`wounded`), dead, XP, level-ups, notes.
 - Campaign over: section 2.11. No victory condition exists.
 
-Code: delve.ts `leaveCastle`, `afterHeroMove`; camp.ts `contractDone`, `buildSummary`, `backToCamp`.
+Code: delve.ts `leaveCastle`, `canLeaveAt`, `afterHeroMove`; camp.ts `contractDone`, `buildSummary`, `backToCamp`.
 
 ---
 
 ## 16. Determinism and saves
 
 - All randomness from `state.rng` (mulberry32, src/game/rng.ts). Same seed and commands give the same game.
-- `serialize`/`deserialize`: the whole state as JSON, `version` 3. Older saves without campaign HP get full HP; without a village, a fresh one.
+- `serialize`/`deserialize`: the whole state as JSON, `version` 3. Older saves without campaign HP get full HP; without a village, a fresh one. V4.0: saves without `campaign.opened` keep every entrance open (the field absent means open); without `campaign.explored`, an empty memory; a delve saved without `Delve.ways` gets it from the campaign. No save-key bump.
 - Browser storage keys: save `vc.save.v39` (src/ui/app.ts `SAVE_KEY`); loadout `vc.loadout.v33`; settings `vc.settings`; mute `vc.muted`; light meter scale `vc.lightmax.v3`.
 
 ---
@@ -816,7 +844,7 @@ Each entry: what docs/v3-spec.md (latest applicable section) says, what the code
 25. ~~Burglar ability text~~: fixed in V3.9.4 (data.ts `ROLES.burglar` now reads "Opens chests without using the action."; Take is free for everyone).
 26. **Arrival next to sleepers ignores quiet feet.** Spec 24.3 gives the Burglar 10% for ending adjacent. Code applies that to walks only; arrivals by fall, climb or grapple wake adjacent sleepers for sure and blink at 25% for anyone (common.ts:549-556).
 27. **Blink, throws and fireball target "in sight".** Spec 15.3/15.4 say "in sight". Code checks the party's visible set, not the caster's own line of sight (delve.ts:430-439 `hexesInSight`).
-28. **Cutpurse can steal hoard pieces.** Spec 7: not heirloom. Code excludes only `heirloom` items (story items are heirlooms), so hoard pieces can be stolen (world-phase.ts:551).
+28. **Cutpurse can steal hoard pieces.** Spec 7: not heirloom. Code excludes only `heirloom` items (story items are heirlooms) and, since V4.0, the sally port key, so hoard pieces can be stolen (world-phase.ts `steal`).
 29. **Sounds the spec lists that never happen.** Spec 24.8 lists the crew toll as a `shout` and smashing and digging as `crash`. Code: `crewDemand` makes no sound (common.ts:465-477), and no monster or crew member ever smashes or digs; the only `crash` sounds are a locked door forced open, a crew working the winch and a crew gust (ai.ts:148, rivals.ts:521, crewai.ts:713).
 30. ~~Section 22 missing~~: fixed in V3.9.4 (a stub now points to the shelf branch).
 
@@ -827,6 +855,6 @@ Rules I could not confirm in the engine (UI-only or unverified):
 - "Start shuttered" on Level 1 (UI sends `shutter` after `startDelve`).
 - Camera, markers, beacons, hover texts and footprint glyphs (view; not checked).
 - Balance targets in spec 20.4 (sim, not checked).
-- The castle.test invariant that breaking every breakable wall keeps each contract path at least 60% of its length (castle.test.ts; not run).
+- The castle.test invariant that breaking every breakable wall keeps each contract path at least 60% of its length (castle.test.ts; runs green; since V4.0 the "normal" path counts the east breach's rubble as cleared).
 
 Note: the working tree had uncommitted edits by someone else while this was written (comments in src/game/ai.ts, UI text in src/ui, docs); none change a rule. Line numbers are from the files as they stood.

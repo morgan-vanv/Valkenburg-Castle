@@ -40,6 +40,10 @@ export function buildLevel1(): LevelBuilder {
   b.set(37, 3, { kind: 'stairs' });
   b.set(24, 31, { kind: 'exit' }).set(1, 14, { kind: 'exit' }).set(44, 21, { kind: 'exit' });
   b.set(37, 21, { kind: 'brazier' });
+  // V4.0 (spec 25): the two side ways in start shut. The sally port's barred gate stands between its
+  // exit and the kitchens; fallen stone chokes the east breach between its exit and the chapel.
+  b.set(2, 14, { kind: 'door', locked: true, barred: true });
+  b.set(42, 21, { kind: 'cracked', heap: true }).set(43, 21, { kind: 'cracked', heap: true });
 
   // Great hall: columns down both flanks, the high table and benches.
   for (const [c, r] of [[17, 11], [17, 15], [17, 19], [32, 11], [21, 9], [28, 9]] as [number, number][]) b.set(c, r, { kind: 'pillar' });
@@ -92,8 +96,8 @@ export function buildLevel1(): LevelBuilder {
   // The great hall's collapsed roof: daylight all round the pit mouth.
   b.light('daylight', [[20, 10], [29, 10], [19, 14], [32, 14], [19, 18], [31, 18], [24, 20]]);
   // Corridors open to the sky: the hall's library arm, the servants' passage, the gate passage,
-  // the sally port and the east breach.
-  b.light('daylight', [[15, 6], [6, 8], [23, 22], [2, 14], [42, 21]]);
+  // the sally port and the east breach (V4.0: on their exits, outside the gate and the rubble).
+  b.light('daylight', [[15, 6], [6, 8], [23, 22], [1, 14], [44, 21]]);
   // More fallen roof: the chapel's nave and south aisle, the kitchens' chimney, the tower's top.
   // The library and the armory stay dim: the lantern still earns its oil there.
   b.light('daylight', [[37, 20], [34, 24], [8, 14], [37, 4]]);

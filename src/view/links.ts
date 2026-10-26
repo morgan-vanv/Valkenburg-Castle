@@ -4,7 +4,7 @@
 
 import type { Reach } from '../game/api';
 import { distance, hexKey, samePos, type Pos } from '../game/hex';
-import type { CastleDef, CastleLink, Delve } from '../game/types';
+import type { CastleDef, CastleLink, Delve, GameState } from '../game/types';
 
 export interface LinkInfo {
   kind: CastleLink['kind'];
@@ -120,6 +120,17 @@ export function exitAt(castle: CastleDef, at: Pos, entrance: Pos | null): ExitIn
   const lv = castle.levels.find((l) => l.level === at.level);
   if (lv?.tiles[hexKey(at)]?.kind !== 'exit') return null;
   return { at, name: exitName(castle, at), entrance: !!entrance && samePos(entrance, at) };
+}
+
+/**
+ * V4.0 (spec 25): is this exit behind a way that's still shut (the sally port's barred gate, the east
+ * breach's rubble)? Read from the state as the engine keeps it: Campaign.opened (absent: all open) and
+ * Delve.ways. The engine's `entrances()` says the same for the Set out screen.
+ */
+export function exitShut(castle: CastleDef, s: GameState | null | undefined, at: Pos): boolean {
+  const way = castle.shutWays?.find((x) => { const e = castle.entrances[x.entrance]; return !!e && samePos(e, at); });
+  if (!way || !s?.campaign.opened) return false;
+  return !s.campaign.opened[way.id] && !s.delve?.ways?.[way.id];
 }
 
 /** Floating marker text. */

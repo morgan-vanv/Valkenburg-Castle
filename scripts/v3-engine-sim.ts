@@ -770,7 +770,9 @@ for (let i = 0; i < N; i++) {
   carry.forEach((it, j) => {
     (packs[fit[j % fit.length]!] ??= []).push(it.id);
   });
-  s = run(s, { type: 'startDelve', contractId: k.id, heroIds: fit, entrance: i % castle.entrances.length, packs });
+  // V4.0 (spec 25): only the open ways in (a new campaign has the main gate alone); rotate through them.
+  const ways = e.entrances(s).filter((x) => x.state === 'open');
+  s = run(s, { type: 'startDelve', contractId: k.id, heroIds: fit, entrance: ways[i % ways.length]!.index, packs });
   if (s.stage !== 'delve') {
     console.log('could not start delve');
     break;

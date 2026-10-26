@@ -37,6 +37,7 @@ import {
 import { int, pick } from './rng';
 import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
+import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -333,7 +334,8 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = fa
   const pr = c.d.prisoner;
   if (pr && h.escorting === pr.id && !pr.dead && !pr.out && !adjacent(pr.at, h.at)) {
     const spot = posNeighbors(h.at)
-      .filter((p) => canEnter(c.w, c.d, p) && !occupant(c, p) && !c.d.traps[posKey(p)] && kindAt(c.w, c.d, p) !== 'door')
+      // Not onto doors (V4.0: except the open sally port gate, the only way to its exit).
+      .filter((p) => canEnter(c.w, c.d, p) && !occupant(c, p) && !c.d.traps[posKey(p)] && (kindAt(c.w, c.d, p) !== 'door' || !!c.w.tile(p)?.barred))
       .sort((a, b) => (a.level === pr.at.level ? distance(a, pr.at) : 99) - (b.level === pr.at.level ? distance(b, pr.at) : 99))[0];
     if (spot) {
       pr.at = spot;
@@ -388,9 +390,10 @@ setAfterLanding((c, h) => {
 
 const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley'];
 
-function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean } | null {
+function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean; barred?: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
-  if (door && door.locked && !door.open) return { door: true, jammed: door.jammed };
+  // V4.0 (spec 25.2): a barred gate is locked, but only its key or a blast opens it.
+  if (door && door.locked && !door.open) return { door: true, jammed: door.jammed, ...(c.w.tile(p)?.barred ? { barred: true } : {}) };
   const ch = c.d.chests.find((x) => samePos(x.at, p) && !x.opened && x.locked);
   if (ch) return { chest: true, jammed: ch.jammed };
   return null;
@@ -543,7 +546,12 @@ function nextToWinch(c: Ctx, at: Pos): Pos | undefined {
 
 /** Locked doors and chests on or next to the hero that a pick could still work (not jammed). */
 function pickableAround(c: Ctx, h: HeroInDelve): ActionTarget[] {
-  return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed; }).map((at) => ({ at }));
+  return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed && !l.barred; }).map((at) => ({ at }));
+}
+
+/** V4.0 (spec 25.2): a barred gate still shut at `p`. */
+function barredAt(c: Ctx, p: Pos): boolean {
+  return !!lockedThingAt(c, p)?.barred;
 }
 
 /** Spec 21.4: the reason a hero with no pick at all can't Pick. */
@@ -597,6 +605,12 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'dig':
       if (cls !== 'sapper' && h.ale !== 'mole') return [];
       return posNeighbors(h.at).filter((p) => { const k = kindAt(c.w, c.d, p); return k === 'rubble' || k === 'cracked'; }).map((at) => ({ at }));
+    case 'unbar': {
+      // V4.0 (spec 25.2): the sally port key in the barred gate next to you.
+      const it = h.pack.find(isGateKey);
+      if (!it) return [];
+      return posNeighbors(h.at).filter((p) => barredAt(c, p)).map((at) => ({ at, itemId: it.id }));
+    }
     case 'fireball':
       if (!mage('pyromancer', 2)) return [];
       return hexesInSight(c, h, FIREBALL_RANGE, (p) => isFloorish(c.w, c.d, p) || kindAt(c.w, c.d, p) === 'pit');
@@ -644,7 +658,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'key': {
       const it = itemOf(h, 'key');
       if (!it) return [];
-      return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed; }).map((at) => ({ at, itemId: it.id }));
+      return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed && !l.barred; }).map((at) => ({ at, itemId: it.id }));
     }
     case 'oil': {
       const it = itemOf(h, 'oil');
@@ -668,13 +682,15 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (!pickTool(c, h)) return [];
       return pickableAround(c, h);
     case 'smash':
-      return aroundAndSelf(h.at).filter((p) => lockedThingAt(c, p)).map((at) => ({ at }));
+      return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.barred; }).map((at) => ({ at }));
     case 'open': {
       const out: ActionTarget[] = [];
       for (const p of posNeighbors(h.at)) {
         if (kindAt(c.w, c.d, p) !== 'door') continue;
         const door = doorAt(c.d, p);
         if (!door || door.locked || c.d.blown.includes(posKey(p))) continue;
+        // V4.0 (spec 25.2): the sally port gate, once open, stays open.
+        if (c.w.tile(p)?.barred) continue;
         if (door.open && occupant(c, p)) continue;
         out.push({ at: p });
       }
@@ -784,7 +800,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     case 'escape':
       return h.grabbedBy && onMap(c).some((m) => m.id === h.grabbedBy) ? [{ id: h.grabbedBy }] : [];
     case 'leave':
-      return kindAt(c.w, c.d, h.at) === 'exit' ? [{ at: h.at }] : [];
+      return canLeaveAt(c, h.at) ? [{ at: h.at }] : [];
     // ---- V3.7 (spec 20.5) kit
     case 'brace':
       return (cls === 'heir' || cls === 'sellsword' || cls === 'sapper') && !h.braced ? [{ id: h.heroId }] : [];
@@ -803,6 +819,13 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
   return [];
 }
 
+/** An exit hex whose way is open (V4.0, spec 25: never one behind a shut gate or rubble). */
+export function canLeaveAt(c: Ctx, at: Pos): boolean {
+  if (kindAt(c.w, c.d, at) !== 'exit') return false;
+  const way = wayAtEntrance(c.w.castle, at);
+  return !way || wayOpen(c.s, way.id);
+}
+
 /** V3.7 (spec 20.5): a crate or barrel still standing at `p`. */
 export function smashable(c: Ctx, p: Pos): boolean {
   const t = c.w.tile(p);
@@ -818,13 +841,13 @@ const LABELS: Record<ActionKind, string> = {
   overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', setCharge: 'Set charge', dig: 'Dig', fireball: 'Fireball',
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust', dread: 'Dread',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
-  key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught',
+  key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught', unbar: 'Unbar the gate',
   brace: 'Brace', hamstring: 'Hamstring', nightthorn: 'Night thorn', briar: 'Briar', smashProp: 'Smash',
 };
 
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar'];
 const ORDER: ActionKind[] = [
-  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'open', 'take', 'free', 'revive', 'potion', 'mend',
+  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'potion', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
@@ -837,7 +860,7 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
-  key: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
+  key: 'hex', unbar: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
   brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2 };
@@ -1084,7 +1107,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'setCharge':
       return blastSpec(c, h, t.at!, t.fuse ?? 1);
     case 'dig':
-      return simple(kindAt(c.w, c.d, t.at!) === 'rubble' ? 'Clears the rubble' : 'Breaks through the cracked wall', DIG_NOISE);
+      return simple(kindAt(c.w, c.d, t.at!) === 'rubble' || c.w.tile(t.at!)?.heap ? 'Clears the rubble' : 'Breaks through the cracked wall', DIG_NOISE);
     case 'fireball': {
       let p = withLight(def.stats.wits);
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
@@ -1144,6 +1167,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return simple(`Noise ${FIRECRACKER_NOISE} there`, FIRECRACKER_NOISE);
     case 'key':
       return simple(lockedThingAt(c, t.at!)?.chest ? 'Opens the chest, silently' : 'Opens the door, silently');
+    case 'unbar':
+      return simple('Opens the gate, silently. It stays open');
     case 'oil':
       return simple(`+${OIL_LIGHT} light`, 0, OIL_LIGHT);
     case 'grapple': {
@@ -1421,8 +1446,18 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (k === 'rubble' && c.w.tile(t.at!)?.kind !== 'rubble') (c.d.dug ??= []).push(key);
       else c.d.blown.push(key);
       c.ev.push({ type: 'dug', at: t.at! });
-      say(c, k === 'rubble' ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
+      say(c, k === 'rubble' || c.w.tile(t.at!)?.heap ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
       makeNoise(c, t.at!, DIG_NOISE);
+      checkWays(c); // V4.0 (spec 25.3): the east breach's rubble
+      break;
+    }
+    case 'unbar': {
+      // V4.0 (spec 25.2): the key stays in the lock; the gate is open for good.
+      useItem(h, t.itemId);
+      say(c, `${name} turns the sally port key and lifts the bar.`);
+      openDoor(c, t.at!);
+      c.w.fixedCache = null;
+      checkWays(c);
       break;
     }
     case 'fireball': {
@@ -1959,7 +1994,7 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
 
 export function abandon(c: Ctx): void {
   for (const h of c.d.heroes) {
-    if (h.status === 'active' && kindAt(c.w, c.d, h.at) === 'exit') leaveCastle(c, h);
+    if (h.status === 'active' && canLeaveAt(c, h.at)) leaveCastle(c, h);
   }
   endDelve(c);
 }

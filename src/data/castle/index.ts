@@ -35,6 +35,22 @@ export const castle: CastleDef = {
   ],
   // Index order matters to `startDelve.entrance`: main gate, sally port, east breach.
   entrances: [L1(24, 31), L1(1, 14), L1(44, 21)],
+  entranceNames: ['Main gate', 'Sally port', 'East breach'],
+  // V4.0 (spec 25): a new campaign goes in by the main gate only. The sally port's barred gate opens
+  // with its key (one copy lies in the library, by the west shelves) or a blast; the east breach's
+  // rubble with a blast or a Dig. Once open, each stays open for the rest of the campaign.
+  shutWays: [
+    {
+      id: 'sally', entrance: 1, kind: 'gate', at: [L1(2, 14)], keyAt: L1(3, 1),
+      hint: 'A barred gate. It wants its key, or a charge.',
+      openLine: 'The sally port gate swings open. It stays open.',
+    },
+    {
+      id: 'breach', entrance: 2, kind: 'rubble', at: [L1(42, 21), L1(43, 21)],
+      hint: 'Choked with rubble.',
+      openLine: 'The east breach is clear. A new way in.',
+    },
+  ],
   rivalEntrances: [L1(44, 21), L1(1, 14)],
   // V3.5 (spec 18.5): where a cutthroat crew waits on Level 2, at choke points: the west and east
   // ends of the main bridge, the arcade end of the north bridge, and the winch room by the lift.

@@ -535,6 +535,9 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     heroById: (s, id) => s.campaign.roster.find((h) => h.id === id),
     classInfo: (cls) => ({ name: cls, role: '', weapon: '', armor: 0, mana: 0, abilities: [] }),
     partyProblem: () => null,
+    // V4.0 (spec 25): the fixture castle keeps every way in open and remembers nothing.
+    entrances: () => castle.entrances.map((_, index) => ({ index, name: castle.entranceNames?.[index] ?? `Way in ${index + 1}`, state: 'open' as const, known: true })),
+    castleMemory: () => castle.levels.map((l) => ({ level: l.level, hexes: [] })),
     value: (items) => items.reduce((a, i) => a + (['gold', 'gem', 'jewelry', 'heirloom'].includes(i.kind) ? i.amount : 0), 0),
     serialize: (s) => JSON.stringify(s),
     deserialize: (t) => {

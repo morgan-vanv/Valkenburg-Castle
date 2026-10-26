@@ -155,6 +155,7 @@ const SINGLE: Record<ItemKind, string> = {
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', hook: 'Grappling hook',
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
   lockpicks: 'Lockpicks', improvised: 'Improvised pick', nightsight: 'Night-eye draught',
+  gatekey: 'Sally port key',
 };
 
 export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {
@@ -162,7 +163,7 @@ export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: 
     id: newItemId(c.s),
     kind,
     name: name ?? (kind === 'gold' ? `${amount} gold` : SINGLE[kind]),
-    amount,
+    amount: kind === 'gatekey' ? 0 : amount, // V4.0 (spec 25.2): the sally key is worth nothing
     slots: kind === 'heirloom' || kind === 'hoard' ? 2 : 1,
   };
 }

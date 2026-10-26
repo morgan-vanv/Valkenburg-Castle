@@ -650,3 +650,48 @@ Sight is narrow; sound fills the gap, **for the heroes only**. Monsters and crew
 - Move-risk tags (wake %, notice eye, free swing) and the Burglar's backstab dagger appear over their figure or hex from their first frame: their appear animation is a fade only. (It used to animate `transform`, which these tags use for their screen position, so they slid in from the screen's top-left corner.) The owner will revisit the free-swing warning's presentation in V4.0.
 - The unlit hint's tooltip names the live unlit notice ranges (5 walking, 1 sneaking) instead of a stale 3.
 - Help texts brought in line with 24.6–24.7: a hero's hover says they are blind only straight behind; backstab and blindsided texts say "from behind" (a monster's rear half, straight behind a crew member or hero); the key list shows F (Face) only when `FACING.faceCommand` is on; the sneak help no longer mentions the removed rear-half hover. The Burglar's ability line reads "Opens chests without using the action" (Take is free for everyone).
+
+## 25. V4.0: new players go in blind (owner, 2026-10-26)
+
+A new campaign enters the castle by the main gate only. The other two ways in are found and opened through play, and once opened they stay open for the rest of the campaign, as entrances and as exits. The Set out screen draws its map only from what the campaign has explored. Contract: `git diff main -- src/game/types.ts src/game/api.ts`.
+
+### 25.1 Entrances
+
+- `castle.entrances` (index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21); `castle.entranceNames`: "Main gate", "Sally port", "East breach".
+- `castle.shutWays` lists the two that start shut (`ShutWayDef`: id `sally` | `breach`, the entrance index, kind `gate` | `rubble`, the obstacle hexes, the key's hex for a gate, a hint and the line logged when it opens).
+- `Campaign.opened?: Partial<Record<'sally' | 'breach', boolean>>`: ways opened for good. A new campaign starts with `{}`. A save without the field had every entrance open and keeps them (absent = all open).
+- `Delve.ways`: the ways open in this delve (from the campaign at the start, plus any opened inside); merged into `Campaign.opened` at `backToCamp`.
+- `startDelve` refuses a shut entrance: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate."
+- An exit whose way is shut is not an exit: no Leave there (nor Abandon), and crews, draggers and cutpurses path only to open exits. The HUD gives no "Way out" marker, ring or hint for it; its hover reads "Way out, shut · <hint>".
+
+### 25.2 The sally port: a barred gate
+
+- A locked door with `barred` at L1 (2, 14), between the sally port's exit and the kitchens.
+- Opens with **its key** (`unbar` action: adjacent, one action, silent, anyone; the key is used up in the lock) or **a blast** within 1 (a bought charge set on it, a Sapper's set or thrown charge). Not Pick, Smash, the skeleton key or a crew's open job. Hover: "Barred gate · the sally port key opens it (Unbar), or a charge. Then it stays open".
+- Opened: "The sally port gate swings open. It stays open." The gate stands open in every later delve.
+- **The sally port key** (`ItemKind` `gatekey`, "Sally port key"): 1 slot, worth 0, never sold, never handed over in parley, never stolen by a cutpurse, ignored by prospectors looting; it never reaches the stash and is never lost gear. A hero who gets out carrying it opens the gate for good ("With its key in hand, the sally port gate is yours. It stays open."). A dead hero's key drops with their pack and lies there for the rest of that delve.
+- One copy lies in the library at L1 (3, 1) (the west end of the north aisle, 5 from the spider, 7 from the servants' passage trap) at every delve start while the gate is shut. A second comes with the Lantern Sisters by the sally port (25.4).
+
+### 25.3 The east breach: rubble
+
+- Two heaps (`cracked` tiles with `heap`) at L1 (42, 21) and (43, 21) choke the passage between the breach's exit and the chapel. Each is a cracked wall by the rules: blocks sight and passage; a blast within 1 or a Dig (Sapper, or a hero with Mole's Brown) turns it to floor. The view draws a heap as a mound of boulders over floor; the HUD names it "Rubble" ("fallen stone chokes the east breach · a charge clears it, or a Sapper's Dig").
+- The breach is open once a walkable path (locked doors aside) joins its exit to the main gate: "The east breach is clear. A new way in." One blast at the inner heap clears both; a Dig clears one heap at a time.
+- The daylight that lit the two passages moved onto their exit hexes, so the barred gate and the heaps don't spill light through.
+
+### 25.4 Rival crews make an entrance
+
+- The Lantern Sisters (Level 1, 50%, rounds 6–9) still arrive at a rival entrance more than 6 from the party's entrance, and wait while a hero is within 6 of it. With the party always at the main gate, both rival entrances qualify; the seeded RNG picks one (it used to be the farthest).
+- **By a shut sally port:** the Burglar sister carries a sally port key in her pack. As they come in she unlocks the gate (silently): "A key turns in the sally port's bar. The Lantern Sisters let themselves in." The key stays in her pack and drops with it if she dies. The gate is open for good.
+- **By a shut east breach:** "The Lantern Sisters set a charge in the rubble of the east breach." They blast the heap nearest the exit (and the other if still standing) as they arrive: a real blast set by the Burglar sister (4/2 damage to anything around the heap; the crew is still outside and unhurt; noise 8, heard on the levels above and below and by the party as a `blast`). The breach is open for good.
+- Their way out is always an open exit (they came in by one); `exitsBy` never offers a shut one.
+
+### 25.5 Castle memory
+
+- `Campaign.explored?: Record<number, string[]>`: every hex a delve has explored, as hex keys "q,r" by level, merged in at `backToCamp` (deduplicated). New campaigns start with `{}`, old saves with nothing.
+- `Engine.castleMemory(s): { level: number; hexes: string[] }[]`: one entry per castle level (empty arrays on a new campaign). The Set out screen draws its map from this.
+- `Engine.entrances(s): { index; name; state: 'open' | 'locked' | 'blocked'; known; hint? }[]`, one per `castle.entrances`, index order. The main gate is always open and known. Sally port `open` or `locked`; east breach `open` or `blocked`. `known`: opened, or its exit hex or its gate/rubble is in the campaign's memory (or this delve's explored hexes). `hint` while shut: "A barred gate. It wants its key, or a charge." / "Choked with rubble."
+
+### 25.6 Also
+
+- Story contracts lose their "Story" and "Unlocks …" warnings (the board shows story status itself).
+- The balance sim picks among the open entrances (`engine.entrances`), rotating through them.

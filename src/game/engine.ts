@@ -15,6 +15,7 @@ import { hd, rivalsOnMap, valueOf } from './common';
 import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, moveNoise, reachable, refreshSight, seenSet, spec } from './delve';
 import { computeIntents, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
+import { applyOpenWays, castleMemory, entranceList, startWays } from './ways';
 
 function ctx(w: World, s: GameStateX, ev: GameEvent[] = []): Ctx | null {
   if (!s.delve) return null;
@@ -234,6 +235,8 @@ export function createEngine(castle: CastleDef): Engine {
     },
     classInfo: (cls) => classInfo(cls),
     partyProblem: (state, heroIds) => partyProblem(state as GameStateX, heroIds),
+    entrances: (state) => entranceList(w, state),
+    castleMemory: (state) => castleMemory(w, state),
     heroById: (state, id) => state.campaign.roster.find((h) => h.id === id),
     value: (items) => valueOf(items),
 
@@ -246,6 +249,13 @@ export function createEngine(castle: CastleDef): Engine {
         for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
         // V3.5: saves without the village start with nothing won back.
         s.campaign.village ??= newVillage();
+        // V4.0 (spec 25): a save without `opened` had every way in open, and keeps them (campaignOpen
+        // reads the absent field as open). A delve saved mid-way gets its ways set up the same way.
+        const d = s.delve as DelveX | null;
+        if (d && !d.ways) {
+          d.ways = startWays(w, s);
+          applyOpenWays(w, d);
+        }
         return s;
       } catch {
         return null;

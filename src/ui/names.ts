@@ -385,6 +385,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   caltrops: `Scatter on a hex next to you: the first monster to step on it takes ${CALTROPS_DMG} and stops. Lasts the delve.`,
   firecracker: `Throw ${THROW_RANGE.firecracker}: noise ${FIRECRACKER_NOISE} where it lands. Lures monsters away from you.`,
   key: 'Open a locked door or chest next to you, silently. One use.',
+  unbar: 'Turn the sally port key in the barred gate next to you. Silent. The gate stays open for the rest of the campaign.',
   oil: `Pour a flask into the lantern: +${OIL_LIGHT} light, ${OIL_LIGHT} more rounds. Silent.`,
   grapple: 'From a pit landing, climb straight up to the level above. The hook is kept. Takes the whole turn.',
   nightsight: 'Drink the night-eye draught: 8 rounds without dark penalties to your sight or rolls. Silent. The dark still hides you from nothing, and the Gloam still comes.',
@@ -465,6 +466,7 @@ export const ITEM_HELP: Record<string, string> = {
   caltrops: `The first monster across takes ${CALTROPS_DMG} and stops.\nUse: Items › Caltrops, then click a hex next to you`,
   hook: 'Climb from a pit landing up a level. Reusable.\nUse: on a pit landing, Items › Grapple up',
   key: 'Opens one locked door or chest, silently.\nUse: next to the lock, Items › Skeleton key',
+  gatekey: 'The key to the sally port\'s barred gate. Opens it silently, for good. Carry it out and the gate is yours.\nUse: next to the gate, Interact › Unbar the gate',
   oil: `+${OIL_LIGHT} lantern light (${OIL_LIGHT} more rounds).\nUse: Items › Oil flask`,
   firecracker: `Noise ${FIRECRACKER_NOISE} where it lands: lures monsters.\nUse: Items › Firecracker, then click a hex within ${THROW_RANGE.firecracker}`,
   lockpicks: 'The smith\'s proper lockpicks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.\nUse: next to a locked door or chest, Interact › Pick lock',
@@ -562,6 +564,7 @@ export const ITEM_GLYPH: Record<string, string> = {
   caltrops: '⁂',
   grapple: '⚓',
   key: '⚷',
+  gatekey: '⚿',
   oil: '♁',
   firecracker: '✺',
   lockpicks: '⚲',
@@ -583,6 +586,7 @@ export function itemBase(kind: string): string {
   if (k.includes('caltrop')) return 'caltrops';
   if (k.includes('grappl') || k === 'hook') return 'grapple';
   if (k === 'improvised') return 'improvised';
+  if (k === 'gatekey') return 'gatekey';
   if (k.includes('lockpick') || k.includes('picks')) return 'lockpicks';
   if (k.includes('night')) return 'nightsight';
   if (k.includes('key')) return 'key';

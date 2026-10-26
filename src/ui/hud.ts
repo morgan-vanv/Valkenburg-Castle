@@ -9,7 +9,7 @@ import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, pips } from './dom';
-import { exitAt, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
+import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
 import { ACTION_GLYPH, ACTION_HELP, ACTION_KEY, ALE_EFFECT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, DEAL_GLYPH, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, classGlyph, className, crewMemberLine, itemBase, itemGlyph, itemLabel, itemTip, lightScale, modifierHelp, roundsToNext, type LightScale } from './names';
 import { backDirs, backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
@@ -320,10 +320,18 @@ export class Hud {
     this.choose(e.option, e.option.targets[0] ?? { at: sel.at });
   }
 
-  /** V3.6 (19.5): the exit hex is known (explored) or the one the party came in by. */
+  /** V3.6 (19.5): the exit hex is known (explored) or the one the party came in by. V4.0: never one whose way is still shut. */
   private exitKnown(p: Pos): boolean {
     const k = posKey(p);
-    return !!this.vis && (this.vis.explored.has(k) || this.vis.visible.has(k));
+    if (!this.vis || !(this.vis.explored.has(k) || this.vis.visible.has(k))) return false;
+    return !this.exitShut(p);
+  }
+
+  /** V4.0 (spec 25): the shut-way hint if `p` is an exit whose way is still shut (barred or choked), else null. */
+  private exitShut(p: Pos): string | null {
+    const castle = this.engine.castle();
+    if (!exitShut(castle, this.state, p)) return null;
+    return castle.shutWays?.find((x) => samePos(castle.entrances[x.entrance]!, p))?.hint ?? 'Shut.';
   }
 
   /** V3.7 (20.5): engine.calm, tolerant of an engine without it (then Delve.calm, else not calm). */
@@ -398,7 +406,7 @@ export class Hud {
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
       const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
-      const hexPick = this.pending.pick === 'hex' && !['jump', 'dig', 'key'].includes(this.pending.action);
+      const hexPick = this.pending.pick === 'hex' && !['jump', 'dig', 'key', 'unbar'].includes(this.pending.action);
       // V3.7 (20.3): while setting a charge, breakable walls among the targets are outlined on top.
       if (this.pending.action === 'setCharge' || this.pending.action === 'charge') {
         const castle = this.engine.castle();
@@ -814,7 +822,9 @@ export class Hud {
     const spent = !canPick && selDef?.cls === 'burglar';
     const lockedHow = (more: string) => (canPick ? `Pick, Smash${more}` : spent ? `Smash it${more}: the improvised pick is spent, Gerda sells lockpicks` : `Smash it${more}, or pick it with lockpicks`);
     if (t.kind === 'door' && door) {
-      if (door.open) act('Open door', 'walk through');
+      if (door.open) act(t.barred ? 'Sally port gate' : 'Open door', 'walk through');
+      // V4.0 (spec 25.2): the sally port's barred gate: its key or a charge, nothing else.
+      else if (t.barred && door.locked) act('Barred gate', 'the sally port key opens it (Unbar), or a charge. Then it stays open');
       else if (door.jammed) act('Jammed door', 'Smash or Charge');
       else if (door.locked) act('Locked door', lockedHow(' or Charge'));
       else act('Door', 'Open, then walk through');
@@ -832,12 +842,15 @@ export class Hud {
       else parts.push(TILE_NAME[t.kind] ?? t.kind);
     } else if (t.kind === 'exit') {
       const e = exitAt(castle, at, this.host.entrance());
-      act('Way out', e ? exitTooltip(e) : 'stand here, then Leave the castle');
+      const shut = this.exitShut(at);
+      if (shut) act('Way out, shut', shut);
+      else act('Way out', e ? exitTooltip(e) : 'stand here, then Leave the castle');
     }
     else if (t.kind === 'pit') {
       const f = this.fallWords(at);
       parts.push(`<b class="neg">Pit</b> <span class="tip-how">· Jump or Rope</span>${f ? `<br><span class="neg">${f.text}</span>` : ''}`);
-    } else if (t.kind === 'cracked') act('Cracked wall', d.blown.includes(k) ? 'blown open' : "a charge breaks it, or a Sapper's Dig");
+    } else if (t.kind === 'cracked' && t.heap) act('Rubble', d.blown.includes(k) ? 'cleared' : "fallen stone chokes the east breach · a charge clears it, or a Sapper's Dig");
+    else if (t.kind === 'cracked') act('Cracked wall', d.blown.includes(k) ? 'blown open' : "a charge breaks it, or a Sapper's Dig");
     else if (t.kind === 'rubble') act('Rubble', "costs 2 to cross, or Sapper's Dig");
     else if (t.kind === 'sealed') parts.push('<b>Sealed.</b> Nothing opens it yet.');
     else if (t.kind === 'wall' && d.blown.includes(k)) act('Blast rubble', "a wall a charge broke · costs 2 to cross, or Sapper's Dig");
@@ -1854,8 +1867,8 @@ export class Hud {
         }
         else if (t.kind === 'brazier' && !d.lit.includes(k)) text = 'Cold brazier';
         else if (t.prop === 'winch' && !d.liftWorking) text = 'Winch';
-        else if (t.kind === 'door' && d.doors[k] && !d.doors[k]!.open) text = d.doors[k]!.locked ? 'Locked door' : 'Door';
-        else if (t.kind === 'cracked') text = 'Cracked wall';
+        else if (t.kind === 'door' && d.doors[k] && !d.doors[k]!.open) text = d.doors[k]!.locked ? (t.barred ? 'Barred gate' : 'Locked door') : 'Door';
+        else if (t.kind === 'cracked' && !d.blown.includes(k)) text = t.heap ? 'Rubble' : 'Cracked wall';
         const chest = d.chests.find((c) => samePos(c.at, p) && !c.opened);
         if (chest) text = chest.locked ? 'Locked chest' : 'Chest';
         const g = d.ground.find((x) => samePos(x.at, p) && x.items.length);
