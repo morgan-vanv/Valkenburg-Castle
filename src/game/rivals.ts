@@ -124,8 +124,9 @@ function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
 export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, partyEntrance?: Pos): CrewX | null {
   const c: Ctx = { w, s, d, ev: [] };
   if (level <= 1) {
-    // Spec 23.2: never within 6 of the party's own way in. V4.0 (spec 25.4): either rival way in, by the
-    // dice (shut or not: the Sisters make their own entrance).
+    // Spec 23.2: never within 6 of the party's own way in. V4.0 (spec 25.4): any other way in, by the
+    // dice (shut or not: the Sisters make their own entrance). V4.1 (owner): the main gate is one of them,
+    // so a party that came by the sally port or the breach may find the Sisters coming in by the gate.
     const ways = w.castle.rivalEntrances.filter((p) => !partyEntrance || distance(p, partyEntrance) > PROSPECTOR_KEEP_OFF);
     if (!ways.length || random(s) >= PROSPECTOR_CHANCE) return null;
     const at = pick(s, ways);
