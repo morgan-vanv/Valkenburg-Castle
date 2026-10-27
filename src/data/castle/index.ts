@@ -66,9 +66,11 @@ export const castle: CastleDef = {
     { at: L1(5, 16), kind: 'rats', asleep: true }, // kitchens
     { at: L1(7, 3), kind: 'spider', asleep: true }, // library
     { at: L1(8, 24), kind: 'cutpurse' }, // courtyard
-    { at: L1(21, 13), kind: 'orc' }, // hall, west of the pit
+    { at: L1(22, 13), kind: 'orc' }, // hall, west of the pit: V4.1 (WS8 L1-5) on the unrailed lip, so a shove, knockback or gust drops it
     { at: L1(31, 17), kind: 'orc' }, // hall, east of the pit
     { at: L1(36, 4), kind: 'orc' }, // tower stair
+    // V4.1 (WS8 L1-3): a second post on the way down; a firecracker in the tower passage (33, 8) sends both searching.
+    { at: L1(35, 5), kind: 'orc' }, // tower stair
     { at: L1(17, 25), kind: 'orc' }, // courtyard, by the gatehouse
     // V4.1 (spec 31.2, B1): Aldric's guard dozes on a campaign's first delve.
     { at: L1(35, 24), kind: 'orc', firstDelveAsleep: true }, // chapel, by the chest
@@ -80,9 +82,11 @@ export const castle: CastleDef = {
     { at: L2(26, 3), kind: 'orc', asleep: true },
     { at: L2(29, 2), kind: 'orc', asleep: true },
     { at: L2(23, 3), kind: 'captain', asleep: true }, // with the squad
-    { at: L2(11, 23), kind: 'orc', name: 'Grub the Jailer' }, // cellblock
+    // V4.1 (WS8 L2-3): Grub keeps the cellblock's way from the winch room side, within the winch's noise.
+    { at: L2(21, 23), kind: 'orc', name: 'Grub the Jailer' }, // cellblock passage, winch room end
     { at: L2(7, 12), kind: 'spider' }, // archive
-    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand' }, // forge
+    // V4.1 (WS8 L2-1): Ugluk sleeps by the forge fire: Gerda's rescue is a stealth test, not a slugfest.
+    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand', asleep: true }, // forge
     { at: L2(28, 21), kind: 'rats' }, // south rim
     // The arcade patrol: two orcs on one loop, the second a hex behind the first.
     { at: L2(24, 6), kind: 'orc', patrol: route(2, [[24, 6], ...ARCADE_LOOP]) },

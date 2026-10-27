@@ -96,7 +96,8 @@ export function buildLevel1(): LevelBuilder {
   b.light('daylight', [[20, 10], [29, 10], [19, 14], [32, 14], [19, 18], [31, 18], [24, 20]]);
   // Corridors open to the sky: the hall's library arm, the servants' passage, the gate passage,
   // the sally port and the east breach (V4.0: on their exits, outside the gate and the rubble).
-  b.light('daylight', [[15, 6], [6, 8], [23, 22], [1, 14], [44, 21]]);
+  // V4.1 (WS8 L1-4): the servants' passage at (6, 8) lost its open sky: its trap sits in the dark.
+  b.light('daylight', [[15, 6], [23, 22], [1, 14], [44, 21]]);
   // More fallen roof: the chapel's nave and south aisle, the kitchens' chimney. V4.1 (WS2): the tower's top (was 37,4) is
   // roofed again: the library, the armory and the tower are Level 1's dark rooms.
   b.light('daylight', [[37, 20], [34, 24], [8, 14]]);
