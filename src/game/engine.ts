@@ -17,7 +17,7 @@ import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, fitClass, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
-import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
+import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, doSetAmbush, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
 import { computeIntents, lookAll, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
 import { applyOpenWays, castleMemory, entranceList, startWays } from './ways';
@@ -65,6 +65,9 @@ export function createEngine(castle: CastleDef): Engine {
         break;
       case 'setMoveMode':
         err = doSetMoveMode(c, command.heroId, command.sneak);
+        break;
+      case 'setAmbush':
+        err = doSetAmbush(c, command.heroId, command.on);
         break;
       case 'act': {
         // V4.0 (spec 27): an action that changes the light (a torch, the lantern opened, shuttered or passed, kindle, oil)

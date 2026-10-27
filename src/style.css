@@ -3059,3 +3059,8 @@ div.dl-deal { cursor: default; }
 .tag-venom .ic { color: var(--venom); }
 .tag-bleed { color: var(--red); font-weight: 700; font-size: 0.72rem; }
 .tag-carried { color: #9ec8ff; font-size: 0.68rem; }
+/* V4.1 (spec 31.13): strike from hiding or hold, beside Walk/Sneak. */
+.dl-ambush { cursor: pointer; background: transparent; padding: 2px; }
+.dl-ambush .dl-seg-b { background: transparent; color: var(--dl-ink-4); pointer-events: none; }
+.dl-ambush.on .dl-seg-b { background: #3a2a12; color: var(--dl-cream); }
+.dl-ambush:focus-visible { outline: 2px solid var(--dl-cream); outline-offset: 2px; }

@@ -533,6 +533,12 @@ export interface HeroInDelve {
    */
   moveMode?: 'walk' | 'sneak';
   /**
+   * V4.1 (spec 31.13, owner): free swings from hiding. A hero hidden from the enemy passing them (veiled, or not
+   * noticed by it) only swings when this is on ("Strike from hiding"); off (the default, absent), they hold and stay hidden.
+   * A hero the passer has noticed always swings. The `setAmbush` command changes it.
+   */
+  ambush?: boolean;
+  /**
    * V4.1 (spec 31.4): poisoned: 1 damage at step 2 of every world phase, never below 1 HP, until cured (an antipoison,
    * Mend, leaving). Replaces V4.0's `venom` and `paralyzed` (old saves load either as poisoned).
    */
@@ -996,6 +1002,7 @@ export type Command =
    */
   | { type: 'move'; heroId: string; path: Pos[]; /** V4.0 (spec 26.1): omitted = the hero's own Walk/Sneak setting */ sneak?: boolean; follow?: boolean }
   | { type: 'setMoveMode'; heroId: string; sneak: boolean } // V4.0 (spec 26.1): the hero's Walk/Sneak setting; free, player phase
+  | { type: 'setAmbush'; heroId: string; on: boolean } // V4.1 (spec 31.13): strike from hiding or hold; free, player phase
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
   | { type: 'face'; heroId: string; facing: number } // V3.9 (spec 24.2): turn to face a direction; free, player phase

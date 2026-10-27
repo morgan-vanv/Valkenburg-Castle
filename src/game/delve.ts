@@ -180,6 +180,15 @@ export function sneakSetting(c: Ctx, heroId: string): boolean {
   return hd(c, heroId)?.moveMode === 'sneak';
 }
 
+/** V4.1 (spec 31.13): the `setAmbush` command: free, any active hero, player phase: strike from hiding, or hold. */
+export function doSetAmbush(c: Ctx, heroId: string, on: boolean): string | undefined {
+  const h = hd(c, heroId);
+  if (!h) return 'No such hero.';
+  if (h.status !== 'active') return `${heroName(c, heroId)} isn't in a state to strike anyone.`;
+  h.ambush = on;
+  return undefined;
+}
+
 /** V4.0 (spec 26.1): the `setMoveMode` command: free, any active hero, player phase. Changes nothing else. */
 export function doSetMoveMode(c: Ctx, heroId: string, sneak: boolean): string | undefined {
   const h = hd(c, heroId);

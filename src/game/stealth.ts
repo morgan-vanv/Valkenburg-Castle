@@ -410,6 +410,19 @@ function heroSwingTarget(c: Ctx, id: string): { at: Pos; armor: number; name: st
   return null;
 }
 
+/**
+ * V4.1 (spec 31.13): is hero `h` hidden from enemy `id`: veiled, or not noticed by it (a monster's `noticedIds`; a crew
+ * member's own `noticedIds`). A hidden hero's free swing is the player's call (`HeroInDelve.ambush`).
+ */
+export function hiddenFrom(c: Ctx, h: HeroInDelve, id: string): boolean {
+  if ((h.veil ?? 0) > 0) return true;
+  const m = c.d.monsters.find((x) => x.id === id);
+  if (m) return m.awareness === 'asleep' || !hasNoticed(m as MonsterX, h.heroId);
+  const r = c.d.rivals?.members.find((x) => x.id === id);
+  if (r) return !(r.noticedIds ?? []).includes(h.heroId);
+  return false;
+}
+
 /** Can this hero swing now: active, free to act, action still ready. */
 export function heroCanSwing(h: HeroInDelve): boolean {
   return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing && !h.dreaded; // V4.1 (WS7): Dread
@@ -427,6 +440,8 @@ export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos, done: Set<str
   for (const h of c.d.heroes) {
     if (!heroCanSwing(h) || done.has(h.heroId)) continue;
     if (!stepProvokes(h.at, from)) continue;
+    // V4.1 (spec 31.13, owner): a hero hidden from this enemy holds unless set to strike from hiding.
+    if (hiddenFrom(c, h, id) && !h.ambush) continue;
     done.add(h.heroId);
     const def = heroDef(c, h.heroId)!;
     // V4.1 (WS6, spec 31.8): a bow swing looses an arrow (plain first, else a specialty one, its effect too); out of arrows, the knife.

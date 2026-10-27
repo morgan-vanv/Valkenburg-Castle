@@ -2542,6 +2542,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     // V4.1 (spec 31.4): poisoned: a green drop.
     if (hd.poisoned) out.push(h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': 'Poisoned', 'data-tip': `${POISON_TIP}\n${name} has ${hd.hp} HP; the poison never takes the last one.` }, icon('venom', 13)));
     if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
+    if (hd.ambush) add('ambush', 'sword', `Strike from hiding · ${name} takes free swings at enemies passing who haven't spotted them, and gives themselves away. Select ${name} and click "Strike from hiding" to hold instead.`);
     if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
@@ -2631,6 +2632,21 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         { class: 'dl-seg', role: 'radiogroup', 'aria-label': `${def.name} moves by` },
         h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${!this.sneak ? 'on' : ''}`, 'aria-checked': !this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Walk · noise 1 a hex\n${MOVE_HELP.walk}`, onclick: () => this.setSneak(false) }, 'Walk'),
         h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${this.sneak ? 'on' : ''}`, 'aria-checked': this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Sneak · silent · key S (this hero only)\n${MOVE_HELP.sneak}${def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`, onclick: () => this.setSneak(true) }, 'Sneak ', h('kbd', null, 'S')),
+      ),
+      // V4.1 (spec 31.13, owner): free swings from hiding are the player's call, per hero.
+      h(
+        'button',
+        {
+          type: 'button',
+          class: `dl-seg dl-ambush ${sel?.ambush ? 'on' : ''}`,
+          'aria-pressed': sel?.ambush ? 'true' : 'false',
+          disabled: this.busy,
+          'data-tip': sel?.ambush
+            ? `Strike from hiding · on\nIf an enemy that hasn't spotted ${def.name} steps away from them, ${def.name} takes the free swing, and gives themselves away. Seen, they always swing.`
+            : `Hold in hiding · on\nIf an enemy that hasn't spotted ${def.name} steps away from them, ${def.name} lets it pass and stays hidden. Seen, they always swing. Click to strike from hiding instead.`,
+          onclick: () => this.setAmbush(!sel?.ambush),
+        },
+        h('span', { class: 'dl-seg-b on' }, sel?.ambush ? '⚔ Strike from hiding' : '◌ Hold in hiding'),
       ),
     );
     // Actions: Attack (always), Shove, class abilities and spells, then whatever is in reach.
@@ -3322,6 +3338,13 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       return;
     }
     await this.flashBanner('Combat!', why ?? 'Something has noticed the party. Your move.', 'combat', wait, 0.7);
+  }
+
+  /** V4.1 (spec 31.13): strike from hiding or hold, per hero (a free command; the engine keeps it). */
+  private setAmbush(on: boolean): void {
+    const sel = this.selected();
+    if (!sel || this.busy) return;
+    void this.host.send({ type: 'setAmbush', heroId: sel.heroId, on });
   }
 
   /** V4.0 (spec 26.1): Walk/Sneak is per hero: set the selected hero's (a free command; the engine keeps it). */
