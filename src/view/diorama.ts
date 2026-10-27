@@ -29,7 +29,7 @@ const MAX_LIGHTS = 12;
  * on the floor (`at`), or a crew member's own light. Read from the state the same way the engine's lightSources does.
  */
 interface ViewLight {
-  kind: 'torch' | 'lantern' | 'crew';
+  kind: 'torch' | 'lantern' | 'crew' | 'arrow'; // V4.1 (WS6): a glow arrow
   radius: number;
   holder?: string;
   at: Pos;
@@ -55,6 +55,8 @@ function viewLights(state: GameState): ViewLight[] {
   }
   for (const g of d.ground) for (const i of g.items) if (itemRadius(i) > 0) out.push({ kind: i.kind as 'torch' | 'lantern', radius: itemRadius(i), at: g.at });
   for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && (d.rivals as { entered?: boolean } | null)?.entered !== false) out.push({ kind: 'crew', radius: 2, holder: r.id, at: r.at });
+  // V4.1 (WS6, spec 31.8): glow arrows (on the figure they stuck in, or where they landed).
+  for (const g of d.glows ?? []) if (g.rounds > 0) out.push({ kind: 'arrow', radius: 2, ...(g.on ? { holder: g.on } : {}), at: g.at });
   return out;
 }
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
@@ -715,10 +717,10 @@ export class Diorama {
         const v = this.units.get(L.holder);
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         const off = L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.5, 0.3) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.3, 0.2) : new THREE.Vector3(-0.3, v.height + 0.4, 0.2);
-        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
+        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
       } else {
         if (!this.vis.explored.has(posKey(L.at))) continue;
-        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
+        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
       }
     }
     const lv = this.levels.get(this.shownLevel);
@@ -3832,6 +3834,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   venomdart: '➶', // V4.0 (spec 29)
   carry: '⛟', // V4.1 (spec 31.4)
   brace: '⛨', sleep: '☾', dread: '☠', nightthorn: '✶', briar: '❦', antidote: '⚗', kindle: '🔥', // V4.1 (WS7, spec 31.9)
+  arrow: '➶', // V4.1 (WS6)
   pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
@@ -3870,13 +3873,18 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   venomdart: 'throws a poison dart at', // V4.1 (spec 31.4)
   carry: 'lifts', // V4.1 (spec 31.4)
   brace: 'braces', sleep: 'casts Sleep on', dread: 'casts Dread on', nightthorn: 'looses a night thorn at', briar: 'calls briars on', antidote: 'gives an antipoison to', kindle: 'kindles the light of', // V4.1 (WS7)
+  arrow: 'looses a special arrow at', // V4.1 (WS6)
   pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
 const BEACON_COLOR: Record<'recover' | 'rescue' | 'slay', number> = { recover: 0xffd36a, rescue: 0x8fe07a, slay: 0xff5a4a };
 
-const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, venomdart: 0x6fdc5a, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
+const THROW_COLOR: Partial<Record<string, number>> = {
+  smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, venomdart: 0x6fdc5a, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a,
+  // V4.1 (WS6): arrows
+  whistlearrows: 0xe8e0c8, glowarrows: 0x9ff0d0, firearrows: 0xff8a30, poisonarrows: 0x6fdc5a, barbarrows: 0xb8b8c0, ropearrow: 0xc8a878, blastarrows: 0xff5a3a,
+};
 const SPELL_COLOR: Partial<Record<string, number>> = {
   firebolt: 0xff7a20,
   fireball: 0xff5a10,

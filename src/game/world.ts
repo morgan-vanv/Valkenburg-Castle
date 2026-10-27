@@ -5,6 +5,7 @@ import { DIRS, distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, 
 import type { Brightness, CastleDef, HeroInDelve, Item, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { DARK_SIGHT, FIXED_LIGHT_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
+import { GLOW_ARROW_RADIUS } from './data'; // V4.1 (WS6)
 import { CREW_LIGHT_RADIUS, LANTERN_LOW_AT, LANTERN_MAX, LANTERN_RADIUS_FULL, LANTERN_RADIUS_LOW, NIGHTEYE_ALE, TORCH_RADIUS, TORCH_ROUNDS } from './data'; // V4.1 (WS2)
 
 export class World {
@@ -323,8 +324,10 @@ export interface LightSrc {
   at: Pos;
   radius: number;
   party: boolean;
-  /** torch, lantern (an item: held by `holder`, or lying on the ground), glow (Glowworm Pale), crew, brazier. */
-  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier';
+  /** torch, lantern (an item: held by `holder`, or lying on the ground), glow (Glowworm Pale), crew, brazier; V4.1 (WS6) arrow: a glow arrow (on `holder`, or where it landed). */
+  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier' | 'arrow';
+  /** V4.1 (WS6): a glow arrow's rounds left. */
+  rounds?: number;
   holder?: string;
   item?: Item;
 }
@@ -361,7 +364,23 @@ export function lightSources(d: DelveX): LightSrc[] {
   const hooded = !!cr && cr.temperament === 'cutthroat' && cr.stance === 'waiting';
   if (cr && cr.entered && !hooded) for (const r of cr.members) if (!r.goneOut && r.hp > 0) out.push({ at: r.at, radius: CREW_LIGHT_RADIUS, party: false, kind: 'crew', holder: r.id });
   for (const k of d.lit) out.push({ at: parsePos(k), radius: 3, party: false, kind: 'brazier' });
+  // V4.1 (WS6, spec 31.8): glow arrows: radius 2 where they landed, or on the figure they stuck in (it carries the light).
+  // Not party light: a hero lit only by one stands in castle light (−10, sight 4/3/2), but monsters see them and the Gloam shies.
+  for (const g of d.glows ?? []) {
+    if (g.rounds <= 0) continue;
+    const on = g.on ? glowHolderAt(d, g.on) : undefined;
+    out.push({ at: on ?? g.at, radius: GLOW_ARROW_RADIUS, party: false, kind: 'arrow', ...(on && g.on ? { holder: g.on } : {}), rounds: g.rounds });
+  }
   return out;
+}
+
+/** V4.1 (WS6): where the figure a glow arrow stuck in stands now (monster, crew member up or down, hero on the map). */
+function glowHolderAt(d: DelveX, id: string): Pos | undefined {
+  const m = d.monsters.find((x) => x.id === id && !x.buried);
+  if (m) return m.at;
+  const r = d.rivals?.members.find((x) => x.id === id && !x.goneOut && (x.hp > 0 || x.downed));
+  if (r) return r.at;
+  return d.heroes.find((x) => x.heroId === id && (x.status === 'active' || x.status === 'downed'))?.at;
 }
 
 /** Does this hero carry burning party light (a lit torch, an open lantern with light left, Glowworm)? */

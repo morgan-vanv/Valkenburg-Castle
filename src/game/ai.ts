@@ -16,6 +16,7 @@ import { wayAtEntrance, wayOpen } from './ways';
 import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
 import { rivalStats } from './rivals';
 import { poison } from './poison';
+import { bowClass, spendArrow } from './arrows'; // V4.1 (WS6)
 import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
 import { crewBraceMods, crewEdge } from './crewpower'; // V4.1 (WS7)
 
@@ -362,6 +363,11 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     // V3.9 (spec 24.2): only at enemies in the watcher's front half.
     if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit, h.facing)) continue;
     h.overwatch = false;
+    // V4.1 (WS6, spec 31.8): the shot looses a plain arrow (the quiver first); none left (spent on free swings): it lapses.
+    if (bowClass(def.cls) && !spendArrow(h.pack)) {
+      say(c, `${heroName(c, h.heroId)} reaches for an arrow and finds none.`);
+      continue;
+    }
     const cls = CLASSES[def.cls];
     let slots = cls.weapon.slots;
     if (distance(h.at, at) <= 1) slots -= 1;

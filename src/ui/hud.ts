@@ -19,6 +19,8 @@ import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE } from '../game/data';
 import { BURGLAR_WALK, CLASSES, DARK_SIGHT, FOCUS_MAX, HEAVY_MOVE, KINDLE_LIGHT, MONSTERS, OIL_LIGHT, TORCH_ROUNDS, OVERWATCH_RANGE, PACK_SLOTS, SMUGGLER_SNEAK, VEIL_BREAK_NOISE, WALK_MOVE, FACING, TOLL_MIN, BETRAY_LOOT } from '../game/data';
 import { pairHome as pairsHome } from '../game/data'; // V4.1 (spec 31.4): splints
+import { ARROWS_PER_LEVEL, KNIFE } from '../game/data'; // V4.1 (WS6)
+import { ATTACK_ARROWS, arrowWord, bowReady, weaponNow } from '../game/arrows'; // V4.1 (WS6)
 import { isKit } from '../game/charges';
 import type { Settings } from './settings';
 import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
@@ -48,7 +50,9 @@ interface PreviewState {
   focus: number;
 }
 
-const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote', 'shoot']); // V4.1 (WS6): a hex arrow's pack slot shoots it
+/** V4.1 (WS6, spec 31.8): the quiver's rule, on its chip. */
+const QUIVER_LINE = `A fresh quiver every delve: ${ARROWS_PER_LEVEL} arrows a level. Every bow shot uses one (attack, overwatch, knockback, hamstring, a free swing). Out of arrows: a knife (${KNIFE.slots} Finesse tries, ${KNIFE.dmg} damage, next to the target).`;
 /** V4.1 (spec 31.4): the poison line, everywhere it shows (pillar 15: what it does and what cures it). */
 const POISON_TIP = 'Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out.';
 
@@ -183,6 +187,8 @@ export class Hud {
   private options: ActionOption[] = [];
   private pending: ActionOption | null = null;
   private pv: PreviewState | null = null;
+  /** V4.1 (WS6, spec 31.8): the arrow picked for the armed shot (a specialty bundle's item id); null: plain. */
+  private arrowPick: string | null = null;
   private lastPreview: PreviewState | null = null;
   private intents: Record<string, Intent> = {};
   private mouse = { x: 0, y: 0 };
@@ -771,6 +777,9 @@ export class Hud {
       if (link) lines.push({ html: `Click: ${esc(linkButton(link.info))}`, cls: 'act' });
       else if (exit?.option && !exit.option.blocked) lines.push({ html: 'Click: Leave the castle', cls: 'act' });
       else if (act) lines.push(this.clickLine(act.option, act.target));
+      // V4.1 (WS6, spec 31.8): a Ranger's bow shot that has nothing to loose says why.
+      const dry = this.options.find((o) => o.blocked && ['hamstring', 'knockback', 'overwatch'].includes(o.action) && o.targets.some((t) => !t.id || t.id === unitId));
+      if (dry && (m || rival) && !act) lines.push({ html: `${esc(dry.blocked!)}${dry.blocked === 'Out of arrows' ? ` · the knife reaches only next to ${esc(this.heroDef(this.selectedId ?? '')?.name ?? 'you')}` : ''}`, cls: 'bad' });
       return lines;
     }
     if (!at) return [];
@@ -936,11 +945,12 @@ export class Hud {
   private previewFor(o: ActionOption, t: ActionTarget): RollPreview | null {
     const sel = this.selected();
     if (!sel || !this.state) return null;
-    const k = `${sel.heroId}|${o.action}|${t.id ?? ''}|${t.at ? posKey(t.at) : ''}|${t.itemId ?? ''}|${t.fuse ?? ''}`;
+    const ta = this.withArrow(o, t); // V4.1 (WS6): with the picked arrow
+    const k = `${sel.heroId}|${o.action}|${t.id ?? ''}|${t.at ? posKey(t.at) : ''}|${t.itemId ?? ''}|${t.fuse ?? ''}|${ta.arrow ?? ''}`;
     let pr = this.pvCache.get(k);
     if (!pr) {
       try {
-        pr = this.engine.preview(this.state, sel.heroId, o.action, t);
+        pr = this.engine.preview(this.state, sel.heroId, o.action, ta);
       } catch {
         return null;
       }
@@ -1160,7 +1170,7 @@ export class Hud {
     const out: CardLine[] = [];
     const tName = t.id ? this.theName(t.id) : this.targetLabel(t).toLowerCase();
     const title = o.action === 'attack' ? `Attack ${tName}` : `${o.label}${t.id || t.at ? ` · ${tName}` : ''}`;
-    const sub = o.action === 'attack' && def ? `${who} · ${CLASSES[def.cls]?.weapon.name.toLowerCase() ?? ''}` : o.mana ? `${who} · ${o.mana} mana` : who;
+    const sub = o.action === 'attack' && def && sel ? `${who} · ${weaponNow(def.cls, sel.pack).name.toLowerCase()}` : o.mana ? `${who} · ${o.mana} mana` : who;
     out.push({ html: `<b>${esc(cap(title))}</b> <span class="dl-card-k">${esc(sub)}</span>` });
     if (o.blocked) {
       out.push({ html: esc(o.blocked), cls: 'bad' });
@@ -1174,6 +1184,8 @@ export class Hud {
     if (pr && pr.slots > 0) {
       const read = readRoll(pr, 0, this.hpOf(t), this.itWord(t));
       out.push({ html: esc(read.headline), cls: 'head' }, { html: esc(read.sub), cls: 'sub' });
+      const al = this.arrowLine(o, t); // V4.1 (WS6): which arrow
+      if (al) out.push({ html: `➳ ${esc(al.text)}`, cls: 'dim' });
       const chips = pr.modifiers.map((m) => modifierChip(m, who)).filter((c): c is NonNullable<typeof c> => !!c);
       if (chips.length) out.push({ html: chips.map((c) => `<span class="dl-chip ${c.good ? 'good' : 'bad'}">${c.good ? '▲' : '▼'} ${esc(c.text)}</span>`).join(' '), cls: 'chips' });
       if (this.full) {
@@ -1674,7 +1686,9 @@ export class Hud {
     }
     sfx.play('click');
     this.coach.done(2);
-    if (o.targets.length === 1) {
+    this.arrowPick = null; // V4.1 (WS6): each shot starts plain
+    // V4.1 (WS6): a Ranger with specialty arrows always gets the pill, so the arrow can be picked first.
+    if (o.targets.length === 1 && !this.arrowChoices(o).length) {
       this.choose(o, o.targets[0]!);
       return;
     }
@@ -1685,6 +1699,81 @@ export class Hud {
     this.showPill(o);
     this.drawHighlights();
     this.renderBar();
+  }
+
+  /** V4.1 (WS6, spec 31.8): the specialty bundles the selected Ranger's Attack can loose (none: no picker). */
+  private arrowChoices(o: ActionOption): Item[] {
+    const sel = this.selected();
+    if (!sel || o.action !== 'attack' || !CLASSES[this.heroDef(sel.heroId)?.cls ?? 'heir']?.weapon.range || !bowReady(sel.pack)) return [];
+    return sel.pack.filter((i) => ATTACK_ARROWS.includes(i.kind) && i.amount > 0);
+  }
+
+  /** The arrow the armed shot looses now: the picked bundle if it's still there, else plain. */
+  private arrowNow(o: ActionOption): Item | null {
+    const list = this.arrowChoices(o);
+    return list.find((i) => i.id === this.arrowPick) ?? null;
+  }
+
+  /** "Arrow: Plain · Glow (3) · Fire (3)": the arrow picker, with the shot (the pill, the roll panel; keys , and .). */
+  private arrowRow(o: ActionOption, onPick?: (id: string | null) => void): HTMLElement | '' {
+    const list = this.arrowChoices(o);
+    if (!list.length) return '';
+    const sel = this.selected()!;
+    const plainN = sel.pack.filter((i) => i.kind === 'quiver' || i.kind === 'arrows').reduce((n, i) => n + i.amount, 0);
+    const cur = this.arrowNow(o)?.id ?? null;
+    const pick = (id: string | null) => {
+      if (onPick) return onPick(id);
+      this.arrowPick = id;
+      this.pvCache.clear();
+      this.showPill(o);
+      this.showHot();
+    };
+    const opt = (id: string | null, label: string, tip: string, off = false) =>
+      h('button', { type: 'button', class: `dl-pill-opt dl-arrow-opt ${cur === id ? 'on' : ''}`, 'data-arrow': id ?? 'plain', 'aria-pressed': cur === id ? 'true' : 'false', disabled: off, 'data-tip': tip, onclick: () => pick(id) }, label);
+    return h(
+      'span',
+      { class: 'dl-pill-arrows', role: 'group', 'aria-label': 'Which arrow' },
+      h('span', { class: 'dl-kick dl-kick-dim', 'data-tip': 'Which arrow this shot looses · keys , and . step through them' }, 'Arrow ', h('kbd', null, ','), h('kbd', null, '.')),
+      opt(null, plainN ? `Plain (${plainN})` : 'Plain (none)', `Plain · ${plainN} left: the quiver first, then bought arrows.`, !plainN),
+      ...list.map((i) => opt(i.id, `${cap(arrowWord(i.kind))} (${i.amount})`, `${itemTip(i, false)}`)),
+    );
+  }
+
+  /** "Plain arrow · 9 left" / "Glow arrow · 2 left after" / "Knife · out of arrows": which arrow a shot looses, for the cards. */
+  private arrowLine(o: ActionOption, t: ActionTarget): { text: string; tip: string } | null {
+    const sel = this.selected();
+    const def = sel ? this.heroDef(sel.heroId) : undefined;
+    if (!sel || !def || !CLASSES[def.cls]?.weapon.range || !['attack', 'knockback', 'hamstring', 'overwatch'].includes(o.action)) return null;
+    if (o.action === 'attack' && !bowReady(sel.pack)) return { text: 'Knife · out of arrows', tip: QUIVER_LINE };
+    const id = t.arrow ?? this.withArrow(o, t).arrow;
+    // No plain arrow left: the bow looses a specialty one (the engine's attackArrow).
+    const sp = id ? sel.pack.find((i) => i.id === id) : !sel.pack.some((i) => (i.kind === 'quiver' || i.kind === 'arrows') && i.amount > 0) ? sel.pack.find((i) => ATTACK_ARROWS.includes(i.kind) && i.amount > 0) : undefined;
+    if (sp) return { text: `${cap(arrowWord(sp.kind))} arrow · ${sp.amount - 1} left after`, tip: itemTip(sp, false) };
+    const q = sel.pack.find((i) => i.kind === 'quiver')?.amount ?? 0;
+    const bought = sel.pack.filter((i) => i.kind === 'arrows').reduce((n, i) => n + i.amount, 0);
+    const left = q + bought - 1;
+    return { text: `Plain arrow${q ? ' from the quiver' : ''} · ${Math.max(0, left)} left after`, tip: `The quiver first (${q}), then bought arrows (${bought}).` };
+  }
+
+  /** V4.1 (WS6): the roll panel's arrow changed: preview the shot again with it. */
+  private repickArrow(id: string | null): void {
+    const p = this.pv;
+    const sel = this.selected();
+    if (!p || !sel || !this.state) return;
+    this.arrowPick = id;
+    const { arrow: _old, ...base } = p.target;
+    void _old;
+    const t = this.withArrow(p.option, base);
+    this.pv = { ...p, target: t, preview: this.engine.preview(this.state, sel.heroId, p.option.action, t), focus: 0 };
+    this.pvCache.clear();
+    sfx.play('flip', { pitch: 1.1 });
+    this.renderPreview();
+  }
+
+  /** The target with the picked arrow on it (the engine's `target.arrow`). */
+  private withArrow(o: ActionOption, t: ActionTarget): ActionTarget {
+    const a = o.action === 'attack' ? this.arrowNow(o) : null;
+    return a ? { ...t, arrow: a.id } : t;
   }
 
   /** "Attack: pick a target · Esc to cancel", with a list for keyboard users and for picks that aren't on the map. */
@@ -1737,6 +1826,7 @@ export class Hud {
     this.pill.append(
       h('span', { class: 'dl-pill-t' }, h('b', null, `${o.label}${o.mana ? ` (${o.mana} mana)` : ''}`), `: ${what} · `, h('button', { type: 'button', class: 'dl-pill-esc', onclick: () => this.cancel() }, 'Esc to cancel')),
       o.action === 'setCharge' ? h('span', { class: 'dl-pill-note' }, 'Outlined walls can be broken. You pick the fuse next.') : '',
+      this.arrowRow(o),
       list.length ? h('span', { class: 'dl-pill-list' }, ...list) : '',
       h('span', { class: 'dl-pill-keys' }, h('span', { class: 'dl-pill-hot hidden', 'aria-live': 'polite' }), h('span', { class: 'dim' }, `Tab: ${opts.length > 1 ? 'next of ' + opts.length : 'mark it'} · Enter: take it`)),
     );
@@ -1744,6 +1834,7 @@ export class Hud {
   }
 
   private choose(o: ActionOption, t: ActionTarget): void {
+    if (this.pending !== o) this.arrowPick = null; // V4.1 (WS6): a direct click shoots plain (the roll panel can switch)
     this.pending = null;
     this.resetHot();
     this.dio.showPick(null);
@@ -1770,6 +1861,8 @@ export class Hud {
     }
     const picked = this.fusePicked;
     this.fusePicked = false;
+    // V4.1 (WS6): the shot carries the arrow picked in the pill.
+    t = this.withArrow(o, t);
     if (!picked && (o.rolls || o.action === 'jump' || (o.area ?? 0) > 0 || o.action === 'blink')) {
       const p = this.engine.preview(this.state, sel.heroId, o.action, t);
       this.openPreview({ option: o, target: t, preview: p, focus: 0 });
@@ -1887,8 +1980,8 @@ export class Hud {
     const t = p.target;
     const tName = t.id ? this.theName(t.id) : this.targetLabel(t).toLowerCase();
     const title = p.option.action === 'attack' ? `Attack ${tName}` : `${p.option.label}${t.id || t.at ? ` · ${tName}` : ''}`;
-    const kick = p.option.action === 'attack' && def ? `${name} · ${CLASSES[def.cls]?.weapon.name.toLowerCase() ?? ''}` : `${name} · ${p.option.label.toLowerCase()}`;
-    const verb = p.option.action === 'attack' && def && CLASSES[def.cls]?.weapon.range ? 'Shoot' : (VERB[p.option.action] ?? p.option.label);
+    const kick = p.option.action === 'attack' && def && sel ? `${name} · ${weaponNow(def.cls, sel.pack).name.toLowerCase()}` : `${name} · ${p.option.label.toLowerCase()}`;
+    const verb = p.option.action === 'attack' && def && sel && weaponNow(def.cls, sel.pack).range ? 'Shoot' : (VERB[p.option.action] ?? p.option.label);
     el.classList.toggle('jump', p.option.action === 'jump');
     const head = h('div', { class: 'dl-roll-head' }, h('div', { class: 'dl-roll-who' }, h('span', { class: 'dl-kick' }, kick), h('span', { class: 'dl-roll-title' }, cap(title))));
     el.append(head);
@@ -1898,6 +1991,13 @@ export class Hud {
       return;
     }
     if (pr.warning) el.append(h('div', { class: `dl-roll-warn ${pr.confirm ? 'severe' : ''}` }, icon('warn', 14), h('span', null, pr.warning)));
+    // V4.1 (WS6, spec 31.8): which arrow this shot looses, and the picker (keys , and .).
+    {
+      const line = this.arrowLine(p.option, t);
+      if (line) head.append(h('span', { class: 'dl-roll-arrow', 'data-tip': line.tip }, '➳ ', line.text));
+      const row = this.arrowRow(p.option, (id) => this.repickArrow(id));
+      if (row) el.append(h('div', { class: 'dl-roll-arrows' }, row));
+    }
     let read: RollRead | null = null;
     if (pr.slots > 0) {
       head.append(h('span', { class: 'dl-roll-ctx' }, `${pr.slots} tr${pr.slots === 1 ? 'y' : 'ies'} of ${statName(pr.stat)} · ${lightWords(pr.modifiers)}`));
@@ -2632,7 +2732,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         onclick: () => this.startAction(o),
       },
       key ? h('span', { class: 'dl-kb' }, key.toUpperCase()) : '',
-      ic ? icon(o.action === 'attack' && CLASSES[cls as keyof typeof CLASSES]?.weapon.range ? 'shoot' : ic, 20) : h('span', { class: 'dl-ab-g' }, ACTION_GLYPH[o.action] ?? '•'),
+      ic ? icon(o.action === 'attack' && CLASSES[cls as keyof typeof CLASSES]?.weapon.range && bowReady(this.selected()?.pack ?? []) ? 'shoot' : ic, 20) : h('span', { class: 'dl-ab-g' }, ACTION_GLYPH[o.action] ?? '•'),
       h('span', { class: 'dl-ab-l' }, label),
       o.mana ? h('span', { class: 'dl-ab-mana', 'aria-label': `${o.mana} mana` }, ...Array.from({ length: o.mana }, () => h('i', null))) : '',
     );
@@ -2677,7 +2777,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       'div',
       { class: 'dl-pack' },
       h('span', { class: 'dl-kick dl-kick-dim dl-pack-k' }, 'Pack · click to use'),
-      h('span', { class: 'dl-pack-row' }, row, ...kit.map((it) => kitChip(it, def.name))),
+      h('span', { class: 'dl-pack-row' }, row, ...kit.map((it) => kitChip(it, def.name, false, sel.pack))),
     );
   }
 
@@ -3272,6 +3372,14 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (this.busy) return;
     if (this.parleyHero) return;
     if (this.pv) {
+      // V4.1 (WS6): , and . step through the arrows on the roll panel too.
+      if ((e.key === ',' || e.key === '.') && this.arrowChoices(this.pv.option).length) {
+        e.preventDefault();
+        const ids = [null, ...this.arrowChoices(this.pv.option).map((i) => i.id)];
+        const i = ids.indexOf(this.arrowNow(this.pv.option)?.id ?? null);
+        this.repickArrow(ids[(i + (e.key === '.' ? 1 : ids.length - 1)) % ids.length] ?? null);
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
         this.confirmPreview();
@@ -3285,6 +3393,18 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       return;
     }
     // V4.0 (spec 30.3): picking among options: Tab or the arrows mark the next, Enter takes the marked one.
+    // V4.1 (WS6): , and . step through the arrows for the armed shot (Plain · Glow · Fire ...).
+    if (this.pending && !this.confirmBox && (e.key === ',' || e.key === '.') && this.arrowChoices(this.pending).length) {
+      e.preventDefault();
+      const o = this.pending;
+      const ids = [null, ...this.arrowChoices(o).map((i) => i.id)];
+      const i = ids.indexOf(this.arrowNow(o)?.id ?? null);
+      this.arrowPick = ids[(i + (e.key === '.' ? 1 : ids.length - 1)) % ids.length] ?? null;
+      this.pvCache.clear();
+      this.showPill(o);
+      this.showHot();
+      return;
+    }
     if (this.pending && !this.confirmBox) {
       if (e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -3449,6 +3569,9 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
       return it.targetId && it.targetId !== who ? `gives ${name(it.targetId)} an antipoison` : 'drinks an antipoison';
     case 'kindle':
       return `kindles ${name(it.targetId)}'s ${it.item ?? 'light'}`;
+    case 'arrow':
+      // V4.1 (WS6, spec 31.8): a crew Ranger's specialty arrow.
+      return it.item === 'glowarrows' ? `shoots a glow arrow at ${name(it.targetId)}: it lights them up for the crew` : it.item === 'barbarrows' ? `shoots a barbed arrow at ${name(it.targetId)}: a hit roots them 2 rounds` : `shoots a special arrow at ${name(it.targetId)}`;
     case 'toll':
       return `demands a toll: pay ${d?.rivals?.toll ?? 50} or they attack next turn`;
     case 'firebolt':
@@ -3576,11 +3699,17 @@ function packMini(pack: Item[], owner: string): HTMLElement {
   const free = Math.max(0, PACK_SLOTS - used);
   const row = h('span', { class: 'dl-minis', tabindex: 0, 'data-tip': `Pack · ${names.length ? names.join(', ') : 'empty'}${free ? `, ${free} free` : ', full'}\nSelect ${owner} to use what's in it (the bar's pack).` }, ...socks);
   const kit = pack.filter(isKit);
-  return h('span', { class: 'dl-minipack' }, row, ...kit.map((it) => kitChip(it, owner, true)));
+  return h('span', { class: 'dl-minipack' }, row, ...kit.map((it) => kitChip(it, owner, true, pack)));
 }
 
 /** V4.0 (spec 26.5): the hero's own kit, as a small chip ("⌐ own"). */
-function kitChip(it: Item, owner: string, small = false): HTMLElement {
+function kitChip(it: Item, owner: string, small = false, pack?: Item[]): HTMLElement {
+  // V4.1 (WS6, spec 31.8): the Ranger's quiver: "➶ 10", bought arrows after.
+  if (it.kind === 'quiver') {
+    const bought = (pack ?? []).filter((i) => i.kind === 'arrows').reduce((n, i) => n + i.amount, 0);
+    const tip = `${owner}'s own · ${it.amount} arrow${it.amount === 1 ? '' : 's'}; bought arrows after${bought ? ` (${bought} plain in the pack)` : ''}\nTakes no slot; can't be given away. ${QUIVER_LINE}${it.amount ? '' : '\nThe quiver is empty.'}`;
+    return h('span', { class: `dl-own dl-quiver ${small ? 'sm' : ''} ${it.amount ? '' : 'empty'}`, tabindex: 0, 'data-kit': it.kind, 'data-tip': tip }, itemGlyph(it.kind), ' ', h('small', { class: 'num' }, `${it.amount}`));
+  }
   // V4.0 (spec 30.2): both kits count their uses (one a level each delve); an old save's single pick reads 1.
   const n = Math.max(1, it.amount);
   const pick = it.kind === 'improvised';

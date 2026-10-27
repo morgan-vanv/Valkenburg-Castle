@@ -29,6 +29,7 @@ import { MEND_UP_HP, POTION_HEAL } from './data'; // V4.1 (spec 31.4)
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 import { POWER_KIT, castPlan, kiteFor, holdBack, likelyKill, powerAct, powerKit, powerPrefer, spotCost } from './crewpower'; // V4.1 (WS7, spec 31.9)
+import { arrowIntent, arrowWord, crewCanShoot, crewCounts, crewLoosed, crewPlainReady, spendCrewArrow } from './arrows'; // V4.1 (WS6)
 
 // ---------------------------------------------------------------- the pack
 
@@ -540,7 +541,9 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
     case 'burglar':
       return venomIntent(c, r, t) ?? dartIntent(c, r) ?? smokeIntent(c, r);
     case 'ranger':
-      return knockbackIntent(c, r) ?? rangerHamstring(c, r, t) ?? caltropsIntent(c, r) ?? overwatchIntent(c, r);
+      // V4.1 (WS6, spec 31.8): the specialty arrow first (glow at a hero in the dark, barbed at a runner); the plain-arrow
+      // shots only with plain arrows left (the quiver, then bought).
+      return arrowIntent(c, r, t, (n) => heroesInSight(c, r, n)) ?? (crewPlainReady(r) ? knockbackIntent(c, r) ?? rangerHamstring(c, r, t) : null) ?? caltropsIntent(c, r) ?? (crewPlainReady(r) ? overwatchIntent(c, r) : null);
     case 'sellsword':
       // Glue is for the charge, not for a brawl already joined: only when nobody is at his blade.
       return shoveIntent(c, r) ?? (targets(c).some((x) => x.hero && adjacentTo(x.at, r.at)) ? null : glueIntent(c, r));
@@ -556,7 +559,7 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   return null;
 }
 
-export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring',
+export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring', 'arrow',
   'brace', 'sleep', 'dread', 'nightthorn', 'briar', 'antidote', 'kindle']; // V4.1 (WS7): crewpower.ts POWER_KIT
 
 /** A sleep dart on a hero: a hit costs them their next move and action (spec 16.5). */
@@ -649,6 +652,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
         return true;
       }
       if (!within(t.at, r.at, KNOCKBACK_RANGE) || !los(c.w, c.d, r.at, t.at)) return false;
+      if (crewCounts(r) && !spendCrewArrow(r, 'plain')) return false; // V4.1 (WS6): a plain arrow
       faceToward(r, t.at);
       say(c, `${r.name} aims to knock ${heroName(c, t.id)} off the edge.`);
       const roll2 = roll(c, r.id, 'Knockback shot', 2, st.chance);
@@ -704,8 +708,24 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
     }
     case 'hamstring': {
       if (!t?.hero || !hamstringIntent(c, r.at, t)) return false;
+      if (crewCounts(r) && !spendCrewArrow(r, 'plain')) return false; // V4.1 (WS6): a plain arrow
       faceToward(r, t.at);
       hamstringShot(c, r.id, t, st.chance);
+      return true;
+    }
+    case 'arrow': {
+      // V4.1 (WS6, spec 31.8, pillar 17): the crew Ranger's specialty arrow: a bow shot at the hero, the arrow's effect
+      // where it lands (a glow lights them up for the crew; a barb roots a runner). Named in the log.
+      const kind = it.item;
+      if (!kind || !t?.hero || !crewCanShoot(c, r, t.at) || !r.pack?.some((i) => i.kind === kind && i.amount > 0)) return false;
+      faceToward(r, t.at);
+      spendCrewArrow(r, kind);
+      tell(c, r, `${r.name} looses a ${arrowWord(kind)} arrow at ${heroName(c, t.id)}.`, t.at);
+      c.ev.push({ type: 'thrown', by: r.id, kind, from: { ...r.at }, to: { ...t.at } });
+      const at = { ...t.at };
+      const adj = distance(r.at, t.at) <= 1 ? 1 : 0;
+      const hit = strike(c, r.id, t.id, Math.max(1, st.slots - adj), st.chance, st.dmg, 'Shot');
+      crewLoosed(c, r, kind, t.id, at, hit === t.id);
       return true;
     }
     case 'firebolt': {
@@ -915,6 +935,7 @@ function finish(c: Ctx, r: RivalX, h: HeroX): void {
   const st = rivalStats(r);
   faceToward(r, h.at);
   tell(c, r, `${r.name} stands over ${heroName(c, h.heroId)} and strikes.`, h.at);
+  if (st.range > 1) spendCrewArrow(r); // V4.1 (WS6): a bow's finishing shot looses an arrow
   strike(c, r.id, h.heroId, st.slots, st.chance, st.dmg, 'Finishing blow');
 }
 
@@ -1092,7 +1113,11 @@ export function hostileAct(c: Ctx, r: RivalX): void {
     const dmgPer = stab ? st.dmg * BACKSTAB_DMG_MULT : st.dmg;
     if (stab) tell(c, r, `${r.name} slips behind ${heroName(c, t.id)} and backstabs.`, t.at);
     else if (unnoticed) tell(c, r, `${r.name} strikes before ${heroName(c, t.id)} sees it coming.`, t.at);
+    // V4.1 (WS6, spec 31.8): a crew bow shot looses an arrow (plain first, then a specialty one: its effect lands too).
+    const loosed = st.range > 1 ? spendCrewArrow(r) : null;
+    const tAt = { ...t.at };
     const hit = strike(c, r.id, t.id, slots, st.chance, dmgPer, stab ? 'Backstab' : unnoticed ? 'Sneak attack' : r.cls === 'ranger' ? 'Shot' : 'Attack');
+    if (st.range > 1) crewLoosed(c, r, loosed, t.id, tAt, hit === t.id);
     // Spec 20.4: a hero this member downs is robbed on the spot and dragged from the next round; spec 28.8: only one left alone.
     const downed = hit ? (hd(c, hit) as HeroX | undefined) : undefined;
     if (downed && downed.status === 'downed' && adjacentTo(downed.at, r.at) && !draggedBy(c, downed.heroId) && alone(c, downed)) rob(c, r, downed);

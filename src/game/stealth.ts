@@ -18,6 +18,8 @@ import { blocked, hitRange, strikeDetailed, wardOf, type Target } from './ai';
 import { partySees } from './hearing';
 import { figure } from './falls';
 import { rivalStats } from './rivals';
+import { arrowLands, attackArrow, figureAt, spendArrow, spendCrewArrow, weaponNow } from './arrows'; // V4.1 (WS6)
+import { FIRE_ARROW_DMG } from './data'; // V4.1 (WS6)
 
 // ---------------------------------------------------------------- facing
 
@@ -375,6 +377,9 @@ export function enemySwing(c: Ctx, sw: Swinger, heroId: string): void {
   const m = c.d.monsters.find((x) => x.id === sw.id);
   if (m) faceToward(m, hd(c, heroId)?.at ?? m.at);
   say(c, `${sw.name} gets a free swing at ${heroName(c, heroId)}.`);
+  // V4.1 (WS6, spec 31.8): a crew Ranger's bow swing looses an arrow too (plain first).
+  const rv = m ? undefined : rivalsOnMap(c).find((x) => x.id === sw.id);
+  if (rv && rivalStats(rv).range > 1) spendCrewArrow(rv);
   const r = strikeDetailed(c, sw.id, heroId, sw.slots, sw.chance, sw.dmg, 'Free swing');
   c.ev.push({ type: 'swing', by: sw.id, target: r.hit ?? heroId, hits: r.hits, damage: r.damage });
 }
@@ -415,19 +420,23 @@ export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos): boolean {
     if (!(h.at.level === from.level && distance(h.at, from) === 1)) continue;
     if (h.at.level === to.level && distance(h.at, to) <= 1) continue;
     const def = heroDef(c, h.heroId)!;
-    const cls = CLASSES[def.cls];
+    // V4.1 (WS6, spec 31.8): a bow swing looses an arrow (plain first, else a specialty one, its effect too); out of arrows, the knife.
+    const weapon = weaponNow(def.cls, h.pack);
+    const loosed = weapon.range ? spendArrow(h.pack, attackArrow(h.pack)?.id) : null;
+    const knife = weapon !== CLASSES[def.cls].weapon;
     // V3.7 (spec 20.5): a braced hero swings at full slots.
-    const slots = cls.weapon.range ? SWING_BOW_SLOTS : h.braced ? cls.weapon.slots : Math.max(1, cls.weapon.slots - SWING_SLOT_PENALTY);
-    const p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + lightPenaltyFor(c.w, c, h);
-    say(c, `${heroName(c, h.heroId)} swings at ${t.name} as it goes.`);
+    const slots = weapon.range ? SWING_BOW_SLOTS : h.braced ? weapon.slots : Math.max(1, weapon.slots - SWING_SLOT_PENALTY);
+    const p = def.stats[weapon.stat] + (knife ? 0 : 10 * def.weaponTier) + lightPenaltyFor(c.w, c, h);
+    say(c, `${heroName(c, h.heroId)} ${loosed ? 'looses an arrow' : 'swings'} at ${t.name} as it goes.`);
     const r = roll(c, h.heroId, 'Free swing', slots, p);
-    const dmg = r.hits ? r.hits * Math.max(1, cls.weapon.dmg - t.armor) + (r.perfect ? 1 : 0) : 0;
+    const dmg = r.hits ? r.hits * Math.max(1, weapon.dmg - t.armor) + (r.perfect ? 1 : 0) + (loosed === 'firearrows' ? FIRE_ARROW_DMG : 0) : 0;
     c.ev.push({ type: 'swing', by: h.heroId, target: id, hits: r.hits, damage: dmg });
     if (!r.hits) c.ev.push({ type: 'miss', attacker: h.heroId, target: id });
     else {
       hurtAny(c, id, dmg, h.heroId, { crit: r.perfect });
       turnOnHit(c, id, h.heroId); // V4.0 (spec 26.3)
     }
+    if (loosed && loosed !== 'quiver' && loosed !== 'arrows') arrowLands(c, loosed, h.heroId, figureAt(c.d as DelveX, id) ?? to, id, r.hits > 0);
     if (!figure(c, id)) return true;
   }
   return false;

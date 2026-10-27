@@ -25,6 +25,9 @@ import {
   crewApproach, crewGo, crewOpenChest, crewPickSlots, crewPicker, crewWalk, crewWorkLock, forgetSeenBy, routeIntent, tell, type CrewRoute,
 } from './crewmove';
 import { classKit } from './charges';
+// V4.1 (WS6, spec 31.8): crew quivers and arrows.
+import { classQuiver, crewBowReady, crewBundle, crewCounts, crewLoosed, spendCrewArrow } from './arrows';
+import { FIRE_ARROW_DMG, KNIFE } from './data';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, rescueAct, rescuePlan, spellChance, useKit } from './crewai';
 import { blast } from './charges';
@@ -43,8 +46,9 @@ import { POWER_KIT, heldRound, crewRetreat, crewWary, nearHero, noteWary, powerP
 export function rivalStats(r: RivalX): RivalStats {
   if (r.level !== undefined) {
     const def = CLASSES[r.cls];
-    const w = def.weapon;
-    const chance = def.stats[w.stat] + (w.stat === def.main ? 5 * (r.level - 1) : 0) + 10 * (r.weaponTier ?? 0);
+    // V4.1 (WS6, spec 31.8): a crew Ranger out of arrows fights with a knife (melee, 2 Finesse slots, 1 damage; no tier).
+    const w = crewBowReady(r) ? def.weapon : KNIFE;
+    const chance = def.stats[w.stat] + (w.stat === def.main ? 5 * (r.level - 1) : 0) + (w === KNIFE ? 0 : 10 * (r.weaponTier ?? 0));
     // V4.0 (spec 28.1): a member walks as a hero of its class (the Burglar 5); sneaking and dashing: crewmove.ts `crewBudget`.
     const move = r.cls === 'burglar' ? BURGLAR_WALK : WALK_MOVE;
     return { hp: def.hp + 2 * (r.level - 1), slots: w.slots, chance, dmg: w.dmg, move, armor: def.armor + (r.armorTier ?? 0), range: w.range ?? 1 };
@@ -76,6 +80,11 @@ function member(s: GameStateX, id: string, def: CrewDef, m: CrewDef['members'][n
   const kit = classKit({ s }, m.cls, def.level);
   if (kit && m.cls === 'sapper') r.pack!.unshift(kit);
   else if (kit) r.pack!.push(kit);
+  // V4.1 (WS6, spec 31.8): a crew Ranger's quiver (5 arrows a crew level) and its crew's specialty bundle (CREW_ARROWS).
+  const quiver = classQuiver({ s }, m.cls, def.level);
+  if (quiver) r.pack!.push(quiver);
+  const bundle = crewBundle(s, def.id, m.cls);
+  if (bundle) r.pack!.push(bundle);
   return r;
 }
 
@@ -388,6 +397,8 @@ export function rivalOverwatchFire(c: Ctx, heroId: string): void {
     if (!r.overwatch || !within(r.at, h.at, BOW_RANGE) || !inFrontHalf(r, h.at) || !los(c.w, c.d, r.at, h.at)) continue; // V3.9: front half only
     r.overwatch = false;
     const st = rivalStats(r);
+    // V4.1 (WS6): the shot looses a plain arrow; with none left it lapses.
+    if (crewCounts(r) && !spendCrewArrow(r, 'plain')) continue;
     say(c, `${r.name} looses an arrow at ${heroName(c, heroId)}.`);
     c.ev.push({ type: 'cast', by: r.id, spell: 'overwatch', targetId: heroId, at: { ...h.at } });
     strike(c, r.id, heroId, st.slots, st.chance, st.dmg, 'Overwatch');
@@ -622,16 +633,20 @@ export function hitMonster(c: Ctx, r: RivalX, id: string): void {
     slots += BACKSTAB_SLOTS;
     dmg *= BACKSTAB_DMG_MULT;
   }
+  // V4.1 (WS6, spec 31.8): a crew bow shot looses an arrow (plain first, then a specialty one: its effect lands too).
+  const loosed = !bolt && st.range > 1 ? spendCrewArrow(r) : null;
   const rr = roll(c, r.id, bolt ? 'Firebolt' : stab ? 'Backstab' : r.cls === 'ranger' ? 'Shot' : 'Attack', slots, p);
   makeNoise(c, r.at, bolt ? PYRO_BOLT_NOISE : 2, { what: 'clash' });
   if (!rr.hits) {
     c.ev.push({ type: 'miss', attacker: r.id, target: m.id });
+    crewLoosed(c, r, loosed, m.id, m.at, false);
     return;
   }
-  const total = rr.hits * Math.max(1, dmg - monsterArmor(c, m)) + (rr.perfect ? 1 : 0);
+  const total = rr.hits * Math.max(1, dmg - monsterArmor(c, m)) + (rr.perfect ? 1 : 0) + (loosed === 'firearrows' ? FIRE_ARROW_DMG : 0);
   if (stab) tell(c, r, `${r.name} backstabs ${m.name}: ${total}.`, m.at);
   hurtAny(c, m.id, total, r.id, { crit: rr.perfect, backstab: stab });
   turnOnHit(c, m.id, r.id); // V4.0 (spec 26.3)
+  crewLoosed(c, r, loosed, m.id, m.at, true);
 }
 
 function hiredAct(c: Ctx, r: RivalX): void {
