@@ -6,7 +6,7 @@ import {
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
   VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, KIT_PER_LEVEL,
-  CARRY_MOVE, VENOM_TRAP_DMG, MEND_UP_HP, CARRIED_OUT_HP, UNSHACKLE_SMASH_NOISE,
+  CARRY_MOVE, VENOM_TRAP_DMG, MEND_UP_HP, CARRIED_OUT_HP,
 } from '../game/data';
 import * as DATA from '../game/data';
 
@@ -380,7 +380,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   nightthorn: `1 mana. 2 Wits slots at range ${V37.thornRange} in sight: 1 damage per hit that ignores armor. Silent.`,
   briar: `1 mana. 2 Wits slots at range ${V37.briarRange} in sight, 1 damage per hit; any hit roots the target for 1 round (all slots hit: 2). Rooted: can't move or dash. Noise 1.`,
   smashProp: `Break a crate or barrel next to you. Noise ${V37.smashNoise}. Most hold a few coins, some a torch, potion, firecracker or caltrops; the loot drops on the hex.`,
-  dread: `1 mana. ${V37.dreadSlots} Wits slots at range ${V37.dreadRange} in sight: 1 hit and the monster or crew member is feared for ${V37.fearRounds} castle turns: it runs its full move away from you, attacks nobody, drops any hold, and every hero it leaves gets a free swing at it. Not the Dragon or the Gloam. Silent.`,
+  dread: `1 mana. ${V37.dreadSlots} Wits slots at range ${V37.dreadRange} in sight: 1 hit and the monster or crew member is feared for ${V37.fearRounds} castle turns: it runs its full move away from you, attacks nobody, drops any hold, and every hero it moves away from gets a free swing at it. Not the Dragon or the Gloam. Silent.`,
   dig: `Clear rubble, a cracked wall or blast rubble next to you, no charge needed. Noise ${DIG_NOISE}.`,
   fireball: `2 mana. Radius 1 at range ${FIREBALL_RANGE} or less: 3 Wits slots, 2 damage per hit to everyone there, allies too. Burns ${BURN_ROUNDS} rounds. Noise ${FIREBALL_NOISE}.`,
   veil: `1 mana. A hero within ${SPELL_RANGE} is unseen by monsters for ${VEIL_ROUNDS} rounds. Attacking or noise ${VEIL_BREAK_NOISE}+ breaks it. Silent.`,
@@ -401,7 +401,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   venomdart: `Throw ${THROW_RANGE.venomdart}, 1 Finesse slot, at a monster or crew member in sight (not the Dragon or the Gloam): a hit poisons it: 1 damage a turn, never below 1, until it is cured. Silent.`,
   antidote: 'Drink it while poisoned, or give it to a poisoned hero next to you, up or down (an action): the poison is gone.',
   carry: `Lift a downed hero or a shackled captive next to you (uses the action). They share your hex and come along; you move ${CARRY_MOVE} at most and take only free actions (doors, Take, Drop, Give, Leave, Parley) while you carry them. No jumping, climbing, grappling or blinking. A carried hero doesn't bleed. Leave by an exit with them: a downed hero comes out alive at ${CARRIED_OUT_HP} HP, a captive is rescued.`,
-  unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), an improvised pick (uses one, sure), or Smash (2 Might slots, 1 hit, noise ${UNSHACKLE_SMASH_NOISE} either way). Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
+  unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), or an improvised pick (uses one, sure). Without one of these, carry them out instead. Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
   setDown: 'Put down the body you carry, next to you. Free.',
   // V4.1 (WS6, spec 31.8)
   shoot: `Loose a specialty arrow at a hex in sight, no roll: whistling (noise ${DATA.WHISTLE_NOISE} there), glow (lights radius ${DATA.GLOW_ARROW_RADIUS} for ${DATA.GLOW_ARROW_ROUNDS} rounds), blast (${DATA.BLAST_ARROW_DMG} damage within 1, opens locks, breaks walls; noise ${DATA.BLAST_NOISE}), or a rope arrow at a pit's edge within ${DATA.ROPE_ARROW_RANGE} (a rope anchored there). Range ${DATA.BOW_RANGE}.`,
@@ -438,7 +438,7 @@ export function modifierHelp(m: string): string {
   if (/^Backstab/.test(m)) return 'from behind, unnoticed: +1 slot and double damage per hit';
   if (/^Blindsided|^From behind/.test(m)) return 'struck from straight behind the target';
   if (/^Sneak attack|^Unnoticed|^Unaware/.test(m)) return 'it has not noticed you yet';
-  if (/^Free swing/.test(m)) return 'a swing as it leaves your reach: 1 slot fewer';
+  if (/^Free swing/.test(m)) return 'a swing as it moves from your side: 1 slot fewer';
   if (/^Braced/.test(m)) return 'the target has planted their feet';
   if (/^Hamstring|^Legs/.test(m)) return 'a shot at the legs is harder';
   if (/^Raised/.test(m)) return 'shooting from raised floor';
@@ -456,7 +456,7 @@ export const AWARENESS_TEXT: Record<string, string> = {
   asleep: `Asleep: sees nothing; it wakes by sound. Every hex you pass within 2 of it rolls to wake it (walking ${V37.wakeWalk}%, sneaking ${V37.wakeSneak}%, half that unlit). Ending next to it: walking wakes it, sneaking ${V37.wakeEndSneak}%.`,
   alert: `At its post, unaware: sees ahead (${V37.noticeLitWalk} lit, ${V37.noticeLitSneak} sneaking; ${V37.noticeDarkWalk} unlit, ${V37.noticeDarkSneak} sneaking). At its sides only a walker within ${V37.sideWalk} or anyone right beside it; nothing straight behind.`,
   searching: `Searching (?): heard something and goes to look. Sees ahead and at its sides (${V37.noticeLitWalk} lit, ${V37.noticeLitSneak} sneaking; ${V37.noticeDarkWalk} unlit, ${V37.noticeDarkSneak} sneaking); straight behind only a walker right behind it.`,
-  hunting: 'Hunting (!): it has seen someone and comes for them. Those it has seen it follows all round; others it sees ahead and at its sides. Leave its reach and it gets a free swing.',
+  hunting: 'Hunting (!): it has seen someone and comes for them. Those it has seen it follows all round; others it sees ahead and at its sides. Move from its side (away, round it or past it) and it gets a free swing.',
   patrol: `On patrol, unaware: sees ahead (${V37.noticeLitWalk} lit, ${V37.noticeLitSneak} sneaking; ${V37.noticeDarkWalk} unlit, ${V37.noticeDarkSneak} sneaking). At its sides only a walker within ${V37.sideWalk} or anyone right beside it; nothing straight behind.`,
 };
 
@@ -467,7 +467,7 @@ export const MOVE_HELP = {
   walk: `Walk: up to 4 hexes (Burglar 5), noise 1 at every hex you pass (2 on rubble). Sleepers within 2 of your path roll to wake (${V37.wakeWalk}% each hex, half unlit); ending next to one wakes it. Awake monsters notice you ahead of them within ${V37.noticeLitWalk} lit, ${V37.noticeDarkWalk} unlit (a searching or hunting one at its sides too); an unaware one at its sides within ${V37.sideWalk}; straight behind only when adjacent. They notice you on the step that brings you into view, even if you walk on out of it. Hovering a hex shows what the move risks.
 After moving, a second move (a dash, as far again: 4, Burglar 5) spends the action. Each hero keeps their own Walk/Sneak setting.`,
   sneak: `Sneak (S): up to 2 hexes (Burglar 4, dash 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (Burglar ${V39.burglarWakeSneak}%; half unlit; ending next to one ${V37.wakeEndSneak}%, Burglar ${V39.burglarWakeEndSneak}%). Awake monsters notice you ahead of them (a searching or hunting one at its sides too) within ${V37.noticeLitSneak} lit (Burglar ${V39.burglarNoticeLitSneak}), ${V37.noticeDarkSneak} unlit; an unaware one at its sides only right beside it (never a Burglar), and none straight behind (hovering an enemy says which way it faces). Your first strike on a monster that has not noticed you gets +${V37.sneakSlots} slot. S switches only the selected hero; Burglars start on Sneak.`,
-  swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once as you leave its reach, with 1 slot fewer. Sneaking does not avoid it. Your heroes swing the same way at enemies that leave their reach while their action is still ready.',
+  swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once when you move from a hex next to it (away, round it or past it; once a move), with 1 slot fewer. Stepping up to it is free. Sneaking does not avoid it. Your heroes swing the same way at enemies that move from their side while their action is still ready.',
   blind: FACING_HELP.rear,
 };
 

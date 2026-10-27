@@ -495,10 +495,6 @@ export const MEND_UP_HP = 2;
 export const CARRIED_OUT_HP = 1;
 /** Splints (Gerda and Aldric home): a downed hero crawls this many hexes a turn. */
 export const CRAWL_MOVE = 1;
-/** Unshackle by Smash: Might slots, hits needed, noise either way (as smashing a chest). */
-export const UNSHACKLE_SMASH_SLOTS = 2;
-export const UNSHACKLE_SMASH_HITS = 1;
-export const UNSHACKLE_SMASH_NOISE = 4;
 /** Unshackle with an improvised pick: sure, but not silent. */
 export const UNSHACKLE_IMPROVISED_NOISE = 2;
 export const SMOKE_ROUNDS = 2;

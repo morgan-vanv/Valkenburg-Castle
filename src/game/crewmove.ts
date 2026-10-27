@@ -18,7 +18,7 @@ import { bringCarried } from './common'; // V4.1 (spec 31.4)
 import { canEnter, dijkstra, dirIndex, distField, doorAt, kindAt, litSet, los, seesHex, within } from './world';
 import { approach, blocked, strikeDetailed } from './ai';
 import { hearStep, partySees } from './hearing';
-import { faceToward, heroSwings, isSneaking, monsterCanSwing, moodOf, sleepersNear, stepNoise, wakeChance } from './stealth';
+import { faceToward, heroSwings, isSneaking, monsterCanSwing, moodOf, sleepersNear, stepNoise, stepProvokes, wakeChance } from './stealth';
 import { lookAll } from './world-phase';
 import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse, spendPick } from './charges';
 import { digOut } from './delve';
@@ -225,7 +225,7 @@ export function routeIntent(c: Ctx, route: CrewRoute, fallback: Intent = { kind:
 
 /**
  * V4.0 (spec 28.1, 28.2, 28.4): a crew member walks `path`, walking or sneaking, by the heroes' rules, step by step:
- * it faces each step; heroes it leaves swing at a hostile one, hunting monsters that noticed it swing at it; doors
+ * it faces each step; heroes it steps from swing at a hostile one, hunting monsters that noticed it swing at it (spec 31.11: once each a move); doors
  * open; walking, its footsteps are heard by the party (sneaking: silent), every awake monster looks (`lookAll`: it
  * may be noticed, and the cover of others blown), heroes who see it notice it, walking makes step noise (1, rubble 2)
  * and sleepers roll to wake (the heroes' chances, a Burglar's quiet feet); a trap on the hex springs. At the end it
@@ -244,11 +244,12 @@ export function crewWalk(c: Ctx, r: RivalX, path: Pos[], sneak = false): boolean
   };
   const alive = () => r.hp > 0 && !r.goneOut;
   const swung = new Set<string>();
+  const heroesSwung = new Set<string>(); // V4.1 (spec 31.11): each hero swings once per move
   let passed = false;
   let from = r.at;
   for (const [i, p] of path.entries()) {
     if (p.level === from.level && !samePos(p, from)) r.facing = dirIndex(from, p);
-    if (heroSwings(c, r.id, from, p)) {
+    if (heroSwings(c, r.id, from, p, heroesSwung)) {
       flush();
       return true;
     }
@@ -304,11 +305,11 @@ export function crewWalk(c: Ctx, r: RivalX, path: Pos[], sneak = false): boolean
   return false;
 }
 
-/** Hunting monsters that noticed the member swing as it steps out of their reach (spec 20.2, as at a hero). */
-function monsterSwings(c: Ctx, r: RivalX, from: Pos, to: Pos, done: Set<string>): void {
+/** Hunting monsters that noticed the member swing as it steps from their side (spec 20.2, 31.11: as at a hero), once per move. */
+function monsterSwings(c: Ctx, r: RivalX, from: Pos, _to: Pos, done: Set<string>): void {
   for (const m of c.d.monsters) {
     if (done.has(m.id) || r.hp <= 0) continue;
-    if (!(m.at.level === from.level && distance(m.at, from) === 1) || (m.at.level === to.level && distance(m.at, to) <= 1)) continue;
+    if (!stepProvokes(m.at, from)) continue;
     if (!monsterCanSwing(m, r.id)) continue;
     done.add(m.id);
     const st = monsterStats(m);

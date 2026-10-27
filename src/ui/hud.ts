@@ -770,7 +770,7 @@ export class Hud {
       if (m) lines = this.full ? this.monsterLines(m).map((html) => ({ html })) : this.monsterCard(m);
       else if (hero) lines = this.heroCard(hero);
       else if (rival) lines = this.rivalCard(rival);
-      else if (d.prisoner?.id === unitId) lines = [{ html: `<b>${esc(d.prisoner.name)}</b> <span class="dim">${d.prisoner.freed ? 'freed, following' : 'shackled'}</span>` }, { html: d.prisoner.freed ? 'Bring them to a way out.' : 'Free them from next to them.' }, { html: `HP ${d.prisoner.hp}/5`, cls: 'dim' }];
+      else if (d.prisoner?.id === unitId) lines = [{ html: `<b>${esc(d.prisoner.name)}</b> <span class="dim">${d.prisoner.freed ? 'freed, following' : 'shackled'}</span>` }, { html: d.prisoner.freed ? 'Bring them to a way out.' : 'Unshackle them (lockpicks, an improvised pick or a key), or carry them out.' }, { html: `HP ${d.prisoner.hp}/5`, cls: 'dim' }];
       const act = this.bestActionFor(unitId, at);
       const link = unitId === this.selectedId ? this.linkHere() : null;
       const exit = unitId === this.selectedId ? this.exitHere() : null;
@@ -780,6 +780,9 @@ export class Hud {
       // V4.1 (WS6, spec 31.8): a Ranger's bow shot that has nothing to loose says why.
       const dry = this.options.find((o) => o.blocked && ['hamstring', 'knockback', 'overwatch'].includes(o.action) && o.targets.some((t) => !t.id || t.id === unitId));
       if (dry && (m || rival) && !act) lines.push({ html: `${esc(dry.blocked!)}${dry.blocked === 'Out of arrows' ? ` · the knife reaches only next to ${esc(this.heroDef(this.selectedId ?? '')?.name ?? 'you')}` : ''}`, cls: 'bad' });
+      // V4.1 (spec 31.11): next to the shackled captive with no lock tool: say what Unshackle takes (Carry stays the way out).
+      const noTool = d.prisoner?.id === unitId ? this.options.find((o) => o.action === 'unshackle' && o.blocked) : undefined;
+      if (noTool && act?.option !== noTool) lines.push({ html: esc(noTool.blocked!), cls: 'bad' });
       return lines;
     }
     if (!at) return [];

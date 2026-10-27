@@ -12,6 +12,7 @@ import { makeHero } from './camp';
 import { hurtAny, makeItem, occupant } from './common';
 import { buildCrew, planRival } from './rivals';
 import { poison } from './poison';
+import { NO_UNSHACKLE } from './delve';
 import { fall } from './falls';
 
 const e = createEngine(testCastle);
@@ -362,7 +363,7 @@ describe('V4.1 shackled captives and Unshackle (spec 31.4)', () => {
     expect(r.events.some((x) => x.type === 'out' && x.id === 'p1')).toBe(true);
   });
 
-  it('Unshackle with lockpicks (silent), the key (used up), an improvised pick (one used), or Smash (2 Might slots, noise 4)', () => {
+  it('Unshackle with lockpicks (silent), the key (used up) or an improvised pick (one used); no Smash (spec 31.11)', () => {
     const tools: [ItemKind | null, (s: GameState) => void][] = [
       ['lockpicks', (s) => expect(hero(s, 'keven').pack.some((i) => i.kind === 'lockpicks')).toBe(true)],
       ['key', (s) => expect(hero(s, 'keven').pack.some((i) => i.kind === 'key')).toBe(false)],
@@ -378,15 +379,16 @@ describe('V4.1 shackled captives and Unshackle (spec 31.4)', () => {
       expect(r.events.some((x) => x.type === 'noise' && x.radius >= 4)).toBe(false);
       check(s);
     }
+    // V4.1 (spec 31.11, owner): without a lock tool Unshackle is listed blocked with the reason; Smash is gone, Carry stays.
     const s = delve([]);
     captive(s);
-    const pv = e.preview(s, 'keven', 'unshackle', { id: 'p1' });
-    expect(pv).toMatchObject({ slots: 2, noise: 4, stat: 'might' });
-    const r = until(s, { type: 'act', heroId: 'keven', action: 'unshackle', target: { id: 'p1' }, focus: 0 }, (ev) => ev.some((x) => x.type === 'freed'));
-    expect(r.state.delve!.prisoner!.freed).toBe(true);
-    const miss = until(s, { type: 'act', heroId: 'keven', action: 'unshackle', target: { id: 'p1' }, focus: 0 }, (ev) => !ev.some((x) => x.type === 'freed'));
-    expect(miss.state.delve!.prisoner!.freed).toBe(false);
-    expect(miss.events.some((x) => x.type === 'noise' && x.radius === 4)).toBe(true);
+    hero(s, 'keven').pack = hero(s, 'keven').pack.filter((i) => !['lockpicks', 'key', 'improvised'].includes(i.kind));
+    const opt = e.actions(s, 'keven').find((o) => o.action === 'unshackle');
+    expect(opt?.blocked).toBe(NO_UNSHACKLE);
+    expect(opt?.rolls).toBe(false);
+    expect(e.preview(s, 'keven', 'unshackle', { id: 'p1' }).ok).toBe(false);
+    expect(e.apply(s, { type: 'act', heroId: 'keven', action: 'unshackle', target: { id: 'p1' }, focus: 0 }).error).toBeTruthy();
+    expect(e.actions(s, 'keven').find((o) => o.action === 'carry')?.blocked).toBeUndefined();
   });
 
   it('unshackled, the captive follows the freer at walk 4 without slowing them; leaving with them adjacent rescues them', () => {

@@ -306,6 +306,9 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     const end = path[path.length - 1] ?? h.at;
     const litSet = lit(s);
     const out: MoveRisks = { wake: [], notice: [], swings: [] };
+    // V4.1 (spec 31.11): any step that starts next to an engaged enemy provokes it (once a move).
+    const starts = path.length ? [h.at, ...path.slice(0, -1)] : [];
+    const provokes = (at: Pos) => starts.some((p) => p.level === at.level && distance(p, at) === 1);
     for (const m of d.monsters) {
       if (m.hp <= 0 || m.at.level !== h.at.level) continue;
       if (m.awareness === 'asleep') {
@@ -334,12 +337,12 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       const dist = distance(end, m.at);
       const noticed = m.awareness === 'hunting' ? false : sneak ? !blind && dist <= rng : dist <= (blind ? Math.ceil(rng / 2) : rng);
       if (noticed) out.notice.push({ id: m.id });
-      if (m.awareness === 'hunting' && distance(h.at, m.at) === 1 && distance(end, m.at) > 1) out.swings.push({ id: m.id, damage: [0, m.kind === 'orc' ? 2 : 3] });
+      if (m.awareness === 'hunting' && provokes(m.at)) out.swings.push({ id: m.id, damage: [0, m.kind === 'orc' ? 2 : 3] });
     }
     if (d.rivals?.stance === 'hostile')
       for (const r of d.rivals.members) {
         if (r.hp <= 0 || r.goneOut || r.at.level !== h.at.level) continue;
-        if (distance(h.at, r.at) === 1 && distance(end, r.at) > 1 && !(r.feared ?? 0)) out.swings.push({ id: r.id, damage: [0, 4] });
+        if (provokes(r.at) && !(r.feared ?? 0)) out.swings.push({ id: r.id, damage: [0, 4] });
       }
     return out;
   };
@@ -739,7 +742,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId)!;
         const risks = risksFor(state, cmd.heroId, cmd.path, mvSneak);
         const ev: ApplyResult['events'] = [];
-        // V3.7 (20.2): free swings as the hero leaves reach, before the move plays.
+        // V3.7 (20.2), V4.1 (31.11): free swings as the hero moves from an enemy's side, before the move plays.
         for (const sw of risks.swings) {
           const hits = sw.id.startsWith('m') ? 1 : 0;
           const damage = hits ? Math.max(1, sw.damage[1] - 1) : 0;
@@ -790,8 +793,8 @@ export function fixtureEngine(castle0: CastleDef): Engine {
             const path = [away];
             const next = posNeighbors(away).filter((p) => walk(s, p) && !d.heroes.some((x) => samePos(x.at, p))).sort((a, b) => distance(b, from) - distance(a, from))[0];
             if (next) path.push(next);
-            // Heroes it leaves get a free swing.
-            for (const hx of d.heroes) if (hx.status === 'active' && !hx.acted && distance(hx.at, m.at) === 1 && distance(hx.at, path[path.length - 1]!) > 1) {
+            // Heroes it moves from get a free swing (spec 31.11).
+            for (const hx of d.heroes) if (hx.status === 'active' && !hx.acted && distance(hx.at, m.at) === 1) {
               m.hp -= 1;
               ev.push({ type: 'swing', by: hx.heroId, target: m.id, hits: 1, damage: 1 });
             }

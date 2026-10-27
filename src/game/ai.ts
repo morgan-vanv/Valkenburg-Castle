@@ -139,7 +139,7 @@ export function exitOpen(c: Ctx, e: Pos): boolean {
 
 /**
  * Walk a figure along `path`. Returns true if it was stopped short: caltrops (monsters only), or a
- * hero's free swing killed it (spec 20.2: leaving a hero's side with their action ready). It faces
+ * hero's free swing killed it (spec 20.2, 31.11: stepping from a hero's side with their action ready). It faces
  * the way it last stepped (spec 20.1).
  */
 export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path: Pos[]): boolean {
@@ -149,9 +149,10 @@ export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path:
   const seg: Pos[] = [];
   let from = at.at;
   const isMonster = c.d.monsters.some((m) => m.id === id);
+  const swung = new Set<string>(); // V4.1 (spec 31.11): each hero swings once per move
   for (const p of path) {
     if (p.level === from.level && !samePos(p, from)) at.facing = dirIndex(from, p);
-    if (heroSwings(c, id, from, p)) {
+    if (heroSwings(c, id, from, p, swung)) {
       if (seg.length) c.ev.push({ type: 'moved', id, path: [...seg] });
       at.at = { ...from };
       return true;

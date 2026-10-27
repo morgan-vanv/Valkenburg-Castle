@@ -355,9 +355,17 @@ export interface Swinger {
   name: string;
 }
 
-/** Enemies that get a free swing at `heroId` stepping from `from` to `to`: adjacent to from, not to to. */
-export function swingersFor(c: Ctx, heroId: string, from: Pos, to: Pos): Swinger[] {
-  const leaves = (at: Pos) => at.level === from.level && distance(at, from) === 1 && !(at.level === to.level && distance(at, to) <= 1);
+/**
+ * V4.1 (spec 31.11, owner): a step provokes the enemy whose reach it starts in. Moving at all from a hex next to an
+ * engaged enemy (out of its reach, round it, past it) gives it a free swing; stepping next to it from outside doesn't.
+ */
+export function stepProvokes(enemyAt: Pos, from: Pos): boolean {
+  return enemyAt.level === from.level && distance(enemyAt, from) === 1;
+}
+
+/** Enemies that get a free swing at `heroId` stepping from `from` (to `to`): every engaged one next to `from` (spec 31.11). */
+export function swingersFor(c: Ctx, heroId: string, from: Pos, _to: Pos): Swinger[] {
+  const leaves = (at: Pos) => stepProvokes(at, from);
   const out: Swinger[] = [];
   for (const m of c.d.monsters) {
     if (!leaves(m.at) || !monsterCanSwing(m, heroId)) continue;
@@ -384,7 +392,7 @@ export function enemySwing(c: Ctx, sw: Swinger, heroId: string): void {
   c.ev.push({ type: 'swing', by: sw.id, target: r.hit ?? heroId, hits: r.hits, damage: r.damage });
 }
 
-/** A hero steps from `from` to `to`: every enemy left behind swings once (per enemy per move; `done` carries across the move's steps). */
+/** A hero steps from `from` to `to`: every engaged enemy next to `from` swings once (per enemy per move; `done` carries across the move's steps). */
 export function provokeSwings(c: Ctx, h: HeroInDelve, from: Pos, to: Pos, done: Set<string>): void {
   for (const sw of swingersFor(c, h.heroId, from, to)) {
     if (done.has(sw.id) || h.status !== 'active') continue;
@@ -408,17 +416,18 @@ export function heroCanSwing(h: HeroInDelve): boolean {
 }
 
 /**
- * An enemy `id` steps from `from` to `to` (spec 20.2): every active hero it leaves (adjacent before,
- * not after) whose action is still ready swings with their weapon at one slot fewer (a bow at 1).
- * The action is not spent. Returns true when the enemy died of it.
+ * An enemy `id` steps from `from` to `to` (spec 20.2): every active hero next to `from` (V4.1 spec 31.11: whether the
+ * step leaves them or not) whose action is still ready swings with their weapon at one slot fewer (a bow at 1), once
+ * per move (`done`: the heroes who already swung on this move). The action is not spent. Returns true when the enemy
+ * died of it.
  */
-export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos): boolean {
+export function heroSwings(c: Ctx, id: string, from: Pos, to: Pos, done: Set<string> = new Set()): boolean {
   const t = heroSwingTarget(c, id);
   if (!t) return false;
   for (const h of c.d.heroes) {
-    if (!heroCanSwing(h)) continue;
-    if (!(h.at.level === from.level && distance(h.at, from) === 1)) continue;
-    if (h.at.level === to.level && distance(h.at, to) <= 1) continue;
+    if (!heroCanSwing(h) || done.has(h.heroId)) continue;
+    if (!stepProvokes(h.at, from)) continue;
+    done.add(h.heroId);
     const def = heroDef(c, h.heroId)!;
     // V4.1 (WS6, spec 31.8): a bow swing looses an arrow (plain first, else a specialty one, its effect too); out of arrows, the knife.
     const weapon = weaponNow(def.cls, h.pack);
@@ -492,7 +501,8 @@ function shadowHears(sh: Shadow, at: Pos): void {
 
 /**
  * What a move along `path` risks (spec 20.1, 20.2, 24.4, 26.2, 27): every wake roll on the way with its chance,
- * the awake enemies that would notice a hero on the way, and the free swings leaving provokes, with their damage
+ * the awake enemies that would notice a hero on the way, and the free swings the move provokes (spec 31.11: any step
+ * from a hex next to an engaged enemy, once per enemy), with their damage
  * range. V4.0 (spec 27): the preview plays the move through the eyes of every monster the party has seen
  * (`seen`): at each hex the mover steps on, every awake one looks at every active hero (the mover there, the
  * others where they stand, the light as it is then: a lantern carried along lights friends), noticing as the
@@ -524,12 +534,13 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
   let facing = h.facing;
   path.forEach((p, i) => {
     const last = i === path.length - 1;
-    // Free swings first, as the step leaves their reach: a monster that has noticed the mover (perhaps earlier on this path) and hunts.
+    // Free swings first, as the step starts in their reach (spec 31.11: out of it, round it or past it): a monster that has
+    // noticed the mover (perhaps earlier on this path) and hunts.
     for (const sh of shadows) {
       const m = sh.m;
       if (swung.has(m.id) || sh.mood !== 'hunting' || !sh.noticed.includes(h.heroId)) continue;
       if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0) continue;
-      if (!(m.at.level === from.level && distance(m.at, from) === 1) || (m.at.level === p.level && distance(m.at, p) <= 1)) continue;
+      if (!stepProvokes(m.at, from)) continue;
       swung.add(m.id);
       const st = monsterStats(m);
       const slots = Math.max(1, st.slots - SWING_SLOT_PENALTY);
