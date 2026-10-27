@@ -412,7 +412,7 @@ export function actionHelp(action: ActionKind, cls?: string): string {
   if (action === 'attack' && cls && cls in CLASSES) {
     const w = CLASSES[cls as HeroClass].weapon;
     const stat = `${w.stat[0]!.toUpperCase()}${w.stat.slice(1)}`;
-    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}. Sneak attack: +1 slot on a monster that has not noticed you${cls === 'burglar' ? `. Backstab from beside or behind (a monster's sides or straight behind it, straight behind a crew member): +${V39.backstabSlots} more and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage` : ''}.`;
+    return `${w.name}: ${w.slots} ${stat} slots, ${w.dmg} damage per hit${w.range ? `, range ${w.range} in sight (adjacent: 1 slot less)` : ', next to you'}. All slots hit: +1. Noise ${w.noise ?? 2}. Sneak attack: +1 slot on a monster that has not noticed you${cls === 'burglar' ? `. Backstab from beside or behind (a monster's sides or straight behind it, straight behind a crew member): +${V39.backstabSlots} more and ${V39.backstabMult === 2 ? 'double' : `×${V39.backstabMult}`} damage` : ''}.${w.range ? ` Each shot uses an arrow (the quiver first); pick a specialty arrow in the bar's pill (keys , and .). Out of arrows: a knife, ${DATA.KNIFE.slots} Finesse slots, ${DATA.KNIFE.dmg} damage, next to you.` : ''}`;
   }
   return ACTION_HELP[action] ?? '';
 }
@@ -539,13 +539,13 @@ export const ITEM_USE: Record<string, { pack?: boolean; then?: string; how?: str
   // V4.1 (WS6): Attack picks the arrow; Shoot looses the hex ones.
   quiver: { how: 'every bow shot uses one, before bought arrows' },
   arrows: { how: 'every bow shot, once the quiver is empty' },
-  whistlearrows: { how: 'Attack (pick it as the arrow), or Shoot arrow at a hex' },
-  glowarrows: { how: 'Attack (pick it as the arrow), or Shoot arrow at a hex' },
+  whistlearrows: { pack: true, then: `a hex within ${DATA.BOW_RANGE} (or pick it as the arrow when you Attack)` },
+  glowarrows: { pack: true, then: `a hex within ${DATA.BOW_RANGE} (or pick it as the arrow when you Attack)` },
   firearrows: { how: 'Attack: pick it as the arrow' },
   poisonarrows: { how: 'Attack: pick it as the arrow' },
   barbarrows: { how: 'Attack: pick it as the arrow' },
-  ropearrow: { how: 'Shoot arrow at a pit edge' },
-  blastarrows: { how: 'Shoot arrow at a hex' },
+  ropearrow: { pack: true, then: `a pit edge within ${DATA.ROPE_ARROW_RANGE}` },
+  blastarrows: { pack: true, then: `a hex within ${DATA.BOW_RANGE}` },
   greaterpotion: { pack: true, then: 'yourself or a hero next to you' }, // V4.1 (spec 31.3)
 };
 

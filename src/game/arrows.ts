@@ -115,20 +115,29 @@ export function addGlow(c: Ctx, at: Pos, on?: string): void {
   c.visCache = undefined;
 }
 
-/** World phase step 1: glow arrows burn down 1; one on a figure that died or left stays where it last was (or goes with them). */
+/**
+ * Glow arrows in a figure follow it (`at` kept to where it stands); one in a figure that died stays where it was last
+ * synced (run at the end of every world phase and every hero command, so that's where it fell); one in a crew member
+ * who left goes with them.
+ */
+export function syncGlows(c: Ctx): void {
+  for (const g of c.d.glows ?? []) {
+    if (!g.on) continue;
+    const p = figureAt(c.d, g.on);
+    if (p) g.at = { ...p };
+    else if (c.d.rivals?.members.some((r) => r.id === g.on && r.goneOut)) g.rounds = 0; // gone out with them
+    else g.on = undefined;
+  }
+  if (c.d.glows?.some((g) => g.rounds <= 0)) c.d.glows = c.d.glows.filter((g) => g.rounds > 0);
+}
+
+/** World phase step 1: glow arrows burn down 1. */
 export function tickGlows(c: Ctx): void {
   const list = c.d.glows;
   if (!list?.length) return;
-  for (const g of list) {
-    if (g.on) {
-      const p = figureAt(c.d, g.on);
-      if (p) g.at = { ...p };
-      else if (c.d.rivals?.members.some((r) => r.id === g.on && r.goneOut)) g.rounds = 0; // gone out with them
-      else g.on = undefined;
-    }
-    g.rounds -= 1;
-  }
-  c.d.glows = list.filter((g) => g.rounds > 0);
+  syncGlows(c);
+  for (const g of c.d.glows ?? []) g.rounds -= 1;
+  c.d.glows = (c.d.glows ?? []).filter((g) => g.rounds > 0);
   c.visCache = undefined;
 }
 

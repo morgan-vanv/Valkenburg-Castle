@@ -2,7 +2,7 @@
 // the Gloam hunts, then new intents. Also blasting charges at the end of
 // the player phase. Monster behaviour: spec 7, 14.3, 14.4, 16.1, 16.3, 16.4.
 
-import { tickGlows } from './arrows'; // V4.1 (WS6)
+import { syncGlows, tickGlows } from './arrows'; // V4.1 (WS6)
 import { clearHeard } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent, Item } from './types';
@@ -849,6 +849,7 @@ export function worldPhase(c: Ctx): void {
     // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) comes loose.
     if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
   }
+  syncGlows(c); // V4.1 (WS6): glow arrows keep up with what they stuck in
   tick(d.smoke);
   tick(d.glue);
   tick(d.burning);

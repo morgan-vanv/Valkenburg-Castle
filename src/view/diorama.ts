@@ -29,7 +29,7 @@ const MAX_LIGHTS = 12;
  * on the floor (`at`), or a crew member's own light. Read from the state the same way the engine's lightSources does.
  */
 interface ViewLight {
-  kind: 'torch' | 'lantern' | 'crew';
+  kind: 'torch' | 'lantern' | 'crew' | 'arrow'; // V4.1 (WS6): a glow arrow
   radius: number;
   holder?: string;
   at: Pos;
@@ -55,6 +55,8 @@ function viewLights(state: GameState): ViewLight[] {
   }
   for (const g of d.ground) for (const i of g.items) if (itemRadius(i) > 0) out.push({ kind: i.kind as 'torch' | 'lantern', radius: itemRadius(i), at: g.at });
   for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && (d.rivals as { entered?: boolean } | null)?.entered !== false) out.push({ kind: 'crew', radius: 2, holder: r.id, at: r.at });
+  // V4.1 (WS6, spec 31.8): glow arrows (on the figure they stuck in, or where they landed).
+  for (const g of d.glows ?? []) if (g.rounds > 0) out.push({ kind: 'arrow', radius: 2, ...(g.on ? { holder: g.on } : {}), at: g.at });
   return out;
 }
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
@@ -715,10 +717,10 @@ export class Diorama {
         const v = this.units.get(L.holder);
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         const off = L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.5, 0.3) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.3, 0.2) : new THREE.Vector3(-0.3, v.height + 0.4, 0.2);
-        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
+        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
       } else {
         if (!this.vis.explored.has(posKey(L.at))) continue;
-        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
+        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
       }
     }
     const lv = this.levels.get(this.shownLevel);
