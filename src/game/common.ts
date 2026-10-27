@@ -1,6 +1,7 @@
 // Shared delve helpers: lookups, occupancy, rolls, damage, noise, loot.
 
 import { DARK_PENALTY } from './data'; // V4.1 (WS2)
+import { ARROW_BUNDLE } from './data'; // V4.1 (WS6)
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
@@ -243,7 +244,18 @@ const SINGLE: Record<ItemKind, string> = {
   gatekey: 'Sally port key',
   antidote: 'Antipoison', venomdart: 'Poison dart', lantern: 'Lantern', // V4.1 (WS2); V4.1 (spec 31.4): player-facing names
   greaterpotion: 'Greater potion', // V4.1 (spec 31.3)
+  // V4.1 (WS6, spec 31.8): arrows (a bundle's name carries its count: arrowName)
+  quiver: 'Quiver', arrows: 'Plain arrows', whistlearrows: 'Whistling arrows', glowarrows: 'Glow arrows', firearrows: 'Fire arrows',
+  poisonarrows: 'Poison arrows', barbarrows: 'Barbed arrows', ropearrow: 'Rope arrow', blastarrows: 'Blast arrows',
 };
+
+/** V4.1 (WS6, spec 31.8): an arrow bundle's (or the quiver's) name with its count: "Quiver (10)", "Glow arrows (3)", "Rope arrow". */
+export function arrowName(kind: ItemKind, n: number): string {
+  if (kind === 'quiver') return n > 0 ? `Quiver (${n})` : 'Quiver (empty)';
+  const many = SINGLE[kind];
+  const one = many.replace(/arrows$/, 'arrow');
+  return n === 1 ? one : `${many.replace(/arrow$/, 'arrows')} (${n})`;
+}
 
 /**
  * The Sapper's improvised explosives (V4.0, spec 26.5; the V3.7 "satchel"): one slotless pack item,
@@ -259,14 +271,17 @@ export function isSatchel(i: Item): boolean {
  * hero if they die. A fresh set each delve.
  */
 export function isKit(i: Item): boolean {
-  return isSatchel(i) || i.kind === 'improvised';
+  return isSatchel(i) || i.kind === 'improvised' || i.kind === 'quiver'; // V4.1 (WS6): the Ranger's quiver
 }
 
-export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount = 1, name?: string): Item {
+/** V4.1 (WS6): `amount` omitted: 1, or an arrow bundle's count (ARROW_BUNDLE), named with it. */
+export function makeItem(c: { s: Ctx['s'] }, kind: ItemKind, amount?: number, name?: string): Item {
+  const bundle = ARROW_BUNDLE[kind];
+  amount ??= bundle ?? 1;
   return {
     id: newItemId(c.s),
     kind,
-    name: name ?? (kind === 'gold' ? `${amount} gold` : SINGLE[kind]),
+    name: name ?? (kind === 'gold' ? `${amount} gold` : bundle || kind === 'quiver' ? arrowName(kind, amount) : SINGLE[kind]),
     amount: kind === 'gatekey' ? 0 : amount, // V4.0 (spec 25.2): the sally key is worth nothing
     slots: kind === 'heirloom' || kind === 'hoard' ? 2 : 1,
   };

@@ -128,15 +128,15 @@ const CASK_HINT = "Wim swears the recipe's in his cask book. Lost in the Drain."
 
 /** Everything Lowgate will ever sell (docs/v41-vendors.md), vendor by vendor, in the order shown. */
 export const CATALOG: CatalogRow[] = [
-  // ---- Mott's wagon (from the start; Mott never locks anything)
+  // ---- Mott's wagon (from the start; Mott never locks anything). V4.1 (WS6): the arrow rows are the engine's own kinds now.
   { id: 'torch', vendor: 'mott', kind: 'ware', keys: ['torch'], name: 'Torch', group: 'Light and mending', use: 'A light of your own, for a while.', price: 10, gate: [], hint: '' },
   { id: 'potion', vendor: 'mott', kind: 'ware', keys: ['potion'], name: 'Potion', group: 'Light and mending', use: 'Heals, or gets a downed friend up.', price: 20, gate: [], hint: '' },
   { id: 'antidote', vendor: 'mott', kind: 'ware', keys: ['antipoison', 'antidote'], name: 'Antipoison', group: 'Light and mending', use: 'Draws the poison out, yours or a friend\'s.', price: 20, gate: [], hint: '' },
   { id: 'rope', vendor: 'mott', kind: 'ware', keys: ['rope'], name: 'Rope', group: 'Getting in and around', use: 'Down a pit, and back up.', price: 15, gate: [], hint: '' },
   { id: 'charge', vendor: 'mott', kind: 'ware', keys: ['charge'], name: 'Blasting charge', group: 'Getting in and around', use: 'Blows doors, chests and walls open. Loud.', price: 45, gate: [], hint: '' },
   { id: 'firecracker', vendor: 'mott', kind: 'ware', keys: ['firecracker'], name: 'Firecracker', group: 'Quiet work', use: 'A loud bang, somewhere else.', price: 10, gate: [], hint: '' },
-  { id: 'arrows', glyph: '➳', vendor: 'mott', kind: 'ware', keys: ['arrows'], name: 'Plain arrows', group: 'Arrows', use: 'A bundle for when the quiver runs dry.', price: 10, gate: [], hint: '', soon: '"Arrows? The fletcher\'s cart is due any day now."', ws: 'WS6' },
-  { id: 'whistlearrows', glyph: '➳', vendor: 'mott', kind: 'ware', keys: ['whistlearrows', 'arrows-whistling'], name: 'Whistling arrows', group: 'Arrows', use: 'Shrieks where it lands. Draws them off.', price: 15, gate: [], hint: '', soon: '"Whistlers. I\'ve ordered a few. They\'re noisy in the post."', ws: 'WS6' },
+  { id: 'arrows', glyph: '➳', vendor: 'mott', kind: 'ware', keys: ['arrows'], name: 'Plain arrows', group: 'Arrows', use: 'A bundle for when the quiver runs dry.', price: 10, gate: [], hint: '' },
+  { id: 'whistlearrows', glyph: '➳', vendor: 'mott', kind: 'ware', keys: ['whistlearrows'], name: 'Whistling arrows', group: 'Arrows', use: 'Shrieks where it lands. Draws them off.', price: 15, gate: [], hint: '' },
 
   // ---- Gerda's forge (needs Gerda)
   { id: 'blade', glyph: '⚔', vendor: 'gerda', kind: 'gear', keys: ['weapon'], name: 'Blade', group: 'Gear for a hero', use: 'A keener edge on their weapon.', price: 60, gate: [G], hint: "Old Hobart's smith could put an edge on anything. If she's still alive down there..." },
@@ -148,9 +148,9 @@ export const CATALOG: CatalogRow[] = [
   { id: 'lockpicks', vendor: 'gerda', kind: 'ware', keys: ['lockpicks'], name: 'Lockpicks', group: 'Metalwork', use: 'Pick locks quietly, as often as you like.', price: 25, gate: [G], hint: 'Real picks, not bent nails. A smith\'s work.' },
   { id: 'caltrops', vendor: 'gerda', kind: 'ware', keys: ['caltrops'], name: 'Caltrops', group: 'Metalwork', use: 'Stops the first monster across.', price: 15, gate: [G], hint: 'Iron caltrops would slow them down. Iron needs a smith.' },
   { id: 'gerda-charge', vendor: 'gerda', kind: 'ware', keys: ['charge'], name: 'Blasting charge', group: 'Metalwork', use: 'Gerda\'s casing, Ilse\'s powder. Cheaper than Mott\'s.', price: 30, gate: [G, I], hint: "Gerda's iron and Ilse's powder. If only they were both here." },
-  { id: 'barbarrows', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['barbarrows', 'arrows-barbed'], name: 'Barbed arrows', group: 'Arrows', use: 'Holds a runner where it stands.', price: 25, gate: [G], hint: 'Barbed heads would hold a runner in place. A smith\'s work.', ws: 'WS6' },
-  { id: 'ropearrow', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['ropearrow', 'arrows-rope'], name: 'Rope arrow', group: 'Arrows', use: 'A line across a pit, or up a ledge.', price: 30, gate: [G], hint: 'A line fired across the pit... it would take a smith to forge the head.', ws: 'WS6' },
-  { id: 'blastarrows', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['blastarrows', 'arrows-blast'], name: 'Blast arrows', group: 'Arrows', use: 'Bursts where it lands, like a small charge.', price: 40, gate: [G, I], hint: 'An arrow that bursts where it lands. That would take a smith and an alchemist together.', ws: 'WS6' },
+  { id: 'barbarrows', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['barbarrows'], name: 'Barbed arrows', group: 'Arrows', use: 'Holds a runner where it stands.', price: 25, gate: [G], hint: 'Barbed heads would hold a runner in place. A smith\'s work.' },
+  { id: 'ropearrow', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['ropearrow'], name: 'Rope arrow', group: 'Arrows', use: 'A line across a pit, or up a ledge.', price: 30, gate: [G], hint: 'A line fired across the pit... it would take a smith to forge the head.' },
+  { id: 'blastarrows', glyph: '➳', vendor: 'gerda', kind: 'ware', keys: ['blastarrows'], name: 'Blast arrows', group: 'Arrows', use: 'Bursts where it lands, like a small charge.', price: 40, gate: [G, I], hint: 'An arrow that bursts where it lands. That would take a smith and an alchemist together.' },
 
   // ---- Ilse's bench (needs Ilse)
   { id: 'oil', vendor: 'ilse', kind: 'ware', keys: ['oil'], name: 'Oil flask', group: 'Light and mending', use: 'Tops up a lantern.', price: 15, gate: [I], hint: 'Lamp oil, refined. Ilse would know how.' },
@@ -160,9 +160,9 @@ export const CATALOG: CatalogRow[] = [
   { id: 'venomdart', vendor: 'ilse', kind: 'ware', keys: ['poisondart', 'venomdart'], name: 'Poison dart', group: 'Quiet work', use: 'Poisons whatever it hits, silently.', price: 30, gate: [I], hint: 'Smells like something Ilse would mix. If we ever find her.' },
   { id: 'smoke', vendor: 'ilse', kind: 'ware', keys: ['smoke'], name: 'Smoke bomb', group: 'Quiet work', use: 'Blinds both ways. Hunters lose you.', price: 20, gate: [I], hint: 'Smoke to hide in. Somebody in that castle used to make it by the barrel.' },
   { id: 'glue', vendor: 'ilse', kind: 'ware', keys: ['glue'], name: 'Glue bomb', group: 'Quiet work', use: 'Sticks monsters where they stand.', price: 25, gate: [I], hint: 'Sticky, nasty stuff. An alchemist\'s work.' },
-  { id: 'glowarrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['glowarrows', 'arrows-glow'], name: 'Glow arrows', group: 'Arrows', use: 'Lights up where it lands.', price: 20, gate: [I], hint: 'Arrows that light where they land. If we had an alchemist...', ws: 'WS6' },
-  { id: 'firearrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['firearrows', 'arrows-fire'], name: 'Fire arrows', group: 'Arrows', use: 'Sets the spot it hits burning.', price: 25, gate: [I], hint: 'Pitch and fire on an arrowhead. Ilse could mix it.', ws: 'WS6' },
-  { id: 'poisonarrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['poisonarrows', 'arrows-poison'], name: 'Poison arrows', group: 'Arrows', use: 'A hit poisons.', price: 30, gate: [I], hint: 'Spider venom on an arrowhead. Only an alchemist would dare.', ws: 'WS6' },
+  { id: 'glowarrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['glowarrows'], name: 'Glow arrows', group: 'Arrows', use: 'Lights up where it lands.', price: 20, gate: [I], hint: 'Arrows that light where they land. If we had an alchemist...' },
+  { id: 'firearrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['firearrows'], name: 'Fire arrows', group: 'Arrows', use: 'Sets the spot it hits burning.', price: 25, gate: [I], hint: 'Pitch and fire on an arrowhead. Ilse could mix it.' },
+  { id: 'poisonarrows', glyph: '➳', vendor: 'ilse', kind: 'ware', keys: ['poisonarrows'], name: 'Poison arrows', group: 'Arrows', use: 'A hit poisons.', price: 30, gate: [I], hint: 'Spider venom on an arrowhead. Only an alchemist would dare.' },
 
   // ---- The Flagon's taps (one ale per hero per delve; needs Wim)
   { id: 'ale-glowworm', vendor: 'flagon', kind: 'ale', keys: ['glowworm'], name: 'Glowworm Pale', group: 'On tap', use: '', price: 15, gate: [W, 'copper'], hint: COPPER_HINT },

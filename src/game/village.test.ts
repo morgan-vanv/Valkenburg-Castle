@@ -180,20 +180,23 @@ describe('V4.1 WS1 (spec 31.2): gold and the first delve', () => {
     expect(s.campaign.gold).toBe(60 - SHIELD_PRICE);
   });
 
-  it('Ilse\'s gift: 2 antidotes on the cart; no gift a second time', () => {
+  it('Ilse\'s gift: 2 antidotes and 3 glow arrows (V4.1 WS6) on the cart; no gift a second time', () => {
     const fresh = withParty(e.newGame(5));
     fresh.campaign.reputation = 1;
     let t = finishStory(fresh, 'surgeon').state; // Aldric home, reputation 2: Ilse goes up
     const before = t.campaign.stash.length;
     const r = finishStory(t, 'alchemist');
     expect(r.state.campaign.stash.filter((i) => i.kind === 'antidote')).toHaveLength(2);
-    expect(r.state.campaign.stash.length).toBe(before + 2);
-    expect(r.events.some((x) => x.type === 'say' && /two antidotes/.test(x.text))).toBe(true);
+    expect(r.state.campaign.stash.length).toBe(before + 3);
+    // V4.1 (WS6, spec 31.8): one bundle of 3 glow arrows.
+    expect(r.state.campaign.stash.filter((i) => i.kind === 'glowarrows')).toMatchObject([{ amount: 3, slots: 1, name: 'Glow arrows (3)' }]);
+    expect(r.events.some((x) => x.type === 'say' && /two antidotes and three glow arrows/.test(x.text))).toBe(true);
     // Done again (a stale board copy): no village change, no second gift.
     t = structuredClone(r.state);
     t.campaign.board.push({ id: 'story-alchemist', kind: 'rescue', title: 'Rescue Ilse the alchemist', brief: '', siteId: 'l2-story-archive', level: 2, bounty: 0, warnings: [], story: 'alchemist' });
     const again = finishStory(t, 'alchemist');
     expect(again.state.campaign.stash.filter((i) => i.kind === 'antidote')).toHaveLength(2);
+    expect(again.state.campaign.stash.filter((i) => i.kind === 'glowarrows')).toHaveLength(1);
   });
 
   it('the copper and the cask book bring no gift', () => {

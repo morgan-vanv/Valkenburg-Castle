@@ -62,6 +62,7 @@ import { makeHero } from '../src/game/camp';
 import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
 import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
+import { quiverPerDelve } from '../src/game/data'; // V4.1 (WS6)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -111,6 +112,8 @@ const RESERVE = 60;
 /** Gold moved by camp commands, by kind (negative = spent). */
 const ledger: Record<string, number> = {};
 const throws = { thrown: 0, hits: 0, kills: 0, heroHits: 0 };
+/** V4.1 (WS6): arrows the bot buys and the glow arrows it shoots ahead. */
+const arrows = { bundles: 0, glows: 0, knife: 0 };
 const sap = { fuses: 0, blasts: 0, walls: 0, collapsed: 0, rubbled: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
 const sapLog: string[] = [];
 const pits: Pos[] = [];
@@ -403,6 +406,31 @@ function routeFor(s: GameState, at: Pos): { goals: Pos[]; jump: Pos[]; winch: bo
   });
   const edges = good.flatMap((p) => posNeighbors(p).filter((n) => kindAt(w, d, n) === 'floor'));
   return { goals: edges, jump: good, winch: false };
+}
+
+/**
+ * V4.1 (WS6, spec 31.8): a Ranger with glow arrows and nothing to shoot lights a dark hex ahead (Levels 2 and 3): the
+ * unlit hex in sight nearest the goal, at least 3 away, not lit already (Shoot arrow, no roll). Uses the action.
+ */
+function glowAhead(s: GameState, id: string): GameState {
+  if (!V41) return s;
+  const d = s.delve as DelveX;
+  const me = d.heroes.find((x) => x.heroId === id)!;
+  if (me.status !== 'active' || me.acted || me.at.level === 1 || option(s, id, 'attack')) return s;
+  const o = option(s, id, 'shoot');
+  const glow = me.pack.find((i) => i.kind === 'glowarrows');
+  if (!o || !glow) return s;
+  const lit = litSet(w, d);
+  const field = distField(w, d, routeFor(s, me.at).goals, { stairs: true, allowLocked: true });
+  const here = field.get(posKey(me.at)) ?? 999;
+  const t = o.targets
+    .filter((x) => x.itemId === glow.id && x.at && !lit.has(posKey(x.at)) && hexDistance(x.at, me.at) >= 3 && (field.get(posKey(x.at)) ?? 999) < here)
+    .sort((a, b) => (field.get(posKey(a.at!)) ?? 999) - (field.get(posKey(b.at!)) ?? 999))[0];
+  if (!t) return s;
+  const before = s;
+  s = act(s, id, 'shoot', t, 0);
+  if (s !== before) arrows.glows++;
+  return s;
 }
 
 /**
@@ -917,6 +945,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     }
   }
   if (alive()) s = lightCheck(s, id);
+  if (alive()) s = glowAhead(s, id);
   tryAct();
   // Dash (spec 15.2): nothing to do with the action, so move again toward the goal.
   if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
@@ -1131,6 +1160,15 @@ for (let i = 0; i < N; i++) {
   // V4.1 (WS2): light. Torches: 1 per Level 2 contract, 3 per Level 3 (one more when rich); the lantern once Gerda sells
   // it and the bot can afford it plus a reserve.
   s = buyLight(s, k.level);
+  // V4.1 (WS6, spec 31.8; POLICY=v41): a Ranger going to Level 2+ whose quiver brings under 10 buys a bundle of plain arrows.
+  if (V41 && k.level >= 2) for (const id of fit) {
+    const h = s.campaign.roster.find((x) => x.id === id);
+    if (!h || h.cls !== 'ranger' || quiverPerDelve(h.level) >= 10) continue;
+    if (s.campaign.stash.some((it) => it.kind === 'arrows') || s.campaign.gold < 10 + RESERVE / 2) continue;
+    const before = s;
+    s = run(s, { type: 'buy', kind: 'arrows' });
+    if (s !== before) arrows.bundles++;
+  }
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   // V4.1 (spec 31.3): oil is Ilse's; only when her bench sells it.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
@@ -1172,6 +1210,12 @@ for (let i = 0; i < N; i++) {
     const who = [...fit.slice(j % fit.length), ...fit].find(room);
     if (who) (packs[who] ??= []).push(it.id);
   });
+  // V4.1 (WS6): a Ranger packs the plain arrows and (below Level 1) glow arrows (Ilse's gift).
+  const ranger = fit.find((id) => e.heroById(s, id)?.cls === 'ranger');
+  if (ranger) for (const kind of ['arrows', ...(k.level >= 2 ? ['glowarrows'] : [])]) {
+    const it = s.campaign.stash.find((x) => x.kind === kind && !Object.values(packs).flat().includes(x.id));
+    if (it && (packs[ranger] ?? []).length < 4) (packs[ranger] ??= []).push(it.id);
+  }
   // V4.0 (spec 25): only the open ways in (a new campaign has the main gate alone); rotate through them.
   const ways = e.entrances(s).filter((x) => x.state === 'open');
   s = run(s, { type: 'startDelve', contractId: k.id, heroIds: fit, entrance: ways[i % ways.length]!.index, packs });
@@ -1352,6 +1396,7 @@ for (const pl of [1, 2, 3, 4, 5, 6]) {
   console.log(`  ${String(pl).padStart(8)}   ${cell(1).padStart(9)}   ${cell(2).padStart(9)}   ${cell(3).padStart(9)}`);
 }
 console.log(`campaigns: ${campaignNo} (a new one starts when the heir falls or is taken); sapper throws ${throws.thrown}`);
+console.log(`arrows (V4.1 WS6): plain bundles bought ${arrows.bundles}, glow arrows shot ahead ${arrows.glows}`);
 if (CSV) {
   const head = 'campaign,delve,contract,level,story,done,rounds,partyLv,maxLv,rep,village,gold,wealth,loot,bounty,deaths,captured,wealthAfter,crew';
   const lines = rows.map((r) => [r.campaign, r.cd, r.contract.split(' ')[0], r.level, r.story, r.done ? 1 : 0, r.rounds, r.partyLv.toFixed(2), r.maxLv, r.rep, r.village, r.gold, r.wealth, r.loot, r.bounty, r.deaths, r.captured, r.goldAfter, JSON.stringify(r.crew)].join(','));

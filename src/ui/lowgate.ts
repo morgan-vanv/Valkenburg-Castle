@@ -7,6 +7,7 @@ import type { Engine } from '../game/api';
 import type { AleKind, AleOffer, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
 import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
 import { GIFTS } from '../game/data'; // V4.1 (spec 31.2)
+import { ARROWS_PER_LEVEL, quiverPerDelve } from '../game/data'; // V4.1 (WS6)
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -1391,11 +1392,14 @@ function packSlots(c: Campaign, l: Loadout, hr: Hero, host: CampHost, page: Camp
 function kitLine(hr: Hero): HTMLElement | '' {
   // V4.0 (spec 30.2): one a level each delve.
   const n = kitPerDelve(hr.level);
-  const k = hr.cls === 'sapper' ? { kind: 'improvised-charge', what: `${n} improvised explosive${n === 1 ? '' : 's'}` } : hr.cls === 'burglar' ? { kind: 'improvised', what: `${n} improvised pick${n === 1 ? '' : 's'}` } : null;
+  // V4.1 (WS6, spec 31.8): the Ranger's quiver, 5 arrows a level.
+  const q = quiverPerDelve(hr.level);
+  const k = hr.cls === 'sapper' ? { kind: 'improvised-charge', what: `${n} improvised explosive${n === 1 ? '' : 's'}` } : hr.cls === 'burglar' ? { kind: 'improvised', what: `${n} improvised pick${n === 1 ? '' : 's'}` } : CLASSES[hr.cls].weapon.range ? { kind: 'quiver', what: `${q} arrows` } : null;
   if (!k) return '';
+  const fresh = k.kind === 'quiver' ? `A fresh quiver every delve: ${ARROWS_PER_LEVEL} arrows for each level ${hr.name} has. Bought arrows are shot after.` : `A fresh ${n === 1 ? 'one' : 'set'} every delve: one for each level ${hr.name} has.`;
   return h(
     'p',
-    { class: 'lg-kit', tabindex: 0, 'data-kit': k.kind, 'data-tip': `${hr.name}'s own · ${k.what}\nDoesn't take a slot; can't be given away. A fresh ${n === 1 ? 'one' : 'set'} every delve: one for each level ${hr.name} has.\n${ITEM_EFFECT[k.kind] ?? ''}` },
+    { class: 'lg-kit', tabindex: 0, 'data-kit': k.kind, 'data-tip': `${hr.name}'s own · ${k.what}\nDoesn't take a slot; can't be given away. ${fresh}\n${ITEM_EFFECT[k.kind] ?? ''}` },
     h('span', { class: 'lg-g', 'aria-hidden': 'true' }, itemGlyph(k.kind)),
     `Brings their own: ${k.what}`,
     h('span', { class: 'lg-kit-s' }, ' · no slot'),

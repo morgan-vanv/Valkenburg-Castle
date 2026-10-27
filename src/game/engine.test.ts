@@ -1579,7 +1579,9 @@ describe('15.3 classes', () => {
 describe('15.4 quartermaster', () => {
   it('sells seventeen items (V3.6: lockpicks; V4.0: venom darts and the antidote; V4.1: no night-eye draught, the greater potion, the lantern); buying puts them in the stash', () => {
     const shop = e.shop();
-    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'greaterpotion', 'lantern']);
+    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'greaterpotion', 'lantern',
+      // V4.1 (WS6, spec 31.8): arrows
+      'arrows', 'whistlearrows', 'glowarrows', 'firearrows', 'poisonarrows', 'barbarrows', 'ropearrow', 'blastarrows']);
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
@@ -2429,7 +2431,8 @@ describe('V3.5', () => {
       expect(se.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBe('Not for sale.'); // V4.1 (spec 31.3): an ale now
       const shop = se.shop(s);
       // V4.1 (spec 31.3): Ilse's wares and the greater potion are locked too.
-      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['caltrops', 'dart', 'glue', 'greaterpotion', 'hook', 'key', 'lantern', 'lockpicks', 'oil', 'smoke', 'venomdart']);
+      // V4.1 (WS6): and the arrows but Mott's (plain and whistling).
+      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['barbarrows', 'blastarrows', 'caltrops', 'dart', 'firearrows', 'glowarrows', 'glue', 'greaterpotion', 'hook', 'key', 'lantern', 'lockpicks', 'oil', 'poisonarrows', 'ropearrow', 'smoke', 'venomdart']);
       expect(shop.find((o) => o.kind === 'key')!.needs).toBe('smith');
       expect(se.shop().some((o) => o.locked)).toBe(false);
       s.campaign.village.smith = true;
