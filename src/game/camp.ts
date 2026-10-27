@@ -14,6 +14,7 @@ import {
   HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
 } from './data';
 // V4.1 (WS1/WS5, spec 31.2, 31.3)
+import { ARROW_BUNDLE } from './data'; // V4.1 (WS6)
 import { CAPTIVE_PAY, GIFTS, PAIR_PRICES, POTION_HEAL, STORY_PAY, SUPPER_HEAL, pairHome } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES, SHIELD_PRICE } from './data';
@@ -22,6 +23,7 @@ import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeCrew } from './rivals';
 import { makeItem, packUsed, valueOf } from './common';
 import { classKit, isKit } from './charges';
+import { classQuiver } from './arrows'; // V4.1 (WS6)
 import { facingInto } from './stealth';
 import { canEnter, kindAt, type World } from './world';
 import { applyOpenWays, entranceList, isGateKey, mergeDelve, shutWays, startWays, wayOpen } from './ways';
@@ -316,7 +318,7 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       if (o.locked) return err(o.locked);
       if (C.gold < o.price) return err('Not enough gold.');
       C.gold -= o.price;
-      C.stash.push(makeItem({ s }, o.kind, 1, o.name));
+      C.stash.push(ARROW_BUNDLE[o.kind] ? makeItem({ s }, o.kind) : makeItem({ s }, o.kind, 1, o.name)); // V4.1 (WS6): a bundle of arrows
       events.push({ type: 'say', text: `Bought a ${o.name.toLowerCase()}${o.price !== SHOP.find((x) => x.kind === o.kind)?.price ? ` (${o.price} gold)` : ''}.` });
       return { events };
     }
@@ -467,7 +469,8 @@ export function shopOffers(s?: GameState): ShopOffer[] {
   return SHOP.map((o) => {
     const locked = !v ? undefined : needsLocked(v, o.needs);
     const list = Array.isArray(o.needs) ? o.needs : o.needs ? [o.needs] : [];
-    let vendor: ShopOffer['vendor'] = list.includes('alchemist') ? 'ilse' : list.includes('smith') ? 'gerda' : 'mott';
+    // V4.1 (WS6): an entry may name its seller (Gerda sells the blast arrows she and Ilse make).
+    let vendor: ShopOffer['vendor'] = o.vendor ?? (list.includes('alchemist') ? 'ilse' : list.includes('smith') ? 'gerda' : 'mott');
     let price = o.price;
     for (const pp of PAIR_PRICES) {
       if (pp.kind === o.kind && v && pairHome(v, pp.needs[0], pp.needs[1]) && pp.price < price) {
@@ -670,6 +673,9 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     const kit = classKit({ s }, h.cls, h.level);
     if (kit && h.cls === 'sapper') hid.pack.unshift(kit);
     else if (kit) hid.pack.push(kit);
+    // V4.1 (WS6, spec 31.8): the Ranger's quiver, 5 arrows a level, slotless and their own (spent before bought arrows).
+    const quiver = classQuiver({ s }, h.cls, h.level);
+    if (quiver) hid.pack.push(quiver);
     // V3.9 (spec 24.2): everyone starts facing into the castle.
     hid.facing = facingInto(w, d, hid.at);
     // V4.1 (WS2): FREE_LANTERN (off) hands the first hero the old free lantern; packed torches and lanterns go in unlit.

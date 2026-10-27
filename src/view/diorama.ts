@@ -3831,6 +3831,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   hamstring: '➴',
   venomdart: '➶', // V4.0 (spec 29)
   carry: '⛟', // V4.1 (spec 31.4)
+  arrow: '➶', // V4.1 (WS6)
   pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
@@ -3868,13 +3869,18 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   hamstring: 'shoots the legs of',
   venomdart: 'throws a poison dart at', // V4.1 (spec 31.4)
   carry: 'lifts', // V4.1 (spec 31.4)
+  arrow: 'looses a special arrow at', // V4.1 (WS6)
   pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 
 /** Contract colours (15.7): recover gold, rescue green, slay red. Mirrored in style.css .beacon-tag. */
 const BEACON_COLOR: Record<'recover' | 'rescue' | 'slay', number> = { recover: 0xffd36a, rescue: 0x8fe07a, slay: 0xff5a4a };
 
-const THROW_COLOR: Partial<Record<string, number>> = { smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, venomdart: 0x6fdc5a, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a };
+const THROW_COLOR: Partial<Record<string, number>> = {
+  smoke: 0xb0b0b4, glue: 0xd8e04a, dart: 0x9ad0ff, venomdart: 0x6fdc5a, caltrops: 0x8a8e94, firecracker: 0xff5a3a, charge: 0x8a2a1a,
+  // V4.1 (WS6): arrows
+  whistlearrows: 0xe8e0c8, glowarrows: 0x9ff0d0, firearrows: 0xff8a30, poisonarrows: 0x6fdc5a, barbarrows: 0xb8b8c0, ropearrow: 0xc8a878, blastarrows: 0xff5a3a,
+};
 const SPELL_COLOR: Partial<Record<string, number>> = {
   firebolt: 0xff7a20,
   fireball: 0xff5a10,

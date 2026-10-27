@@ -10,6 +10,7 @@ import { calmReach } from './calm';
 import { litSet, sightRangeAt, visibleSet, World } from './world';
 import { brightnessAt } from './common';
 import { lightsOf, migrateLight, siteUnlit } from './light'; // V4.1 (WS2)
+import { migrateArrows } from './arrows'; // V4.1 (WS6)
 import { NIGHTSIGHT_REFUND } from './data';
 import { sightWash } from './stealth';
 import { edgeRiskAt, fallInfo } from './falls';
@@ -298,6 +299,8 @@ export function createEngine(castle: CastleDef): Engine {
         if (d) migratePoison(d);
         // V4.1 (WS2): a delve saved with the old free lantern: it becomes a loaner Lantern in its bearer's pack.
         migrateLight(s);
+        // V4.1 (WS6, spec 31.8): a delve saved before arrows: Rangers (heroes and crew) get their quiver.
+        migrateArrows(s);
         // V4.1 (WS2): the old night-eye draught is no longer sold (Night-eye Stout is an ale): stash copies go back for 15 each.
         const flat = s.campaign.stash.filter((i) => i.kind === 'nightsight');
         if (flat.length) {

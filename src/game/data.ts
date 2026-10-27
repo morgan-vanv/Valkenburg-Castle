@@ -128,6 +128,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Overwatch: shoot the first enemy that moves or acts in sight within 6 next world phase.',
       'Knockback shot: 2 Finesse slots at range 5; 2 hits push the target 1 hex back (pits!).',
       'Hamstring: 1 Finesse slot at −20% at range 5; a hit roots the target for 2 rounds (no moving, can still act). Noise 1.',
+      'Quiver: 5 arrows a level each delve, their own; every shot uses one, bought arrows after. Out of arrows: a knife (2 Finesse slots, 1 damage).',
     ],
   },
   sapper: {
@@ -420,6 +421,15 @@ export const SHOP: ShopOffer[] = [
   { kind: 'greaterpotion', name: 'Greater potion', price: 35, text: 'Heals 8. Gets a downed hero up.', needs: ['surgeon', 'alchemist'] },
   // V4.1 (spec 31.5, WS2): Gerda's lantern: reusable, refilled free in camp.
   { kind: 'lantern', name: 'Lantern', price: 120, text: 'Holds 20 rounds of light, refilled free in camp: radius 4 (3 when low). The shutter is free. Oil tops it up.', needs: 'smith', vendor: 'gerda' },
+  // V4.1 (WS6, spec 31.8): arrows, 1-slot bundles. A Ranger shoots the quiver first, then plain arrows; specialty arrows when picked.
+  { kind: 'arrows', name: 'Plain arrows', price: 10, text: 'A bundle of 6 for the bow, shot after the quiver runs dry.', vendor: 'mott' },
+  { kind: 'whistlearrows', name: 'Whistling arrows', price: 15, text: 'A bundle of 3: noise 6 where it lands. Shoot one at a foe or at a hex in sight (range 6).', vendor: 'mott' },
+  { kind: 'glowarrows', name: 'Glow arrows', price: 20, text: 'A bundle of 3: lights radius 2 for 8 rounds where it lands, or on what it hits. The Gloam shies from it.', needs: 'alchemist' },
+  { kind: 'firearrows', name: 'Fire arrows', price: 25, text: 'A bundle of 3: +1 damage on a hit, and the hex burns 2 rounds.', needs: 'alchemist' },
+  { kind: 'poisonarrows', name: 'Poison arrows', price: 30, text: 'A bundle of 3: a hit poisons (1 damage a turn, never below 1).', needs: 'alchemist' },
+  { kind: 'barbarrows', name: 'Barbed arrows', price: 25, text: 'A bundle of 3: a hit roots the target 2 rounds.', needs: 'smith' },
+  { kind: 'ropearrow', name: 'Rope arrow', price: 30, text: 'One arrow with a line: shot at a pit edge within 5 in sight, it anchors a rope there.', needs: 'smith' },
+  { kind: 'blastarrows', name: 'Blast arrows', price: 40, text: 'A bundle of 2: a blast where it lands: 3 damage within 1, noise 8; opens locks and breaks walls like a charge.', needs: ['smith', 'alchemist'], vendor: 'gerda' },
 ];
 
 // V3.6 (spec 19.2, 19.3).
@@ -635,7 +645,8 @@ export const GIFTS: Partial<Record<StoryId, Gift>> = {
   surgeon: { items: [['potion', 2]], short: '2 potions', line: 'Brother Aldric presses two potions on you for the road. They\'re on Keven\'s cart.' },
   innkeeper: { ale: 'reserve', short: 'A round of Hobart\'s Reserve', line: 'Old Wim broaches his last cask of Hobart\'s Reserve: a round for everyone on the roster, drunk as they next go in.' },
   smith: { shields: 1, short: 'A shield', line: 'Gerda owes you a shield. The next one at the forge is free.' },
-  alchemist: { items: [['antidote', 2]], short: '2 antidotes', line: 'Ilse gives you two antidotes from her own stock. They\'re on Keven\'s cart.' },
+  // V4.1 (WS6, spec 31.8): and a bundle of 3 glow arrows.
+  alchemist: { items: [['antidote', 2], ['glowarrows', 1]], short: '2 antidotes, 3 glow arrows', line: 'Ilse gives you two antidotes and three glow arrows from her own stock. They\'re on Keven\'s cart.' },
 };
 
 /** Spec 31.3: a pair of villagers is home (both flags set). For pair rules anywhere in the engine; old saves lack `alchemist`. */
@@ -660,6 +671,41 @@ export const SUPPER_HEAL = 2;
 
 /** Spec 31.3: the Sapper's tripwire (Gerda and Ilse home): the fuse it's set with; it also goes off when an enemy steps within 1. */
 export const TRIPWIRE_FUSE = 2;
+
+// ---------------------------------------------------------------- V4.1 (WS6, spec 31.8): arrows
+
+/** The Ranger's quiver (class kit, slotless, the hero's own): this many arrows a hero (or crew) level, fresh each delve. */
+export const ARROWS_PER_LEVEL = 5;
+/** Arrows in a Ranger's quiver at the start of a delve: 5 a level (level 1 brings 5, level 2 brings 10). */
+export function quiverPerDelve(level: number | undefined): number {
+  return Math.max(1, Math.floor(level ?? 1)) * ARROWS_PER_LEVEL;
+}
+/** Out of arrows, a Ranger fights with a knife: melee, 2 Finesse slots, 1 damage. */
+export const KNIFE: Weapon = { name: 'Knife', slots: 2, stat: 'finesse', dmg: 1, noise: 2 };
+/** Arrows in a bought bundle (1 slot each bundle). */
+export const ARROW_BUNDLE: Partial<Record<ItemKind, number>> = {
+  arrows: 6, whistlearrows: 3, glowarrows: 3, firearrows: 3, poisonarrows: 3, barbarrows: 3, ropearrow: 1, blastarrows: 2,
+};
+/** A whistling arrow: noise this loud where it lands (a firecracker's). */
+export const WHISTLE_NOISE = 6;
+/** A glow arrow: lights this radius where it lands (or on what it hits) for this many rounds. */
+export const GLOW_ARROW_RADIUS = 2;
+export const GLOW_ARROW_ROUNDS = 8;
+/** A fire arrow: this much more damage on a hit, and the target's hex burns (BURN_ROUNDS, the fireball's rules). */
+export const FIRE_ARROW_DMG = 1;
+/** A barbed arrow: a hit roots this many rounds (hamstring's root, without its −20). */
+export const BARB_ROUNDS = 2;
+/** A rope arrow: an edge hex beside a pit within this range, in sight of the party. */
+export const ROPE_ARROW_RANGE = 5;
+/** A blast arrow: a blast where it lands: this much to everything within 1 (no outer ring), noise BLAST_NOISE. */
+export const BLAST_ARROW_DMG = 3;
+/** Every arrow kind a bow can loose (the quiver, then the bundles). */
+export const ARROW_KINDS: ItemKind[] = ['quiver', 'arrows', 'whistlearrows', 'glowarrows', 'firearrows', 'poisonarrows', 'barbarrows', 'ropearrow', 'blastarrows'];
+/**
+ * Pillar 17: a crew's Ranger brings one bundle of a fitting specialty arrow, on top of its pack (kept out of CREWS so the
+ * crews' own tuning stays apart): the Lantern Sisters' Ranger glow arrows (Level 1 teaches light), the Ferrymen's barbed.
+ */
+export const CREW_ARROWS: Partial<Record<CrewId, ItemKind>> = { 'lantern-sisters': 'glowarrows', ferrymen: 'barbarrows' };
 
 // ---------------------------------------------------------------- V3.5 crews (spec 18.5), reworked in V3.7 (spec 20.4)
 

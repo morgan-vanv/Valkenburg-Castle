@@ -331,6 +331,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   carry: '⛟',
   unshackle: '⛓',
   setDown: '⇩',
+  shoot: '➶', // V4.1 (WS6)
 };
 
 /**
@@ -402,6 +403,8 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   carry: `Lift a downed hero or a shackled captive next to you (uses the action). They share your hex and come along; you move ${CARRY_MOVE} at most and take only free actions (doors, Take, Drop, Give, Leave, Parley) while you carry them. No jumping, climbing, grappling or blinking. A carried hero doesn't bleed. Leave by an exit with them: a downed hero comes out alive at ${CARRIED_OUT_HP} HP, a captive is rescued.`,
   unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), an improvised pick (uses one, sure), or Smash (2 Might slots, 1 hit, noise ${UNSHACKLE_SMASH_NOISE} either way). Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
   setDown: 'Put down the body you carry, next to you. Free.',
+  // V4.1 (WS6, spec 31.8)
+  shoot: `Loose a specialty arrow at a hex in sight, no roll: whistling (noise ${DATA.WHISTLE_NOISE} there), glow (lights radius ${DATA.GLOW_ARROW_RADIUS} for ${DATA.GLOW_ARROW_ROUNDS} rounds), blast (${DATA.BLAST_ARROW_DMG} damage within 1, opens locks, breaks walls; noise ${DATA.BLAST_NOISE}), or a rope arrow at a pit's edge within ${DATA.ROPE_ARROW_RANGE} (a rope anchored there). Range ${DATA.BOW_RANGE}.`,
 };
 
 /** Attack help with the hero's own weapon numbers. Everything else: ACTION_HELP. */
@@ -468,6 +471,19 @@ After moving, a second move (a dash, as far again: 4, Burglar 5) spends the acti
   blind: FACING_HELP.rear,
 };
 
+/** V4.1 (WS6, spec 31.8): what each arrow does (pack hovers, the Outfit's hover). */
+export const ARROW_HELP: Record<string, string> = {
+  quiver: `The Ranger's own: ${DATA.ARROWS_PER_LEVEL} arrows a level each delve, no pack slot, can't be given away. Every bow shot uses one (attack, overwatch, knockback, hamstring, a free swing); bought arrows after. Out of arrows: a knife (${DATA.KNIFE.slots} Finesse slots, ${DATA.KNIFE.dmg} damage, melee).`,
+  arrows: `${DATA.ARROW_BUNDLE.arrows} plain arrows for the bow, shot once the quiver is empty.`,
+  whistlearrows: `Noise ${DATA.WHISTLE_NOISE} where it lands, hit or miss: shot at a foe (Attack) or at a hex in sight (Shoot arrow, range ${DATA.BOW_RANGE}). Draws them off.`,
+  glowarrows: `Lights radius ${DATA.GLOW_ARROW_RADIUS} for ${DATA.GLOW_ARROW_ROUNDS} rounds where it lands, or on the creature it hits (it carries the light). A castle light, not party light: it shows them to you, and the Gloam shies from it.`,
+  firearrows: `+${DATA.FIRE_ARROW_DMG} damage on a hit, and the target's hex burns ${DATA.BURN_ROUNDS} rounds (${DATA.BURN_DMG} a round to whoever stands there).`,
+  poisonarrows: 'A hit poisons: 1 damage a turn, never below 1, until cured. Not the Dragon or the Gloam.',
+  barbarrows: `A hit roots the target ${DATA.BARB_ROUNDS} rounds: it can't move, can still act. No aiming penalty.`,
+  ropearrow: `Shot at an edge hex beside a pit within ${DATA.ROPE_ARROW_RANGE} in sight: a rope is anchored there, so anyone can climb down from that hex (or up to it) without walking over to tie it.`,
+  blastarrows: `A blast where it lands: ${DATA.BLAST_ARROW_DMG} damage within 1, no armor, no outer ring; opens locks and breaks walls within 1 like a charge. Noise ${DATA.BLAST_NOISE}.`,
+};
+
 /** Pack: what each item kind does (how to use it: ITEM_USE). */
 export const ITEM_HELP: Record<string, string> = {
   torch: `Radius ${DATA.TORCH_RADIUS} of light round the bearer for ${TORCH_ROUNDS} rounds while lit. Snuff it (free) to save the rest.`,
@@ -491,6 +507,8 @@ export const ITEM_HELP: Record<string, string> = {
   venomdart: '1 Finesse slot: a hit poisons a monster or crew member: 1 damage a turn, never below 1. Not the Dragon or the Gloam. Silent.',
   antidote: 'Cures poison. Drink it, or give it to a hero next to you, up or down (an action).',
   greaterpotion: `Heals ${DATA.POTION_HEAL.greaterpotion}, or gets a downed hero back up. Aldric and Ilse's.`, // V4.1 (spec 31.3)
+  // V4.1 (WS6, spec 31.8): arrows
+  ...ARROW_HELP,
 };
 
 /**
@@ -518,6 +536,16 @@ export const ITEM_USE: Record<string, { pack?: boolean; then?: string; how?: str
   nightsight: { how: 'nothing (gone flat)' },
   venomdart: { pack: true, then: `a target within ${THROW_RANGE.venomdart}` },
   antidote: { pack: true, then: 'yourself or the hero' },
+  // V4.1 (WS6): Attack picks the arrow; Shoot looses the hex ones.
+  quiver: { how: 'every bow shot uses one, before bought arrows' },
+  arrows: { how: 'every bow shot, once the quiver is empty' },
+  whistlearrows: { how: 'Attack (pick it as the arrow), or Shoot arrow at a hex' },
+  glowarrows: { how: 'Attack (pick it as the arrow), or Shoot arrow at a hex' },
+  firearrows: { how: 'Attack: pick it as the arrow' },
+  poisonarrows: { how: 'Attack: pick it as the arrow' },
+  barbarrows: { how: 'Attack: pick it as the arrow' },
+  ropearrow: { how: 'Shoot arrow at a pit edge' },
+  blastarrows: { how: 'Shoot arrow at a hex' },
   greaterpotion: { pack: true, then: 'yourself or a hero next to you' }, // V4.1 (spec 31.3)
 };
 
@@ -648,6 +676,8 @@ export const ITEM_GLYPH: Record<string, string> = {
   venomdart: '➹',
   antidote: '⚕',
   greaterpotion: '⚱', // V4.1 (spec 31.3)
+  // V4.1 (WS6): the quiver (the kit mark) and bought arrows
+  quiver: '➶', arrows: '➳', whistlearrows: '➳', glowarrows: '➳', firearrows: '➳', poisonarrows: '➳', barbarrows: '➳', ropearrow: '➳', blastarrows: '➳',
 };
 
 /** Glyph for any item kind, tolerant of names the engine picks (smokeBomb, sleepDart, skeletonKey...). */
@@ -696,6 +726,7 @@ export const ITEM_EFFECT: Record<string, string> = {
   venomdart: 'Throw 5, 1 Finesse slot: a hit poisons a monster or crew member (1 damage a turn, never below 1). Silent.',
   antidote: 'Drink, or give to a hero next to you, up or down: cures poison.',
   greaterpotion: `Drink or give: heals ${DATA.POTION_HEAL.greaterpotion}.`, // V4.1 (spec 31.3)
+  ...ARROW_HELP, // V4.1 (WS6)
 };
 
 export function itemLabel(i: Item): string {
@@ -1043,6 +1074,15 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   glue: { group: 'quiet', short: 'Sticks monsters where they stand.' },
   firecracker: { group: 'quiet', short: 'A loud bang, somewhere else.' },
   caltrops: { group: 'quiet', short: 'Stops the first monster across.' },
+  // V4.1 (WS6)
+  arrows: { group: 'around', short: 'A bundle for when the quiver runs dry.' },
+  whistlearrows: { group: 'quiet', short: 'Shrieks where it lands. Draws them off.' },
+  glowarrows: { group: 'light', short: 'Lights up where it lands.' },
+  firearrows: { group: 'around', short: 'Sets the spot it hits burning.' },
+  poisonarrows: { group: 'quiet', short: 'A hit poisons.' },
+  barbarrows: { group: 'around', short: 'Holds a runner where it stands.' },
+  ropearrow: { group: 'around', short: 'A line across a pit.' },
+  blastarrows: { group: 'around', short: 'Bursts where it lands, like a small charge.' },
 };
 export const WARE_GROUP: Record<'light' | 'around' | 'quiet', string> = { light: 'Light and mending', around: 'Getting in and around', quiet: 'Quiet work' };
 
