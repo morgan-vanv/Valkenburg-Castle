@@ -6,7 +6,7 @@ import {
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
   VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, KIT_PER_LEVEL,
-  CARRY_MOVE, VENOM_TRAP_DMG, MEND_UP_HP, CARRIED_OUT_HP, UNSHACKLE_SMASH_NOISE,
+  CARRY_MOVE, VENOM_TRAP_DMG, MEND_UP_HP, CARRIED_OUT_HP,
 } from '../game/data';
 import * as DATA from '../game/data';
 
@@ -401,7 +401,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   venomdart: `Throw ${THROW_RANGE.venomdart}, 1 Finesse slot, at a monster or crew member in sight (not the Dragon or the Gloam): a hit poisons it: 1 damage a turn, never below 1, until it is cured. Silent.`,
   antidote: 'Drink it while poisoned, or give it to a poisoned hero next to you, up or down (an action): the poison is gone.',
   carry: `Lift a downed hero or a shackled captive next to you (uses the action). They share your hex and come along; you move ${CARRY_MOVE} at most and take only free actions (doors, Take, Drop, Give, Leave, Parley) while you carry them. No jumping, climbing, grappling or blinking. A carried hero doesn't bleed. Leave by an exit with them: a downed hero comes out alive at ${CARRIED_OUT_HP} HP, a captive is rescued.`,
-  unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), an improvised pick (uses one, sure), or Smash (2 Might slots, 1 hit, noise ${UNSHACKLE_SMASH_NOISE} either way). Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
+  unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), or an improvised pick (uses one, sure). It takes one of these: without, carry them out. Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
   setDown: 'Put down the body you carry, next to you. Free.',
   // V4.1 (WS6, spec 31.8)
   shoot: `Loose a specialty arrow at a hex in sight, no roll: whistling (noise ${DATA.WHISTLE_NOISE} there), glow (lights radius ${DATA.GLOW_ARROW_RADIUS} for ${DATA.GLOW_ARROW_ROUNDS} rounds), blast (${DATA.BLAST_ARROW_DMG} damage within 1, opens locks, breaks walls; noise ${DATA.BLAST_NOISE}), or a rope arrow at a pit's edge within ${DATA.ROPE_ARROW_RANGE} (a rope anchored there). Range ${DATA.BOW_RANGE}.`,

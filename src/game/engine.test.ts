@@ -685,13 +685,14 @@ describe('contracts and summary', () => {
     expect(s.campaign.delveCount).toBe(1);
   });
 
-  it('rescue (V4.1, spec 31.4): Unshackle (Smash), the captive follows at walk 4, leave with them adjacent', () => {
+  it('rescue (V4.1, spec 31.4, 31.11): Unshackle (lockpicks), the captive follows at walk 4, leave with them adjacent', () => {
     let s = delve({ kind: 'rescue', heroes: ['brann'] });
     const pr = s.delve!.prisoner!;
     expect(pr.at).toEqual(at(1, 16, 8));
     expect(pr.freed).toBe(false);
     put(s, 'brann', at(1, 15, 8));
-    s = until(s, { type: 'act', heroId: 'brann', action: 'unshackle', target: { id: pr.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'freed')).state;
+    const picks = give(s, 'brann', 'lockpicks');
+    s = act(s, 'brann', 'unshackle', { id: pr.id, itemId: picks }).state;
     expect(s.delve!.prisoner).toMatchObject({ freed: true, escortedBy: 'brann' });
     expect(Math.max(...e.reachable(s, 'brann', false).map((r) => r.cost))).toBe(4);
     // Teleport both to the exit for the test.

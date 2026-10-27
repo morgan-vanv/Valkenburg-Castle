@@ -43,7 +43,7 @@ import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
 import { CARRY_MOVE } from './data';
 // V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
-import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, UNSHACKLE_SMASH_HITS, UNSHACKLE_SMASH_NOISE, UNSHACKLE_SMASH_SLOTS, pairHome } from './data';
+import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, pairHome } from './data';
 import { bodyName, carryOut, carryable, checkCarries, closeTo, curePoison, endCarry, isPoisoned, poison, poisonTakes, startCarry, trapDamage } from './poison';
 import { bodiesOn, bringCarried, carrierOf, downedCrew, setDownNear } from './common';
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
@@ -675,6 +675,9 @@ export function pickTool(c: Ctx, h: HeroInDelve): { item: Item; slots: number; p
   return imp ? { item: imp, slots: LOCKPICK_SLOTS, proper: false } : null;
 }
 
+/** V4.1 (spec 31.11, owner): the reason Unshackle isn't offered without a lock tool. */
+export const NO_UNSHACKLE = 'Unshackling takes lockpicks, an improvised pick or a key. Or carry them out.';
+
 /** V4.1 (WS6, spec 31.8): the reason a bow-only shot isn't offered. */
 export const OUT_OF_ARROWS = 'Out of arrows';
 export const NO_PLAIN_ARROWS = 'Out of plain arrows: only specialty arrows left (Attack picks one)';
@@ -797,7 +800,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
       // V4.1 (spec 31.4): a downed hero or the shackled captive next to you that nobody carries.
       return carryable(c, h).map((o) => ({ id: o.id, at: o.at }));
     case 'unshackle': {
-      // V4.1 (spec 31.4): the shackled captive next to you (or on your back): with each tool you have, and Smash.
+      // V4.1 (spec 31.4, 31.11): the shackled captive next to you (or on your back): with each lock tool you have.
       const pr = c.d.prisoner;
       if (!pr || pr.freed || pr.dead || pr.out || !closeTo(pr.at, h.at)) return [];
       const out: ActionTarget[] = [];
@@ -805,7 +808,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
         const it = itemOf(h, k);
         if (it) out.push({ id: pr.id, at: pr.at, itemId: it.id });
       }
-      out.push({ id: pr.id, at: pr.at });
+      // V4.1 (spec 31.11, owner): no Smash: without a lock tool there is nothing to unshackle with (Carry them out).
       return out;
     }
     case 'setDown':
@@ -1005,7 +1008,7 @@ const LABELS: Record<ActionKind, string> = {
   shoot: 'Shoot arrow', // V4.1 (WS6)
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart', 'unshackle'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'carry', 'unshackle', 'setDown', 'potion', 'antidote', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'snuff', 'dropTorch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
@@ -1065,6 +1068,12 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
       if (PLAIN_SHOTS.includes(a) && def && bowClass(def.cls)) {
         const would = targetsFor(c, h, a, true);
         if (would.length) out.push({ action: a, label: LABELS[a], targets: would, rolls: ROLLS.includes(a), pick: PICK[a], blocked: bowReady(h.pack) ? NO_PLAIN_ARROWS : OUT_OF_ARROWS });
+        continue;
+      }
+      // V4.1 (spec 31.11): the shackled captive next to you and no lock tool: listed blocked, so the hover card says why.
+      if (a === 'unshackle') {
+        const pr = c.d.prisoner;
+        if (pr && !pr.freed && !pr.dead && !pr.out && closeTo(pr.at, h.at)) out.push({ action: a, label: LABELS[a], targets: [{ id: pr.id, at: pr.at }], rolls: false, pick: PICK[a], blocked: NO_UNSHACKLE });
         continue;
       }
       // Spec 21.4: a locked thing in reach, and no pick to work it: the option says what would.
@@ -1387,7 +1396,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (it?.kind === 'lockpicks') return simple(`Pick ${who}'s shackles with the lockpicks. Sure and silent`);
       if (it?.kind === 'key') return simple(`Open ${who}'s shackles with the skeleton key. Silent; the key is used up`);
       if (it?.kind === 'improvised') return simple(`Work ${who}'s shackles with an improvised pick. Sure; uses one up. Noise ${UNSHACKLE_IMPROVISED_NOISE}`, UNSHACKLE_IMPROVISED_NOISE);
-      return base('might', UNSHACKLE_SMASH_SLOTS, withLight(def.stats.might), ['Holds, noise 4', `${who} is free, noise 4`, `${who} is free, noise 4`], UNSHACKLE_SMASH_NOISE);
+      return no(NO_UNSHACKLE);
     }
     case 'setDown':
       return simple(`Set ${bodyName(c, h.carrying ?? '')} down. Free.`);
@@ -1915,24 +1924,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'unshackle': {
       const pr = c.d.prisoner!;
       const it = t.itemId ? h.pack.find((i) => i.id === t.itemId) : undefined;
-      let how: 'lockpicks' | 'improvised' | 'key' | 'smash';
+      let how: 'lockpicks' | 'improvised' | 'key';
       if (it?.kind === 'lockpicks') how = 'lockpicks';
       else if (it?.kind === 'key') {
         how = 'key';
         useItem(h, it.id);
-      } else if (it?.kind === 'improvised') {
+      } else {
+        // V4.1 (spec 31.11): an improvised pick (findTarget only offers the lock tools; no Smash).
         how = 'improvised';
-        const left = spendPick(h.pack, it);
+        const left = spendPick(h.pack, it!);
         makeNoise(c, pr.at, UNSHACKLE_IMPROVISED_NOISE);
         if (left === 0) say(c, `${name}'s last improvised pick is spent.`);
-      } else {
-        how = 'smash';
-        const r = doRoll();
-        makeNoise(c, pr.at, UNSHACKLE_SMASH_NOISE);
-        if (r.hits < UNSHACKLE_SMASH_HITS) {
-          say(c, `The shackles hold. Everyone heard that.`);
-          break;
-        }
       }
       unshackle(c, h, how);
       break;
@@ -2350,7 +2352,7 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
 }
 
 /** V4.1 (spec 31.4): unshackled: the captive follows `h` from now on (walk 4, placed beside them after each move). */
-function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'key' | 'smash'): void {
+function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'key'): void {
   const pr = c.d.prisoner!;
   for (const o of c.d.heroes) if (o.carrying === pr.id) o.carrying = undefined;
   pr.freed = true;
@@ -2363,7 +2365,7 @@ function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'ke
   if (samePos(pr.at, h.at)) setDownNear(c, pr.id, h.at);
   c.ev.push({ type: 'freed', prisonerId: pr.id, by: h.heroId, how });
   const name = heroName(c, h.heroId);
-  say(c, how === 'smash' ? `${name} smashes ${pr.name}'s shackles. Stay close.` : how === 'key' ? `${name} turns the skeleton key in ${pr.name}'s shackles. Stay close.` : `${name} picks ${pr.name}'s shackles. Stay close.`);
+  say(c, how === 'key' ? `${name} turns the skeleton key in ${pr.name}'s shackles. Stay close.` : `${name} picks ${pr.name}'s shackles. Stay close.`);
 }
 
 /** V4.1 (spec 31.4): a line in the return report for a hero who came out poisoned. */

@@ -4,7 +4,7 @@
 // antipoison (an action, yourself or an adjacent ally, up or downed), Mend, or leaving the castle. Spider-milk Stout's
 // drinker can't be poisoned. Carry: an action next to a downed hero or the shackled captive; the body shares the carrier's
 // hex and moves with them; the carrier moves CARRY_MOVE at most and takes free actions only; leaving takes the body out.
-// Unshackle: lockpicks, an improvised pick, the skeleton key, or Smash; the unshackled captive follows its freer.
+// Unshackle: lockpicks, an improvised pick or the skeleton key (spec 31.11: no Smash); the unshackled captive follows its freer.
 // Design pillar 17: crews are poisoned, go down and are carried by the same rules.
 
 import { posNeighbors, samePos, type Pos } from './hex';
