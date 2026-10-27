@@ -680,7 +680,12 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
   const mage = (school: HeroClass, mana: number) => cls === school && h.mana >= mana;
   switch (action) {
     case 'attack':
-      if (cls === 'ranger') return enemiesInSight(c, h, CLASSES.ranger.weapon.range ?? 6);
+      if (cls === 'ranger') {
+        // V4.1 (spec 31.4): a downed crew member in sight can be shot too (any hit kills it).
+        const vis = visNow(c);
+        const down = downedCrew(c).filter((r) => within(r.at, h.at, CLASSES.ranger.weapon.range ?? 6) && vis.has(posKey(r.at)) && los(c.w, c.d, h.at, r.at) && !carrierOf(c, r.id)).map((r) => ({ id: r.id, at: r.at }));
+        return [...enemiesInSight(c, h, CLASSES.ranger.weapon.range ?? 6), ...down];
+      }
       return enemiesAdjacent(c, h);
     case 'shove':
       return enemiesAdjacent(c, h, true);
