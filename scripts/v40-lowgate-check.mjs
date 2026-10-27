@@ -126,7 +126,7 @@ await p.click('[data-next="outfit"]');
 await p.waitForTimeout(80);
 check('"Next: Outfit" goes to step 3', (await page()) === 'outfit');
 check('one loadout card per party hero, the first "Packing"', (await p.$$('.lg-hero')).length === 2 && /Packing/i.test(await p.$eval('.lg-hero.sel', (e) => e.innerText)));
-check('Keven carries the lantern', !!(await p.$('.lg-hero[data-hero="keven"] .lg-lantern')));
+check('V4.1: no free lantern on Keven\'s card', !(await p.$('.lg-hero[data-hero="keven"] .lg-lantern')));
 // V4.0 (26.5): class kit shows under the 4 slots: "Brings their own: ...". Keven has none.
 {
   const cls0 = (await st()).campaign.roster.find((x) => x.id === r0).cls;
@@ -221,7 +221,7 @@ const hasMemory = await p.evaluate(() => typeof window.vcEngine.castleMemory ===
 check('step 4 lists only the main gate on a new campaign', ents.length === 1 && /Main gate|Gatehouse/.test(ents[0]), ents.join(','));
 check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(await p.$('.lg-sketch.none')) && !(await p.$('.lg-sketch svg')));
 // V4.0 (spec 30.5): with a remembered Level 1, the sketch takes most of the column (≥ 45% of the window's height) and the
-// ways in, the lantern choice and the plan still show without scrolling, at 1280×800 and 1440×900.
+// ways in and the plan still show without scrolling, at 1280×800 and 1440×900 (V4.1: the lantern checkbox is gone).
 {
   const SHOTS = process.env.SHOTS ?? '';
   const keep = await p.evaluate(() => structuredClone(window.vc.state().campaign));
@@ -234,10 +234,10 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
       const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
       const main = document.querySelector('.lg-main');
       const sk = r('.lg-sketch svg');
-      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 9999, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
+      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 0, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
     });
     check(`${w}×${hh}: the sketch takes ≥ 45% of the window's height`, m.svg && m.sketch >= 0.45 * m.vh, `${Math.round(m.sketch)} of ${m.vh}`);
-    check(`...ways in, lantern and plan in view without scrolling`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
+    check(`...ways in and plan in view without scrolling (no lantern checkbox)`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
     check('...room names readable (≥ 11px) and the ways in named on it', m.names >= 3 && m.fs >= 11 && m.ents2 >= 1, `${m.names} names, ${m.ents2} ways, ${Math.round(m.fs)}px`);
     if (SHOTS) {
       await p.mouse.move(5, hh - 5);
@@ -249,18 +249,16 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
   await edit(`s.campaign.explored = ${JSON.stringify(keep.explored ?? null)} ?? undefined; s.campaign.opened = ${JSON.stringify(keep.opened ?? null)} ?? undefined;`);
   await step('setout');
 }
-check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Lantern/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Torch/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+check('V4.1: no lantern checkbox on Set out', !(await p.$('.lg-shutter input')));
 check('the plan warns when Keven goes', /If he falls, the campaign ends with him\./.test(await p.$eval('.lg-plan', (e) => e.innerText)));
-await p.click('.lg-shutter input');
-await p.waitForTimeout(60);
-check('the lantern shutter checkbox sticks', await p.$eval('.lg-shutter input', (e) => e.checked));
 const partyBefore = (await st()).campaign.roster.map((x) => x.id);
 await p.click('.lg-delve');
 await p.waitForFunction(() => window.vc.state()?.stage === 'delve', null, { timeout: 15000 }).catch(() => {});
 s = await st();
 check('Delve starts a delve with the party and packs', s.stage === 'delve' && s.delve.heroes.length === 2 && s.delve.heroes.some((x) => x.pack.some((i) => i.kind === 'torch')), s.stage);
 await p.waitForFunction(() => !window.vc.busy(), null, { timeout: 30000 }).catch(() => {});
-check('...shuttered as asked', s.stage !== 'delve' || (await p.evaluate(() => window.vc.state().delve.lanternOpen === false)));
+check('...the packed torch goes in unlit (V4.1)', s.stage !== 'delve' || (await p.evaluate(() => window.vc.state().delve.heroes.every((h) => h.pack.every((i) => !i.lit)))));
 
 // ---- back in camp: Same as last time
 await p.evaluate(async () => {
@@ -287,7 +285,7 @@ if (await p.$('[data-same]')) {
   await p.waitForTimeout(100);
   const plan = await p.$eval('.lg-plan', (e) => e.innerText).catch(() => '');
   check('"Same as last time" jumps to step 4 with the remembered party', (await page()) === 'setout' && (await p.$$('.lg-plan-hero')).length === 2 && /Keven/.test(plan));
-  check('...keeps the chosen job and the shutter', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).length > 0 && (await p.$eval('.lg-shutter input', (e) => e.checked)));
+  check('...keeps the chosen job', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).length > 0);
 }
 
 // ---- won back: banner, Show me

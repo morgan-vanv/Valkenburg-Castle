@@ -11,7 +11,7 @@ import { CALM_STEPS, FREE_MOVE } from './data';
 import { say, type Ctx, type HeroX } from './state';
 import { activeHeroes, hd, heroName, levelHeal, makeNoise, nameOf, occupant, onMap, rivalsOnMap, wakeAdjacent } from './common';
 import { bringCarried } from './common'; // V4.1 (spec 31.4)
-import { brightnessOf, dijkstra, dirIndex, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
+import { lightSig, dijkstra, dirIndex, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
 import { moveRisks, provokeSwings, stepNoise, wakeRolls } from './stealth';
 import { ventCheck } from './falls';
 import { afterHeroMove, blocksHero, checkDelveEnd, glimpse, refreshSight, seenSet, springTrap, visNow } from './delve';
@@ -222,7 +222,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
   const name = heroName(c, h.heroId);
   let seen = figuresInSight(c, litSet(c.w, d));
   let hp = new Map(d.heroes.map((x) => [x.heroId, x.hp]));
-  let stage = brightnessOf(d.light);
+  let stage = lightSig(d, false); // V4.1 (WS2): the light changed (a torch burnt out, a lantern ran low)
   let lastNoise = 0;
   let reachedEnd = false;
 
@@ -233,8 +233,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     for (const x of d.heroes) if (x.hp < (hp.get(x.heroId) ?? x.hp)) return `${heroName(c, x.heroId)} is hurt`;
     const woke = stirred(since);
     if (woke) return `${nameOf(c, woke)} stirs`;
-    const st = brightnessOf(d.light);
-    if (st !== stage) return `the light is ${st}`;
+    if (lightSig(d, false) !== stage) return 'the light changed';
     const now = figuresInSight(c, litSet(c.w, d));
     for (const id of now) if (!seen.has(id)) return `${nameOf(c, id)} in sight`;
     return undefined;
@@ -346,7 +345,7 @@ export function calmWalk(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, fo
     const halted = halt(c.ev.slice(mark));
     if (halted) return stop(halted, false);
     hp = new Map(d.heroes.map((x) => [x.heroId, x.hp]));
-    stage = brightnessOf(d.light);
+    stage = lightSig(d, false);
     seen = figuresInSight(c, litSet(c.w, d));
   }
   settle();

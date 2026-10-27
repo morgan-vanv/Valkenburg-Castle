@@ -10,7 +10,7 @@ import type { Intent, Item } from './types';
 import {
   BETRAY_CHANCE, BETRAY_LOOT, BOW_RANGE, CLASSES, CREW_PURSE, CREWS, CUTTHROAT_CHANCE, CUTTHROAT_POOL, CUTTHROAT_SIGHT, CUTTHROAT_TIER,
   HIRE_KEEP, PROSPECTOR_CHANCE, PROSPECTOR_ENTERS, PROSPECTOR_KEEP_OFF, PYRO_BOLT_DMG, PYRO_BOLT_NOISE, PYRO_BOLT_RANGE, PYRO_BOLT_SLOTS, RIVAL_CLASSES,
-  SISTERS_LEAVE_LIGHT, WAKE_CHANCE, WINCH_NOISE, BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, BURGLAR_WALK, SNEAK_ATTACK_SLOTS, WALK_MOVE, type CrewDef, type RivalStats,
+  SISTERS_LEAVE_ROUND, WAKE_CHANCE, WINCH_NOISE, BACKSTAB_DMG_MULT, BACKSTAB_SLOTS, BURGLAR_WALK, SNEAK_ATTACK_SLOTS, WALK_MOVE, type CrewDef, type RivalStats,
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { say, type Ctx, type CrewX, type DelveX, type GameStateX, type MonsterX, type RivalX } from './state';
@@ -787,7 +787,7 @@ export function rivalsAct(c: Ctx): void {
     for (const r of rivalsOnMap(c)) r.intent = undefined;
   }
   if (cr.temperament === 'prospector' && (cr.stance === 'neutral' || cr.stance === 'truce') && cr.goal !== 'leave'
-    && ((cr.pickups ?? 0) >= 3 || c.d.light <= SISTERS_LEAVE_LIGHT)) cr.goal = 'leave';
+    && ((cr.pickups ?? 0) >= 3 || c.d.round >= SISTERS_LEAVE_ROUND)) cr.goal = 'leave'; // V4.1 (WS2): was the party's lantern at 9
   // Veils and wards from earlier rounds fade (the one cast this phase lasts its full two rounds).
   for (const r of cr.members) {
     if ((r.veil ?? 0) > 0) r.veil! -= 1;

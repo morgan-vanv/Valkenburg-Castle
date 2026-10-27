@@ -271,6 +271,8 @@ export type ItemKind =
   | 'gatekey' // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
   // V4.0 (spec 29): venom
   | 'antidote' // V4.1 (spec 31.4): "Antipoison" to players: drink or give to an adjacent ally (an action): cures poison
+  // V4.1 (spec 31.5, WS2)
+  | 'lantern' // Gerda's lantern: reusable, holds 20 (`rounds`), refilled free in camp; `lit` = open
   | 'venomdart' // V4.1 (spec 31.4): "Poison dart" to players: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
   // V4.1 (spec 31.3): Aldric and Ilse together
   | 'greaterpotion'; // heals 8 (POTION_HEAL), or gets a downed hero up at 8
@@ -289,6 +291,12 @@ export interface Item {
   heavy?: boolean;
   /** V3.5: a story item goes to the village when carried out (not to the stash, never sold). */
   story?: StoryId;
+  /** V4.1 (spec 31.5): a torch or lantern burning (a lit torch, an open lantern); burns 1 a world phase wherever it is. */
+  lit?: boolean;
+  /** V4.1 (spec 31.5): rounds of light left in a torch or lantern (absent = full: torch 15, lantern 20). */
+  rounds?: number;
+  /** V4.1 (spec 31.5): the old free party lantern (a save from before, or FREE_LANTERN): never reaches the cart or lost gear. */
+  loaner?: boolean;
 }
 
 export interface Hero {
@@ -375,6 +383,7 @@ export type ShopKind =
   | 'torch' | 'potion' | 'rope' | 'charge'
   | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker'
   | 'lockpicks' | 'nightsight'
+  | 'lantern' // V4.1 (spec 31.5): Gerda's
   // V4.0 (spec 29): Mott's essentials and his quiet work
   | 'antidote' | 'venomdart'
   // V4.1 (spec 31.3)
@@ -478,7 +487,7 @@ export interface HeroInDelve {
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
   /** Downed only: world phases left before death (V4.1, spec 31.4: starts at 3; doesn't run while carried). */
   bleed: number;
-  /** Rounds of torchlight left on this hero's own torch (0 = none lit). */
+  /** Rounds of torchlight left on this hero's own torch (0 = none lit). V4.1 (spec 31.5): legacy, saves from before only (torches are pack items now). */
   torch: number;
   moved: boolean;
   acted: boolean;
@@ -750,10 +759,10 @@ export interface Delve {
   heroes: HeroInDelve[];
   monsters: Monster[];
   rivals: RivalCrew | null;
-  /** Lantern oil, 0..LIGHT_MAX. */
-  light: number;
-  /** Hero carrying the lantern. */
-  lanternBearer: string;
+  /** Lantern oil, 0..LIGHT_MAX. V4.1 (spec 31.5): retired (no free lantern); only in saves from before, turned into a Lantern item on load. */
+  light?: number;
+  /** Hero carrying the lantern. V4.1: retired, as `light`. */
+  lanternBearer?: string;
   doors: Record<string, DoorState>; // by posKey
   chests: ChestState[];
   ground: GroundLoot[];
@@ -782,8 +791,8 @@ export interface Delve {
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
   liftWorking: boolean;
-  /** Lantern shutter (spec 16.2): open burns oil and lights; shuttered does neither. */
-  lanternOpen: boolean;
+  /** Lantern shutter (spec 16.2): open burns oil and lights; shuttered does neither. V4.1: retired, as `light` (a Lantern item's `lit`). */
+  lanternOpen?: boolean;
   /** Patrollers whose route a hero has watched (monster ids). */
   knownRoutes: string[];
   /** Level 3 Gloam: world phases in a row with every hero lit (fades at 2). */
@@ -854,7 +863,9 @@ export type ActionKind =
   | 'give' // hand an item to an adjacent hero
   | 'disarm' // a spotted trap
   | 'light' // light an adjacent brazier
-  | 'torch' // light a torch from the pack
+  | 'torch' // light (or relight) a torch from the pack. V4.1 (spec 31.5): target.itemId = the torch; an action
+  | 'snuff' // V4.1 (spec 31.5): free: put out a lit torch in the pack; it keeps its rounds
+  | 'dropTorch' // V4.1 (spec 31.5): free: drop a lit torch on your hex, still burning
   | 'potion' // drink, or give to an adjacent downed/hurt hero
   | 'charge' // place a blasting charge on an adjacent door, chest or cracked wall
   | 'rope' // anchor a rope at a pit edge
@@ -876,11 +887,11 @@ export type ActionKind =
   | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally
   | 'firebolt' // Mage spell
-  | 'kindle' // Mage spell: +12 light
+  | 'kindle' // Mage spell. V4.1 (spec 31.5): target.id = a hero within 3, itemId = their torch or lantern: light it, or +6 rounds
   | 'mend' // Mage spell: heal 4 on an ally within 3
   | 'passLantern' // give the lantern to an adjacent hero
   | 'winch' // next to the winch: work it so the lift runs (loud)
-  | 'shutter' // lantern bearer: open or shutter the lantern (free)
+  | 'shutter' // lantern bearer: open or shutter the lantern (free). V4.1 (spec 31.5): target.itemId = a Lantern in the pack
   | 'escape' // held by a ghoul: 2 Might slots, 1 hit frees
   | 'leave' // on an exit: leave the castle
   // ---- V3.2 class abilities (target kind in brackets: self / ally id / enemy id / hex at)

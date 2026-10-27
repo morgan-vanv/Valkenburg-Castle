@@ -1,7 +1,7 @@
 // V4.0: Lowgate, the camp before a delve. One path of four steps along the top (Job, Party,
 // Outfit, Set out), each clickable at any time; the Lowgate ribbon (houses, Keven's cart, the
 // graves) and the step buttons along the bottom. Keven's cart and the graves are side pages.
-// The party, packs, entrance and shutter are UI state (a Loadout) until Delve sends startDelve.
+// The party, packs and entrance are UI state (a Loadout) until Delve sends startDelve.
 
 import type { Engine } from '../game/api';
 import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
@@ -28,7 +28,7 @@ export interface Loadout {
   /** Stash item ids per hero. */
   packs: Record<string, string[]>;
   entrance: number;
-  /** 16.2: shutter the lantern as the delve starts (Level 1 has daylight). */
+  /** 16.2: shutter the lantern as the delve starts. V4.1 (WS2): retired (an old remembered loadout may still have it; ignored). */
   startShuttered?: boolean;
 }
 
@@ -58,7 +58,7 @@ const STEP_WHAT: Record<Step, string> = {
   job: 'Pick a contract from the notice post.',
   party: 'Who goes in: hire, heal, take up to four.',
   outfit: 'Fill the packs from the peddler and the cart.',
-  setout: 'Which way in, the lantern, and Delve.',
+  setout: 'Which way in, and Delve.',
 };
 
 // ------------------------------------------------------------ engine helpers (defensive: the engine agent adds these in parallel)
@@ -146,7 +146,7 @@ export function cleanLoadout(s: GameState, engine: Engine, l: Loadout | null): L
   }
   const ents = entrancesOf(engine, s);
   const entrance = selectable(ents, prev.entrance) ? prev.entrance : selectable(ents, 0) ? 0 : (ents.find((x) => x.known && x.state === 'open')?.index ?? 0);
-  return { contractId: contract?.id, heroIds, packs, entrance, startShuttered: !!prev.startShuttered };
+  return { contractId: contract?.id, heroIds, packs, entrance };
 }
 
 /** A new visit to Lowgate: the last party (still on the roster, Keven first), empty packs, the last way in. */
@@ -155,7 +155,7 @@ export function freshLoadout(s: GameState, engine: Engine, last: Loadout | null)
   let heroIds = (last?.heroIds ?? []).filter((id) => c.roster.some((x) => x.id === id));
   if (!heroIds.length) heroIds = [c.roster.find((x) => x.cls === 'heir')?.id ?? c.roster[0]?.id].filter((x): x is string => !!x);
   heroIds.sort((a, b) => Number(isHeir(c, b)) - Number(isHeir(c, a)));
-  return cleanLoadout(s, engine, { heroIds, packs: {}, entrance: last?.entrance ?? 0, startShuttered: last?.startShuttered });
+  return cleanLoadout(s, engine, { heroIds, packs: {}, entrance: last?.entrance ?? 0 });
 }
 
 /** "Same as last time": the remembered loadout, if its heroes are all still on the roster. */
@@ -170,8 +170,9 @@ const slotsUsed = (items: Item[]) => items.reduce((a, i) => a + i.slots, 0);
 function packedIds(l: Loadout): Set<string> {
   return new Set(Object.values(l.packs).flat());
 }
-function lanternBearer(l: Loadout): string | undefined {
-  return l.heroIds.includes('keven') ? 'keven' : l.heroIds[0];
+/** V4.1 (WS2): who packs a torch or a lantern (no free lantern any more). */
+function lightCarriers(c: Campaign, l: Loadout): string[] {
+  return l.heroIds.filter((id) => packItems(c, l, id).some((i) => i.kind === 'torch' || i.kind === 'lantern'));
 }
 
 // ------------------------------------------------------------ small pieces
@@ -518,7 +519,7 @@ function sameButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
       data: { same: '1' },
       tip: `Same as last time · ${names}\nThe same party, the same packs where the cart still has them, the same way in. Takes the job you've chosen and goes straight to Set out.`,
       onclick: () => {
-        const next = cleanLoadout(s, host.engine, { contractId: l.contractId, heroIds: [...last.heroIds], packs: structuredClone(last.packs ?? {}), entrance: selectable(ents, last.entrance) ? last.entrance : 0, startShuttered: !!last.startShuttered });
+        const next = cleanLoadout(s, host.engine, { contractId: l.contractId, heroIds: [...last.heroIds], packs: structuredClone(last.packs ?? {}), entrance: selectable(ents, last.entrance) ? last.entrance : 0 });
         sfx.play('click');
         host.setDraft(next, 'setout');
       },
@@ -646,7 +647,7 @@ function jobStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): v
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
 
 /** A contract's warnings as risk chips (without the ones that repeat the card's own lines). */
-function riskChips(k: Contract, engine: Engine, captive?: Captive): HTMLElement[] {
+function riskChips(k: Contract, engine: Engine, captive?: Captive, s?: GameState): HTMLElement[] {
   const crewNames = new Set(Object.values(CREW).map((x) => x.name));
   const storyUnlocks = k.story ? STORIES.find((x) => x.id === k.story)?.unlocks : undefined;
   const site = engine.castle().contractSites.find((x) => x.id === k.siteId);
@@ -671,6 +672,14 @@ function riskChips(k: Contract, engine: Engine, captive?: Captive): HTMLElement[
     }
     out.push(h('span', { class: 'lg-chip lg-risk', 'data-tip': w }, warnTri(), w));
   }
+  // V4.1 (WS2, C3): the site is in castle memory and no fixed light reaches it.
+  let unlit = false;
+  try {
+    unlit = !!s && !!engine.siteUnlit?.(s, k.siteId);
+  } catch {
+    unlit = false;
+  }
+  if (unlit) out.push(h('span', { class: 'lg-chip lg-risk lg-unlit', 'data-chip': 'unlit', 'data-tip': "Unlit · You'll want light." }, warnTri(), 'Unlit'));
   return out;
 }
 
@@ -690,7 +699,7 @@ function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive
   const st = k.story ? STORY[k.story] : null;
   const crew = captive ? CREW[captive.crew] : null;
   const chosen = l.contractId === k.id;
-  const risks = riskChips(k, host.engine, captive);
+  const risks = riskChips(k, host.engine, captive, host.state() ?? undefined);
   const card = h(
     'button',
     {
@@ -1056,7 +1065,7 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
   const c = s.campaign;
   const v = villageOf(s);
   const sel = ui.packFor === hr.id;
-  const bearer = lanternBearer(l) === hr.id;
+  const bearer = packItems(c, l, hr.id).some((i) => i.kind === 'lantern'); // V4.1 (WS2): Gerda's lantern, packed
   const pick = () => {
     if (ui.packFor === hr.id) return;
     ui.packFor = hr.id;
@@ -1074,7 +1083,7 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
       { class: 'lg-hero-top' },
       hexBadge(hr.cls, 'md', statsTip(hr.cls, hr)),
       h('span', { class: 'lg-hero-n' }, hr.name),
-      bearer ? h('span', { class: 'lg-lantern', tabindex: 0, 'data-tip': `Lantern · The lantern goes with ${hr.name}.\nIt is the party's clock: it burns down each round while open. Oil tops it up.` }, lanternIcon(), 'Lantern') : '',
+      bearer ? h('span', { class: 'lg-lantern', tabindex: 0, 'data-tip': `Lantern · ${hr.name} carries Gerda's lantern: 20 rounds, refilled in camp.\nIt burns down each round while open; the shutter is free. Lost if ${hr.name} falls.` }, lanternIcon(), 'Lantern') : '',
       sel ? h('span', { class: 'lg-kick lg-packing' }, 'Packing') : btn({ class: 'lg-pickpack', k: `pack-${hr.id}`, data: { packfor: hr.id }, tip: `${hr.name} · What you buy or take off the cart goes in this pack.`, onclick: pick }, 'Pick to pack'),
     ),
     packSlots(c, l, hr, host, 'outfit'),
@@ -1220,7 +1229,7 @@ function peddler(el: HTMLElement, s: GameState, l: Loadout, host: CampHost): voi
   const offers = host.engine.shop(s);
   const packed = packedIds(l);
   const metal = offers.filter((o) => o.needs === 'smith');
-  const order = ['torch', 'oil', 'potion', 'greaterpotion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
+  const order = ['torch', 'lantern', 'oil', 'potion', 'greaterpotion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
   const shown = offers.filter((o) => !o.locked).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   for (const g of ['light', 'around', 'quiet'] as const) {
     const list = shown.filter((o) => (WARE[o.kind]?.group ?? 'around') === g);
@@ -1422,7 +1431,7 @@ function setOutStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
       if (d < best) ((best = d), (closest = e.index));
     }
   }
-  const left = h('section', { class: 'lg-setout-l', 'aria-label': 'Entrance and lantern' });
+  const left = h('section', { class: 'lg-setout-l', 'aria-label': 'Entrance' });
   const lvl1 = castle.levels.find((x) => x.level === 1)?.name ?? 'the castle';
   left.append(stepHead('How do you go in?', open.length > 1 ? `${numWord(open.length)} ways into ${lvl1.replace(/^The /, 'the ')} that you know of. Each one is also a way out.` : 'The main gate is the only way in anyone knows. It is also the way out.'));
   left.append(sketch(s, l, host, ents, mem, siteKnown ? site!.at : null));
@@ -1455,13 +1464,9 @@ function setOutStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
     );
   }
   left.append(group);
-  const box = h('input', { type: 'checkbox', class: 'lg-check', 'data-k': 'shutter', checked: !!l.startShuttered }) as HTMLInputElement;
-  box.addEventListener('change', () => host.setDraft({ ...l, startShuttered: box.checked }, 'setout'));
-  const shutter = h('label', { class: 'lg-shutter prep-shutter' }, box, h('span', { class: 'lg-shutter-t' }, h('span', { class: 'lg-shutter-n' }, 'Go in with the lantern shut'), h('span', { class: 'lg-sub' }, 'Level 1 has daylight. A shut lantern burns no oil; open it when it gets dark.')));
-  // V4.0 (spec 30.5): with a sketch, the lantern choice sits under the plan so the sketch gets the left column's height.
+  // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone (no free lantern; packed lights go in unlit).
   const hasSketch = !!left.querySelector('.lg-sketch:not(.none)');
-  if (!hasSketch) left.append(shutter);
-  main.append(h('div', { class: 'lg-setout' }, left, hasSketch ? h('div', { class: 'lg-setout-r' }, plan(s, l, host), shutter) : plan(s, l, host)));
+  main.append(h('div', { class: 'lg-setout' }, left, hasSketch ? h('div', { class: 'lg-setout-r' }, plan(s, l, host)) : plan(s, l, host)));
 }
 
 function sketch(s: GameState, l: Loadout, host: CampHost, ents: EntranceInfo[], mem: Map<number, Set<string>>, site: { level: number; q: number; r: number } | null): HTMLElement {
@@ -1559,7 +1564,6 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   const c = s.campaign;
   const k = c.board.find((x) => x.id === l.contractId);
   const st = k?.story ? STORY[k.story] : null;
-  const bearer = lanternBearer(l);
   const box = h('aside', { class: 'lg-plan', 'aria-label': 'The plan' }, h('div', { class: 'lg-kick' }, 'The plan'));
   box.append(
     k
@@ -1571,7 +1575,7 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   for (const id of l.heroIds) {
     const hr = heroOf(c, id);
     if (!hr) continue;
-    const carry = [...(bearer === id ? ['Lantern'] : []), ...packItems(c, l, id).map((i) => (i.kind === 'gem' || i.kind === 'jewelry' ? i.name : itemLabel(i)))];
+    const carry = [...packItems(c, l, id).map((i) => (i.kind === 'gem' || i.kind === 'jewelry' ? i.name : itemLabel(i)))];
     who.append(h('div', { class: 'lg-plan-hero', 'data-hero': id }, hexBadge(hr.cls, 'sm'), h('span', { class: 'lg-plan-n' }, hr.name), h('span', { class: 'lg-plan-c' }, carry.length ? carry.join(' · ') : 'Nothing packed')));
   }
   box.append(who);
@@ -1587,6 +1591,8 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
     problem = null;
   }
   if (problem) box.append(h('div', { class: 'lg-plan-warn' }, warnTri('#ff8a8f', 16), h('span', null, problem)));
+  // V4.1 (WS2): nobody packs a torch or a lantern.
+  if (l.heroIds.length && !lightCarriers(c, l).length) box.append(h('div', { class: 'lg-plan-warn warn-light', 'data-warn': 'nolight' }, warnTri('#e8a33d', 16), h('span', null, "No light packed. Level 1's daylight will do; deeper, you'll want a torch.")));
   box.append(h('span', { class: 'lg-plan-s dim' }, 'Every step stays open: click one along the top to change it.'));
   return box;
 }

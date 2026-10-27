@@ -2498,6 +2498,16 @@ input.seed {
 .dl-lantern.lt-pitch .dl-lantern-stage { color: var(--dl-red-soft); }
 .dl-lantern.shut .dl-notches { opacity: 0.5; filter: saturate(0.4); }
 .dl-lantern.shut .dl-lantern-stage { color: var(--dl-ink-3); }
+/* V4.1 (WS2): the light readout: one chip per lit torch or open lantern (who carries it, rounds left). */
+.dl-lchips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 18px; }
+.dl-lchip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 3px; background: #2a2420; color: var(--parchment); font-size: 12px; line-height: 16px; }
+.dl-lchip.torch { box-shadow: inset 0 0 0 1px #c88a3a; }
+.dl-lchip.lantern { box-shadow: inset 0 0 0 1px #ffb35c; }
+.dl-lchip b { color: #ffcf86; font-weight: 600; }
+.dl-lchip.low b { color: var(--dl-red-soft); }
+.dl-lchip.none { background: none; color: var(--dl-ink-4); padding-left: 0; }
+.dl-lchip-n { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-si.lantern b { margin-left: 2px; font-size: 11px; }
 .dl-job { width: 430px; flex: 0 1 430px; min-width: 240px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; text-align: left; cursor: pointer; color: var(--parchment); }
 .dl-job:hover { border-color: var(--ember-dim); }
 .dl-job-ic { color: var(--ember); flex: none; }

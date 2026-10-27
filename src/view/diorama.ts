@@ -23,6 +23,40 @@ import { heardFade, heardIcon, heardTitle } from './sounds';
 import { INTENT_ICON, iconSvg, intentTone } from './icons';
 
 const MAX_LIGHTS = 12;
+
+/**
+ * V4.1 (WS2, spec 31.5): one light the view draws as a point light: a carried torch or lantern (`holder`), one lying lit
+ * on the floor (`at`), or a crew member's own light. Read from the state the same way the engine's lightSources does.
+ */
+interface ViewLight {
+  kind: 'torch' | 'lantern' | 'crew';
+  radius: number;
+  holder?: string;
+  at: Pos;
+}
+
+/** V4.1 (WS2): radius of a burning torch (3) or lantern (4 at 7+, 3 below), 0 when out. Mirrors world.ts lightRadius. */
+function itemRadius(i: Item): number {
+  if ((i.kind !== 'torch' && i.kind !== 'lantern') || !i.lit) return 0;
+  const r = i.rounds ?? (i.kind === 'lantern' ? 20 : 15);
+  if (r <= 0) return 0;
+  return i.kind === 'torch' ? 3 : r >= 7 ? 4 : 3;
+}
+
+function viewLights(state: GameState): ViewLight[] {
+  const d = state.delve;
+  if (!d) return [];
+  const out: ViewLight[] = [];
+  for (const h of d.heroes) {
+    if (h.status !== 'active' && h.status !== 'downed') continue;
+    let best: Item | undefined;
+    for (const i of h.pack) if (itemRadius(i) > (best ? itemRadius(best) : 0)) best = i;
+    if (best) out.push({ kind: best.kind as 'torch' | 'lantern', radius: itemRadius(best), holder: h.heroId, at: h.at });
+  }
+  for (const g of d.ground) for (const i of g.items) if (itemRadius(i) > 0) out.push({ kind: i.kind as 'torch' | 'lantern', radius: itemRadius(i), at: g.at });
+  for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && (d.rivals as { entered?: boolean } | null)?.entered !== false) out.push({ kind: 'crew', radius: 2, holder: r.id, at: r.at });
+  return out;
+}
 /** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
 const FLOAT_LIFT = 2.25;
 /** How far below the shown level we draw through pits. */
@@ -129,10 +163,11 @@ export class Diorama {
   private hoverUnit: string | null = null;
   private downAt: { x: number; y: number; button: number } | null = null;
   private active = true;
-  private brightness: Brightness = 'bright';
-  /** Hero ids whose torch is lit. */
-  private torches = new Set<string>();
+  /** The light the party acts in (engine.brightness); kept for the view's mood, not the light radius (V4.1). */
+  brightness: Brightness = 'bright';
   private lanternBearer: string | null = null;
+  /** V4.1 (WS2): every light that moves or burns down, read from the state: carried torches and lanterns, dropped lit ones, crews. */
+  private lightSrcs: ViewLight[] = [];
   private litBraziers = new Set<string>();
   private extraVisible: Set<string> | null = null;
   private sparks: THREE.Points;
@@ -657,30 +692,34 @@ export class Diorama {
   private updateLights(t: number): void {
     type Src = { at: THREE.Vector3; radius: number; color: number; power: number; seed: number };
     const srcs: Src[] = [];
-    const radiusOf: Record<Brightness, number> = { bright: 4, dim: 3, dark: 2, pitch: 0 };
-    const bearer = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
+    // V4.1 (WS2): the lantern model hangs at the hip of the first hero carrying an open lantern; every carried or dropped
+    // torch and lantern, and every crew member's light, is a point light (lanterns warmer and wider).
+    const lantern = this.lightSrcs.find((L) => L.kind === 'lantern' && L.holder);
+    const bearer = lantern ? this.units.get(lantern.holder!) : this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
     const bearerShown = !!bearer && bearer.shown && bearer.at.level === this.shownLevel && !bearer.dead;
-    if (bearer && bearerShown && this.lanternOpen) {
-      const r = radiusOf[this.brightness];
-      if (r > 0) srcs.push({ at: bearer.root.position.clone().add(new THREE.Vector3(0.3, bearer.height + 0.5, 0.3)), radius: r, color: this.brightness === 'bright' ? 0xffb862 : this.brightness === 'dim' ? 0xf09a48 : 0xd0763a, power: 1, seed: 0 });
-    }
-    // 16.2: the lantern itself hangs at the bearer's right hip, dark when shuttered or empty.
     this.lanternObj.visible = bearerShown;
     if (bearer && bearerShown) {
       const f = bearer.facing;
       const side = new THREE.Vector3(Math.cos(f), 0, -Math.sin(f)).multiplyScalar(bearer.height * 0.28);
       this.lanternObj.position.copy(bearer.root.position).add(side).add(new THREE.Vector3(0, bearer.height * 0.42 + bearer.fig.position.y, 0));
       this.lanternObj.rotation.y = f;
-      const lit = this.lanternOpen && this.brightness !== 'pitch';
+      const lit = !!lantern;
       const k = lit ? 0.75 + Math.sin(t * 9) * 0.1 + Math.sin(t * 23) * 0.05 : 0;
       (this.lanternGlow.material as THREE.SpriteMaterial).opacity = k;
       (this.lanternFlame.material as THREE.MeshBasicMaterial).color.setHex(lit ? 0xffd27a : 0x2a1e14);
       this.lanternFlame.scale.y = lit ? 0.9 + Math.sin(t * 11) * 0.12 : 0.6;
     }
-    for (const id of this.torches) {
-      const v = this.units.get(id);
-      if (!v || !v.shown || v.at.level !== this.shownLevel || id === this.lanternBearer) continue;
-      srcs.push({ at: v.root.position.clone().add(new THREE.Vector3(-0.3, v.height + 0.4, 0.2)), radius: 2, color: 0xff9a40, power: 0.9, seed: srcs.length * 1.7 });
+    for (const L of this.lightSrcs) {
+      if (L.at.level !== this.shownLevel) continue;
+      if (L.holder) {
+        const v = this.units.get(L.holder);
+        if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
+        const off = L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.5, 0.3) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.3, 0.2) : new THREE.Vector3(-0.3, v.height + 0.4, 0.2);
+        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
+      } else {
+        if (!this.vis.explored.has(posKey(L.at))) continue;
+        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
+      }
     }
     const lv = this.levels.get(this.shownLevel);
     if (lv) {
@@ -1121,11 +1160,12 @@ export class Diorama {
       this.applyBrokenWalls([]);
       return;
     }
-    this.brightness = brightness ?? (d.light > 36 ? 'bright' : d.light >= 19 ? 'dim' : d.light >= 1 ? 'dark' : 'pitch');
-    this.lanternBearer = d.lanternBearer;
-    this.lanternOpen = d.lanternOpen !== false;
+    this.brightness = brightness ?? 'bright';
+    // V4.1 (WS2): no party lantern on the delve; lights are read from packs, the floor and the crew.
+    this.lightSrcs = viewLights(state);
+    this.lanternBearer = this.lightSrcs.find((L) => L.kind === 'lantern' && L.holder)?.holder ?? null;
+    this.lanternOpen = !!this.lanternBearer;
     this.liftWorking = !!d.liftWorking;
-    this.torches = new Set(d.heroes.filter((h) => h.torch > 0 && h.status === 'active').map((h) => h.heroId));
     this.syncUnits(state);
     this.syncWorld(state);
     this.refreshUnits();
@@ -3070,12 +3110,12 @@ export class Diorama {
       }
       case 'shutter': {
         this.lanternOpen = e.open;
+        if (this.state) this.lightSrcs = viewLights(this.state);
         const b = this.lanternBearer ? this.units.get(this.lanternBearer) : undefined;
         if (b && b.root.visible) {
           this.floatText(b.root.position.clone().add(new THREE.Vector3(0, b.height + 0.3, 0)), e.open ? 'Lantern open' : 'Lantern shuttered', 'info', 1.2);
           if (e.open) this.flash(b.root.position.clone().add(new THREE.Vector3(0, b.height, 0)), 0xffb862, 4);
         }
-        if (this.state?.delve) this.state.delve.lanternOpen = e.open;
         await clock.wait(0.2);
         return;
       }
@@ -3117,6 +3157,7 @@ export class Diorama {
       }
       case 'light': {
         this.brightness = e.brightness;
+        if (this.state) this.lightSrcs = viewLights(this.state);
         return;
       }
       case 'shoved': {

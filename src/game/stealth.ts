@@ -2,6 +2,7 @@
 // whom, the wake rolls a passing hero provokes, attacks of opportunity both ways, and the
 // move preview's risks. Pure rules: no DOM, all dice through the seeded RNG.
 
+import { emitsLight } from './world'; // V4.1 (WS2)
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Awareness, HeroInDelve } from './types';
 import type { MoveRisks } from './api';
@@ -506,7 +507,7 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
     shadows.push({ m, at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])], patrol: m.awareness === 'patrol', shouted: !!m.shouted });
   }
   // The mover's own light moves with them; doors open as the path passes.
-  const emits = (c.d.lanternBearer === h.heroId && c.d.lanternOpen !== false) || h.torch > 0 || h.ale === 'glowworm';
+  const emits = emitsLight(h); // V4.1 (WS2): a lit torch, an open lantern, Glowworm
   let doors = c.d.doors;
   let cc: Ctx = c;
   const others = sightedHeroes(c).filter((x) => x.id !== h.heroId);

@@ -10,7 +10,7 @@ export const LIGHT_DIM = 7; // this..LIGHT_BRIGHT = dim
 export const PACK_SLOTS = 4;
 export const FOCUS_MAX = 3;
 export const MANA_MAX = 3;
-export const TORCH_ROUNDS = 12;
+export const TORCH_ROUNDS = 15; // V4.1 (WS2): was 12
 export const BLEED_START = 3; // V4.1 (spec 31.4): was 2
 
 export interface Weapon {
@@ -236,6 +236,33 @@ export const GLOAM_RISE_MAX = 6;
 export const GLOAM_CALM_FADE = 2;
 export const BRAZIER_LIGHT = 4;
 export const KINDLE_LIGHT = 6;
+// ---------------------------------------------------------------- V4.1 (WS2): light, torches are the clock
+
+/**
+ * V4.1 (WS2): the free party lantern of V3.3–V4.0 is retired: a delve starts with no party light. Switched on, every
+ * delve hands the first hero (Keven if he goes) a slotless lantern (the old free lantern as an item; spec 31.5).
+ */
+export const FREE_LANTERN = { enabled: false };
+/** A lit torch lights this far round whoever holds it (or the hex it lies on). Rounds: TORCH_ROUNDS. */
+export const TORCH_RADIUS = 3;
+/** The lantern (Gerda's): holds this many rounds, refilled free in camp; radius 4 at LANTERN_LOW_AT and above, 3 below. */
+export const LANTERN_MAX = 20;
+export const LANTERN_LOW_AT = 7;
+export const LANTERN_RADIUS_FULL = 4;
+export const LANTERN_RADIUS_LOW = 3;
+/** Kindle (Pyromancer): lights or relights a torch or lantern held by a hero within this, or adds KINDLE_LIGHT rounds to one. */
+export const KINDLE_RANGE = 3;
+/** Every crew member carries a light of its own: this radius round it (part of the lit set for everyone). */
+export const CREW_LIGHT_RADIUS = 2;
+/** Neutral Lantern Sisters head out at this round at the latest (was: the party's lantern at 9 or less). */
+export const SISTERS_LEAVE_ROUND = 18;
+/** The ale effect that is Night-eye Stout (the ALES entry is the village's): sees as if lit, stays unlit to others. */
+export const NIGHTEYE_ALE = 'nighteye';
+/** Darkness by the hero's own hex: party light (a torch, a lantern, Glowworm) or daylight, a castle light only, unlit. */
+export const DARK_PENALTY = { party: 0, castle: -10, unlit: -20 } as const;
+/** An old save's night-eye draughts in the stash are bought back for this each on load (the draught is retired). */
+export const NIGHTSIGHT_REFUND = 15;
+
 // ---------------------------------------------------------------- V3.7 stealth and swings (spec 20.1, 20.2)
 
 /** Walking noise per hex passed (2 on rubble); sneaking is silent. */
@@ -336,8 +363,6 @@ export const SISTER_CLASSES: ('ranger' | 'shadowmancer' | 'burglar')[] = ['range
 export const SISTER_DARTS = 2;
 export const SISTER_DART_CHANCE = 65;
 export const SISTER_SMOKE = 1;
-/** Neutral sisters head out when the lantern gets this low (was 18 of 40). */
-export const SISTERS_LEAVE_LIGHT = 9;
 
 export const SISTER = { hp: 7, slots: 3, chance: 55, dmg: 2, move: 4 };
 export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
@@ -368,7 +393,7 @@ export const ORC_SHOVE_CHANCE = 60;
 export const DRAGON_WAKE_NOISE = 4;
 
 export const SHOP: ShopOffer[] = [
-  { kind: 'torch', name: 'Torch', price: 10, text: '12 rounds of light around the bearer.' },
+  { kind: 'torch', name: 'Torch', price: 10, text: 'Light it (an action): radius 3 for 15 rounds. Snuff it free and it keeps what is left.' },
   { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
   { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
   // V4.1 (spec 31.3): Mott's charge costs 45 (was 30); Gerda sells it for 30 once Ilse is home too (PAIR_PRICES).
@@ -383,7 +408,7 @@ export const SHOP: ShopOffer[] = [
   { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
   { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
-  { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.', needs: 'alchemist' },
+  { kind: 'oil', name: 'Oil flask', price: 15, text: '+10 to a lantern (an action, or Kindle\'s cousin).', needs: 'alchemist' },
   // V4.0 (spec 29.6): an essential: always sold.
   // V4.1 (spec 31.4): the antipoison (internal kind `antidote` kept).
   { kind: 'antidote', name: 'Antipoison', price: 20, text: 'Drink, or give to a hero next to you, up or down (an action): cures poison.' },
@@ -393,6 +418,8 @@ export const SHOP: ShopOffer[] = [
   // V3.7.1 (spec 21.3) the night-eye draught was sold here once Wim was home; V4.1 (spec 31.3): gone (Night-eye Stout, an ale).
   // V4.1 (spec 31.3): Aldric and Ilse together.
   { kind: 'greaterpotion', name: 'Greater potion', price: 35, text: 'Heals 8. Gets a downed hero up.', needs: ['surgeon', 'alchemist'] },
+  // V4.1 (spec 31.5, WS2): Gerda's lantern: reusable, refilled free in camp.
+  { kind: 'lantern', name: 'Lantern', price: 120, text: 'Holds 20 rounds of light, refilled free in camp: radius 4 (3 when low). The shutter is free. Oil tops it up.', needs: 'smith', vendor: 'gerda' },
 ];
 
 // V3.6 (spec 19.2, 19.3).
@@ -467,7 +494,7 @@ export const UNSHACKLE_IMPROVISED_NOISE = 2;
 export const SMOKE_ROUNDS = 2;
 export const GLUE_ROUNDS = 2;
 export const CALTROPS_DMG = 2;
-export const OIL_LIGHT = 8;
+export const OIL_LIGHT = 10; // V4.1 (WS2): +10 to a lantern (was +8 to the party lantern)
 export const FIRECRACKER_NOISE = 6;
 
 /** Spec 17.2: the infirmary heals for this much gold per HP. Nothing heals for free between delves. */
