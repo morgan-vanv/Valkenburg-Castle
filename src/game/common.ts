@@ -666,7 +666,10 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
   if (opts.what) hearLoud(c, at, radius, opts.what, { otherLevels: opts.otherLevels });
   const heard = noiseField(c.w, c.d, at, radius);
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
-  if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
+  // V4.1 (spec 31.10): only when a hero is within the noise's reach too. Since monsters notice crews (spec 28.2), an orc
+  // bellowing at a crew member on another level would otherwise send the crew after a party that made no sound.
+  if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))
+    && c.d.heroes.some((h) => h.status === 'active' && heard.has(posKey(h.at)))) crewDemand(c);
   for (const m of c.d.monsters) {
     if (m.kind === 'gloam' || m.buried) continue;
     let hears = heard.has(posKey(m.at));

@@ -1279,3 +1279,19 @@ Derived member numbers at the new levels (clamped at 95): the Sisters' Ranger 14
 
 Code: crewpower.ts (`crewFocus`, `keyFocus`, `crewEdge`, `flankMate`, `powerPrefer`, `likelyKill`, `spotCost`, `standsOff`, `castPlan`, `kiteFor`, `heroThreat`, `holdBack`, `heldRound`, `partyStrength`, `crewStrength`, `crewBeaten`, `crewRetreat`, `crewWary`, `nearHero`, `waryStep`, `noteWary`, `powerKit`, `powerPlan`, `powerAct`, `crewBraceMods`); ai.ts `strikeDetailed`, `strikeCrew`; crewai.ts `crewTarget`, `attackPlan`, `kitIntent`, `KIT`, `useKit`, `hostilePlan`, `hostileAct`; rivals.ts `member`, `purse`, `planRival`, `lootAct`, `rivalsAct`; parley.ts `deals`, `doDeal`; delve.ts `rivalArmorMods`, `spec`, `actions`, fireball; stealth.ts `heroCanSwing`; world.ts `lightSources`; world-phase.ts.
 
+### 31.10 The Level 2 check, measured; two fixes (WS9, 2026-10-27)
+
+The sim's new Level 2 scenario (`SCENARIO=l2`, a fresh party of four at levels 3, 3, 2, 2 with 300 gold, Aldric and Wim home, a regular Level 2 contract; `POLICY=prepared` buys light, potions and an antipoison, sneaks near monsters it sees and uses kit; `POLICY=careless` buys nothing and never sneaks) found two problems besides difficulty:
+
+- **A crew demanded its toll from a party a level away.** Since monsters notice crews (spec 28.2), an orc bellowing at a waiting crew on Level 2 counted as noise the crew heard in the player phase, so it demanded the toll and turned hostile while the party was still on Level 1. Fix (`makeNoise`, common.ts): a waiting cutthroat crew demands on noise of 4+ only when an active hero is within that noise's reach too. Test: crews.test.ts "a waiting crew demands its toll only for noise the party is near".
+- **The stair landing was an alarm.** The Level 2 guard patrolled guard post ↔ barracks through the barracks door, opening it on every pass, so a fight at the landing woke the sleeping squad and its captain (whose shout calls every orc within 8). The guard now patrols the guard post and the arcade's east end, L2 (36, 4) ↔ (29, 6); the barracks door stays shut unless the party opens it.
+
+| `SCENARIO=l2`, SEED=11 | Delves | Done | Deaths a delve | Main killers (where) |
+| --- | --- | --- | --- | --- |
+| prepared, before | 24 | 13% | 3.6 | orcs at the guard post and arcade; the Gloam after a fall |
+| careless, before | 24 | 0% | 2.3 | orcs at the guard post |
+| prepared, after | 16 | 19% | 2.8 | the arcade (12) and east ledge (7) archers and patrols; the Gloam in the Bone Pile (10) after knockbacks into the pit |
+| careless, after | 16 | 0% | 2.6 | orcs at the guard post (15) and the tower stair (7) |
+
+The plan's target (a prepared party at ~2.5 does 60% with ≤ 1 death) is not met. Open levers, for the owner: the archers' raised perches (+10, spec 31.7 L2-2) and their 60% edge knockback over the arcade's broken railing; the Gloam's 4 a phase to a lone unlit hero who falls into the Bone Pile; how many torches a party needs on Level 2. The bot is also crude (it walks bridges under archers and lights at most two heroes), so a careful player does better than these numbers.
+

@@ -93,7 +93,9 @@ export const castle: CastleDef = {
     { at: L2(23, 7), kind: 'orc', patrol: route(2, [[23, 7], ...ARCADE_LOOP]) },
     // Guard post <-> barracks: the short way is through the barracks door (it opens it), the long
     // way round by the arcade gaps if the door is ever blocked.
-    { at: L2(36, 4), kind: 'orc', patrol: route(2, [[36, 4], [22, 3]]) },
+    // V4.1 (spec 31.10): the guard walks the guard post and the arcade's east end, no longer through the barracks: the
+    // squad sleeps behind a closed door, so a fight at the stair landing doesn't wake it by itself.
+    { at: L2(36, 4), kind: 'orc', patrol: route(2, [[36, 4], [29, 6]]) },
     // The east-ledge walker: down the ledge from below the archer to the forge end and back.
     { at: L2(35, 19), kind: 'orc', patrol: route(2, [[35, 19], [34, 11], [35, 22]]) },
     { at: L2(28, 7), kind: 'archer' }, // arcade, in the broken railing over the pit
