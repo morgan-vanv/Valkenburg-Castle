@@ -38,7 +38,9 @@ function count(ev: { type: string; text?: string }[]): void {
   if (!TALLY) return;
   for (const x of ev) if (x.type === 'say') for (const [k, re] of VERBS) if (re.test(x.text ?? '')) tally[k] = (tally[k] ?? 0) + 1;
 }
-const e = createEngine(testCastle);
+// V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
+// enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
+const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
 
 type PartyDef = {
   name: string; heroes: [HeroClass, number][]; weaponTier?: 0 | 1 | 2; armorTier?: 0 | 1 | 2; potions?: number;

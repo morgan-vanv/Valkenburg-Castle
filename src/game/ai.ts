@@ -3,11 +3,12 @@
 
 import { CLASH_HEAR, DOWNED_HEAR, FORCED_DOOR_HEAR, hearLoud, hearStep, isEnemy, partySees } from './hearing';
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
-import type { HeroInDelve, Intent } from './types';
+import type { HeroInDelve, Intent, ReactionQuestion } from './types';
+import { ask, called, capital } from './react'; // V4.1 (spec 31.13)
 import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
 import { say, type Ctx, type MonsterX, type RivalX } from './state';
 import {
-  armorOf, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
+  armorOf, clampChance, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
   rangedLabel, rivalsOnMap, roll, rootFigure, turnOnHit,
 } from './common';
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
@@ -356,6 +357,24 @@ function figurePosOf(c: Ctx, id: string): Pos | undefined {
  * An enemy `id` at `at` moves or acts: the first Ranger on overwatch who can see it within 6 shoots
  * (full bow roll). Returns true if the enemy died.
  */
+/** V4.1 (spec 31.13): "Fenna's on overwatch. The orc moves 4 hexes away: shoot it now, or hold for another?" */
+function overwatchQuestion(c: Ctx, h: HeroInDelve, id: string, at: Pos, slots: number, p: number): ReactionQuestion {
+  const who = heroName(c, h.heroId);
+  const it = called(c, id);
+  const n = distance(h.at, at);
+  const ch = clampChance(p);
+  return {
+    kind: 'overwatch',
+    heroId: h.heroId,
+    enemyId: id,
+    at: { ...at },
+    text: `${who}'s on overwatch. ${capital(it)} moves ${n} ${n === 1 ? 'hex' : 'hexes'} away, within ${OVERWATCH_RANGE}: shoot it now, or hold for another?`,
+    yes: { label: 'Shoot', line: `${who} looses an arrow at it (${slots} ${slots === 1 ? 'try' : 'tries'} at ${ch}%); the overwatch is spent.` },
+    no: { label: 'Hold', line: `${who} keeps watching, still armed for the rest of the castle's turn.` },
+    roll: { slots, chance: ch },
+  };
+}
+
 export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
   const lit = litSet(c.w, c.d);
   for (const h of c.d.heroes) {
@@ -363,9 +382,9 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     const def = heroDef(c, h.heroId)!;
     // V3.9 (spec 24.2): only at enemies in the watcher's front half.
     if (!within(h.at, at, OVERWATCH_RANGE) || !seesHex(c.w, c.d, h.at, at, lit, h.facing)) continue;
-    h.overwatch = false;
     // V4.1 (WS6, spec 31.8): the shot looses a plain arrow (the quiver first); none left (spent on free swings): it lapses.
-    if (bowClass(def.cls) && !spendArrow(h.pack)) {
+    if (bowClass(def.cls) && !h.pack.some((i) => (i.kind === 'quiver' || i.kind === 'arrows') && i.amount > 0)) {
+      h.overwatch = false;
       say(c, `${heroName(c, h.heroId)} reaches for an arrow and finds none.`);
       continue;
     }
@@ -375,6 +394,10 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + lightPenaltyFor(c.w, c, h, lit);
     const m = c.d.monsters.find((x) => x.id === id);
     if (m?.awareness === 'asleep') p += 20;
+    // V4.1 (spec 31.13, owner): the Ranger chooses (a reaction): shoot this one, or hold for another (still armed).
+    if (ask(c, overwatchQuestion(c, h, id, at, slots, p)) === 'no') continue;
+    h.overwatch = false;
+    if (bowClass(def.cls)) spendArrow(h.pack);
     say(c, `${heroName(c, h.heroId)} looses an arrow at ${nameOf(c, id)}.`);
     c.ev.push({ type: 'cast', by: h.heroId, spell: 'overwatch', targetId: id, at });
     const r = roll(c, h.heroId, 'Overwatch', slots, p);

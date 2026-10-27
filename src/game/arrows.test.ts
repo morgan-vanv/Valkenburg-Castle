@@ -129,6 +129,7 @@ describe('V4.1 WS6 arrows (spec 31.8)', () => {
       hero(t, 'rae').facing = undefined;
       t = ok(t, { type: 'act', heroId: 'rae', action: 'overwatch', target: {}, focus: 0 }).state;
       expect(quiver(t)!.amount).toBe(10);
+      hero(t, 'rae').reactions = { overwatch: 'always' }; // V4.1 (spec 31.13): shoot without asking
       const r = ok(t, { type: 'endTurn' });
       expect(r.events.some((x) => x.type === 'cast' && x.spell === 'overwatch' && x.by === 'rae' && x.targetId === o.id)).toBe(true);
       expect(quiver(r.state)!.amount).toBe(9);
