@@ -970,3 +970,18 @@ Before = the V4.0 branch with venom merged (3755b14), after = this change; each 
 
 - Crew arena (`v37-crew-arena.ts 40`, SEED=1; 40 fights × 4 crews × 5 parties), dead / captured in all: 605 / 135 before, 564 / 137 after. Only the cells with a Sapper crew moved: the Ferrymen vs l1x4 lost 50% → 43%, vs l3x4 heroes dead 31 → 26; the Wake vs l2x4 lost 23% → 15% (dead 53 → 35), vs l3x4 30% → 33%, vs l1x4 20% → 18%. A softer crew Sapper (HP −1, armor −1) makes the Ferrymen and the Wake a little easier; the Wake's Spade's extra charge doesn't make up for it. The Sisters and the Gallows Choir are unchanged.
 - Sim (`v3-engine-sim.ts 10`, SEED=1,2,3; 30 delves): contracts done 22 → 20, hero deaths 23 → 24; crew fights 9 → 7, dead in them 15 → 12, captured 4 → 3. With a Sapper hired first (SAPPER=1): done 18 → 19, deaths 25 → 29 (a level 1 Sapper has 9 HP, no armor and one explosive). Runs diverge after the first delve, so single-seed swings are noise.
+
+## 31. V4.1: rebalance (owner, 2026-10-26)
+
+V4.1 is a rebalance of the economy, progression and play, run as audit (docs/v41-audit.md), a measurable sim, a pitch, then small deployed steps. Sections are added here as each step ships.
+
+### 31.1 The Sisters never come in by the party's way (owner, 2026-10-26)
+
+Owner: "I'd like for enemy crews to not enter from whatever entrance the player party did. So if the player enters through the Sally, other squads should be able to enter through the default entrance."
+
+- `castle.rivalEntrances` is every way in: the main gate L1 (24, 31), the east breach L1 (44, 21), the sally port L1 (1, 14) (was the breach and the sally port only).
+- `makeCrew` still rules out any rival entrance within `PROSPECTOR_KEEP_OFF` (6) of the party's entrance, which always rules out the party's own; the seeded RNG picks among the rest. From the main gate: the sally port or the breach (unchanged). From the sally port: the main gate or the breach. From the breach: the main gate or the sally port.
+- By the main gate (always open) they simply walk in: no key, no blast. Shut ways work as spec 25.4 (the key and the re-barred gate; the blasted breach, open for good). They still wait while a hero is within 6 of their way in.
+- Only the Lantern Sisters enter mid-delve; cutthroat crews start at their posts on Levels 2 and 3, unchanged.
+- Tests: ways.test.ts ("never by the party's own way in"; "by the open main gate ... nothing is blasted or unbarred"), castle.test.ts (rival entrances = every entrance).
+

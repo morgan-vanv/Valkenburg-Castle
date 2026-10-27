@@ -51,7 +51,8 @@ export const castle: CastleDef = {
       openLine: 'The east breach is clear. A new way in.',
     },
   ],
-  rivalEntrances: [L1(44, 21), L1(1, 14)],
+  // V4.1 (owner): the Sisters may come by any way in but the party's own (the main gate too).
+  rivalEntrances: [L1(24, 31), L1(44, 21), L1(1, 14)],
   // V3.5 (spec 18.5): where a cutthroat crew waits on Level 2, at choke points: the west and east
   // ends of the main bridge, the arcade end of the north bridge, and the winch room by the lift.
   // V3.7 (spec 20.4): the Wake waits on Level 3, at the lift base or where the Bone Pile narrows
