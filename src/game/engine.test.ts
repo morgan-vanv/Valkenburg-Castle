@@ -2722,7 +2722,8 @@ describe('V3.5', () => {
 
     it('noise of 4 or more they hear wakes them too; the toll is at least 50', () => {
       const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      put(s, 'brann', at(2, 3, 3));
+      // V4.1 (spec 31.10): the noise must reach a hero too, so Brann stands by it.
+      put(s, 'brann', at(2, 10, 2));
       const c = ctx(s);
       makeNoise(c, at(2, 12, 2), 3);
       expect(crewOf(s).stance).toBe('waiting');
