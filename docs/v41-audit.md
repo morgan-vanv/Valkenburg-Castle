@@ -168,5 +168,21 @@ It sells on return, buys forge gear, ales, potions and torches, sweeps known che
 
 Read: with a more careful bot the economy barely gets going, because the party dies before it can spend. The first numbers to fix are survival on the first delve and the step from Level 1 to Level 2; the gold curve only means something once campaigns last.
 
-Next for the sim: pick contracts the way a careful player does (stay on Level 1 until the party is level 2–3 and four strong; take story contracts that fit), then rerun for the gold and level curves.
+### The V4.1 bot with careful contract choice (`L2_AT=2.5`, `L3_AT=3.5`; seeds 1–4, 120 delves)
+
+Level 2 only once the party is three strong and averages level 2.5; Level 3 once four strong at 3.5.
+
+| Contract level | Party level (mean) | Delves | Done | Deaths per delve |
+| --- | --- | --- | --- | --- |
+| L1 | 1 | 33 | 85% | 0.27 |
+| L1 | 2 | 48 | 94% | 0.27 |
+| L2 | 2 (2.5–2.9) | 9 | 22% | 2.89 |
+| L2 | 3 | 16 | 63% | 1.94 |
+| L2 | 4 | 3 | 100% | 0.33 |
+| L3 | 4 | 7 | 29% | 2.71 |
+
+- **Campaigns last longer but still end early:** 28 campaigns, median 4–5 delves, longest 10. A quarter of first delves lose a hero, and 5 of 28 campaigns end on delve 1. Ten of 23 finished campaigns ended on a Level 2 story contract (Gerda, the copper).
+- **Gold never piles up.** Wealth peaked at 610 as the party set out. Money is spent as fast as it comes: hiring 6,560 (replacing the dead), forge 4,810 plus shields 350, healing 2,000, potions 1,320, antidotes 560, ales 340, torches 160, oil 120. Selling valuables brought in 5,850; bounties 6,155; loot carried out 11,970 (gold and valuables).
+- **Read:** the economy isn't too rich; survival limits it. The rebalance should make the first delves and the Level 1 → 2 step survivable before it tightens money, or tighter money just ends campaigns sooner.
+
 
