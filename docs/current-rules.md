@@ -742,12 +742,23 @@ Built as heroes of their class at the crew level: HP = class HP + 2 × (level �
 
 | Crew | Level | Tiers | Members (pack) |
 | --- | --- | --- | --- |
-| Lantern Sisters | 4 (V4.1 WS7; was 2) | weapon 1, armor 1 | Ranger (2 caltrops, potion; V4.1: quiver 20, 3 glow arrows): 14 HP, 95%, armor 1. Shadowmancer (smoke, firecracker, antipoison): 12 HP, spells 90%. Burglar (2 darts, smoke, lockpicks, 4 improvised picks): 13 HP, 95%, darts 90% |
-| The Ferrymen | 4 (V4.1 WS7; was 3) | weapon 1, armor 1 | Sellsword (potion, glue): 16 HP, 95%, armor 2. Ranger (2 caltrops, potion; V4.1: quiver 20, 3 barbed arrows): 14 HP, 95%. Sapper (4 improvised explosives, 2 charges, glue): 15 HP, 85%, armor 1 (spec 30.1) |
-| The Gallows Choir | 5 (V4.1 WS7; was 3) | weapon 1, armor 1 | Sellsword (potion, glue): 18 HP, 95%, armor 2. Burglar (sleep dart, poison dart, smoke, lockpicks, 5 improvised picks): 15 HP, 95%, darts 95%. Pyromancer (potion, antipoison; was oil): 14 HP, spells 95% |
-| The Wake | 6 (V4.1 WS7; was 4) | weapon 2, armor 1 | Sellsword (2 potions): 20 HP, 95%, armor 2. Hedgewitch (2 potions): 17 HP, spells 95%. Shadowmancer (smoke, firecracker): 16 HP, spells 95%. Sapper (6 improvised explosives, 3 charges): 19 HP, 95%, armor 1 (spec 30.1) |
+| Lantern Sisters | 4 (V4.1 WS7; was 2) | weapon 1, armor 1 | Wenna, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 glow arrows): 14 HP, 95%, armor 1. Odile, Shadowmancer (smoke, firecracker, antipoison): 12 HP, spells 90%. Brisk, Burglar (2 darts, smoke, lockpicks, 4 improvised picks): 13 HP, 95%, darts 90%. V4.1 squads: Maud, Hedgewitch (smoke, antipoison): 13 HP, spells 85% |
+| The Ferrymen | 4 (V4.1 WS7; was 3) | weapon 1, armor 1 | Joost, Sellsword (potion, glue): 16 HP, 95%, armor 2. Sil, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 barbed arrows): 14 HP, 95%. Brecht, Sapper (4 improvised explosives, 2 charges, glue): 15 HP, 85%, armor 1 (spec 30.1). V4.1 squads: Kees, Burglar (sleep dart, poison dart, potion, lockpicks, 4 improvised picks): 13 HP, 95% |
+| The Gallows Choir | 6 (V4.1 squads; WS7 5; was 3) | weapon 1, armor 1 | Deacon Harl, Sellsword (potion, glue): 20 HP, 95%, armor 2. Little Mags, Burglar (sleep dart, poison dart, smoke, lockpicks, 6 improvised picks): 17 HP, 95%, darts 95%. Cantor Vey, Pyromancer (potion, antipoison; was oil): 16 HP, spells 95%. V4.1 squads: Verger Crane, Shadowmancer (smoke, firecracker): 16 HP, spells 95% |
+| The Wake | 6 (V4.1 WS7; was 4) | weapon 2, armor 1 | Mother Grave, Sellsword (2 potions): 20 HP, 95%, armor 2. Sexton, Hedgewitch (2 potions): 17 HP, spells 95%. Candle, Shadowmancer (smoke, firecracker): 16 HP, spells 95%. Spade, Sapper (6 improvised explosives, 3 charges): 19 HP, 95%, armor 1 (spec 30.1). V4.1 squads: Pall, Ranger (2 caltrops, potion, quiver 30): 18 HP, 95% |
 
-Cutthroat members each carry a purse: 30 gold (the Ferrymen, the Gallows Choir), 50 (the Wake) (V4.1 WS7: `CrewDef.purse`, fixed per crew now that crew levels moved). Every level-built member has 3 Focus (V4.1 WS7, below). Crew levels are tuned to the arena (spec 31.9): each crew is about even with a fresh party of its level's size and level (the Sisters: three at level 2; the Level 2 crews: three at level 3; the Wake: four at level 4); a level below, one short or battle-worn, the party loses most fights. A member's numbers clamp at 95. The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
+**Crew size (V4.1 squads, spec 31.12).** A crew fields as many members as the party that set out (`crewSize(def, party)` = clamp(party, min, max), `CrewDef.size`; `startDelve` passes the number of heroes going in to `makeCrew`): the Sisters, the Ferrymen and the Gallows Choir 2–4, the Wake 3–5. A smaller crew leaves members out in its `CrewDef.drop` order (`crewLineup`), first left out first:
+
+| Crew | 4 | 3 | 2 |
+| --- | --- | --- | --- |
+| Lantern Sisters | Wenna, Odile, Brisk, Maud | Wenna, Odile, Brisk | Wenna, Brisk (the Burglar with the locks and the sally port key, the Ranger) |
+| The Ferrymen | Joost, Sil, Brecht, Kees | Joost, Sil, Brecht | Joost, Brecht (the Sapper) |
+| The Gallows Choir | Harl, Mags, Vey, Crane | Harl, Mags, Vey | Harl, Mags (her poison dart) |
+| The Wake | Grave, Sexton, Candle, Spade (5: + Pall) | Grave, Sexton, Spade | (3 at least) |
+
+Members keep their ids `r1`… in lineup order. Purses per member as before. With at most 4 heroes in a party, the Wake's fifth (Pall) is defined but not fielded today (spec 31.12, open question).
+
+Cutthroat members each carry a purse: 30 gold (the Ferrymen, the Gallows Choir), 50 (the Wake) (V4.1 WS7: `CrewDef.purse`, fixed per crew now that crew levels moved). Every level-built member has 3 Focus (V4.1 WS7, below). Crew levels are tuned to the arena (spec 31.9, 31.12): each crew is about even with a fresh party of its level's size and level (the Sisters: three at level 2; the Level 2 crews: three at level 3; the Wake: four at level 4), and, sized to the party, with parties of two and four at that level; a level below, one short or battle-worn, the party loses most fights. A member's numbers clamp at 95. The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
 
 ### 12.3 Stances and behaviour
 
