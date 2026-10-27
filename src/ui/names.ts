@@ -767,7 +767,7 @@ export const STORY: Record<StoryId, {
     unlocks: 'The forge, and metalwork at the peddler',
     step: 'outfit',
     home: 'Gerda the smith is home.',
-    homeLine: 'She stokes the forge. Blades, mail and shields are on each hero when you outfit the party, and the peddler sells metalwork again.',
+    homeLine: 'She stokes the forge. Blades, mail, shields and metalwork are at Gerda\'s forge when you outfit the party.',
     service: 'Blades, mail and shields when you outfit the party.',
     line: 'Gerda stokes the forge. Steel can be bought and mended again.',
     itemTip: '',
