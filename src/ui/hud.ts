@@ -2542,7 +2542,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
-    const threats = Object.entries(this.intents).filter(([id, it]) => it.targetId === hd.heroId && seen.has(id) && ['attack', 'shove', 'grab', 'drag', 'web', 'firebolt', 'dart', 'venomdart', 'hamstring', 'rob', 'steal'].includes(it.kind));
+    const threats = Object.entries(this.intents).filter(([id, it]) => it.targetId === hd.heroId && seen.has(id) && ['attack', 'shove', 'grab', 'drag', 'web', 'firebolt', 'dart', 'venomdart', 'hamstring', 'rob', 'steal', 'dread', 'nightthorn', 'briar'].includes(it.kind));
     if (threats.length) add('bad threat', 'sword', `Targeted · ${threats.map(([id, it]) => `${cap(this.theName(id))} ${intentText(this.state!, it, id)}`).join('; ')} next turn.`);
     if (this.backExposed(hd.heroId)) add('bad back-exposed', 'eyeOff', `Back exposed · ${FACING_HELP.backExposed}`);
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
@@ -2550,6 +2550,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
+    else if (hd.dreaded) add('bad dread', 'flee', `Dread · ${name} can move this turn but not act (a crew Shadowmancer's Dread).`); // V4.1 (WS7)
     else if ((hd.rooted ?? 0) > 0) add('bad rooted', 'chain', `Rooted · can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
     const dragger = d.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut);
     if (dragger) add('bad dragged', 'hand', `Dragged · ${dragger.name} is hauling ${name} toward the way out. Kill, down or fear ${dragger.name} to free them.`);
@@ -3553,6 +3554,21 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
       return `throws a poison dart at ${name(it.targetId)} (a hit poisons: −1 a turn, never below 1)`;
     case 'carry':
       return `lifts ${name(it.targetId)} to carry them out`;
+    // V4.1 (WS7, spec 31.9): crews as an equal power.
+    case 'brace':
+      return 'braces: hits on them do 1 less, and you roll −15% against them';
+    case 'sleep':
+      return `casts Sleep on ${name(it.targetId)} (2 Wits slots)`;
+    case 'dread':
+      return `casts Dread on ${name(it.targetId)} (2 Wits slots: a hit, and they can't act next turn)`;
+    case 'nightthorn':
+      return `looses a night thorn at ${name(it.targetId)} (2 Wits slots, 1 a hit, armor ignored)`;
+    case 'briar':
+      return `calls briars on ${name(it.targetId)} (2 Wits slots, 1 a hit and rooted)`;
+    case 'antidote':
+      return it.targetId && it.targetId !== who ? `gives ${name(it.targetId)} an antipoison` : 'drinks an antipoison';
+    case 'kindle':
+      return `kindles ${name(it.targetId)}'s ${it.item ?? 'light'}`;
     case 'arrow':
       // V4.1 (WS6, spec 31.8): a crew Ranger's specialty arrow.
       return it.item === 'glowarrows' ? `shoots a glow arrow at ${name(it.targetId)}: it lights them up for the crew` : it.item === 'barbarrows' ? `shoots a barbed arrow at ${name(it.targetId)}: a hit roots them 2 rounds` : `shoots a special arrow at ${name(it.targetId)}`;

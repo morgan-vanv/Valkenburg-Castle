@@ -18,6 +18,7 @@ import { rivalStats } from './rivals';
 import { poison } from './poison';
 import { bowClass, spendArrow } from './arrows'; // V4.1 (WS6)
 import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
+import { crewBraceMods, crewEdge } from './crewpower'; // V4.1 (WS7)
 
 // ---------------------------------------------------------------- perception
 
@@ -233,7 +234,9 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   const gm = h ? guardMods(c, h, rangedLabel(what)) : { dmg: 0, chance: 0 };
   // V3.9 (spec 24.2): from the hero's rear half, +1 slot; unseen, it stands out to the party.
   const bs = h ? blindside(c, attacker, h) : NOT_BLINDSIDED;
-  const r = roll(c, attacker, bs.extra ? `${what} from behind` : what, slots + bs.extra, p + gm.chance);
+  // V4.1 (WS7, spec 31.9): a crew member's strike by the heroes' rules: flanked +1 slot, a perch +10, Focus on a key roll.
+  const edge = h ? crewEdge(c, attacker, h, slots, p, dmg, what) : null;
+  const r = roll(c, attacker, bs.extra ? `${what} from behind` : what, (edge?.slots ?? slots) + bs.extra, (edge?.p ?? p) + gm.chance, edge?.focus ?? 0);
   // V3.9.3 (spec 24.8): an unseen enemy's attack is heard as a clash (hearing only; seen before any reveal).
   const from = figurePosOf(c, attacker);
   const unseenAttacker = !!from && isEnemy(c, attacker) && !partySees(c, from);
@@ -261,7 +264,8 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
 function strikeCrew(c: Ctx, attacker: string, r: RivalX, slots: number, p: number, dmg: number, what: string): { hit: string | null; hits: number; damage: number } {
   const from = figurePosOf(c, attacker);
   const extra = from && inRearHalf(r, from) ? BLINDSIDE_SLOTS : 0;
-  const rr = roll(c, attacker, extra ? `${what} from behind` : what, slots + extra, p);
+  const bm = crewBraceMods(r); // V4.1 (WS7): a braced crew Sellsword
+  const rr = roll(c, attacker, extra ? `${what} from behind` : what, slots + extra, p + bm.chance);
   if (from && isEnemy(c, attacker) && !partySees(c, from) && !partySees(c, r.at)) hearLoud(c, from, CLASH_HEAR, 'clash', { seen: false });
   if (c.d.monsters.some((m) => m.id === attacker)) r.attackedBy = attacker;
   if (!rr.hits) {
@@ -269,7 +273,7 @@ function strikeCrew(c: Ctx, attacker: string, r: RivalX, slots: number, p: numbe
     return { hit: null, hits: 0, damage: 0 };
   }
   const st = rivalStats(r);
-  const total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0)) + (rr.perfect ? 1 : 0);
+  const total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0) - bm.dmg) + (rr.perfect ? 1 : 0);
   hurtAny(c, r.id, total, attacker, { crit: rr.perfect });
   turnOnHit(c, r.id, attacker);
   if (spiderBite(c, attacker)) poison(c, r.id, attacker); // V4.1 (spec 31.4): crew members too (pillar 17)

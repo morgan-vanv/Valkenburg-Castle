@@ -8,12 +8,13 @@ import {
   BETRAY_CHANCE, BETRAY_LOOT, DEAL_PRICE, DEAL_RANGE, DEEP_PRICE, HIRE_KEEP, HIRE_ROUNDS, SCOUT_RANGE, TRUCE_HOSTILE,
 } from './data';
 import { say, type Ctx, type CrewX } from './state';
-import { hd, heroName, makeHostile, partyValue, putOnGround, rivalsOnMap, round5 } from './common';
+import { hd, heroName, makeHostile, noteOnce, partyValue, putOnGround, rivalsOnMap, round5 } from './common';
 import { distance } from './hex';
 import { doorAt, kindAt, los, within } from './world';
 import { computeRivalIntents } from './rivals';
 import { crewPicker } from './crewmove';
 import { visNow } from './delve';
+import { crewBeaten } from './crewpower'; // V4.1 (WS7, spec 31.9)
 
 /** Crew members this hero can talk to: visible, unveiled, within 4, in line of sight. */
 export function parleyTargets(c: Ctx, heroId: string): { id: string; at: Pos }[] {
@@ -159,12 +160,14 @@ export function deals(c: Ctx, heroId: string): DealOption[] {
       ...(blocked ? { blocked } : {}),
     });
   };
+  // V4.1 (WS7, spec 31.9): a hostile crew with half its members down takes a truce or a leave for nothing.
+  const beaten = crewBeaten(c);
   // leave
-  offer('leave', 'Pay them to leave', priced(DEAL_PRICE.leave, lv), 'They make for the nearest exit now and drop any heirloom they carry.',
+  offer('leave', beaten ? 'Let them go' : 'Pay them to leave', beaten ? 0 : priced(DEAL_PRICE.leave, lv), 'They make for the nearest exit now and drop any heirloom they carry.',
     st === 'hired' ? 'They work for you now.' : st === 'bribed' ? 'They are already leaving.' : undefined);
   // truce (the toll while demanding)
-  const trucePrice = st === 'demanding' ? (cr.toll ?? 0) : st === 'hostile' ? priced(TRUCE_HOSTILE, lv) : priced(DEAL_PRICE.truce, lv);
-  offer('truce', st === 'demanding' ? 'Pay the toll' : 'Buy a truce', trucePrice,
+  const trucePrice = beaten ? 0 : st === 'demanding' ? (cr.toll ?? 0) : st === 'hostile' ? priced(TRUCE_HOSTILE, lv) : priced(DEAL_PRICE.truce, lv);
+  offer('truce', st === 'demanding' ? 'Pay the toll' : beaten ? 'Offer a truce' : 'Buy a truce', trucePrice,
     cr.temperament === 'cutthroat' ? 'They never attack unless attacked, and hold their post.' : 'They never attack unless attacked, and keep looting.',
     st === 'hired' ? 'They work for you now.' : st === 'truce' ? 'You already have a truce.' : undefined);
   // jobs
@@ -198,6 +201,7 @@ export function doDeal(c: Ctx, heroId: string, deal: DealKind, job?: JobKind): s
   if (!opt) return deal === 'job' ? 'Pick a job: winch, open or scout.' : 'No such deal.';
   if (!opt.ok) return opt.blocked ?? 'Not now.';
   let paid: string[] = [];
+  const beaten = crewBeaten(c) && (deal === 'truce' || deal === 'leave'); // V4.1 (WS7)
   if (opt.price > 0) {
     const p = plan(c, opt.price)!;
     paid = pay(c, p);
@@ -218,7 +222,8 @@ export function doDeal(c: Ctx, heroId: string, deal: DealKind, job?: JobKind): s
           say(c, `${r.name} drops ${hl[0]!.name.replace(/^The /, 'the ')} at your feet.`);
         }
       }
-      say(c, `${name} pocket the coin and make for the way out.`);
+      say(c, beaten ? `${name} take the way out you offer, carrying their own. Nobody pays.` : `${name} pocket the coin and make for the way out.`);
+      if (beaten) noteOnce(c, `${name} took a truce when the fight turned against them.`);
       break;
     }
     case 'truce':
@@ -226,7 +231,11 @@ export function doDeal(c: Ctx, heroId: string, deal: DealKind, job?: JobKind): s
       cr.toll = undefined;
       cr.blocked = 0;
       if (cr.goal === 'leave' && cr.temperament === 'cutthroat') cr.goal = 'loot';
-      say(c, opt.label === 'Pay the toll' ? `${name} count the coin. "Pass, then."` : `${name} lower their blades. A truce.`);
+      say(c, opt.label === 'Pay the toll' ? `${name} count the coin. "Pass, then."` : beaten ? `${name} lower their blades. "Done. We'll go." A truce, for nothing.` : `${name} lower their blades. A truce.`);
+      if (beaten) {
+        cr.goal = 'leave';
+        noteOnce(c, `${name} took a truce when the fight turned against them.`);
+      }
       break;
     case 'job': {
       if (job === 'scout') {

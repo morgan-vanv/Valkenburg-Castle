@@ -58,6 +58,8 @@ export interface RivalX extends Rival {
   seenBy?: string[];
   /** V4.0 (spec 28.2): the monster that attacked this member this world phase (it fights back). */
   attackedBy?: string;
+  /** V4.1 (WS7, spec 31.9): the walk before a shown spell or dart (move, then act, as a hero). */
+  castPath?: Pos[];
 }
 
 export interface CrewX extends RivalCrew {

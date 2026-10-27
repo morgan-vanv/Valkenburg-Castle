@@ -5,7 +5,7 @@ import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, Command, GameEvent, GameState, HeroClass, ItemKind, Monster, MonsterKind, SlotRoll } from './types';
-import { MONSTERS } from './data';
+import { CREWS, MONSTERS } from './data';
 import { brightnessOf, glimpseSet, noiseField, World } from './world';
 import type { DelveX, GameStateX, HeroX, MonsterX, RivalX } from './state';
 import { dirIndex, moveRisks, wakeChance, wouldNotice } from './stealth';
@@ -2345,10 +2345,25 @@ function gold(n: number, id = `g${n}`): Item {
   return { id, kind: 'gold', name: `${n} gold`, amount: n, slots: 1 };
 }
 
+/**
+ * V4.1 (WS7, spec 31.9): the crew levels these mechanics tests were written against (the Sisters 2, the Level 2 crews 3,
+ * the Wake 4); WS7 retuned the live table. `crewDelve` builds at these so a test of a verb doesn't move with tuning.
+ */
+const OLD_LEVEL: Record<CrewId, number> = { 'lantern-sisters': 2, ferrymen: 3, 'gallows-choir': 3, 'the-wake': 4 };
+function oldBuild(s: GameState, id: CrewId, spots: Pos[]) {
+  const live = CREWS[id].level;
+  CREWS[id].level = OLD_LEVEL[id];
+  try {
+    return buildCrew(s as GameStateX, id, spots);
+  } finally {
+    CREWS[id].level = live;
+  }
+}
+
 /** A delve with a crew placed by hand on `spots`; stance as given. */
 function crewDelve(id: CrewId, spots: Pos[], stance?: RivalCrew['stance'], heroes = ['brann']) {
   const s = delve({ heroes });
-  const cr = buildCrew(s as GameStateX, id, spots);
+  const cr = oldBuild(s, id, spots);
   if (stance) cr.stance = stance;
   s.delve!.rivals = cr;
   return s;
@@ -2675,9 +2690,9 @@ describe('V3.5', () => {
       expect(seen['L1']!).toBeLessThan(130);
       // V3.7 (spec 20.4): built like level 3 heroes: class HP +2 per level above 1.
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['ranger', 12], ['sapper', 13]]); // V4.0 (spec 30.1): the Sapper's HP 9
+      expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 16], ['ranger', 14], ['sapper', 15]]); // V4.0 (spec 30.1): the Sapper's HP 9; V4.1 (WS7): level 4
       const g = buildCrew(s as GameStateX, 'gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 14], ['burglar', 11], ['pyromancer', 10]]);
+      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 18], ['burglar', 15], ['pyromancer', 14]]); // V4.1 (WS7): level 5
     });
 
     it('waiting cutthroats see a hero within 6: they demand the toll (max of 50 and half the carried value), then turn hostile', () => {
@@ -3522,7 +3537,6 @@ describe('V3.7 stealth and swings', () => {
 
 import { rivalStats } from './rivals';
 import { crewTarget, pathToSpots } from './crewai';
-import { CREWS } from './data';
 import { los as losFrom } from './world';
 
 describe('V3.7 crews', () => {
@@ -3534,23 +3548,25 @@ describe('V3.7 crews', () => {
   it('builds members like heroes of their class at the crew\'s level, with tiers, a pack, mana and a purse', () => {
     const s = delve({ heroes: ['brann'] });
     const wake = buildCrew(s as GameStateX, 'the-wake', WAKE_SPOTS);
+    // V4.1 (WS7, spec 31.9): the Wake at level 6 (was 4).
     expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
-      ['sellsword', 16, 4, 2, 1], ['hedgewitch', 13, 4, 2, 1], ['shadowmancer', 12, 4, 2, 1], ['sapper', 15, 4, 2, 1],
+      ['sellsword', 20, 6, 2, 1], ['hedgewitch', 17, 6, 2, 1], ['shadowmancer', 16, 6, 2, 1], ['sapper', 19, 6, 2, 1],
     ]);
     expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['improvised-charge', 'charge', 'charge', 'charge']]); // V4.0 (spec 28.6): class kit
-    // V4.0 (spec 30.1, 30.2): Spade, a level 4 Sapper, brings 4 improvised explosives (and 3 bought: 7); armor 0 + 1, Might 60 + 15 + 20.
-    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 4, slots: 0 });
-    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 15, chance: 95, armor: 1 });
+    // V4.0 (spec 30.1, 30.2): Spade, a level 6 Sapper, brings 6 improvised explosives (and 3 bought); armor 0 + 1, Might 60 + 25 + 20.
+    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 6, slots: 0 });
+    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 19, chance: 105, armor: 1 });
     expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
-    // Sellsword: Sword 3 slots at Might 70 + 15 (three levels) + 20 (weapon 2); armor 1 + 1; move 4.
-    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 105, dmg: 2, armor: 2, move: 4, range: 1 });
+    expect(wake.members.map((r) => r.focus)).toEqual([3, 3, 3, 3]); // V4.1 (WS7): Focus for key rolls
+    // Sellsword: Sword 3 slots at Might 70 + 25 (five levels) + 20 (weapon 2); armor 1 + 1; move 4.
+    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 115, dmg: 2, armor: 2, move: 4, range: 1 });
     // Hedgewitch: Staff 2 Might slots, Might isn't her main stat: 35 + 20.
     expect(rivalStats(wake.members[1]!)).toMatchObject({ slots: 2, chance: 55, dmg: 1, armor: 1 });
     expect(wake.members.every((r) => r.loot.length === 1 && r.loot[0]!.kind === 'gold' && r.loot[0]!.amount === 50)).toBe(true);
-    // The Sisters at level 2, weapon 1: the ranger's bow at Finesse 75 + 5 + 10, range 6, HP 10.
+    // The Sisters at level 4 (V4.1 WS7; was 2), weapon 1: the ranger's bow at Finesse 75 + 15 + 10, range 6, HP 14.
     const sis = buildCrew(s as GameStateX, 'lantern-sisters', [at(1, 3, 6), at(1, 4, 6), at(1, 5, 6)]);
-    expect(rivalStats(sis.members[0]!)).toMatchObject({ hp: 10, slots: 3, chance: 90, range: 6, armor: 1 }); // armor 1: the sim's tuning (progress note)
-    expect(sis.members[0]!.hp).toBe(10);
+    expect(rivalStats(sis.members[0]!)).toMatchObject({ hp: 14, slots: 3, chance: 100, range: 6, armor: 1 }); // armor 1: the sim's tuning (progress note)
+    expect(sis.members[0]!.hp).toBe(14);
     expect(sis.members.every((r) => r.loot.length === 0)).toBe(true); // prospectors carry no purse
     expect(CREWS['the-wake'].hideout.siteId).toBe('the-wake-hideout');
   });
@@ -3568,7 +3584,7 @@ describe('V3.7 crews', () => {
       expect(cr.crew).toBe('the-wake');
       expect(cr.stance).toBe('waiting');
       expect(cr.members.length).toBe(4);
-      expect(cr.members.every((r) => r.at.level === 3 && distance(r.at, at(3, 4, 6)) <= 2 && r.level === 4)).toBe(true);
+      expect(cr.members.every((r) => r.at.level === 3 && distance(r.at, at(3, 4, 6)) <= 2 && r.level === CREWS['the-wake'].level)).toBe(true);
       const two = makeCrew(w, t, t.delve!, 2);
       if (two) expect(['ferrymen', 'gallows-choir']).toContain(two.crew);
     }
@@ -3581,13 +3597,16 @@ describe('V3.7 crews', () => {
     const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven', 'pim']);
     put(s, 'keven', at(2, 15, 2)); // the bearer, nearest
     put(s, 'brann', at(2, 14, 2));
-    hero(s, 'brann').hp = 2;
+    hero(s, 'brann').hp = 10; // V4.1 (WS7, spec 31.9): at 2 he'd be a likely kill, and a likely kill comes first
     put(s, 'pim', at(2, 2, 1)); // far off, behind the wall
     expect(crewTarget(ctx(s))!.id).toBe('keven');
     computeIntentsOf(ctx(s));
     const fighters = members(s).filter((r) => r.intent?.kind === 'attack' || r.intent?.kind === 'move' || r.intent?.kind === 'fuse');
     expect(fighters.length).toBeGreaterThan(0);
     for (const r of fighters) expect(r.intent?.targetId, r.cls).toBe('keven');
+    // V4.1 (WS7): a hero the crew can likely down this round comes before the bearer.
+    hero(s, 'brann').hp = 2;
+    expect(crewTarget(ctx(s))!.id).toBe('brann');
     // The bearer out of reach: the lowest-HP hero in reach.
     put(s, 'keven', at(2, 2, 2));
     s.delve!.rivals!.members.forEach((r) => (r.intent = undefined));
@@ -3738,6 +3757,7 @@ describe('V3.7 crews', () => {
     const s = crewDelve('gallows-choir', [at(2, 17, 8), at(2, 18, 8), at(2, 16, 4)], 'hostile', ['brann', 'keven', 'pim']);
     member(s, 0).hp = 0;
     member(s, 1).hp = 0;
+    s.delve!.rivals!.retreat = 0; // V4.1 (WS7, spec 31.9): it called a fight off once already: it fights on
     put(s, 'brann', at(2, 13, 1));
     put(s, 'keven', at(2, 14, 1));
     put(s, 'pim', at(2, 13, 2));

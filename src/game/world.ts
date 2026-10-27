@@ -359,7 +359,10 @@ export function lightSources(d: DelveX): LightSrc[] {
     }
   }
   const cr = d.rivals;
-  if (cr && cr.entered) for (const r of cr.members) if (!r.goneOut && r.hp > 0) out.push({ at: r.at, radius: CREW_LIGHT_RADIUS, party: false, kind: 'crew', holder: r.id });
+  // V4.1 (WS7, spec 31.9): a cutthroat crew waiting at its post keeps its lights hooded (an ambush in the dark, Level 2's
+  // lesson); they uncover them once they demand the toll or fight.
+  const hooded = !!cr && cr.temperament === 'cutthroat' && cr.stance === 'waiting';
+  if (cr && cr.entered && !hooded) for (const r of cr.members) if (!r.goneOut && r.hp > 0) out.push({ at: r.at, radius: CREW_LIGHT_RADIUS, party: false, kind: 'crew', holder: r.id });
   for (const k of d.lit) out.push({ at: parsePos(k), radius: 3, party: false, kind: 'brazier' });
   // V4.1 (WS6, spec 31.8): glow arrows: radius 2 where they landed, or on the figure they stuck in (it carries the light).
   // Not party light: a hero lit only by one stands in castle light (−10, sight 4/3/2), but monsters see them and the Gloam shies.

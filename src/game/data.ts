@@ -785,6 +785,25 @@ export const PYRO_BOLT_DMG = 2;
 export const PYRO_BOLT_NOISE = 3;
 export const SELLSWORD_SHOVE_CHANCE = 60;
 
+// ---------------------------------------------------------------- V4.1 (WS7, spec 31.9): crews as an equal power
+/** A member's Focus for the delve, as a hero's (FOCUS_MAX), spent on key rolls: a likely kill, an edge shot, a lone hero's dart. */
+export const CREW_FOCUS = 3;
+/** A crew Sellsword braces (an action, the heroes' Brace) when this many heroes who are up stand at its blade. */
+export const CREW_BRACE_HEROES = 2;
+/** Retreat: a hostile crew with at least this share of its members down, dead or gone, facing a party CREW_RETREAT_RATIO × as strong, calls the fight off. */
+export const CREW_LOSING_SHARE = 0.5;
+export const CREW_RETREAT_RATIO = 1.5;
+/** A crew at peace that sees a stronger party (strength × this) keeps at least CREW_WARY_GAP hexes from every hero. */
+export const CREW_WARY_RATIO = 1.25;
+export const CREW_WARY_GAP = 3;
+/** Strength, for retreat and wariness: per figure who is up, HP + this × level; + this per potion carried. */
+export const STRENGTH_PER_LEVEL = 4;
+export const STRENGTH_PER_POTION = 3;
+/** A member that can't strike this round holds at the edge of the party's reach (two heroes) for up to this many rounds of a fight. */
+export const CREW_HOLD_ROUNDS = 2;
+/** A crew Ranger on a raised hex shoots at +10, as a hero (spec 31.7's perches). */
+export const CREW_RAISED_BONUS = 10;
+
 export interface CrewMemberDef {
   name: string;
   cls: RivalClass;
@@ -805,20 +824,24 @@ export interface CrewDef {
   members: CrewMemberDef[];
   /** Spec 20.4: the crew's hideout, where captives are held ("Bring back" contracts); a ContractSiteDef with `hideout` = this crew. */
   hideout: { siteId: string; where: string };
+  /** V4.1 (WS7): each member's purse (cutthroats), fixed per crew now that crew levels moved (was CREW_PURSE by level). */
+  purse?: number;
 }
 
 export const CREWS: Record<CrewId, CrewDef> = {
   'lantern-sisters': {
-    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 2, weaponTier: 1, armorTier: 1, contracts: [1],
+    // V4.1 (WS7, spec 31.9): level 4 (was 2): even with a fresh party of three at level 2 in the arena.
+    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 4, weaponTier: 1, armorTier: 1, contracts: [1],
     members: [
       { name: SISTER_NAMES[0]!, cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
-      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker', 'antidote'] }, // V4.1 (WS7): + antipoison (Level 1's spider)
       { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
     ],
     hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
-    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
+    // V4.1 (WS7, spec 31.9): level 4 (was 3): even with a party of three at level 3.
+    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 4, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
       { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
@@ -827,17 +850,19 @@ export const CREWS: Record<CrewId, CrewDef> = {
     hideout: { siteId: 'ferrymen-hideout', where: 'the Drain' },
   },
   'gallows-choir': {
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
+    // V4.1 (WS7, spec 31.9): level 5 (was 3): even with a party of three at level 3 (no front-line Sapper: its casters need the levels).
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 5, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
       // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.
       { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'venomdart', 'smoke', 'lockpicks'] },
-      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'oil'] },
+      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'antidote'] }, // V4.1 (WS7): oil (no crew lantern to fill) → antipoison
     ],
     hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
   },
   'the-wake': {
-    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 4, weaponTier: 2, armorTier: 1, contracts: [3],
+    // V4.1 (WS7, spec 31.9): level 6 (was 4, MAX_LEVEL now): even with a party of four at level 4.
+    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 6, weaponTier: 2, armorTier: 1, contracts: [3], purse: 50,
     members: [
       { name: 'Mother Grave', cls: 'sellsword', pack: ['potion', 'potion'] },
       { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },

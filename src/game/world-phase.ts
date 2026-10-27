@@ -819,6 +819,7 @@ export function worldPhase(c: Ctx): void {
     h.overwatch = false;
     h.guarding = undefined;
     h.braced = undefined;
+    if (h.dreaded && h.dreaded <= d.round) h.dreaded = undefined; // V4.1 (WS7, spec 31.9): a crew Dread's turn is over
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;

@@ -28,6 +28,7 @@ import { bringCarried, carrierOf, downedCrew } from './common'; // V4.1 (spec 31
 import { MEND_UP_HP, POTION_HEAL } from './data'; // V4.1 (spec 31.4)
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
+import { POWER_KIT, castPlan, kiteFor, holdBack, likelyKill, powerAct, powerKit, powerPrefer, spotCost } from './crewpower'; // V4.1 (WS7, spec 31.9)
 import { arrowIntent, arrowWord, crewCanShoot, crewCounts, crewLoosed, crewPlainReady, spendCrewArrow } from './arrows'; // V4.1 (WS6)
 
 // ---------------------------------------------------------------- the pack
@@ -129,6 +130,9 @@ export function crewTarget(c: Ctx): Target | null {
   const ms = rivalsOnMap(c);
   if (!ts.length || !ms.length) return null;
   const reach = (t: Target) => ms.some((r) => inReach(r, t));
+  // V4.1 (WS7, spec 31.9): a hero the crew can likely down this round comes first (focus fire on a kill).
+  const kill = likelyKill(c, ts, inReach);
+  if (kill) return kill;
   const brightest = brightestHero(c.d, ts.map((t) => t.id));
   const bearer = brightest ? ts.find((t) => t.id === brightest) : undefined;
   if (bearer && reach(bearer)) return bearer;
@@ -208,26 +212,41 @@ export interface Plan {
  */
 export function attackPlan(c: Ctx, r: RivalX, t: Target): Plan {
   const st = rivalStats(r);
-  const reach = st.range;
+  // V4.1 (WS7, spec 31.9): a mage with mana closes to its spells' reach (4), not to its staff's: it casts from there next round.
+  const caster = manaOf(r) > 0 && st.range === 1;
+  const reach = caster ? 4 : st.range;
   const canHit = (from: Pos) => t.at.level === from.level && within(t.at, from, reach) && (reach === 1 || los(c.w, c.d, from, t.at));
   const dmg = hitRange(st.slots, st.dmg, t.armor);
+  // V4.1 (WS7): standing in fire (or bunched under a fire mage's eye), a member that can hit from a better hex steps there first.
+  if (canHit(r.at) && spotCost(c, r, r.at) > 0) {
+    const better = (reach > 1 ? shootingSpots(c, r, t, reach) : attackSpots(c, t.at, r.id)).filter((p) => spotCost(c, r, p) < spotCost(c, r, r.at) && canHit(p));
+    const step = better.length ? pathToSpots(c, r, better, crewBudget(r, false), t.id, (p) => spotCost(c, r, p)) : [];
+    const end = step[step.length - 1];
+    if (end && canHit(end)) return { intent: caster ? { kind: 'move', to: end, targetId: t.id } : { kind: 'attack', targetId: t.id, to: end, damage: dmg }, path: step };
+  }
+  if (caster && canHit(r.at)) return { intent: { kind: 'wait' }, path: [] };
   if (canHit(r.at)) return { intent: { kind: 'attack', targetId: t.id, to: { ...r.at }, damage: dmg }, path: [] };
-  const spots = reach > 1 ? shootingSpots(c, r, t) : attackSpots(c, t.at, r.id);
+  const spots = reach > 1 ? shootingSpots(c, r, t, reach) : attackSpots(c, t.at, r.id);
   if (r.cls === 'sapper' && sapperWay(c, r, spots)) {
     const route = crewApproach(c, r, spots, { sneak: false });
     if (route.way) return { intent: routeIntent(c, route), path: route.path, way: route.way };
   }
   const sneak = wantSneak(c, r, [], t.id);
   const budget = crewBudget(r, sneak);
-  const path = pathToSpots(c, r, spots, budget, t.id, guardPrefer(c, r));
+  const prefer = powerPrefer(c, r, t, guardPrefer(c, r)); // V4.1 (WS7): walk to flank; a Ranger to a perch
+  const path = pathToSpots(c, r, spots, budget, t.id, prefer);
   const end = path[path.length - 1];
-  if (end && canHit(end)) return { intent: { kind: 'attack', targetId: t.id, to: end, damage: dmg }, path, sneak };
+  if (end && canHit(end)) return caster ? { intent: { kind: 'move', to: end, targetId: t.id }, path, sneak } : { intent: { kind: 'attack', targetId: t.id, to: end, damage: dmg }, path, sneak };
   // The dash stops short of the party's reach: a member that can't strike this round doesn't walk up to hand the heroes the first blow.
-  let far = pathToSpots(c, r, spots, 2 * budget, t.id, guardPrefer(c, r));
+  let far = pathToSpots(c, r, spots, 2 * budget, t.id, prefer);
   while (far.length > path.length && activeHeroes(c).some((h) => adjacentTo(h.at, far[far.length - 1]!))) far = far.slice(0, -1);
   while (far.length > path.length && occupant(c, far[far.length - 1]!)) far = far.slice(0, -1);
   const dash = far.length > path.length;
-  const go = dash ? far : path;
+  let go = dash ? far : path;
+  // V4.1 (WS7, spec 31.9): not piecemeal: hold at the edge of the party's reach (crewpower.ts holdBack).
+  go = holdBack(c, r, go);
+  while (go.length && occupant(c, go[go.length - 1]!)) go = go.slice(0, -1);
+  if (go.length <= path.length && dash) return go.length ? { intent: { kind: 'move', to: go[go.length - 1]!, targetId: t.id, ...(sneak ? { sneak: true } : {}) }, path: go, sneak } : { intent: { kind: 'wait' }, path: [] };
   const stop = go[go.length - 1];
   return stop ? { intent: { kind: 'move', to: stop, targetId: t.id, ...(sneak ? { sneak: true } : {}) }, path: go, sneak, dash } : { intent: { kind: 'wait' }, path: [] };
 }
@@ -504,6 +523,20 @@ function witchIntent(c: Ctx, r: RivalX): Intent | null {
 export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   const potion = potionIntent(c, r);
   if (potion) return potion;
+  // V4.1 (WS7, spec 31.9): an antipoison first; then the new verbs by class (brace, Sleep, Dread, Night thorn, Briar).
+  const cure = powerKit(c, r, t, 'first');
+  if (cure) return cure;
+  const cls: RivalClass = r.cls;
+  if (cls === 'sellsword') return shoveIntent(c, r) ?? powerKit(c, r, t, 'class') ?? (targets(c).some((x) => x.hero && adjacentTo(x.at, r.at)) ? null : glueIntent(c, r));
+  if (cls === 'shadowmancer') {
+    // Blink, veil and smoke first (as before), then the new spells (Sleep, Dread, Night thorn), then the firecracker.
+    const s = shadowIntent(c, r);
+    return s && s.kind !== 'firecracker' ? s : (powerKit(c, r, t, 'class') ?? s);
+  }
+  if (cls === 'hedgewitch') {
+    const w = witchIntent(c, r);
+    return w && w.kind !== 'ward' ? w : (powerKit(c, r, t, 'class') ?? w);
+  }
   switch (r.cls) {
     case 'burglar':
       return venomIntent(c, r, t) ?? dartIntent(c, r) ?? smokeIntent(c, r);
@@ -526,7 +559,8 @@ export function kitIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   return null;
 }
 
-export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring', 'arrow'];
+export const KIT: Intent['kind'][] = ['veil', 'overwatch', 'shove', 'smoke', 'dart', 'venomdart', 'fuse', 'firebolt', 'fireball', 'potion', 'glue', 'caltrops', 'firecracker', 'blink', 'mend', 'gust', 'ward', 'item', 'hamstring', 'arrow',
+  'brace', 'sleep', 'dread', 'nightthorn', 'briar', 'antidote', 'kindle']; // V4.1 (WS7): crewpower.ts POWER_KIT
 
 /** A sleep dart on a hero: a hit costs them their next move and action (spec 16.5). */
 function throwDart(c: Ctx, r: RivalX, t: Target): void {
@@ -587,6 +621,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       return true;
     }
   }
+  // V4.1 (WS7, spec 31.9): the new verbs (an antipoison, Sleep and Kindle at peace too; the rest only while hostile).
+  if (POWER_KIT.includes(it.kind)) return powerAct(c, r, it);
   if (cr.stance !== 'hostile') return false;
   switch (it.kind) {
     case 'overwatch':
@@ -966,9 +1002,25 @@ export function hostilePlan(c: Ctx, r: RivalX): Plan {
   const fin = finishable(c, r);
   if (fin) return { intent: { kind: 'attack', targetId: fin.heroId, to: { ...r.at } }, path: [] };
   const t = currentTarget(c);
+  r.castPath = undefined;
   const kit = kitIntent(c, r, t);
   if (kit) return { intent: kit, path: [] };
   if (!t) return { intent: { kind: 'wait' }, path: [] };
+  // V4.1 (WS7, spec 31.9): a mage (or a Burglar with darts) walks to where its spell reaches, then casts, in one turn.
+  const cast = castPlan(c, r, (from) => {
+    const at = r.at;
+    r.at = from;
+    try {
+      const it = kitIntent(c, r, t);
+      return it && it.kind !== 'potion' && it.kind !== 'blink' && it.kind !== 'overwatch' ? it : null;
+    } finally {
+      r.at = at;
+    }
+  });
+  if (cast) {
+    r.castPath = cast.path;
+    return { intent: { ...cast.intent }, path: cast.path };
+  }
   return attackPlan(c, r, t);
 }
 
@@ -1017,6 +1069,19 @@ export function hostileAct(c: Ctx, r: RivalX): void {
   }
   if (it && KIT.includes(it.kind)) {
     if (cr.stance === 'hostile' && (overwatchCheck(c, r.id, r.at) || !rivalsOnMap(c).includes(r))) return;
+    // V4.1 (WS7, spec 31.9): move, then act, as a hero: the walk to where the spell reaches, else a step out of the
+    // party's melee reach before a spell or a dart.
+    const walk = r.castPath?.length ? r.castPath : [];
+    r.castPath = undefined;
+    if (walk.length && !walk.some((p) => occupant(c, p) && !samePos(p, r.at))) {
+      crewWalk(c, r, walk);
+      if (!rivalsOnMap(c).includes(r)) return;
+    }
+    const kite = cr.stance === 'hostile' && !walk.length ? kiteFor(c, r, it) : [];
+    if (kite.length) {
+      crewWalk(c, r, kite);
+      if (!rivalsOnMap(c).includes(r)) return;
+    }
     if (useKit(c, r, it)) {
       r.intent = undefined;
       guardCheck(c, r);

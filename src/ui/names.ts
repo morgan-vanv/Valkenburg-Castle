@@ -896,12 +896,12 @@ export const CREW: Record<CrewId, { name: string; blurb: string; colour: string;
 /** V3.7 (spec 20.4): what a crew member of each class does with its pack, for hover and the parley card. */
 export const CREW_KIT: Record<string, string> = {
   ranger: 'Longbow at range 6. Caltrops on the hex you would charge through; overwatch when nobody is in reach.',
-  shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half.',
+  shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half. Puts a monster hunting the crew to sleep; Dread on a hero standing over a hurt sister (no action next turn); night thorns (armor ignored).',
   burglar: 'Walks 5, sneaks 4 on quiet feet. A poison dart for a hero standing alone (the Gallows Choir\'s), sleep darts at whoever carries the most light; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
-  sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges.',
+  sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges. Braces when two of you are at his blade.',
   sapper: 'Hammer, improvised explosives and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge. Digs through cracked walls and blasts locked doors when that\'s the short way.',
   pyromancer: 'Firebolt at range 5; fireball when three heroes stand within 1 of a hex.',
-  hedgewitch: 'Mends the member below half, wards the striker, gusts a hero standing at an edge.',
+  hedgewitch: 'Mends the member below half, wards the striker, gusts a hero standing at an edge. Briars a hero charging in (rooted).',
 };
 
 /** V3.7 (spec 20.4): a crew member's level, tiers and pack, one line. */

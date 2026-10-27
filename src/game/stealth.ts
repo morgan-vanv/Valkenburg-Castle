@@ -404,7 +404,7 @@ function heroSwingTarget(c: Ctx, id: string): { at: Pos; armor: number; name: st
 
 /** Can this hero swing now: active, free to act, action still ready. */
 export function heroCanSwing(h: HeroInDelve): boolean {
-  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing;
+  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing && !h.dreaded; // V4.1 (WS7): Dread
 }
 
 /**
