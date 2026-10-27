@@ -7,7 +7,7 @@ import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { DIRS, distance, posKey, samePos, type Pos } from './hex';
 import type { CrewId, GameEvent, GameState, Monster, MonsterKind, RivalCrew } from './types';
-import { MONSTERS } from './data';
+import { CREWS, MONSTERS } from './data';
 import { World, kindAt } from './world';
 import type { Ctx, DelveX, GameStateX, MonsterX, RivalX } from './state';
 import { buildCrew, planRival } from './rivals';
@@ -221,6 +221,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
       for (let i = 1; i < 400 && seen.size < 4; i++) {
         const s = seeded(delve(), i);
         const [, , burglar] = crew(s, 'lantern-sisters', [at(1, 18, 2), at(1, 18, 3), at(1, 16, 1)]);
+        burglar!.level = 2; // V4.1 (WS7): the Sisters are level 4 now; a level 2 picker shows every outcome
         const c = ctx(s);
         const res = crewWorkLock(c, burglar!, CHEST);
         const ch = s.delve!.chests.find((x) => samePos(x.at, CHEST))!;
@@ -259,6 +260,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
         const s = seeded(delve(), i);
         keven(s).at = at(1, 4, 7);
         crew(s, 'lantern-sisters', [at(1, 18, 2), at(1, 18, 3), at(1, 16, 1)]);
+        for (const m of s.delve!.rivals!.members) m.level = 2; // V4.1 (WS7): a level 2 picker jams now and then
         s.delve!.rivals!.job = { kind: 'open', at: CHEST, price: 30, by: 'keven' };
         const before = keven(s).pack.filter((x) => x.kind === 'gold').reduce((n, x) => n + x.amount, 0);
         const r = e.apply(s, { type: 'endTurn' });
@@ -360,7 +362,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
     it('digs through a cracked wall that saves 6+ hexes (noise 4); carries improvised explosives', () => {
       const s = delve();
       const [, , sapper] = crew(s, 'ferrymen', [at(2, 1, 1), at(2, 2, 1), at(2, 3, 4)], 'bribed');
-      expect(sapper!.pack!.find((i) => i.kind === 'improvised-charge')).toMatchObject({ amount: 3, slots: 0 });
+      expect(sapper!.pack!.find((i) => i.kind === 'improvised-charge')).toMatchObject({ amount: CREWS.ferrymen.level, slots: 0 }); // one a crew level
       const c = ctx(s);
       const way = sapperWay(c, sapper!, [at(2, 3, 7)]);
       expect(way).toEqual({ kind: 'dig', at: at(2, 3, 5) });
@@ -377,7 +379,7 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
       expect(route.way).toEqual({ kind: 'blast', at: at(1, 13, 3) });
       expect(crewDoWay(c, sapper!, route.way!)).toBe(true);
       expect(c.ev).toContainEqual({ type: 'fuseSet', at: at(1, 13, 3), rounds: 1, by: sapper!.id });
-      expect(sapper!.pack!.find((i) => i.kind === 'improvised-charge')!.amount).toBe(2);
+      expect(sapper!.pack!.find((i) => i.kind === 'improvised-charge')!.amount).toBe(CREWS.ferrymen.level - 1);
       // It waits for its own fuse; the next blast opens the door.
       expect(crewApproach(c, sapper!, [at(1, 15, 3)]).path).toEqual([]);
     });
@@ -414,5 +416,31 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
     const r = crewApproach(c, sell!, [at(3, 10, 4)], { dash: true });
     expect(r.path.every((p) => !samePos(p, at(3, 6, 4)) && !samePos(p, at(3, 7, 4)))).toBe(true);
     expect(distance(r.path[r.path.length - 1]!, sell!.at)).toBeGreaterThan(0);
+  });
+});
+
+describe('V4.1 (spec 31.10): a waiting crew demands its toll only for noise the party is near', () => {
+  it('noise far from every hero (an orc bellowing at the crew) does not set off the toll; noise by the party does', async () => {
+    const { makeNoise } = await import('./common');
+    const s = delve(3);
+    const k = keven(s);
+    // Find two floor hexes on the party's level: one near the crew, one far from both.
+    const lvl = w.levels.get(k.at.level)!;
+    const floor = Object.keys(lvl.tiles).map((key) => { const [q, r] = key.split(',').map(Number) as [number, number]; return { level: k.at.level, q, r }; })
+      .filter((p) => kindAt(w, s.delve as DelveX, p) === 'floor');
+    const far = floor.filter((p) => distance(p, k.at) >= 12).sort((a, b) => distance(b, k.at) - distance(a, k.at))[0]!;
+    expect(far).toBeTruthy();
+    const spots = floor.filter((p) => distance(p, far) <= 2 && distance(p, k.at) >= 10).slice(0, 3);
+    crew(s, 'ferrymen', spots, 'waiting');
+    // A loud noise right by the crew, out of every hero's reach.
+    const c1 = ctx(s, 'player');
+    makeNoise(c1, far, 5);
+    expect(s.delve!.rivals!.stance).toBe('waiting');
+    // The same noise made where a hero stands and reaching the crew: they demand.
+    const near = floor.find((p) => distance(p, spots[0]!) === 3)!;
+    k.at = { ...near };
+    const c2 = ctx(s, 'player');
+    makeNoise(c2, near, 5);
+    expect(s.delve!.rivals!.stance).toBe('demanding');
   });
 });

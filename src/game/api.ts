@@ -147,7 +147,8 @@ export interface LightInfo {
   radius: number;
   /** The party's own light (a torch, a lantern, Glowworm); false: a crew member's light, a lit brazier. */
   party: boolean;
-  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier';
+  /** V4.1 (WS6, spec 31.8): `arrow` = a glow arrow (radius 2; on `holder` when it stuck in a figure). */
+  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier' | 'arrow';
   /** Hero (or crew member) carrying it; absent for a torch or lantern lying lit on the floor, and braziers. */
   holder?: string;
   /** Torches and lanterns: rounds of light left, and the most it holds. */

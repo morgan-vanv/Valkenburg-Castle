@@ -49,6 +49,9 @@ import { bodiesOn, bringCarried, carrierOf, downedCrew, setDownNear } from './co
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
 import { POTION_HEAL, TRIPWIRE_FUSE } from './data'; // V4.1 (spec 31.3)
 import { doLight, lightSpecText, lightTargets } from './light'; // V4.1 (spec 31.5, WS2)
+import { crewBraceMods } from './crewpower'; // V4.1 (WS7)
+import { arrowCount, arrowLands, attackArrow, attackArrows, bowClass, bowReady, plainArrows, shootTargets, spendArrow, weaponNow } from './arrows'; // V4.1 (WS6)
+import { BARB_ROUNDS, BLAST_ARROW_DMG, FIRE_ARROW_DMG, GLOW_ARROW_RADIUS, GLOW_ARROW_ROUNDS, WHISTLE_NOISE } from './data'; // V4.1 (WS6)
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -672,14 +675,27 @@ export function pickTool(c: Ctx, h: HeroInDelve): { item: Item; slots: number; p
   return imp ? { item: imp, slots: LOCKPICK_SLOTS, proper: false } : null;
 }
 
-/** Every valid target for an action right now (ignores move/act flags). */
-export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTarget[] {
+/** V4.1 (WS6, spec 31.8): the reason a bow-only shot isn't offered. */
+export const OUT_OF_ARROWS = 'Out of arrows';
+export const NO_PLAIN_ARROWS = 'Out of plain arrows: only specialty arrows left (Attack picks one)';
+/** V4.1 (WS6): bow shots that loose a plain arrow (the quiver, then bought ones). */
+const PLAIN_SHOTS: ActionKind[] = ['knockback', 'hamstring', 'overwatch'];
+
+/**
+ * Every valid target for an action right now (ignores move/act flags). V4.1 (WS6): `anyArrows` lists a bow shot's
+ * targets as if the quiver were full (for the "Out of arrows" option the HUD explains).
+ */
+export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows = false): ActionTarget[] {
   const def = heroDef(c, h.heroId)!;
   const cls = def.cls;
+  // V4.1 (WS6, spec 31.8): knockback, hamstring and overwatch each loose a plain arrow.
+  if (PLAIN_SHOTS.includes(action) && bowClass(cls) && !anyArrows && !plainArrows(h.pack)) return [];
   const others = c.d.heroes.filter((x) => x !== h);
   const mage = (school: HeroClass, mana: number) => cls === school && h.mana >= mana;
   switch (action) {
     case 'attack':
+      // V4.1 (WS6, spec 31.8): out of arrows, the Ranger fights with a knife (melee).
+      if (cls === 'ranger' && !anyArrows && !bowReady(h.pack)) return enemiesAdjacent(c, h);
       if (cls === 'ranger') {
         // V4.1 (spec 31.4): a downed crew member in sight can be shot too (any hit kills it).
         const vis = visNow(c);
@@ -953,6 +969,10 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return enemiesInSight(c, h, BRIAR_RANGE, { noDragon: true });
     case 'smashProp':
       return posNeighbors(h.at).filter((p) => smashable(c, p)).map((at) => ({ at }));
+    case 'shoot':
+      // V4.1 (WS6, spec 31.8): a whistling, glow, blast or rope arrow at a hex in sight (no roll), one entry per bundle kind.
+      if (!bowClass(cls)) return [];
+      return shootTargets(c, h, visNow(c), (n, f) => hexesInSight(c, h, n, f));
   }
   return [];
 }
@@ -982,13 +1002,14 @@ const LABELS: Record<ActionKind, string> = {
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught', unbar: 'Unbar the gate',
   brace: 'Brace', hamstring: 'Hamstring', nightthorn: 'Night thorn', briar: 'Briar', smashProp: 'Smash',
   venomdart: 'Poison dart', antidote: 'Antipoison', carry: 'Carry', unshackle: 'Unshackle', setDown: 'Set down',
+  shoot: 'Shoot arrow', // V4.1 (WS6)
 };
 
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart', 'unshackle'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'carry', 'unshackle', 'setDown', 'potion', 'antidote', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'snuff', 'dropTorch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
-  'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
+  'caltrops', 'firecracker', 'shoot', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
 /** How the UI targets each action (ActionOption.pick). */
@@ -1002,6 +1023,7 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   key: 'hex', unbar: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
   brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
   venomdart: 'enemy', antidote: 'ally', carry: 'other', unshackle: 'other', setDown: 'self',
+  shoot: 'hex', // V4.1 (WS6)
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2, setTripwire: 2 };
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
@@ -1036,8 +1058,15 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
   const def = heroDef(c, heroId);
   for (const a of ORDER) {
     if (!canDo(h, a)) continue;
+    if (h.dreaded && !FREE.includes(a)) continue; // V4.1 (WS7, spec 31.9): a crew Shadowmancer's Dread
     const t = targetsFor(c, h, a);
     if (!t.length) {
+      // V4.1 (WS6, spec 31.8): a bow shot with nothing to loose: listed blocked ("Out of arrows"), so the hover card says why.
+      if (PLAIN_SHOTS.includes(a) && def && bowClass(def.cls)) {
+        const would = targetsFor(c, h, a, true);
+        if (would.length) out.push({ action: a, label: LABELS[a], targets: would, rolls: ROLLS.includes(a), pick: PICK[a], blocked: bowReady(h.pack) ? NO_PLAIN_ARROWS : OUT_OF_ARROWS });
+        continue;
+      }
       // Spec 21.4: a locked thing in reach, and no pick to work it: the option says what would.
       if (a === 'pick' && !pickTool(c, h)) {
         const locked = pickableAround(c, h);
@@ -1147,12 +1176,18 @@ function sign(n: number): string {
 
 /** A monster's armor against this hit, with the plain-words modifiers (armor, the captain's shield wall). */
 /** V3.7 (spec 20.4): a crew member's armor (class plus tier) and the Hedgewitch's ward, as modifiers. */
-function rivalArmorMods(r: RivalX, mods: string[]): { armor: number; ward: number } {
+function rivalArmorMods(r: RivalX, mods: string[]): { armor: number; ward: number; chance: number } {
   const armor = rivalStats(r).armor;
   if (armor) mods.push(`Armor −${armor}`);
-  const ward = (r.ward ?? 0) > 0 ? 1 : 0;
+  let ward = (r.ward ?? 0) > 0 ? 1 : 0;
   if (ward) mods.push('Warded −1');
-  return { armor, ward };
+  // V4.1 (WS7, spec 31.9): a braced crew Sellsword, by the heroes' Brace: 1 less a hit, −15% to hit it.
+  const bm = crewBraceMods(r);
+  if (bm.dmg) {
+    ward += bm.dmg;
+    mods.push(`Braced −${bm.dmg} dmg, ${bm.chance}%`);
+  }
+  return { armor, ward, chance: bm.chance };
 }
 
 function armorMods(c: Ctx, m: MonsterX, mods: string[]): number {
@@ -1195,6 +1230,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   if (h.status !== 'active' && !crawler) return no(`${heroName(c, heroId)} can't act.`);
   if (c.d.phase !== 'player') return no('Wait for your turn.');
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
+  if (h.dreaded && !FREE.includes(action)) return no(`${heroName(c, heroId)} is gripped by dread this turn: they can move, but not act.`); // V4.1 (WS7)
   if (h.carrying && !CARRY_OK.includes(action)) return no(`${heroName(c, heroId)} is carrying ${bodyName(c, h.carrying)}: free actions only. Set them down first.`);
   if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
@@ -1219,9 +1255,15 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   switch (action) {
     case 'attack': {
       const f = foe(c, t.id)!;
-      let slots = cls.weapon.slots;
-      let p = withLight(def.stats[cls.weapon.stat]);
-      if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
+      // V4.1 (WS6, spec 31.8): a Ranger out of arrows fights with a knife (2 Finesse slots, 1 damage; the forge's tiers are the bow's).
+      const weapon = weaponNow(def.cls, h.pack);
+      const knife = weapon !== cls.weapon;
+      if (target.arrow && weapon.range && !attackArrows(h.pack).some((i) => i.id === target.arrow) && !h.pack.some((i) => i.id === target.arrow && (i.kind === 'quiver' || i.kind === 'arrows') && i.amount > 0)) return no('No such arrow in the pack.');
+      const arrow = weapon.range ? attackArrow(h.pack, target.arrow) : undefined;
+      if (knife) mods.push('Out of arrows: knife');
+      let slots = weapon.slots;
+      let p = withLight(def.stats[weapon.stat]);
+      if (def.weaponTier && !knife) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       // V3.7 (spec 20.1): the first blow on an enemy that hasn't noticed you; the Burglar's backstab stacks.
       const unnoticed = unnoticedBy(c, t.id!, heroId);
@@ -1229,17 +1271,25 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       // V3.9 (spec 24.3): the Burglar's backstab: melee from the target's rear half, unnoticed: +1 slot, double damage before armor.
       const stab = canBackstab(c, h, t.id!, unnoticed);
       if (stab) { slots += BACKSTAB_SLOTS; mods.push('Backstab: +1 slot, double damage'); }
-      const ranged = !!cls.weapon.range;
+      const ranged = !!weapon.range;
       if (ranged && c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
       if (adjacent(h.at, f.at) && c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
       const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      p += rd?.chance ?? 0; // V4.1 (WS7)
       const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
-      const dmg = Math.max(0, Math.max(1, cls.weapon.dmg * (stab ? BACKSTAB_DMG_MULT : 1) - armor) - (rd?.ward ?? 0));
+      const dmg = Math.max(0, Math.max(1, weapon.dmg * (stab ? BACKSTAB_DMG_MULT : 1) - armor) - (rd?.ward ?? 0));
+      // V4.1 (WS6): the arrow loosed: a fire arrow +1 on a hit; the others' effects named on the outcomes.
+      const ak = arrow?.kind;
+      const fire = ak === 'firearrows' ? FIRE_ARROW_DMG : 0;
+      if (fire) mods.push(`Fire arrow +${fire} dmg`);
+      const tail = ak === 'poisonarrows' ? ', poisoned' : ak === 'barbarrows' ? `, rooted ${BARB_ROUNDS} rounds` : ak === 'glowarrows' ? ', lit up' : ak === 'firearrows' ? ', the hex burns' : '';
       const outcomes = [];
-      for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? 'Miss' : `${i * dmg + (i === slots ? 1 : 0)} dmg`);
-      return base(cls.weapon.stat, slots, p, outcomes, cls.weapon.noise ?? 2, dmg);
+      for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? (ak === 'whistlearrows' ? 'Miss: it shrieks there' : ak === 'glowarrows' ? 'Miss: lights its hex' : 'Miss') : `${i * dmg + (i === slots ? 1 : 0) + fire} dmg${tail}`);
+      const sp = base(weapon.stat, slots, p, outcomes, weapon.noise ?? 2, dmg);
+      if (ak === 'whistlearrows') sp.warning = `Whistling arrow: noise ${WHISTLE_NOISE} where it lands.`;
+      return sp;
     }
     case 'knockback': {
       const f = foe(c, t.id)!;
@@ -1362,6 +1412,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      p += rd?.chance ?? 0; // V4.1 (WS7)
       const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
       const bd = Math.max(0, Math.max(1, 2 - armor) - (rd?.ward ?? 0));
       const outcomes = [];
@@ -1483,6 +1534,29 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'smashProp':
       return simple(`Smash the ${c.w.tile(t.at!)?.prop ?? 'crate'}: loud, may hold something`, SMASH_NOISE);
+    case 'shoot': {
+      // V4.1 (WS6, spec 31.8): a specialty arrow at a hex: no roll.
+      const it = h.pack.find((i) => i.id === t.itemId);
+      const noise = cls.weapon.noise ?? 1;
+      if (it?.kind === 'whistlearrows') return simple(`Whistling arrow: noise ${WHISTLE_NOISE} there. Draws them off`, noise);
+      if (it?.kind === 'glowarrows') {
+        const sp = simple(`Glow arrow: lights radius ${GLOW_ARROW_RADIUS} there for ${GLOW_ARROW_ROUNDS} rounds`, noise);
+        sp.hexes = areaOf(c, t.at!, GLOW_ARROW_RADIUS);
+        return sp;
+      }
+      if (it?.kind === 'ropearrow') return simple('Rope arrow: a rope anchored at this edge. Climb down from here, or up to here from below', noise);
+      if (it?.kind === 'blastarrows') {
+        const sp = simple(`Blast arrow: ${BLAST_ARROW_DMG} dmg within 1, no armor; opens locks and breaks walls within 1. Noise ${BLAST_NOISE}`, noise);
+        sp.hexes = areaOf(c, t.at!, 1);
+        sp.affects = figuresOn(c, sp.hexes);
+        const plan = blastPreview(c, t.at!);
+        if (plan.broke.length) sp.modifiers.push(plan.broke.length === 1 ? 'Breaks the wall' : `Breaks ${plan.broke.length} walls`);
+        const friends = c.d.heroes.filter((o) => (o.status === 'active' || o.status === 'downed') && sp.affects!.includes(o.heroId));
+        if (friends.length) sp.warning = `${friends.map((o) => heroName(c, o.heroId)).join(' and ')} ${friends.length === 1 ? 'stands' : 'stand'} in the blast.`;
+        return sp;
+      }
+      return no('No arrow for that.');
+    }
   }
   return no('Unknown action.');
 }
@@ -1610,6 +1684,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
 
   switch (action) {
     case 'knockback': {
+      spendHeroArrow(c, h); // V4.1 (WS6): a plain arrow
       const r = doRoll();
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
@@ -1626,6 +1701,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'overwatch':
+      // V4.1 (WS6): the arrow is loosed when it fires (ai.ts overwatchCheck).
       h.overwatch = true;
       c.ev.push({ type: 'cast', by: heroId, spell: 'overwatch' });
       say(c, `${name} nocks an arrow and waits.`);
@@ -1676,8 +1752,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (!r.hits) break;
       for (const id of figuresOn(c, hexes)) {
         const m = c.d.monsters.find((x) => x.id === id);
-        const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : 0;
-        const dmg = r.hits * Math.max(1, 2 - armor) + (r.perfect ? 1 : 0);
+        // V4.1 (WS7, spec 31.9): a crew member's armor counts, as a hero's does against a crew fireball (and its ward).
+        const rv = c.d.rivals?.members.find((x) => x.id === id && x.hp > 0);
+        const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : rv ? rivalStats(rv).armor : 0;
+        const dmg = r.hits * Math.max(rv && (rv.ward ?? 0) > 0 ? 0 : 1, Math.max(1, 2 - armor) - (rv && (rv.ward ?? 0) > 0 ? 1 : 0)) + (r.perfect ? 1 : 0);
         if (hd(c, id)) {
           if (fireWard(c, id, dmg) > 0) hurtHero(c, hd(c, id)!, fireWard(c, id, dmg), heroId, r.perfect); // V4.1 (spec 31.3): Dragonfire Porter
         } else hurtAny(c, id, dmg, heroId, { crit: r.perfect });
@@ -1897,6 +1975,9 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     }
     case 'attack':
     case 'firebolt': {
+      // V4.1 (WS6, spec 31.8): a bow shot looses an arrow: the one picked (target.arrow), else plain (the quiver first).
+      const arrowAt = figurePos(c, t.id!);
+      const loosed = action === 'attack' && weaponNow(def.cls, h.pack).range ? spendHeroArrow(c, h, attackArrow(h.pack, target.arrow)?.id) : null;
       const r = doRoll();
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
@@ -1904,14 +1985,30 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (r.hits === 0) {
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
         wakeTarget(c, tid, h.at, heroId);
+        if (loosed && arrowAt) arrowLands(c, loosed, heroId, arrowAt, tid, false);
       } else {
-        const dmg = r.hits * (sp.dmg ?? 1) + (r.perfect ? 1 : 0);
+        const dmg = r.hits * (sp.dmg ?? 1) + (r.perfect ? 1 : 0) + (loosed === 'firearrows' ? FIRE_ARROW_DMG : 0);
         // V3.9 (spec 24.3): name the backstab in the log (the view reads the hit's `backstab` flag too).
         const stab = action === 'attack' && sp.modifiers.some((m) => m.startsWith('Backstab'));
         if (stab) say(c, `${heroName(c, heroId)} backstabs ${c.d.monsters.find((m) => m.id === tid)?.name ?? c.d.rivals?.members.find((m) => m.id === tid)?.name ?? 'it'}: ${dmg}.`);
         hurtAny(c, tid, dmg, heroId, { crit: r.perfect, backstab: stab });
         turnOnHit(c, tid, heroId); // V4.0 (spec 26.3): after the hit (a backstab lands from behind first)
+        if (loosed && arrowAt) arrowLands(c, loosed, heroId, figurePos(c, tid) ?? arrowAt, tid, true);
       }
+      break;
+    }
+    case 'shoot': {
+      // V4.1 (WS6, spec 31.8): a specialty arrow at a hex.
+      const it = h.pack.find((i) => i.id === t.itemId);
+      const kind = it ? spendHeroArrow(c, h, it.id) : null;
+      if (!kind) break;
+      c.ev.push({ type: 'thrown', by: heroId, kind, from: { ...h.at }, to: { ...t.at! } });
+      makeNoise(c, h.at, sp.noise);
+      if (kind === 'blastarrows' && h.veil > 0) {
+        h.veil = 0;
+        say(c, `${name} steps out of the shadows.`);
+      }
+      arrowLands(c, kind, heroId, t.at!, undefined, false);
       break;
     }
     case 'shove': {
@@ -2154,6 +2251,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       say(c, `${name} sets their feet and braces.`);
       break;
     case 'hamstring': {
+      spendHeroArrow(c, h); // V4.1 (WS6): a plain arrow
       const r = doRoll();
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
@@ -2311,4 +2409,19 @@ export function endDelve(c: Ctx): void {
     if (took.length) noteOnce(c, `${cr.name} made off with ${valueOf(took)} gold in loot.`);
   }
   buildSummary(c);
+}
+
+/**
+ * V4.1 (WS6, spec 31.8): a hero's bow shot spends an arrow: `itemId`'s bundle, else plain (the quiver first, then bought).
+ * Says when the quiver runs dry, and when the last arrow is gone. Returns the kind loosed.
+ */
+export function spendHeroArrow(c: Ctx, h: HeroInDelve, itemId?: string): Item['kind'] | null {
+  const q = h.pack.find((i) => i.kind === 'quiver');
+  const before = q?.amount ?? 0;
+  const kind = spendArrow(h.pack, itemId);
+  if (!kind) return null;
+  const name = heroName(c, h.heroId);
+  if (kind === 'quiver' && before === 1) say(c, plainArrows(h.pack) ? `${name}'s quiver is empty. Bought arrows now.` : `${name}'s quiver is empty.`);
+  if (!arrowCount(h.pack)) say(c, `${name} is out of arrows. The knife, then.`);
+  return kind;
 }

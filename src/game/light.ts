@@ -5,6 +5,7 @@
 
 import { distance } from './hex';
 import type { ActionTarget, GameState, HeroInDelve, Item } from './types';
+import { GLOW_ARROW_ROUNDS } from './data'; // V4.1 (WS6)
 import { FREE_LANTERN, KINDLE_LIGHT, KINDLE_RANGE, LANTERN_MAX, OIL_LIGHT, TORCH_ROUNDS } from './data';
 import { say, type Ctx, type DelveX } from './state';
 import { heroName, makeItem, putOnGround } from './common';
@@ -181,7 +182,7 @@ export function burnLights(c: Ctx): void {
 
 /** What lights the castle as the HUD and view see it: the light sources of `world.lightSources`, with rounds. */
 export function lightsOf(d: DelveX): (LightSrc & { rounds?: number; max?: number })[] {
-  return lightSources(d).map((L) => (L.item ? { ...L, rounds: roundsOf(L.item), max: roundsMax(L.item) } : L));
+  return lightSources(d).map((L) => (L.item ? { ...L, rounds: roundsOf(L.item), max: roundsMax(L.item) } : L.kind === 'arrow' ? { ...L, max: GLOW_ARROW_ROUNDS } : L));
 }
 
 /**

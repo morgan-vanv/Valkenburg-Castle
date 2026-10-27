@@ -275,7 +275,17 @@ export type ItemKind =
   | 'lantern' // Gerda's lantern: reusable, holds 20 (`rounds`), refilled free in camp; `lit` = open
   | 'venomdart' // V4.1 (spec 31.4): "Poison dart" to players: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
   // V4.1 (spec 31.3): Aldric and Ilse together
-  | 'greaterpotion'; // heals 8 (POTION_HEAL), or gets a downed hero up at 8
+  | 'greaterpotion' // heals 8 (POTION_HEAL), or gets a downed hero up at 8
+  // V4.1 (WS6, spec 31.8): arrows. `amount` = arrows left.
+  | 'quiver' // the Ranger's own (class kit, slotless): 5 a hero level each delve, spent before bought arrows
+  | 'arrows' // plain arrows, a bundle of 6 (Mott), used after the quiver
+  | 'whistlearrows' // noise 6 where it lands
+  | 'glowarrows' // lights radius 2 for 8 rounds where it lands, or on what it hits
+  | 'firearrows' // +1 damage; the hex burns 2 rounds
+  | 'poisonarrows' // a hit poisons
+  | 'barbarrows' // a hit roots 2 rounds
+  | 'ropearrow' // shot at a pit's edge within 5: a rope anchored there
+  | 'blastarrows'; // a blast of 3 within 1 where it lands (no ring), noise 8, opens locks, breaks walls
 
 export interface Item {
   id: string;
@@ -387,7 +397,9 @@ export type ShopKind =
   // V4.0 (spec 29): Mott's essentials and his quiet work
   | 'antidote' | 'venomdart'
   // V4.1 (spec 31.3)
-  | 'greaterpotion';
+  | 'greaterpotion'
+  // V4.1 (WS6, spec 31.8): arrow bundles
+  | 'arrows' | 'whistlearrows' | 'glowarrows' | 'firearrows' | 'poisonarrows' | 'barbarrows' | 'ropearrow' | 'blastarrows';
 
 /** V4.1 (spec 31.3): who sells a ware (for the vendor tabs, WS4). */
 export type Vendor = 'mott' | 'gerda' | 'ilse' | 'aldric';
@@ -483,6 +495,8 @@ export interface HeroInDelve {
   braced?: boolean;
   /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar: can't move or dash, can act. */
   rooted?: number;
+  /** V4.1 (WS7, spec 31.9): Dread from a crew Shadowmancer: in the player phase of this round the hero takes no action (moving is fine). */
+  dreaded?: number;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
   /** Downed only: world phases left before death (V4.1, spec 31.4: starts at 3; doesn't run while carried). */
@@ -547,7 +561,11 @@ export interface Intent {
     /** V4.0 (spec 29.3): a crew member throws a venom dart (V4.1: the poison dart) at a hero. */
     | 'venomdart'
     /** V4.1 (spec 31.4): a crew member lifts a downed crewmate (`targetId`) and carries them out. */
-    | 'carry';
+    | 'carry'
+    /** V4.1 (WS6, spec 31.8): a crew Ranger looses a specialty arrow (`item`: its kind) at a hero (`targetId`). */
+    | 'arrow'
+    /** V4.1 (WS7, spec 31.9): crews as an equal power: a Sellsword's brace, the missing spells, an antipoison. */
+    | 'brace' | 'sleep' | 'dread' | 'nightthorn' | 'briar' | 'antidote' | 'kindle';
   /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
   sneak?: boolean;
   /** V3.7 `item` intents: which item. */
@@ -667,6 +685,10 @@ export interface Rival {
   bleed?: number;
   /** V4.1 (spec 31.4): the downed crewmate (member id) this member carries out (`dragging` is a hero it carries off). */
   carrying?: string;
+  /** V4.1 (WS7, spec 31.9): Focus left (FOCUS_MAX at the start), spent on key rolls. */
+  focus?: number;
+  /** V4.1 (WS7, spec 31.9): braced (a Sellsword with two heroes at its blade) until its next turn: hits do 1 less, heroes −15%. */
+  braced?: boolean;
 }
 
 export interface RivalCrew {
@@ -692,6 +714,13 @@ export interface RivalCrew {
   /** A job paid for and not yet done. */
   job?: { kind: JobKind; at?: Pos; /** V4.0 (spec 28.3): what was paid and by whom (spec 28.8: kept by the crew, named in the log; no refund) */ price?: number; by?: string };
   spotted: boolean;
+  /** V4.1 (WS7, spec 31.9): the round a hostile crew that was losing called the fight off (falling back; parley is free). */
+  retreat?: number;
+  /** V4.1 (WS7, spec 31.9): a crew at peace that has said it keeps its distance from a stronger party. */
+  wary?: boolean;
+  /** V4.1 (WS7, spec 31.9): rounds a hostile crew held at the edge of the party's reach (`holding`: the last such round). */
+  held?: number;
+  holding?: number;
   /** Round they enter; they're off the map before it. */
   entersRound: number;
   members: Rival[];
@@ -803,6 +832,8 @@ export interface Delve {
   glue: Record<string, number>;
   /** Burning hexes (fireball): rounds left by posKey. Anyone on one at the world phase takes 1; they light themselves. */
   burning: Record<string, number>;
+  /** V4.1 (WS6, spec 31.8): glow arrows burning: radius 2 at `at`, or on the figure `on` (it carries the light); rounds left. */
+  glows?: ArrowGlow[];
   /** Caltrops scattered, by posKey. The first monster to step on one takes 2 and stops. */
   caltrops: string[];
   prisoner: Prisoner | null;
@@ -820,6 +851,15 @@ export interface Delve {
   log: string[];
   /** Kills this delve by hero id. */
   kills: Record<string, number>;
+}
+
+/** V4.1 (WS6, spec 31.8): a glow arrow's light. */
+export interface ArrowGlow {
+  /** Where it landed (for one on a figure: where that figure last was). */
+  at: Pos;
+  /** The monster, crew member or hero it struck and sticks in (the light moves with them). */
+  on?: string;
+  rounds: number;
 }
 
 export interface DelveSummary {
@@ -920,7 +960,9 @@ export type ActionKind =
   | 'antidote' // [self or adjacent ally id] the antipoison: cures poison
   | 'carry' // [adjacent downed hero or shackled captive id] it shares your hex and moves with you; you move 3 at most, free actions only
   | 'unshackle' // [adjacent shackled captive id, itemId = the tool, none = Smash] unshackled, they follow you
-  | 'setDown'; // [self] free: put the carried ally down
+  | 'setDown' // [self] free: put the carried ally down
+  // ---- V4.1 (WS6, spec 31.8): arrows
+  | 'shoot'; // Ranger [hex, itemId = a whistling, glow, blast or rope arrow bundle]: a specialty arrow at a hex in sight (no roll)
 
 export interface ActionTarget {
   /** V3.7 setCharge: fuse length in world phases (1 or 2). */
@@ -929,6 +971,8 @@ export interface ActionTarget {
   id?: string;
   at?: Pos;
   itemId?: string;
+  /** V4.1 (WS6, spec 31.8): a Ranger's Attack: the arrow bundle to loose (a specialty arrow); absent = plain (the quiver first, then bought). */
+  arrow?: string;
 }
 
 export type Command =

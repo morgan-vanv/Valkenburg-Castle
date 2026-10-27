@@ -2,6 +2,7 @@
 // the Gloam hunts, then new intents. Also blasting charges at the end of
 // the player phase. Monster behaviour: spec 7, 14.3, 14.4, 16.1, 16.3, 16.4.
 
+import { syncGlows, tickGlows } from './arrows'; // V4.1 (WS6)
 import { clearHeard } from './hearing';
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent, Item } from './types';
@@ -772,6 +773,7 @@ export function worldPhase(c: Ctx): void {
   const webbedBefore = new Set(d.heroes.filter((h) => h.webbed).map((h) => h.heroId));
   // 1. Light (V4.1, WS2: every lit torch and open lantern burns 1, carried or dropped), bleeding, fire.
   burnLights(c);
+  tickGlows(c); // V4.1 (WS6, spec 31.8): glow arrows burn down too
   burnPhase(c);
   // Spec 18.4: the Black Cask's hiccups: noise 1 at the drinker every world phase.
   for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
@@ -817,6 +819,7 @@ export function worldPhase(c: Ctx): void {
     h.overwatch = false;
     h.guarding = undefined;
     h.braced = undefined;
+    if (h.dreaded && h.dreaded <= d.round) h.dreaded = undefined; // V4.1 (WS7, spec 31.9): a crew Dread's turn is over
     if (h.rallyCooldown > 0) h.rallyCooldown -= 1;
     if (h.veil > 0) h.veil -= 1;
     if (h.ward > 0) h.ward -= 1;
@@ -847,6 +850,7 @@ export function worldPhase(c: Ctx): void {
     // V3.7 (spec 20.5): a rooted crew member (hamstring, briar) comes loose.
     if ((r.stuck ?? 0) > 0) r.stuck! -= 1;
   }
+  syncGlows(c); // V4.1 (WS6): glow arrows keep up with what they stuck in
   tick(d.smoke);
   tick(d.glue);
   tick(d.burning);

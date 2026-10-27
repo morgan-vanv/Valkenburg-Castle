@@ -128,6 +128,7 @@ const ROLES: Record<HeroClass, { role: string; abilities: string[] }> = {
       'Overwatch: shoot the first enemy that moves or acts in sight within 6 next world phase.',
       'Knockback shot: 2 Finesse slots at range 5; 2 hits push the target 1 hex back (pits!).',
       'Hamstring: 1 Finesse slot at −20% at range 5; a hit roots the target for 2 rounds (no moving, can still act). Noise 1.',
+      'Quiver: 5 arrows a level each delve, their own; every shot uses one, bought arrows after. Out of arrows: a knife (2 Finesse slots, 1 damage).',
     ],
   },
   sapper: {
@@ -420,6 +421,15 @@ export const SHOP: ShopOffer[] = [
   { kind: 'greaterpotion', name: 'Greater potion', price: 35, text: 'Heals 8. Gets a downed hero up.', needs: ['surgeon', 'alchemist'] },
   // V4.1 (spec 31.5, WS2): Gerda's lantern: reusable, refilled free in camp.
   { kind: 'lantern', name: 'Lantern', price: 120, text: 'Holds 20 rounds of light, refilled free in camp: radius 4 (3 when low). The shutter is free. Oil tops it up.', needs: 'smith', vendor: 'gerda' },
+  // V4.1 (WS6, spec 31.8): arrows, 1-slot bundles. A Ranger shoots the quiver first, then plain arrows; specialty arrows when picked.
+  { kind: 'arrows', name: 'Plain arrows', price: 10, text: 'A bundle of 6 for the bow, shot after the quiver runs dry.', vendor: 'mott' },
+  { kind: 'whistlearrows', name: 'Whistling arrows', price: 15, text: 'A bundle of 3: noise 6 where it lands. Shoot one at a foe or at a hex in sight (range 6).', vendor: 'mott' },
+  { kind: 'glowarrows', name: 'Glow arrows', price: 20, text: 'A bundle of 3: lights radius 2 for 8 rounds where it lands, or on what it hits. The Gloam shies from it.', needs: 'alchemist' },
+  { kind: 'firearrows', name: 'Fire arrows', price: 25, text: 'A bundle of 3: +1 damage on a hit, and the hex burns 2 rounds.', needs: 'alchemist' },
+  { kind: 'poisonarrows', name: 'Poison arrows', price: 30, text: 'A bundle of 3: a hit poisons (1 damage a turn, never below 1).', needs: 'alchemist' },
+  { kind: 'barbarrows', name: 'Barbed arrows', price: 25, text: 'A bundle of 3: a hit roots the target 2 rounds.', needs: 'smith' },
+  { kind: 'ropearrow', name: 'Rope arrow', price: 30, text: 'One arrow with a line: shot at a pit edge within 5 in sight, it anchors a rope there.', needs: 'smith' },
+  { kind: 'blastarrows', name: 'Blast arrows', price: 40, text: 'A bundle of 2: a blast where it lands: 3 damage within 1, noise 8; opens locks and breaks walls like a charge.', needs: ['smith', 'alchemist'], vendor: 'gerda' },
 ];
 
 // V3.6 (spec 19.2, 19.3).
@@ -635,7 +645,8 @@ export const GIFTS: Partial<Record<StoryId, Gift>> = {
   surgeon: { items: [['potion', 2]], short: '2 potions', line: 'Brother Aldric presses two potions on you for the road. They\'re on Keven\'s cart.' },
   innkeeper: { ale: 'reserve', short: 'A round of Hobart\'s Reserve', line: 'Old Wim broaches his last cask of Hobart\'s Reserve: a round for everyone on the roster, drunk as they next go in.' },
   smith: { shields: 1, short: 'A shield', line: 'Gerda owes you a shield. The next one at the forge is free.' },
-  alchemist: { items: [['antidote', 2]], short: '2 antidotes', line: 'Ilse gives you two antidotes from her own stock. They\'re on Keven\'s cart.' },
+  // V4.1 (WS6, spec 31.8): and a bundle of 3 glow arrows.
+  alchemist: { items: [['antidote', 2], ['glowarrows', 1]], short: '2 antidotes, 3 glow arrows', line: 'Ilse gives you two antidotes and three glow arrows from her own stock. They\'re on Keven\'s cart.' },
 };
 
 /** Spec 31.3: a pair of villagers is home (both flags set). For pair rules anywhere in the engine; old saves lack `alchemist`. */
@@ -660,6 +671,41 @@ export const SUPPER_HEAL = 2;
 
 /** Spec 31.3: the Sapper's tripwire (Gerda and Ilse home): the fuse it's set with; it also goes off when an enemy steps within 1. */
 export const TRIPWIRE_FUSE = 2;
+
+// ---------------------------------------------------------------- V4.1 (WS6, spec 31.8): arrows
+
+/** The Ranger's quiver (class kit, slotless, the hero's own): this many arrows a hero (or crew) level, fresh each delve. */
+export const ARROWS_PER_LEVEL = 5;
+/** Arrows in a Ranger's quiver at the start of a delve: 5 a level (level 1 brings 5, level 2 brings 10). */
+export function quiverPerDelve(level: number | undefined): number {
+  return Math.max(1, Math.floor(level ?? 1)) * ARROWS_PER_LEVEL;
+}
+/** Out of arrows, a Ranger fights with a knife: melee, 2 Finesse slots, 1 damage. */
+export const KNIFE: Weapon = { name: 'Knife', slots: 2, stat: 'finesse', dmg: 1, noise: 2 };
+/** Arrows in a bought bundle (1 slot each bundle). */
+export const ARROW_BUNDLE: Partial<Record<ItemKind, number>> = {
+  arrows: 6, whistlearrows: 3, glowarrows: 3, firearrows: 3, poisonarrows: 3, barbarrows: 3, ropearrow: 1, blastarrows: 2,
+};
+/** A whistling arrow: noise this loud where it lands (a firecracker's). */
+export const WHISTLE_NOISE = 6;
+/** A glow arrow: lights this radius where it lands (or on what it hits) for this many rounds. */
+export const GLOW_ARROW_RADIUS = 2;
+export const GLOW_ARROW_ROUNDS = 8;
+/** A fire arrow: this much more damage on a hit, and the target's hex burns (BURN_ROUNDS, the fireball's rules). */
+export const FIRE_ARROW_DMG = 1;
+/** A barbed arrow: a hit roots this many rounds (hamstring's root, without its −20). */
+export const BARB_ROUNDS = 2;
+/** A rope arrow: an edge hex beside a pit within this range, in sight of the party. */
+export const ROPE_ARROW_RANGE = 5;
+/** A blast arrow: a blast where it lands: this much to everything within 1 (no outer ring), noise BLAST_NOISE. */
+export const BLAST_ARROW_DMG = 3;
+/** Every arrow kind a bow can loose (the quiver, then the bundles). */
+export const ARROW_KINDS: ItemKind[] = ['quiver', 'arrows', 'whistlearrows', 'glowarrows', 'firearrows', 'poisonarrows', 'barbarrows', 'ropearrow', 'blastarrows'];
+/**
+ * Pillar 17: a crew's Ranger brings one bundle of a fitting specialty arrow, on top of its pack (kept out of CREWS so the
+ * crews' own tuning stays apart): the Lantern Sisters' Ranger glow arrows (Level 1 teaches light), the Ferrymen's barbed.
+ */
+export const CREW_ARROWS: Partial<Record<CrewId, ItemKind>> = { 'lantern-sisters': 'glowarrows', ferrymen: 'barbarrows' };
 
 // ---------------------------------------------------------------- V3.5 crews (spec 18.5), reworked in V3.7 (spec 20.4)
 
@@ -739,6 +785,25 @@ export const PYRO_BOLT_DMG = 2;
 export const PYRO_BOLT_NOISE = 3;
 export const SELLSWORD_SHOVE_CHANCE = 60;
 
+// ---------------------------------------------------------------- V4.1 (WS7, spec 31.9): crews as an equal power
+/** A member's Focus for the delve, as a hero's (FOCUS_MAX), spent on key rolls: a likely kill, an edge shot, a lone hero's dart. */
+export const CREW_FOCUS = 3;
+/** A crew Sellsword braces (an action, the heroes' Brace) when this many heroes who are up stand at its blade. */
+export const CREW_BRACE_HEROES = 2;
+/** Retreat: a hostile crew with at least this share of its members down, dead or gone, facing a party CREW_RETREAT_RATIO × as strong, calls the fight off. */
+export const CREW_LOSING_SHARE = 0.5;
+export const CREW_RETREAT_RATIO = 1.5;
+/** A crew at peace that sees a stronger party (strength × this) keeps at least CREW_WARY_GAP hexes from every hero. */
+export const CREW_WARY_RATIO = 1.25;
+export const CREW_WARY_GAP = 3;
+/** Strength, for retreat and wariness: per figure who is up, HP + this × level; + this per potion carried. */
+export const STRENGTH_PER_LEVEL = 4;
+export const STRENGTH_PER_POTION = 3;
+/** A member that can't strike this round holds at the edge of the party's reach (two heroes) for up to this many rounds of a fight. */
+export const CREW_HOLD_ROUNDS = 2;
+/** A crew Ranger on a raised hex shoots at +10, as a hero (spec 31.7's perches). */
+export const CREW_RAISED_BONUS = 10;
+
 export interface CrewMemberDef {
   name: string;
   cls: RivalClass;
@@ -759,20 +824,24 @@ export interface CrewDef {
   members: CrewMemberDef[];
   /** Spec 20.4: the crew's hideout, where captives are held ("Bring back" contracts); a ContractSiteDef with `hideout` = this crew. */
   hideout: { siteId: string; where: string };
+  /** V4.1 (WS7): each member's purse (cutthroats), fixed per crew now that crew levels moved (was CREW_PURSE by level). */
+  purse?: number;
 }
 
 export const CREWS: Record<CrewId, CrewDef> = {
   'lantern-sisters': {
-    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 2, weaponTier: 1, armorTier: 1, contracts: [1],
+    // V4.1 (WS7, spec 31.9): level 4 (was 2): even with a fresh party of three at level 2 in the arena.
+    id: 'lantern-sisters', name: 'The Lantern Sisters', temperament: 'prospector', level: 4, weaponTier: 1, armorTier: 1, contracts: [1],
     members: [
       { name: SISTER_NAMES[0]!, cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
-      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
+      { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker', 'antidote'] }, // V4.1 (WS7): + antipoison (Level 1's spider)
       { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
     ],
     hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
-    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
+    // V4.1 (WS7, spec 31.9): level 4 (was 3): even with a party of three at level 3.
+    id: 'ferrymen', name: 'The Ferrymen', temperament: 'cutthroat', level: 4, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
       { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
@@ -781,17 +850,19 @@ export const CREWS: Record<CrewId, CrewDef> = {
     hideout: { siteId: 'ferrymen-hideout', where: 'the Drain' },
   },
   'gallows-choir': {
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 3, weaponTier: 1, armorTier: 1, contracts: [2],
+    // V4.1 (WS7, spec 31.9): level 5 (was 3): even with a party of three at level 3 (no front-line Sapper: its casters need the levels).
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 5, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
       // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.
       { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'venomdart', 'smoke', 'lockpicks'] },
-      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'oil'] },
+      { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'antidote'] }, // V4.1 (WS7): oil (no crew lantern to fill) → antipoison
     ],
     hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
   },
   'the-wake': {
-    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 4, weaponTier: 2, armorTier: 1, contracts: [3],
+    // V4.1 (WS7, spec 31.9): level 6 (was 4, MAX_LEVEL now): even with a party of four at level 4.
+    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 6, weaponTier: 2, armorTier: 1, contracts: [3], purse: 50,
     members: [
       { name: 'Mother Grave', cls: 'sellsword', pack: ['potion', 'potion'] },
       { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },

@@ -251,9 +251,28 @@ export function shielded(c: Ctx, by: string, id: string, dmg: number): number {
  * is pushed 1 hex away with all shove outcomes; locks within 1 open; cracked and breakable
  * walls within 1 break; noise 8 heard a level up and down. Kills count for `by`.
  */
-export function blast(c: Ctx, at: Pos, by: string): void {
+/**
+ * V4.1 (WS6, spec 31.8): a smaller blast's profile (the blast arrow): `inner` damage within 1, `outer` within 2 (0: no
+ * outer ring), `floor` false leaves the floor whole (no rubble, no collapse), `line` the log line instead of the charge's.
+ */
+export interface BlastProfile {
+  inner?: number;
+  outer?: number;
+  floor?: boolean;
+  /** false: nobody is thrown back. */
+  push?: boolean;
+  line?: string;
+}
+
+export function blast(c: Ctx, at: Pos, by: string, profile: BlastProfile = {}): void {
   const plan = blastPreview(c, at);
-  const { broke, collapsed, rubbled } = plan;
+  const { broke } = plan;
+  // V4.1 (WS6): a profile without the floor leaves it whole.
+  const collapsed = profile.floor === false ? [] : plan.collapsed;
+  const rubbled = profile.floor === false ? [] : plan.rubbled;
+  const inner = profile.inner ?? BLAST_INNER_DMG;
+  const outer = profile.outer ?? BLAST_OUTER_DMG;
+  const reach = outer > 0 ? 2 : 1;
   const near = blastArea(c.w, at, 1);
   // Walls, doors and chests within 1.
   for (const p of near) {
@@ -286,17 +305,17 @@ export function blast(c: Ctx, at: Pos, by: string): void {
   // V4.0 (spec 25.3): a heap of rubble (a cracked tile with `heap`) is blown clear rather than "a wall".
   const walls = broke.filter((p) => !c.w.tile(p)?.heap);
   const heaps = broke.length - walls.length;
-  say(c, `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.${walls.length ? ' The wall comes down.' : ''}${heaps ? ' The rubble is blown clear.' : ''}${collapsed.length ? ' The floor gives way.' : ''}`);
+  say(c, `${profile.line ?? `${setter ? `${setter}'s charge` : 'A charge'} goes off. BOOM.`}${walls.length ? ' The wall comes down.' : ''}${heaps ? ' The rubble is blown clear.' : ''}${collapsed.length ? ' The floor gives way.' : ''}`);
   // Damage: inner ring 4, outer ring 2; the shield for the setter's side.
   const hurt: [string, Pos][] = [];
-  for (const m of onMap(c)) if (m.kind !== 'gloam' && m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, m.at]);
-  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (r.at.level === at.level && distance(r.at, at) <= 2) hurt.push([r.id, r.at]); // V4.1 (spec 31.4): the downed too
-  for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && h.at.level === at.level && distance(h.at, at) <= 2) hurt.push([h.heroId, h.at]);
+  for (const m of onMap(c)) if (m.kind !== 'gloam' && m.at.level === at.level && distance(m.at, at) <= reach) hurt.push([m.id, m.at]);
+  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (r.at.level === at.level && distance(r.at, at) <= reach) hurt.push([r.id, r.at]); // V4.1 (spec 31.4): the downed too
+  for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && h.at.level === at.level && distance(h.at, at) <= reach) hurt.push([h.heroId, h.at]);
   const pr = c.d.prisoner;
-  if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= 2) hurt.push([pr.id, pr.at]);
+  if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= reach) hurt.push([pr.id, pr.at]);
   const credit = hd(c, by) ? by : null;
   for (const [id, p] of hurt) {
-    const dmg = fireWard(c, id, shielded(c, by, id, distance(p, at) <= 1 ? BLAST_INNER_DMG : BLAST_OUTER_DMG));
+    const dmg = fireWard(c, id, shielded(c, by, id, distance(p, at) <= 1 ? inner : outer));
     if (dmg > 0) hurtAny(c, id, dmg, hd(c, id) ? null : (credit ?? by), { noise: false });
   }
   // Spec 20.3a: the floor. Rubble first, then the collapse: whoever stands on it falls down the column.
@@ -326,7 +345,7 @@ export function blast(c: Ctx, at: Pos, by: string): void {
   }
   // The inner ring is thrown back (shove outcomes: pits, walls, fire, each other); not those who already fell.
   for (const [id, p] of hurt) {
-    if (distance(p, at) !== 1) continue;
+    if (distance(p, at) !== 1 || profile.push === false) continue;
     const f = figure(c, id);
     if (!f) continue;
     const now = f.kind === 'hero' ? f.h.at : f.kind === 'monster' ? f.m.at : f.kind === 'rival' ? f.r.at : c.d.prisoner!.at;

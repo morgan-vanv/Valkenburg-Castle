@@ -510,7 +510,9 @@ describe('castle V3.3: awareness', () => {
     expect(distance(arcade[0]!.at, arcade[1]!.at)).toBe(1);
     const guard = l2patrols.find((s) => room(s.at) === 'guard')!;
     expect(guard).toBeDefined();
-    expect(guard.patrol!.some((p) => room(p) === 'barracks')).toBe(true);
+    // V4.1 (spec 31.10): the guard walks to the arcade, not through the barracks (the squad sleeps behind a closed door).
+    expect(guard.patrol!.some((p) => room(p) === 'arcade')).toBe(true);
+    expect(guard.patrol!.some((p) => room(p) === 'barracks')).toBe(false);
     const ledge = l2patrols.find((s) => room(s.at) === 'ledge-e')!;
     expect(ledge).toBeDefined();
     expect(ledge.patrol!.every((p) => room(p) === 'ledge-e')).toBe(true);

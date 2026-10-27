@@ -92,6 +92,24 @@ describe('V4.1 WS4: the vendor catalog', () => {
     expect(status('glowarrows', none).hint).toMatch(/alchemist/);
   });
 
+  it('V4.1 WS6: the arrow rows are live at their vendors: Mott from the start, Ilse, Gerda, the blast arrows with the pair', () => {
+    const none = fresh();
+    expect(status('arrows', none)).toMatchObject({ state: 'live', price: 10, key: 'arrows' });
+    expect(status('whistlearrows', none)).toMatchObject({ state: 'live', price: 15 });
+    for (const id of ['glowarrows', 'firearrows', 'poisonarrows', 'barbarrows', 'ropearrow', 'blastarrows']) expect(status(id, none).state, id).toBe('locked');
+    const ilse = withVillage({ alchemist: true });
+    expect(status('glowarrows', ilse)).toMatchObject({ state: 'live', price: 20 });
+    expect(status('firearrows', ilse)).toMatchObject({ state: 'live', price: 25 });
+    expect(status('poisonarrows', ilse)).toMatchObject({ state: 'live', price: 30 });
+    expect(status('blastarrows', ilse).state).toBe('locked');
+    const gerda = withVillage({ smith: true });
+    expect(status('barbarrows', gerda)).toMatchObject({ state: 'live', price: 25 });
+    expect(status('ropearrow', gerda)).toMatchObject({ state: 'live', price: 30 });
+    expect(status('blastarrows', gerda).state).toBe('locked');
+    expect(status('blastarrows', withVillage({ smith: true, alchemist: true }))).toMatchObject({ state: 'live', price: 40 });
+    expect(CATALOG.filter((r) => r.group === 'Arrows').every((r) => !r.ws)).toBe(true);
+  });
+
   it('perks: locked until the pair is home', () => {
     const sup = PERKS.find((p) => p.id === 'supper')!;
     expect(perkStatus(sup, fresh().campaign.village)).toBe('locked');
