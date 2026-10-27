@@ -97,7 +97,7 @@ export function createEngine(castle: CastleDef): Engine {
     if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
       // V4.0 (spec 26.2): monsters that noticed a hero during the command re-plan (keeping their quarry), so the shown intent is right.
-      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried && !((m.paralyzed ?? 0) > 0) && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
+      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried  && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
       c.replan = undefined;
       // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
       updateCalm(c);
@@ -282,6 +282,9 @@ export function createEngine(castle: CastleDef): Engine {
           const def = s.campaign.roster.find((x) => x.id === dh.heroId);
           if (def?.cls === 'sapper' && dh.hp > def.maxHp) dh.hp = def.maxHp;
         }
+        // V4.1 (spec 31.4): venom and paralysis are gone: an envenomed or paralyzed figure loads as poisoned. A V4.0
+        // shouldered ally (paralyzed, active) is set down: Carry lifts only the downed and the shackled.
+        if (d) migratePoison(d);
         if (d && !d.ways) {
           d.ways = startWays(w, s);
           applyOpenWays(w, d);
@@ -293,4 +296,23 @@ export function createEngine(castle: CastleDef): Engine {
     },
   };
   return engine;
+}
+
+/** V4.1 (spec 31.4): old `venom` / `paralyzed` fields become `poisoned`; a V4.0 shoulder carry of an active ally ends. */
+export function migratePoison(d: DelveX): void {
+  type Old = { venom?: number; paralyzed?: number; poisoned?: boolean };
+  const fix = (f: Old) => {
+    if ((f.venom ?? 0) > 0 || (f.paralyzed ?? 0) > 0) f.poisoned = true;
+    delete f.venom;
+    delete f.paralyzed;
+  };
+  for (const h of d.heroes) fix(h as Old);
+  for (const m of d.monsters) fix(m as Old);
+  for (const r of d.rivals?.members ?? []) fix(r as Old);
+  for (const h of d.heroes) {
+    if (!h.carrying) continue;
+    const x = d.heroes.find((o) => o.heroId === h.carrying);
+    const pr = d.prisoner?.id === h.carrying ? d.prisoner : undefined;
+    if (!(x && x.status === 'downed') && !(pr && !pr.freed)) h.carrying = undefined;
+  }
 }

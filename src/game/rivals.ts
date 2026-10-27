@@ -26,7 +26,7 @@ import {
 } from './crewmove';
 import { classKit } from './charges';
 import { litSet } from './world';
-import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, spellChance, useKit } from './crewai';
+import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, rescueAct, rescuePlan, spellChance, useKit } from './crewai';
 import { blast } from './charges';
 import { checkWays, wayAtEntrance, wayOpen } from './ways';
 
@@ -519,9 +519,11 @@ function lockIntent(c: Ctx, r: RivalX, chestId: string | undefined): Intent | nu
 export function planRival(c: Ctx, r: RivalX): Intent {
   const cr = c.d.rivals!;
   const st = rivalStats(r);
-  if ((r.paralyzed ?? 0) > 0) return { kind: 'wait' }; // V4.0 (spec 29.2)
-  if ((r.feared ?? 0) > 0) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
+  if ((r.feared ?? 0) > 0 && !r.carrying) return { kind: 'flee', to: fleePlan(c, r, st.move).to };
   if (r.intent?.kind === 'veil' && !r.veiled && cr.stance !== 'hostile') return r.intent;
+  // V4.1 (spec 31.4, pillar 17): a crewmate down: carry them out, a potion, Mend, or lift them.
+  const rescue = rescuePlan(c, r);
+  if (rescue) return rescue.intent;
   const foe = defendTarget(c, r);
   if (foe) return { kind: 'attack', targetId: foe.id, to: { ...r.at } };
   if (cr.stance === 'hostile') return hostilePlan(c, r).intent;
@@ -794,11 +796,16 @@ export function rivalsAct(c: Ctx): void {
   let jobDone = false;
   for (const r of rivalsOnMap(c)) {
     if (!rivalsOnMap(c).includes(r)) continue;
-    // V4.0 (spec 29.2): a paralyzed member neither moves nor acts.
-    if ((r.paralyzed ?? 0) > 0) {
+    // V4.1 (spec 31.4, pillar 17): a crewmate down comes first (as shown: a potion, Mend, Carry; or walking one out).
+    // A member that lifts a crewmate (an action) walks it out on the same turn, as a hero may Carry then move.
+    const lifting = !r.carrying && !!r.intent && ['potion', 'mend', 'carry'].includes(r.intent.kind) && !!cr.members.find((m) => m.id === r.intent!.targetId && m !== r && (m.downed || m.hp <= 0));
+    if (r.carrying || (lifting && rescueAct(c, r))) {
+      if (r.carrying && rivalsOnMap(c).includes(r)) rescueAct(c, r);
       r.overwatch = false;
+      r.intent = undefined;
       continue;
     }
+    if (lifting) r.intent = undefined; // the crewmate is gone or up already: on with the round
     if ((r.feared ?? 0) > 0) {
       r.overwatch = false;
       fleeAct(c, r);

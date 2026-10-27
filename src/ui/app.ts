@@ -460,7 +460,7 @@ export class App {
           await this.dio.panTo(at);
           panned = true;
         }
-        if (e.type === 'hit' || e.type === 'miss' || e.type === 'downed' || e.type === 'died' || e.type === 'shoved' || e.type === 'fell' || e.type === 'grabbed' || e.type === 'envenomed' || e.type === 'paralyzed') this.hud.actResult(e);
+        if (e.type === 'hit' || e.type === 'miss' || e.type === 'downed' || e.type === 'died' || e.type === 'shoved' || e.type === 'fell' || e.type === 'grabbed' || e.type === 'poisoned') this.hud.actResult(e);
       }
       if (e.type === 'phase') {
         if (e.phase === 'world') {

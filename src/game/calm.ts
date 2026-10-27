@@ -10,6 +10,7 @@ import type { Reach } from './api';
 import { CALM_STEPS, FREE_MOVE } from './data';
 import { say, type Ctx, type HeroX } from './state';
 import { activeHeroes, hd, heroName, levelHeal, makeNoise, nameOf, occupant, onMap, rivalsOnMap, wakeAdjacent } from './common';
+import { bringCarried } from './common'; // V4.1 (spec 31.4)
 import { brightnessOf, dijkstra, dirIndex, doorAt, kindAt, litSet, pathTo, seesHex, steps } from './world';
 import { moveRisks, provokeSwings, stepNoise, wakeRolls } from './stealth';
 import { ventCheck } from './falls';
@@ -165,6 +166,7 @@ function stepTo(c: Ctx, wk: Walker, p: Pos, sneak: boolean, last: boolean, lit: 
   }
   if (p.level === from.level) h.facing = dirIndex(from, p); // V3.9 (spec 24.2)
   h.at = { ...p };
+  bringCarried(c, h.heroId); // V4.1 (spec 31.4)
   c.visCache = undefined;
   glimpse(c, p);
   noticeOnMove(c, h, () => flush(c, wk)); // V4.0 (spec 26.2): before the step's noise and wake rolls, as doMove

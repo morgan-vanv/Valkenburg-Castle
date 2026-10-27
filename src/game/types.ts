@@ -139,7 +139,7 @@ export interface CoinDef {
 
 export interface TrapDef {
   at: Pos;
-  /** V4.0 (spec 29.5): a venom trap: 1 damage and venom instead of 3 damage. */
+  /** V4.0 (spec 29.5): a venom trap; V4.1 (spec 31.4): a poison trap: 1 damage and a dose of poison instead of 3 damage. */
   venom?: boolean;
 }
 
@@ -270,8 +270,8 @@ export type ItemKind =
   // V4.0 (spec 25.2)
   | 'gatekey' // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
   // V4.0 (spec 29): venom
-  | 'antidote' // drink or give to an adjacent ally (an action): cures venom and paralysis
-  | 'venomdart' // throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
+  | 'antidote' // V4.1 (spec 31.4): "Antipoison" to players: drink or give to an adjacent ally (an action): cures poison
+  | 'venomdart' // V4.1 (spec 31.4): "Poison dart" to players: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
   // V4.1 (spec 31.3): Aldric and Ilse together
   | 'greaterpotion'; // heals 8 (POTION_HEAL), or gets a downed hero up at 8
 
@@ -476,7 +476,7 @@ export interface HeroInDelve {
   rooted?: number;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
-  /** Downed only: world phases left before death (starts at 2). */
+  /** Downed only: world phases left before death (V4.1, spec 31.4: starts at 3; doesn't run while carried). */
   bleed: number;
   /** Rounds of torchlight left on this hero's own torch (0 = none lit). */
   torch: number;
@@ -490,9 +490,9 @@ export interface HeroInDelve {
   rallyCooldown: number;
   /** Sellsword only: id of the ally guarded until the next player phase. */
   guarding?: string;
-  /** Escorted prisoner follows this hero. */
+  /** V4.1 (spec 31.4): the unshackled captive (prisoner id) follows this hero (the old escort; internal name kept). */
   escorting?: string;
-  /** Was revived this delve: leaves Wounded. */
+  /** Was revived this delve (V3; Revive is gone in V4.1, so always false now). */
   revived: boolean;
   /** Moved a second time this turn (a dash, spec 15.2); the action is spent. */
   dashed: boolean;
@@ -509,11 +509,15 @@ export interface HeroInDelve {
    * else on 'walk'; absent = walk). A `move` without `sneak` uses it; the `setMoveMode` command changes it.
    */
   moveMode?: 'walk' | 'sneak';
-  /** V4.0 (spec 29.1): envenomed: world phases left before paralysis (absent or 0 = no venom). */
-  venom?: number;
-  /** V4.0 (spec 29.2): paralyzed: world phases left (absent or 0 = not). Can't move or act; not downed. */
-  paralyzed?: number;
-  /** V4.0 (spec 29.4): the paralyzed ally (hero id) this hero has on their shoulders: they follow every move. */
+  /**
+   * V4.1 (spec 31.4): poisoned: 1 damage at step 2 of every world phase, never below 1 HP, until cured (an antipoison,
+   * Mend, leaving). Replaces V4.0's `venom` and `paralyzed` (old saves load either as poisoned).
+   */
+  poisoned?: boolean;
+  /**
+   * V4.1 (spec 31.4): Carry: the body this hero carries (a downed hero's id, or the shackled prisoner's). It shares the
+   * carrier's hex and moves with them; the carrier moves 3 at most and takes free actions only.
+   */
   carrying?: string;
 }
 
@@ -531,8 +535,10 @@ export interface Intent {
   kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink' | 'hamstring'
     /** V4.0 (spec 28, pillar 17): crews play by the party's rules: pick or smash a lock, disarm a trap, dig through (a Sapper). */
     | 'pick' | 'smash' | 'disarm' | 'dig'
-    /** V4.0 (spec 29.3): a crew member throws a venom dart at a hero. */
-    | 'venomdart';
+    /** V4.0 (spec 29.3): a crew member throws a venom dart (V4.1: the poison dart) at a hero. */
+    | 'venomdart'
+    /** V4.1 (spec 31.4): a crew member lifts a downed crewmate (`targetId`) and carries them out. */
+    | 'carry';
   /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
   sneak?: boolean;
   /** V3.7 `item` intents: which item. */
@@ -580,9 +586,8 @@ export interface Monster {
   /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
   feared?: number;
   fearOf?: string;
-  /** V4.0 (spec 29): envenomed (world phases to paralysis) and paralyzed (world phases left): can't move or act. */
-  venom?: number;
-  paralyzed?: number;
+  /** V4.1 (spec 31.4): poisoned: 1 damage a world phase, never below 1 HP (not the Dragon or the Gloam). */
+  poisoned?: boolean;
 }
 
 /** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
@@ -646,9 +651,13 @@ export interface Rival {
   stuck?: number;
   /** V4.0 (spec 28.1, pillar 17): the member's last move was a sneak (monsters notice by it; the view draws it crouched). */
   sneaked?: boolean;
-  /** V4.0 (spec 29, pillar 17): envenomed and paralyzed, as a hero. */
-  venom?: number;
-  paralyzed?: number;
+  /** V4.1 (spec 31.4, pillar 17): poisoned, as a hero. */
+  poisoned?: boolean;
+  /** V4.1 (spec 31.4): down at 0 HP (hp 0), bleeding out in `bleed` world phases; any damage kills. Dead: hp 0, not downed. */
+  downed?: boolean;
+  bleed?: number;
+  /** V4.1 (spec 31.4): the downed crewmate (member id) this member carries out (`dragging` is a hero it carries off). */
+  carrying?: string;
 }
 
 export interface RivalCrew {
@@ -726,8 +735,9 @@ export interface Prisoner {
   name: string;
   at: Pos;
   hp: number;
+  /** V4.1 (spec 31.4): unshackled (false = shackled: can't move on their own; Carry them or Unshackle them). */
   freed: boolean;
-  /** Hero id escorting, if any. */
+  /** The hero the unshackled captive follows (walk 4, placed next to them after each of their moves). */
   escortedBy?: string;
   out: boolean;
   dead: boolean;
@@ -846,13 +856,11 @@ export type ActionKind =
   | 'light' // light an adjacent brazier
   | 'torch' // light a torch from the pack
   | 'potion' // drink, or give to an adjacent downed/hurt hero
-  | 'revive' // an adjacent downed hero
   | 'charge' // place a blasting charge on an adjacent door, chest or cracked wall
   | 'rope' // anchor a rope at a pit edge
   | 'climb' // climb a rope between levels (whole turn)
   | 'jump' // jump into the pit (wounds)
   | 'shove' // push an adjacent enemy 1 hex (into the pit = it falls)
-  | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
   | 'nightsight' // V3.6: drink the night-eye draught (action)
   // V3.7 (spec 20.5)
@@ -896,10 +904,11 @@ export type ActionKind =
   | 'unbar' // V4.0 [hex] the sally port key on the adjacent barred gate: opens it for good, silent
   | 'oil' // [self] +10 light
   | 'grapple' // [hex on the level above] uses move and action; the hook is kept
-  // ---- V4.0 (spec 29): venom
-  | 'venomdart' // [enemy] throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
-  | 'antidote' // [self or adjacent ally id] cures venom and paralysis
-  | 'shoulder' // [adjacent paralyzed ally id] carry them: they follow every move; the carrier moves 3 at most
+  // ---- V4.0 (spec 29): venom; V4.1 (spec 31.4): poison, Carry and Unshackle (Revive, Free and Shoulder are gone)
+  | 'venomdart' // [enemy] the poison dart: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
+  | 'antidote' // [self or adjacent ally id] the antipoison: cures poison
+  | 'carry' // [adjacent downed hero or shackled captive id] it shares your hex and moves with you; you move 3 at most, free actions only
+  | 'unshackle' // [adjacent shackled captive id, itemId = the tool, none = Smash] unshackled, they follow you
   | 'setDown'; // [self] free: put the carried ally down
 
 export interface ActionTarget {
@@ -998,7 +1007,7 @@ export type GameEvent =
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }
   | { type: 'rooted'; id: string; by: string; rounds: number }
   | { type: 'braced'; id: string }
-  | { type: 'freed'; prisonerId: string }
+  | { type: 'freed'; prisonerId: string; /** V4.1 (spec 31.4): who unshackled them and how */ by?: string; how?: 'lockpicks' | 'improvised' | 'key' | 'smash' }
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }
   | { type: 'delveOver'; summary: DelveSummary }
@@ -1023,12 +1032,12 @@ export type GameEvent =
   | { type: 'shutter'; open: boolean }
   | { type: 'routeKnown'; id: string; route: Pos[] }
   | { type: 'say'; text: string }
-  // V4.0 (spec 29): venom. `venom`: world phases to paralysis now; `dose` 2 for a second dose.
-  | { type: 'envenomed'; id: string; by: string; venom: number; dose: number }
-  | { type: 'paralyzed'; id: string; rounds: number }
-  /** Venom and paralysis gone: `how` 'antidote' | 'mend' | 'worn' (paralysis wore off) | 'out' (left the castle). */
-  | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'worn' | 'out' }
-  | { type: 'shouldered'; by: string; id: string }
+  // V4.1 (spec 31.4): poison (replaces V4.0's envenomed / paralyzed). `by`: who or what dosed them.
+  | { type: 'poisoned'; id: string; by: string }
+  /** Poison gone: `how` 'antidote' | 'mend' | 'out' (left the castle). */
+  | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'out' }
+  /** V4.1 (spec 31.4): `by` lifts `id` (a downed hero or crew member, or the shackled captive); it shares their hex now. */
+  | { type: 'carried'; by: string; id: string }
   | { type: 'setDown'; by: string; id: string };
 
 export interface ApplyResult {
