@@ -118,4 +118,31 @@ Step 2 fixes these before any number changes.
 
 ## 7. Baseline numbers (d659e06)
 
-Filled in below from `v3-engine-sim.ts 30` on seeds 1–4 and `v37-crew-arena.ts 40` (seed 1).
+### The V4.0 bot (`v3-engine-sim.ts 30`, seeds 1–4, 120 delves)
+
+| | L1 | L2 | L3 | All |
+| --- | --- | --- | --- | --- |
+| Delves | 84 | 23 | 13 | 120 |
+| Contracts done | 68 (81%) | 9 (39%) | 1 (8%) | 78 (65%) |
+| Hero deaths | 27 | 50 | 39 | 116 |
+
+- Gold: average loot carried out 31 a delve, average bounty 41. The bot sells nothing, so camp gold stays between 45 and 85 and squads are mostly two heroes.
+- The heir dies often enough that each 30-delve run holds several campaigns (the bot restarts silently).
+- Crew fights: 24, won 0, lost 23, fled 1; 43 heroes dead and 7 captured in them.
+- Stealth and charges: 1.5% of moves sneaked; 8 Sapper blasts in 120 delves (none in combat).
+
+Read: the old bot is a poor player, so these are a floor, not the game's balance. Its numbers say L2 and L3 are a cliff for an under-equipped party, and crews almost always win a fight the bot picks.
+
+### Crew arena (`v37-crew-arena.ts 40`, seed 1; fights lost by the party)
+
+| Crew (level) | L1 × 3 | L1 × 4 | L2 × 4 (W1) | L3 × 4 (W1 A1) | L4 × 4 (W2 A1) |
+| --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (2) | 3% | 0% | 0% | 0% | 0% |
+| Ferrymen (3) | 100% | 43% | 0% | 0% | 0% |
+| Gallows Choir (3) | 95% | 8% | 0% | 0% | 0% |
+| The Wake (4) | 100% | 18% | 15% | 33% | 0% |
+
+Heroes dead / captured across the arena: 564 / 137 (unchanged from spec 30.6).
+
+Read: crew strength is a cliff, not a slope. A level 3 crew wipes a three-hero level 1 party almost every time, and one hero level plus a weapon tier later the same crew never wins. The Wake is the only crew that stays dangerous to geared parties. Lethality is concentrated in fights a level 1 party shouldn't be having: the Ferrymen and the Choir live on Level 2, so the first L2 contract is where a party meets them.
+

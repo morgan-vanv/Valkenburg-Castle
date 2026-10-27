@@ -48,6 +48,7 @@
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
 
+import { writeFileSync } from 'node:fs';
 import { createEngine } from '../src/game/engine';
 import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
@@ -60,7 +61,7 @@ import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
 import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
-import { FACING } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
+import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -76,6 +77,20 @@ const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
 const SAPPER = process.env.SAPPER === '1';
+/**
+ * V4.1 (audit step 2): POLICY=v41 plays like a careful player in camp and in the castle:
+ * sells valuables on return, buys forge gear, ales for everyone and torches for the deep levels;
+ * detours for known chests and coins while it's quiet; sneaks past awake monsters that haven't seen it;
+ * a Sapper throws charges at enemies. Off by default so older numbers stay reproducible.
+ * CSV=<file> writes one row per delve (gold, wealth, levels, outcome, spending) for the economy curves.
+ */
+const V41 = process.env.POLICY === 'v41';
+const CSV = process.env.CSV ?? '';
+/** Gold the v41 bot keeps back in camp for potions and torches before it spends on the forge or ales. */
+const RESERVE = 60;
+/** Gold moved by camp commands, by kind (negative = spent). */
+const ledger: Record<string, number> = {};
+const throws = { thrown: 0, hits: 0, kills: 0, heroHits: 0 };
 const sap = { fuses: 0, blasts: 0, walls: 0, collapsed: 0, rubbled: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
 const sapLog: string[] = [];
 const pits: Pos[] = [];
@@ -98,6 +113,11 @@ const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarm
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
+  if (!r.error && s.stage === 'camp' && cmd.type !== 'startDelve') {
+    const delta = r.state.campaign.gold - s.campaign.gold;
+    const key = cmd.type === 'buy' ? `buy:${cmd.kind}` : cmd.type;
+    if (delta) ledger[key] = (ledger[key] ?? 0) + delta;
+  }
   const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
   if (cmd.type === 'move' && !r.error && s.delve?.calm) {
     calm.moves++;
@@ -272,6 +292,11 @@ function openExits(s: GameState): Pos[] {
 function goalFor(s: GameState): Pos[] {
   const d = s.delve!;
   const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
+  // V4.1 (POLICY=v41): a careful player sweeps what it knows of on the way, while it's quiet and there's time.
+  if (V41) {
+    const loot = lootGoals(s);
+    if (loot.length) return loot;
+  }
   if (leaving) return openExits(s);
   if (d.contract.kind === 'slay') {
     const dr = d.monsters.find((m) => m.kind === 'dragon');
@@ -280,6 +305,55 @@ function goalFor(s: GameState): Pos[] {
   if (d.contract.kind === 'rescue') return [d.prisoner!.at];
   const g = d.ground.find((x) => x.items.some((i) => i.kind === 'heirloom'));
   return g ? [g.at] : openExits(s);
+}
+
+/** How far (straight-line, same level) the v41 bot will detour from its lead hero for loot. */
+const LOOT_REACH = 12;
+const VALUABLE = new Set(['gold', 'gem', 'jewelry', 'heirloom', 'hoard']);
+/**
+ * V4.1 (POLICY=v41): known, unopened, unlocked chests (their neighbours) and ground piles with valuables
+ * within LOOT_REACH of the lead hero on its level, while no hunting monster or hostile crew is in sight,
+ * the light holds and there's pack room. Locked chests count when the party carries picks or keys.
+ */
+function lootGoals(s: GameState): Pos[] {
+  const d = s.delve as DelveX;
+  if (d.light < 10 || d.round > 35) return [];
+  const active = d.heroes.filter((h) => h.status === 'active' && !((h.paralyzed ?? 0) > 0));
+  const lead = active.find((h) => h.heroId === d.lanternBearer) ?? active[0];
+  if (!lead) return [];
+  if (!active.some((h) => slotsUsed(h) < 4)) return [];
+  const vis = e.visibility(s).visible;
+  const danger = d.monsters.some((m) => m.awareness === 'hunting' && !m.buried && m.kind !== 'gloam' && m.at.level === lead.at.level && vis.has(posKey(m.at)))
+    || (d.rivals?.stance === 'hostile' && d.rivals.members.some((r) => r.hp > 0 && !r.goneOut && r.at.level === lead.at.level));
+  if (danger) return [];
+  const known = new Set(d.explored);
+  const canPick = active.some((h) => h.pack.some((i) => i.kind === 'lockpicks' || i.kind === 'key' || i.kind === 'improvised'));
+  const goals: Pos[] = [];
+  for (const c of d.chests) {
+    if (c.opened || c.jammed || (c.locked && !canPick) || c.at.level !== lead.at.level || !known.has(posKey(c.at))) continue;
+    if (hexDistance(c.at, lead.at) > LOOT_REACH) continue;
+    goals.push(...posNeighbors(c.at).filter((p) => kindAt(w, d, p) === 'floor'));
+  }
+  for (const g of d.ground) {
+    if (g.at.level !== lead.at.level || !known.has(posKey(g.at)) || hexDistance(g.at, lead.at) > LOOT_REACH) continue;
+    if (g.items.some((i) => VALUABLE.has(i.kind) && i.kind !== 'heirloom' && i.kind !== 'hoard')) {
+      goals.push(...(kindAt(w, d, g.at) === 'floor' ? [g.at] : posNeighbors(g.at).filter((p) => kindAt(w, d, p) === 'floor')));
+    }
+  }
+  if (!goals.length) return goals;
+  // Only what the lead can walk to soon (an unreachable goal would send routeFor to the winch or a pit).
+  const near = distField(w, d, [lead.at], { stairs: false, allowLocked: false });
+  return goals.filter((p) => (near.get(posKey(p)) ?? 99) <= LOOT_REACH + 4);
+}
+
+/** Pack slots in use (class kit takes none; heirlooms, hoard and the copper take 2). */
+function slotsUsed(h: HeroInDelve): number {
+  let n = 0;
+  for (const i of h.pack) {
+    if (i.kind === 'improvised' || i.kind === 'improvised-charge') continue;
+    n += i.kind === 'heirloom' || i.kind === 'hoard' || (i as { slots?: number }).slots === 2 ? 2 : 1;
+  }
+  return n;
 }
 
 /**
@@ -460,6 +534,20 @@ function nearSleeper(s: GameState, at: Pos): boolean {
   return s.delve!.monsters.some((m) => m.awareness === 'asleep' && !m.buried && m.kind !== 'dragon' && m.at.level === at.level
     && Math.max(Math.abs(m.at.q - at.q), Math.abs(m.at.r - at.r), Math.abs(m.at.q + m.at.r - at.q - at.r)) <= 4);
 }
+/**
+ * V4.1 (POLICY=v41): sneak near a sleeper, or while an awake monster the party has seen (not hunting) is within 6
+ * on the hero's level and nothing is hunting in sight. Otherwise walk. Without the policy: near a sleeper only.
+ */
+function wantSneak(s: GameState, me: HeroInDelve): boolean {
+  if (nearSleeper(s, me.at)) return true;
+  if (!V41) return false;
+  const d = s.delve!;
+  const seen = e.seenEnemies(s);
+  const mons = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.kind !== 'dragon' && m.at.level === me.at.level && seen.has(m.id));
+  if (mons.some((m) => m.awareness === 'hunting')) return false;
+  if (e.heroById(s, me.heroId)?.cls === 'burglar') return true; // quiet feet: sneaking costs a Burglar one hex
+  return mons.some((m) => m.awareness !== 'asleep' && hexDistance(m.at, me.at) <= 6);
+}
 let sneakMoves = 0;
 let walkMoves = 0;
 
@@ -556,6 +644,36 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         }
       }
     }
+    // V4.1 (POLICY=v41): a Sapper throws a charge where it catches two enemies, or one hunting enemy it can't reach,
+    // and no hero (the prisoner neither) but the thrower.
+    if (V41 && def.cls === 'sapper') {
+      const o = option(s, id, 'throwCharge');
+      if (o) {
+        const d = s.delve!;
+        const heroIds = new Set(d.heroes.map((x) => x.heroId).concat(d.prisoner ? [d.prisoner.id] : []));
+        const foes = new Map<string, boolean>();
+        for (const m of d.monsters) if (!m.buried && m.kind !== 'gloam') foes.set(m.id, m.awareness === 'hunting');
+        if (d.rivals?.stance === 'hostile') for (const r of d.rivals.members) if (r.hp > 0 && !r.goneOut) foes.set(r.id, true);
+        const inReach = !!option(s, id, 'attack');
+        let best: { t: ActionTarget; n: number } | undefined;
+        for (const t of o.targets) {
+          if (!t.at) continue;
+          const hit = e.blastPreview(s, t.at).hit;
+          if (hit.some((x) => heroIds.has(x) && x !== id)) continue;
+          const n = hit.filter((x) => foes.has(x)).length;
+          const hunting = hit.some((x) => foes.get(x));
+          if ((n >= 2 || (n === 1 && hunting && !inReach)) && (!best || n > best.n)) best = { t, n };
+        }
+        if (best) {
+          const before = s;
+          s = act(s, id, 'throwCharge', best.t, 0);
+          if (s !== before) {
+            throws.thrown++;
+            return true;
+          }
+        }
+      }
+    }
     // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
     const order: ActionKind[] = ['escape', 'antidote', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'shoulder', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
@@ -598,7 +716,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
       if (a === 'free' && s.delve!.prisoner?.escortedBy) continue;
       if (a === 'open' && !o.targets.some((t) => t.id)) continue;
-      if (a === 'take' && me.pack.length >= 4) continue;
+      if (a === 'take' && (V41 ? slotsUsed(me) >= 4 : me.pack.length >= 4)) continue;
       const target = a === 'open' ? o.targets.find((t) => t.id)! : a === 'mend' ? o.targets.sort((x, y) => (s.delve!.heroes.find((z) => z.heroId === x.id)!.hp) - (s.delve!.heroes.find((z) => z.heroId === y.id)!.hp))[0]! : o.targets[0]!;
       const p = e.preview(s, id, a, target);
       const focus = a === 'attack' || a === 'firebolt' ? Math.min(p.maxFocus, 1) : 0;
@@ -663,7 +781,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const goals = hunters.length && !me.acted ? hunters.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : routeFor(s, me.at).goals;
       const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
       const here = field.get(posKey(me.at)) ?? 999;
-      const sneak = nearSleeper(s, me.at);
+      const sneak = wantSneak(s, me);
       const reach = e.reachable(s, id, sneak);
       // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
       const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
@@ -767,13 +885,91 @@ interface Row {
   story: string;
   dragonDead: boolean;
   reachedL3: boolean;
+  /** V4.1: which campaign (a new one starts when the heir falls), and the delve within it. */
+  campaign: number;
+  cd: number;
+  /** Camp gold as the party set out, and gold plus stash valuables. */
+  gold: number;
+  wealth: number;
+  /** Mean and highest level of the party that went in; reputation and villagers home when it set out. */
+  partyLv: number;
+  maxLv: number;
+  rep: number;
+  village: number;
+  captured: number;
+  goldAfter: number;
 }
 
 const rows: Row[] = [];
+let campaignNo = 1;
+let campDelve = 0;
+const stashValue = (st: GameState) => st.campaign.stash.filter((i) => VALUABLE.has(i.kind) && !i.story).reduce((a, i) => a + i.amount, 0);
+
+/** V4.1 (POLICY=v41): sell every valuable on the cart, as a player who wants gold for the forge would. */
+function campSell(st: GameState): GameState {
+  if (stashValue(st) > 0) st = run(st, { type: 'sellAll' });
+  return st;
+}
+
+const FRONT_CLS = new Set(['heir', 'sellsword', 'sapper']);
+/**
+ * V4.1 (POLICY=v41): spend in camp like a careful player, keeping RESERVE back: forge gear for the party
+ * (front-liners first; armor, weapon, a shield for the front, then the second tiers), an ale each once the copper
+ * is home, two potions in the stash, and torches for the deep levels.
+ */
+function campSpend(st: GameState, ids: string[], level: number): GameState {
+  const gold = () => st.campaign.gold;
+  const pot = () => st.campaign.stash.filter((i) => i.kind === 'potion').length;
+  while (pot() < 2 && gold() >= 20 + RESERVE / 2) {
+    const before = st;
+    st = run(st, { type: 'buy', kind: 'potion' });
+    if (st === before) break;
+  }
+  const torches = level >= 3 ? 2 : level === 2 ? 1 : 0;
+  while (st.campaign.stash.filter((i) => i.kind === 'torch').length < torches && gold() >= 10) {
+    const before = st;
+    st = run(st, { type: 'buy', kind: 'torch' });
+    if (st === before) break;
+  }
+  if (st.campaign.village.smith) {
+    const heroes = () => ids.map((id) => st.campaign.roster.find((h) => h.id === id)!).filter(Boolean)
+      .sort((a, b) => Number(FRONT_CLS.has(b.cls)) - Number(FRONT_CLS.has(a.cls)));
+    const steps: { part: 'armor' | 'weapon' | 'shield'; tier: number }[] = [
+      { part: 'armor', tier: 1 }, { part: 'weapon', tier: 1 }, { part: 'shield', tier: 1 }, { part: 'armor', tier: 2 }, { part: 'weapon', tier: 2 },
+    ];
+    for (const step of steps) for (const h of heroes()) {
+      if (step.part === 'shield') {
+        if (h.shield || !FRONT_CLS.has(h.cls) || gold() - SHIELD_PRICE < RESERVE) continue;
+        st = run(st, { type: 'buyShield', heroId: h.id });
+        continue;
+      }
+      const have = step.part === 'weapon' ? h.weaponTier : h.armorTier;
+      const price = (step.part === 'weapon' ? WEAPON_PRICE : ARMOR_PRICE)[step.tier] ?? 999;
+      if (have !== step.tier - 1 || gold() - price < RESERVE) continue;
+      st = run(st, { type: 'upgrade', heroId: h.id, part: step.part });
+    }
+  }
+  const offers = e.ales(st).filter((a) => !a.locked);
+  if (offers.length) for (const id of ids) {
+    const h = st.campaign.roster.find((x) => x.id === id);
+    if (!h || h.ale) continue;
+    const want = (h.cls === 'burglar' ? ['smuggler', 'reserve'] : level >= 3 ? ['fireside', 'glowworm', 'reserve'] : ['reserve', 'featherfoot'])
+      .map((k) => offers.find((a) => a.kind === k)).find(Boolean);
+    if (!want || gold() - want.price < RESERVE) continue;
+    st = run(st, { type: 'buyAle', heroId: id, ale: want.kind });
+  }
+  return st;
+}
 const unlocked: string[] = [];
 let s = e.newGame(SEED);
 for (let i = 0; i < N; i++) {
-  if (s.stage === 'over') s = e.newGame(SEED + i * 7919);
+  if (s.stage === 'over') {
+    s = e.newGame(SEED + i * 7919);
+    campaignNo++;
+    campDelve = 0;
+  }
+  campDelve++;
+  if (V41) s = campSell(s);
   // Heal everyone so a full party goes in, buy a potion and a torch when rich.
   if (DRAGON) {
     s.campaign.reputation = Math.max(3, s.campaign.reputation);
@@ -837,6 +1033,14 @@ for (let i = 0; i < N; i++) {
   }
   // Lockpicks (spec 19.2): once the smith is home, one reusable pair for the party, carried by a non-Burglar.
   if (s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
+  if (V41) s = campSpend(s, fit, k.level);
+  const setOut = {
+    gold: s.campaign.gold,
+    wealth: s.campaign.gold + stashValue(s),
+    lv: fit.map((id) => s.campaign.roster.find((h) => h.id === id)?.level ?? 1),
+    rep: s.campaign.reputation,
+    village: Object.values(s.campaign.village).filter(Boolean).length,
+  };
   const packs: Record<string, string[]> = {};
   const picks = s.campaign.stash.find((it) => it.kind === 'lockpicks');
   const picker = fit.find((id) => e.heroById(s, id)?.cls !== 'burglar');
@@ -940,6 +1144,16 @@ for (let i = 0; i < N; i++) {
     story: k.story ?? '',
     dragonDead: !d.monsters.some((m) => m.kind === 'dragon') && castle.spawns.some((sp) => sp.kind === 'dragon'),
     reachedL3: d.explored.some((k) => k.startsWith('3:')),
+    campaign: campaignNo,
+    cd: campDelve,
+    gold: setOut.gold,
+    wealth: setOut.wealth,
+    partyLv: setOut.lv.reduce((a, b) => a + b, 0) / Math.max(1, setOut.lv.length),
+    maxLv: Math.max(...setOut.lv),
+    rep: setOut.rep,
+    village: setOut.village,
+    captured: d.heroes.filter((h) => h.status === 'captured').length,
+    goldAfter: 0,
   });
   if (VERBOSE) for (const n of sum.notes) console.log('   ', n);
   const back = e.apply(s, { type: 'backToCamp' });
@@ -949,6 +1163,7 @@ for (let i = 0; i < N; i++) {
   } else {
     for (const ev of back.events) if (ev.type === 'villageUnlocked') unlocked.push(`delve ${i + 1}: ${ev.story}`);
     s = back.state;
+    rows[rows.length - 1]!.goldAfter = s.campaign.gold + stashValue(s);
   }
 }
 
@@ -1000,6 +1215,29 @@ console.log(`stealth (spec 20.1, 20.2): moves ${walkMoves} walked / ${sneakMoves
 console.log(`eyes front (spec 24): enemy strikes on heroes ${eyes.strikes}, from behind ${eyes.blindsided} (${eyes.blindHits} hit), unseen hits ${eyes.unseenHits}; backstabs ${eyes.backstabs} (${eyes.sleeperStabs} on sleepers, ${eyes.backstabHits} hit, ${eyes.backstabKills} kills); face commands ${eyes.faces}, turned to a foe ${eyes.turnedToFoe}`);
 console.log(`hearing (spec 24.8): sounds heard per delve`);
 for (const l of hearLog) console.log(`  ${l}`);
+// V4.1: the economy and progression curves (most useful with POLICY=v41).
+console.log('\neconomy (V4.1): per delve, wealth = camp gold + stash valuables as the party set out');
+console.log('  camp delve contract    done  party lv  rep vil  gold  wealth  loot bounty  dead taken');
+for (const r of rows) {
+  console.log(`  ${String(r.campaign).padStart(4)} ${String(r.cd).padStart(5)} ${r.contract.padEnd(12)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${r.partyLv.toFixed(1).padStart(8)} ${String(r.rep).padStart(4)} ${String(r.village).padStart(3)} ${String(r.gold).padStart(5)} ${String(r.wealth).padStart(7)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(5)} ${String(r.captured).padStart(5)}`);
+}
+console.log(`  camp ledger (gold in + / out -): ${Object.entries(ledger).sort((a, b) => a[1] - b[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'nothing'}`);
+console.log(`  income: bounties ${rows.reduce((a, r) => a + r.bounty, 0)}, carried out ${rows.reduce((a, r) => a + r.loot, 0)} (loose gold and valuables, before selling)`);
+console.log('\ncontract success by party level (mean, rounded) and contract level:');
+console.log('  party lv   L1 done/n   L2 done/n   L3 done/n');
+for (const pl of [1, 2, 3, 4, 5, 6]) {
+  const rs = rows.filter((r) => Math.round(r.partyLv) === pl);
+  if (!rs.length) continue;
+  const cell = (lv: number) => { const x = rs.filter((r) => r.level === lv); return x.length ? `${x.filter((r) => r.done).length}/${x.length}` : '-'; };
+  console.log(`  ${String(pl).padStart(8)}   ${cell(1).padStart(9)}   ${cell(2).padStart(9)}   ${cell(3).padStart(9)}`);
+}
+console.log(`campaigns: ${campaignNo} (a new one starts when the heir falls or is taken); sapper throws ${throws.thrown}`);
+if (CSV) {
+  const head = 'campaign,delve,contract,level,story,done,rounds,partyLv,maxLv,rep,village,gold,wealth,loot,bounty,deaths,captured,wealthAfter,crew';
+  const lines = rows.map((r) => [r.campaign, r.cd, r.contract.split(' ')[0], r.level, r.story, r.done ? 1 : 0, r.rounds, r.partyLv.toFixed(2), r.maxLv, r.rep, r.village, r.gold, r.wealth, r.loot, r.bounty, r.deaths, r.captured, r.goldAfter, JSON.stringify(r.crew)].join(','));
+  writeFileSync(CSV, [head, ...lines].join('\n') + '\n');
+  console.log(`wrote ${CSV}`);
+}
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
 if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);
