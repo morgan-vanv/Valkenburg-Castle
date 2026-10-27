@@ -1,6 +1,6 @@
 # V5.0 first push: the in-delve graphics overhaul
 
-Owner-approved direction, 2026-10-27. This file is the source of truth for the V5.0 graphics work. It replaces nothing in the V4.x docs; the rules do not change.
+Owner-approved direction, 2026-10-27. This file is the source of truth for the V5.0 graphics track (G). V5.0 has a second track running beside it, the play track (P, `docs/v5-play-plan.md`); `docs/v5-plan.md` says who owns which files and how the tracks merge. The rules do not change here.
 
 - Study (keep, read for the reasoning): "In-Delve Graphics Study" https://claude.ai/artifact/XUzRBsKB8pif7czKHRtHWn
 - Scale Lab (interactive, the look's reference implementation): https://claude.ai/artifact/CFm7dkSH2DQGdZRJSi4VuL, source in `mockup/v5/scale-lab.html`
@@ -18,7 +18,7 @@ Owner-approved direction, 2026-10-27. This file is the source of truth for the V
 | Walls | Flat brick walls as in the lab, not thin panels along tile edges. |
 | Rooms | Dressed with props, carried over to the real castle. |
 | Art | Claude builds everything in code for now (no art files, no model packs). Proper artists may take a pass later if the game becomes a real project, so leave a seam for their models. |
-| Branch | All work on `v5.0` (from main 3303949), workstream branches `v5.0-*`. Main keeps V4.x for play-tests. No preview toggle on the live site. |
+| Branch | All graphics work on `v5.0-gfx` (from `v5.0`), workstream branches `v5.0-gfx-*`; merge into `v5.0` only at owner-approved checkpoints (`docs/v5-plan.md`). Main keeps V4.x for play-tests. No preview toggle on the live site. |
 | Scope | Graphics only. Touch mechanics and rules as little as possible: no changes to `src/game`, saves (`vc.save.v39`) or the engine contract (`types.ts`, `api.ts`, `hex.ts`) unless a view need truly requires it, and then logged. |
 
 ## The renderer today (audit at 04eb639; main 3303949 only touched diorama.ts and fixtures.ts lightly)
@@ -84,21 +84,28 @@ Dressing is decoration only. Rules props (`PropKind`) keep their meaning and loo
 - The castle was laid out for today's scale; rooms may read empty or cramped until dressed. Prove one room first.
 - Fog of war: every new material and the jointed figures must go through `fog.ts`; test each material type.
 - Performance: one shadowed light only; post-processing at pixel ratio 2 is costly on integrated GPUs. Add a Quality setting (Low: no shadow, no bloom, no tilt-shift, pixel ratio 1). The headless checks in `scripts/` run on software rendering and should use Low.
-- `diorama.ts` (~4,000 lines) is the hot spot. Put new look code in new modules (for example `src/view/look/`: `post.ts`, `walls.ts`, `floors.ts`, `rig.ts`, `clips.ts`, `dressing.ts`, `actioncam.ts`) and keep diorama.ts edits small, so merging main into `v5.0` stays easy.
-- `v5.0` will drift from main while the owner play-tests V4.x. Merge main into `v5.0` at the start of each session.
+- `diorama.ts` (~4,000 lines) is the hot spot. Put new look code in new modules (for example `src/view/look/`: `post.ts`, `walls.ts`, `floors.ts`, `rig.ts`, `clips.ts`, `dressing.ts`, `actioncam.ts`) and keep diorama.ts edits small, so merges with main and the play track stay easy.
+- `v5.0-gfx` will drift from main and from the play track. Merge `origin/main` and `origin/v5.0` into `v5.0-gfx` at the start of each session.
 
 ## Workstreams
 
 | # | Workstream | What it covers | Needs first | Who |
 | --- | --- | --- | --- | --- |
 | W0 | Great Hall slice | New look modules split out; scale and camera numbers; post chain; tone and fill light; floors and flat walls for the Great Hall (L1 `hall`, label at q13 r15) and its neighbours; a few dressing props; one rigged hero (Keven) with idle and walk; Quality setting; a shot script for fixed views of named rooms | — | Lead, one session |
-| W1 | Camera and post | Default 16 / FOV 30 / pitch easing with zoom; action cam; tilt-shift, bloom and Action camera settings; overlays drawn sharp after post | W0 | Builder |
+| W1 | Camera and post | Default 16 / FOV 30 / pitch easing with zoom; action cam as one module (for example `dio.actionCam(actorId, targetId, ms)`, called from app.ts in blocks marked `// V5.0 G: action cam`); tilt-shift, bloom and Action camera settings; overlays drawn sharp after post; in-world darkness and status effects per P's `docs/v5-status-visuals.md` (owner feedback: the dark ring isn't clear, poison and other statuses need much more emphasis) | W0 | Builder |
 | W2 | Architecture | Floors and flat walls on all three levels; cracked, built and rubble walls; doors, sealed door, stairs, pits, railings, raised floors, bridges, the lift; the cutaway; fixed lights and braziers in the new style | W0 | Builder |
 | W3 | Figures | Joint rig, all heroes and gear, monsters, crews, prisoner, Dragon; the clip set; the artist seam; facing wedges, rings and tags re-fitted to the new heights | W0 | Builder |
 | W4 | Dressing | Prop library and per-room dressing for all 33 rooms | W2 | Builder |
 | W5 | Switch-over | Retire the old look code, update checks and docs, merge `v5.0` to main when the owner says | all | Lead |
 
-Run W0 alone. Then at most two builders at a time (W1 with W2, then W3 with W4), in `git worktree`s under `/root/wt/<name>` as in V4.x. The lead writes a brief per workstream in `docs/agents/v50-<name>.md` and merges into `v5.0`.
+Run W0 alone. The play track runs at the same time and shares the owner's rate limit, so run at most one builder at a time beside the lead, in `git worktree`s under `/root/wt/<name>` as in V4.x. The lead writes a brief per workstream in `docs/agents/v50-<name>.md` and merges into `v5.0-gfx`.
+
+Boundaries with the play track (`docs/v5-plan.md` has the full table):
+- P owns who gets selected next and when the camera follows a hero (`autoAdvance` in hud.ts, follow in app.ts). The action cam hands the camera back to wherever those rules leave it.
+- P owns the keyboard block of `camera.ts` (key listeners and key-driven pan, rotate and zoom) for the controls refresh; G owns the rest of the rig.
+- `src/ui/settings.ts` is append-only for both; G adds Quality, Action camera and Tilt-shift.
+- G's CSS goes in a block marked `/* V5.0 look */` in `src/style.css`; P owns the rest of the HUD styles.
+- Anything P adds that must show in the scene (new statuses, reaction stances) is listed under "View needs" in `docs/v5-plan.md`; check it at the start of each session.
 
 ## Checks and review
 
@@ -109,4 +116,4 @@ Run W0 alone. Then at most two builders at a time (W1 with W2, then W3 with W4),
 
 ## Rate-limit-safe sessions
 
-Every session ends at a commit on its branch, a short report (what changed, what's next, screenshots), and the project briefing updated if the direction moved. Nothing important lives only in a conversation.
+Every session ends at a commit on its branch, a line on the status board in `docs/v5-plan.md`, a short report (what changed, what's next, screenshots), and the project briefing updated if the direction moved. Nothing important lives only in a conversation.
