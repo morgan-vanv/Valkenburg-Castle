@@ -744,8 +744,9 @@ export const SELLSWORD_SHOVE_CHANCE = 60;
 export const CREW_FOCUS = 3;
 /** A crew Sellsword braces (an action, the heroes' Brace) when this many heroes who are up stand at its blade. */
 export const CREW_BRACE_HEROES = 2;
-/** Retreat: a hostile crew with at least this share of its members down, dead or gone, facing a stronger party, calls the fight off. */
+/** Retreat: a hostile crew with at least this share of its members down, dead or gone, facing a party CREW_RETREAT_RATIO × as strong, calls the fight off. */
 export const CREW_LOSING_SHARE = 0.5;
+export const CREW_RETREAT_RATIO = 1.5;
 /** A crew at peace that sees a stronger party (strength × this) keeps at least CREW_WARY_GAP hexes from every hero. */
 export const CREW_WARY_RATIO = 1.25;
 export const CREW_WARY_GAP = 3;

@@ -133,12 +133,14 @@ describe('V4.1 crews as an equal power (spec 31.9)', () => {
   });
 
   describe('brace', () => {
-    it('a crew Sellsword with two heroes at its blade braces; hits on it roll −15% and do 1 less', () => {
+    it('a crew Sellsword with two heroes at its blade, hurt, braces; hits on it roll −15% and do 1 less', () => {
       const s = delve();
       park(s, at(3, 6, 4));
       put(s, 'brann', at(3, 7, 5));
       const [sell] = crew(s, 'ferrymen', [at(3, 7, 4), at(3, 12, 1), at(3, 12, 2)]);
       const c = ctx(s);
+      expect(hostilePlan(c, sell!).intent.kind).not.toBe('brace'); // unhurt: he fights
+      sell!.hp = 8;
       expect(hostilePlan(c, sell!).intent.kind).toBe('brace');
       expect(powerAct(c, sell!, { kind: 'brace', targetId: sell!.id })).toBe(true);
       expect(sell!.braced).toBe(true);

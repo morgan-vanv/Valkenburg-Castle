@@ -11,7 +11,7 @@ import type { HeroInDelve, Intent } from './types';
 import {
   BRACE_CHANCE, BRACE_DMG, BRIAR_DMG, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, CLASSES, CREW_BRACE_HEROES, CREW_FOCUS, CREW_LOOKOUT,
   CREW_LOSING_SHARE, CREW_RAISED_BONUS, CREW_WARY_GAP, CREW_WARY_RATIO, DREAD_RANGE, DREAD_SLOTS, KINDLE_LIGHT, KINDLE_RANGE, NIGHTTHORN_DMG,
-  NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SLEEP_RANGE, STRENGTH_PER_LEVEL, STRENGTH_PER_POTION, CREW_HOLD_ROUNDS as HOLD_ROUNDS,
+  NIGHTTHORN_RANGE, NIGHTTHORN_SLOTS, SLEEP_RANGE, STRENGTH_PER_LEVEL, STRENGTH_PER_POTION, CREW_HOLD_ROUNDS as HOLD_ROUNDS, CREW_RETREAT_RATIO,
 } from './data';
 import { say, type Ctx, type HeroX, type RivalX } from './state';
 import { occupant, activeHeroes, armorOf, clampChance, guardMods, hd, heroDef, heroName, hurtHero, makeNoise, noteOnce, onMap, rivalsOnMap, roll, rootFigure } from './common';
@@ -288,14 +288,14 @@ export function crewBeaten(c: Ctx): boolean {
 }
 
 /**
- * A hostile crew losing badly (half down, dead or gone, and the party now the stronger) calls the fight off, once: a truce,
+ * A hostile crew losing badly (half down, dead or gone, and the party now half as strong again) calls the fight off, once: a truce,
  * the way out, carrying their own. Not while a member carries off a hero. Attack them after and they fight to the last.
  */
 export function crewRetreat(c: Ctx): boolean {
   const cr = c.d.rivals;
   if (!cr || cr.stance !== 'hostile' || cr.retreat !== undefined || !crewBeaten(c)) return false;
   if (rivalsOnMap(c).some((r) => r.dragging)) return false; // carrying off a hero: they have what they came for
-  if (!rivalsOnMap(c).length || crewStrength(c) >= partyStrength(c)) return false;
+  if (!rivalsOnMap(c).length || crewStrength(c) * CREW_RETREAT_RATIO > partyStrength(c)) return false;
   cr.retreat = c.d.round;
   cr.stance = 'truce';
   cr.goal = 'leave';
@@ -355,9 +355,9 @@ function antidoteIntent(c: Ctx, r: RivalX): Intent | null {
   return sick ? { kind: 'antidote', item: 'antidote', targetId: sick.id } : null;
 }
 
-/** A crew Sellsword with two heroes who are up at its blade braces (the heroes' Brace). */
+/** A crew Sellsword with two heroes who are up at its blade, and down to two thirds of its HP, braces (the heroes' Brace). */
 function braceIntent(c: Ctx, r: RivalX): Intent | null {
-  if (r.cls !== 'sellsword' || r.braced) return null;
+  if (r.cls !== 'sellsword' || r.braced || r.hp * 3 > r.maxHp * 2) return null;
   const n = activeHeroes(c).filter((h) => !(h as HeroX).dozing && adjacentTo(h.at, r.at)).length;
   return n >= CREW_BRACE_HEROES ? { kind: 'brace', targetId: r.id } : null;
 }
@@ -554,6 +554,11 @@ export function powerAct(c: Ctx, r: RivalX, it: Intent): boolean {
 /** V4.1 (WS7): a hero a crew Shadowmancer's Dread holds this player phase: no action (moving is fine), no free swings. */
 export function dreadedNow(c: Ctx, h: HeroInDelve): boolean {
   return (h.dreaded ?? 0) === c.d.round && c.d.phase === 'player';
+}
+
+/** V4.1 (WS7): a cutthroat crew waiting at its post keeps its lights hooded (world.ts lightSources). */
+export function hooded(cr: { temperament: string; stance: string } | null | undefined): boolean {
+  return !!cr && cr.temperament === 'cutthroat' && cr.stance === 'waiting';
 }
 
 /** V4.1 (WS7): a braced crew Sellsword: hits on it do 1 less and roll −15 (the heroes' Brace, BRACE_DMG / BRACE_CHANCE). */

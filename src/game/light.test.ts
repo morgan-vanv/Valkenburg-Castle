@@ -335,6 +335,7 @@ describe('V4.1 (WS2) the Gloam: Level 3, unlit heroes only', () => {
     let t = onL2(delve());
     put(t, 'keven', at(3, 6, 4));
     t.delve!.rivals = buildCrew(t as GameStateX, 'the-wake', [at(3, 7, 4), at(3, 8, 6), at(3, 4, 7), at(3, 5, 2)]);
+    t.delve!.rivals.stance = 'truce'; // V4.1 (WS7): a waiting cutthroat crew keeps its lights hooded
     expect(e.heroLit(t, 'keven')).toBe(true);
     t = ok(t, { type: 'endTurn' }).state;
     expect(t.delve!.monsters.some((m) => m.kind === 'gloam')).toBe(false);
@@ -345,11 +346,15 @@ describe('V4.1 (WS2) crews carry light', () => {
   it('every crew member lights radius 2 round itself, for everyone; the party sees it from afar as a light', () => {
     const s = onL2(delve());
     const cr = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 2), at(2, 16, 1), at(2, 17, 1)]);
+    cr.stance = 'demanding'; // V4.1 (WS7, spec 31.9): waiting at their post, cutthroats keep their lights hooded
     s.delve!.rivals = cr;
     const L = litSet(w, s.delve as DelveX);
     expect(L.has(posKey(at(2, 14, 2)))).toBe(true); // 2 from the first member
     expect(e.lights!(s).filter((x) => x.kind === 'crew')).toHaveLength(3);
     expect(e.lights!(s).find((x) => x.kind === 'crew')).toMatchObject({ radius: 2, party: false });
+    // V4.1 (WS7, spec 31.9): a waiting cutthroat crew is hooded: no light until it demands or fights.
+    cr.stance = 'waiting';
+    expect(e.lights!(s).filter((x) => x.kind === 'crew')).toHaveLength(0);
   });
 
   it('a hostile crew goes for the hero carrying the most light (was the lantern bearer)', () => {

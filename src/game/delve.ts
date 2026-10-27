@@ -1687,8 +1687,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       if (!r.hits) break;
       for (const id of figuresOn(c, hexes)) {
         const m = c.d.monsters.find((x) => x.id === id);
-        const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : 0;
-        const dmg = r.hits * Math.max(1, 2 - armor) + (r.perfect ? 1 : 0);
+        // V4.1 (WS7, spec 31.9): a crew member's armor counts, as a hero's does against a crew fireball (and its ward).
+        const rv = c.d.rivals?.members.find((x) => x.id === id && x.hp > 0);
+        const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : rv ? rivalStats(rv).armor : 0;
+        const dmg = r.hits * Math.max(rv && (rv.ward ?? 0) > 0 ? 0 : 1, Math.max(1, 2 - armor) - (rv && (rv.ward ?? 0) > 0 ? 1 : 0)) + (r.perfect ? 1 : 0);
         if (hd(c, id)) {
           if (fireWard(c, id, dmg) > 0) hurtHero(c, hd(c, id)!, fireWard(c, id, dmg), heroId, r.perfect); // V4.1 (spec 31.3): Dragonfire Porter
         } else hurtAny(c, id, dmg, heroId, { crit: r.perfect });
