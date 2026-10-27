@@ -27,7 +27,8 @@ import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, lookRound, moodOf, noticeFigure, perceivable, sightedHeroes, type Sighted } from './stealth';
-import { checkCarries, isParalyzed, venomTick } from './venom';
+import { checkCarries, poisonTick } from './poison';
+import { carrierOf, downedCrew, killMember } from './common'; // V4.1 (spec 31.4)
 import { burnLights } from './light'; // V4.1 (WS2)
 import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
@@ -180,7 +181,6 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
   if (m.kind === 'gloam') return planGloam(c, m, lit);
   if (m.kind === 'dragon') return planDragon(c, m);
   if (m.awareness === 'asleep' || m.buried) return WAIT;
-  if (isParalyzed(m)) return WAIT; // V4.0 (spec 29.2)
   const st = monsterStats(m);
   const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
   const noAbility = !!opts.noAbility;
@@ -315,7 +315,7 @@ function planGloam(c: Ctx, g: MonsterX, lit: Set<string>): Plan {
 export function computeIntents(c: Ctx): void {
   const lit = litSet(c.w, c.d);
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' || m.buried || isParalyzed(m)) {
+    if (m.awareness === 'asleep' || m.buried) {
       m.intent = undefined;
       continue;
     }
@@ -376,8 +376,7 @@ export function lookAll(c: Ctx, first?: string, before?: () => void, anyPhase = 
   const lit = litSet(c.w, c.d);
   const found: { m: MonsterX; ids: string[]; turnedTo?: string }[] = [];
   for (const m of onMap(c)) {
-    // V4.0 (spec 29.2): a paralyzed monster can't turn its head.
-    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || isParalyzed(m)) continue;
+    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') continue;
     const hs = heroes.filter((x) => x.at.level === m.at.level);
     if (!hs.length) continue;
     const r = lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first);
@@ -497,11 +496,6 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
 }
 
 function monsterAct(c: Ctx, m: MonsterX): void {
-  // V4.0 (spec 29.2): paralyzed: it neither moves nor acts.
-  if (isParalyzed(m)) {
-    m.intent = undefined;
-    return;
-  }
   const lit = litSet(c.w, c.d);
   const wasPatrol = m.awareness === 'patrol';
   perceive(c, m, lit);
@@ -751,7 +745,7 @@ function burnPhase(c: Ctx): void {
   const keys = new Set(burning);
   const ids: string[] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && keys.has(posKey(m.at))) ids.push(m.id);
-  for (const r of rivalsOnMap(c)) if (keys.has(posKey(r.at))) ids.push(r.id);
+  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (keys.has(posKey(r.at))) ids.push(r.id); // V4.1 (spec 31.4): the downed too
   for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at))) ids.push(h.heroId);
   const pr = c.d.prisoner;
   if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) ids.push(pr.id);
@@ -786,12 +780,19 @@ export function worldPhase(c: Ctx): void {
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
     // V3.7 (spec 20.4): a crew member dragging them keeps them breathing (they're worth more alive).
-    if (d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut)) continue;
+    // V4.1 (spec 31.4): so does anyone carrying them (a friend's Carry).
+    if (carrierOf(c, h.heroId)) continue;
     h.bleed -= 1;
     if (h.bleed <= 0) killHero(c, h);
   }
-  // V4.0 (spec 29.1, 29.2): venom counts down; paralysis wears off.
-  venomTick(c);
+  // V4.1 (spec 31.4, pillar 17): downed crew members bleed out the same way (not while a crewmate carries them).
+  for (const r of downedCrew(c)) {
+    if (carrierOf(c, r.id)) continue;
+    r.bleed = (r.bleed ?? 1) - 1;
+    if (r.bleed <= 0) killMember(c, r);
+  }
+  // V4.1 (spec 31.4): poison: 1 damage to every poisoned figure that is up, never below 1.
+  poisonTick(c);
   // 2. Monsters, in id order.
   const order = [...d.monsters].filter((m) => m.kind !== 'gloam').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   for (const m of order) {

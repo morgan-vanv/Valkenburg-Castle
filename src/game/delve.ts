@@ -41,8 +41,11 @@ import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
 import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
-import { CARRY_MOVE, VENOM_ROUNDS } from './data';
-import { canStir, carryFollow, checkCarries, cureVenom, endCarry, envenom, isEnvenomed, isParalyzed, shoulderable, trapDamage, venomTakes } from './venom';
+import { CARRY_MOVE } from './data';
+// V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
+import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, UNSHACKLE_SMASH_HITS, UNSHACKLE_SMASH_NOISE, UNSHACKLE_SMASH_SLOTS, pairHome } from './data';
+import { bodyName, carryOut, carryable, checkCarries, closeTo, curePoison, endCarry, isPoisoned, poison, poisonTakes, startCarry, trapDamage } from './poison';
+import { bodiesOn, bringCarried, carrierOf, downedCrew, setDownNear } from './common';
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
 import { POTION_HEAL, TRIPWIRE_FUSE } from './data'; // V4.1 (spec 31.3)
 import { doLight, lightSpecText, lightTargets } from './light'; // V4.1 (spec 31.5, WS2)
@@ -138,7 +141,6 @@ export function doFace(c: Ctx, heroId: string, facing: number): string | undefin
   if (!Number.isInteger(facing) || facing < 0 || facing > 5) return 'Face one of the six sides.';
   if (h.status !== 'active') return `${heroName(c, heroId)} can't turn.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
-  if (isParalyzed(h)) return `${heroName(c, heroId)} is paralyzed.`;
   setFacing(c, h, facing);
   refreshSight(c);
   return undefined;
@@ -160,10 +162,12 @@ export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
   const cls = heroDef(c, h.heroId)?.cls;
   // V4.0 (spec 26.4): the Burglar walks 5 (dash 5) and sneaks 4; everyone else walks 4.
   let b = sneak ? (cls === 'burglar' || h.ale === 'smuggler' ? SMUGGLER_SNEAK : 2) : cls === 'burglar' ? BURGLAR_WALK : WALK_MOVE;
-  if (h.escorting) b = Math.min(b, 3); // the prisoner's pace caps a Burglar too
+  // V4.1 (spec 31.4): the unshackled captive follows at walk 4 without slowing anyone (was: 3 at most while escorting).
+  // V4.1 (spec 31.4): splints: a downed hero crawls 1.
+  if (h.status === 'downed') return CRAWL_MOVE;
   // Spec 18.3: the brewing copper is heavy: its carrier moves 3 at most (dash too).
   if (h.pack.some((i) => i.heavy)) b = Math.min(b, HEAVY_MOVE);
-  // V4.0 (spec 29.4): a paralyzed ally on the shoulders: 3 at most (dash too).
+  // V4.1 (spec 31.4): carrying a body: 3 at most (dash too).
   if (h.carrying) b = Math.min(b, CARRY_MOVE);
   return b;
 }
@@ -198,9 +202,23 @@ function trapPenalty(c: Ctx, p: Pos): number {
   return c.d.traps[posKey(p)]?.spotted ? 10 : 0;
 }
 
+/**
+ * V4.1 (spec 31.4): splints (Gerda and Aldric home): a downed hero nobody carries or holds may crawl 1 hex a turn on their
+ * own (no dash, no actions but Leave on an exit). They still bleed.
+ */
+export function canCrawl(c: Ctx, h: HeroInDelve): boolean {
+  return h.status === 'downed' && pairHome(c.s.campaign.village, 'smith', 'surgeon') && !isCarriedBody(c, h.heroId) && !h.grabbedBy;
+}
+
+function isCarriedBody(c: Ctx, id: string): boolean {
+  return !!carrierOf(c, id);
+}
+
 /** Can this hero move now? 'walk' = first move; 'dash' = second move that spends the action (spec 15.2). */
-export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
-  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing || (h.rooted ?? 0) > 0 || isParalyzed(h)) return null;
+export function moveKind(h: HeroInDelve, c?: Ctx): 'walk' | 'dash' | null {
+  // V4.1 (spec 31.4): a crawler moves once a turn, no dash.
+  if (h.status === 'downed' && c && canCrawl(c, h)) return h.moved ? null : 'walk';
+  if (h.status !== 'active' || h.webbed || h.grabbedBy || (h as HeroX).dozing || (h.rooted ?? 0) > 0) return null;
   if (!h.moved) return 'walk';
   if (!h.acted && !h.dashed) return 'dash';
   return null;
@@ -209,7 +227,7 @@ export function moveKind(h: HeroInDelve): 'walk' | 'dash' | null {
 export function reachable(c: Ctx, heroId: string, sneak: boolean) {
   const h = hd(c, heroId);
   if (!h || c.d.phase !== 'player') return [];
-  const mk = moveKind(h);
+  const mk = moveKind(h, c);
   if (!mk) return [];
   const nodes = dijkstra(c.w, c.d, h.at, {
     enter: (p) => !blocksHero(c, p),
@@ -241,11 +259,11 @@ export function moveNoise(sneak: boolean): number {
 export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, follow = false): string | undefined {
   const h = hd(c, heroId);
   if (!h) return 'No such hero.';
+  if (canCrawl(c, h)) return doCrawl(c, h, path);
   if (h.status !== 'active') return `${heroName(c, heroId)} can't move.`;
   if (h.webbed) return `${heroName(c, heroId)} is stuck in a web.`;
   if (h.grabbedBy) return `${heroName(c, heroId)} is held fast. Break free first.`;
   if ((h as HeroX).dozing) return `${heroName(c, heroId)} is out cold this turn.`;
-  if (isParalyzed(h)) return `${heroName(c, heroId)} is paralyzed.`;
   if ((h.rooted ?? 0) > 0) return `${heroName(c, heroId)} is rooted to the spot for ${h.rooted} more ${h.rooted === 1 ? 'round' : 'rounds'}.`;
   const mk = moveKind(h);
   if (!mk) return h.dashed ? `${heroName(c, heroId)} has already dashed.` : `${heroName(c, heroId)} has already moved.`;
@@ -306,6 +324,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
     // V3.9 (spec 24.2): a walking hero faces the way of each step (stairs keep the facing).
     if (p.level === from.level) h.facing = dirIndex(from, p);
     h.at = { ...p };
+    bringCarried(c, heroId); // V4.1 (spec 31.4): the carried body shares the hex, step by step
     from = p;
     c.visCache = undefined;
     glimpse(c, p);
@@ -350,18 +369,59 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
 export function springTrap(c: Ctx, h: HeroInDelve, at: Pos): void {
   const trap = c.d.traps[posKey(at)];
   delete c.d.traps[posKey(at)];
-  // V4.0 (spec 29.5): a venom trap bites for 1 and envenoms.
+  // V4.0 (spec 29.5): a venom trap; V4.1 (spec 31.4): a poison trap: 1 damage and a dose.
   const dmg = trapDamage(trap);
   c.ev.push({ type: 'trap', at, id: h.heroId, damage: dmg, ...(trap?.venom ? { venom: true } : {}) });
-  say(c, trap?.venom ? `A venom needle bites ${heroName(c, h.heroId)}.` : `A trap bites ${heroName(c, h.heroId)}.`);
+  say(c, trap?.venom ? `A poison needle bites ${heroName(c, h.heroId)}.` : `A trap bites ${heroName(c, h.heroId)}.`);
   hurtHero(c, h, dmg, 'trap');
-  if (trap?.venom) envenom(c, h.heroId, 'trap');
+  if (trap?.venom && h.status === 'active') poison(c, h.heroId, 'trap');
   makeNoise(c, at, 2);
+}
+
+/**
+ * V4.1 (spec 31.4): splints: a downed hero drags themselves one hex (walking noise; traps bite: any damage to a downed hero
+ * kills). No dash; Leave is the only action they may take, on an exit.
+ */
+function doCrawl(c: Ctx, h: HeroInDelve, path: Pos[]): string | undefined {
+  if (h.moved) return `${heroName(c, h.heroId)} has already crawled this turn.`;
+  if (path.length !== 1) return `${heroName(c, h.heroId)} can only crawl ${CRAWL_MOVE} hex.`;
+  const p = path[0]!;
+  const st = steps(c.w, c.d, h.at, { stairs: true }).find(([n]) => samePos(n, p));
+  if (!st || st[1] > CRAWL_MOVE) return "Can't go that way.";
+  if (blocksHero(c, p) || occupant(c, p)) return 'Someone is already there.';
+  c.visCache = undefined;
+  h.moved = true;
+  const from = h.at;
+  if (kindAt(c.w, c.d, p) === 'door') {
+    const door = doorAt(c.d, p);
+    if (door && !door.open) {
+      door.open = true;
+      c.ev.push({ type: 'doorChanged', at: p, open: true, locked: door.locked });
+    }
+  }
+  h.at = { ...p };
+  if (p.level === from.level) h.facing = dirIndex(from, p);
+  c.ev.push({ type: 'moved', id: h.heroId, path: [{ ...p }] });
+  if (p.level !== from.level) c.ev.push({ type: 'levelChanged', id: h.heroId, from: from.level, to: p.level });
+  say(c, `${heroName(c, h.heroId)} drags themselves along the floor.`);
+  glimpse(c, p);
+  const noise = stepNoise(c, p, false);
+  if (noise) makeNoise(c, p, noise, { quiet: true });
+  if (c.d.traps[posKey(p)]) springTrap(c, h, p);
+  refreshSight(c);
+  checkDelveEnd(c);
+  return undefined;
 }
 
 /** Prisoner follows, traps get spotted, sleepers next to the hero wake (`walked`: doMove rolled the wakes per hex already). */
 export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = false): void {
   const pr = c.d.prisoner;
+  // V4.1 (spec 31.4): an unshackled captive whose hero is gone follows the next hero who stands next to them.
+  if (pr && pr.freed && !pr.dead && !pr.out && !pr.escortedBy && h.status === 'active' && !h.escorting && adjacent(pr.at, h.at)) {
+    pr.escortedBy = h.heroId;
+    h.escorting = pr.id;
+    say(c, `${pr.name} falls in behind ${heroName(c, h.heroId)}.`);
+  }
   if (pr && h.escorting === pr.id && !pr.dead && !pr.out && !adjacent(pr.at, h.at)) {
     const spot = posNeighbors(h.at)
       // Not onto doors (V4.0: except the open sally port gate, the only way to its exit).
@@ -372,8 +432,8 @@ export function afterHeroMove(c: Ctx, h: HeroInDelve, sneak = false, walked = fa
       c.ev.push({ type: 'moved', id: pr.id, path: [spot] });
     }
   }
-  // V4.0 (spec 29.4): the ally on the carrier's shoulders comes along.
-  if (h.carrying) carryFollow(c, h);
+  // V4.1 (spec 31.4): the carried body shares the carrier's hex (blinks, climbs, falls and shoves too).
+  if (h.carrying) bringCarried(c, h.heroId);
   if (h.status !== 'active') return;
   for (const [k, t] of Object.entries(c.d.traps)) {
     if (t.spotted) continue;
@@ -427,6 +487,8 @@ setAfterLanding((c, h) => {
 // ---------------------------------------------------------------- targets
 
 const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown', 'snuff', 'dropTorch'];
+/** V4.1 (spec 31.4): Unshackle's tools, best first (lockpicks sure and silent, the key used up and silent, an improvised pick used up). */
+const UNSHACKLE_TOOLS: Item['kind'][] = ['lockpicks', 'key', 'improvised'];
 
 function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean; barred?: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
@@ -453,6 +515,8 @@ function enemiesAdjacent(c: Ctx, h: HeroInDelve, shove = false): ActionTarget[] 
   const out: ActionTarget[] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && !(shove && m.kind === 'dragon') && adjacent(m.at, h.at) && vis.has(posKey(m.at))) out.push({ id: m.id, at: m.at });
   for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0 && adjacent(r.at, h.at) && vis.has(posKey(r.at))) out.push({ id: r.id, at: r.at });
+  // V4.1 (spec 31.4): a downed crew member can be struck (any damage kills it), not shoved.
+  if (!shove) for (const r of downedCrew(c)) if (adjacent(r.at, h.at) && vis.has(posKey(r.at)) && !carrierOf(c, r.id)) out.push({ id: r.id, at: r.at });
   return out;
 }
 
@@ -616,7 +680,12 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
   const mage = (school: HeroClass, mana: number) => cls === school && h.mana >= mana;
   switch (action) {
     case 'attack':
-      if (cls === 'ranger') return enemiesInSight(c, h, CLASSES.ranger.weapon.range ?? 6);
+      if (cls === 'ranger') {
+        // V4.1 (spec 31.4): a downed crew member in sight can be shot too (any hit kills it).
+        const vis = visNow(c);
+        const down = downedCrew(c).filter((r) => within(r.at, h.at, CLASSES.ranger.weapon.range ?? 6) && vis.has(posKey(r.at)) && los(c.w, c.d, h.at, r.at) && !carrierOf(c, r.id)).map((r) => ({ id: r.id, at: r.at }));
+        return [...enemiesInSight(c, h, CLASSES.ranger.weapon.range ?? 6), ...down];
+      }
       return enemiesAdjacent(c, h);
     case 'shove':
       return enemiesAdjacent(c, h, true);
@@ -692,24 +761,37 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
         .map((t) => ({ ...t, itemId: it.id }));
     }
     case 'venomdart': {
-      // V4.0 (spec 29.3): a monster (not the Dragon or the Gloam) or crew member in sight within 5, not paralyzed already.
+      // V4.1 (spec 31.4): the poison dart: a monster (not the Dragon or the Gloam) or crew member in sight within 5, not poisoned yet.
       const it = itemOf(h, 'venomdart');
       if (!it) return [];
-      return enemiesInSight(c, h, THROW_RANGE.venomdart, { noDragon: true }).filter((t) => venomTakes(c, t.id!)).map((t) => ({ ...t, itemId: it.id }));
+      return enemiesInSight(c, h, THROW_RANGE.venomdart, { noDragon: true }).filter((t) => poisonTakes(c, t.id!)).map((t) => ({ ...t, itemId: it.id }));
     }
     case 'antidote': {
-      // V4.0 (spec 29.6): yourself while envenomed, or a hero next to you envenomed or paralyzed (up or downed).
+      // V4.1 (spec 31.4): the antipoison: yourself while poisoned, or a poisoned hero next to you (up or downed).
       const it = itemOf(h, 'antidote');
       if (!it) return [];
       const out: ActionTarget[] = [];
-      if (isEnvenomed(h)) out.push({ id: h.heroId, itemId: it.id });
+      if (isPoisoned(h)) out.push({ id: h.heroId, itemId: it.id });
       for (const o of others) {
-        if ((o.status === 'active' || o.status === 'downed') && adjacent(o.at, h.at) && ((o.venom ?? 0) > 0 || isParalyzed(o))) out.push({ id: o.heroId, itemId: it.id });
+        if ((o.status === 'active' || o.status === 'downed') && closeTo(o.at, h.at) && isPoisoned(o)) out.push({ id: o.heroId, itemId: it.id });
       }
       return out;
     }
-    case 'shoulder':
-      return shoulderable(c, h).map((o) => ({ id: o.heroId, at: o.at }));
+    case 'carry':
+      // V4.1 (spec 31.4): a downed hero or the shackled captive next to you that nobody carries.
+      return carryable(c, h).map((o) => ({ id: o.id, at: o.at }));
+    case 'unshackle': {
+      // V4.1 (spec 31.4): the shackled captive next to you (or on your back): with each tool you have, and Smash.
+      const pr = c.d.prisoner;
+      if (!pr || pr.freed || pr.dead || pr.out || !closeTo(pr.at, h.at)) return [];
+      const out: ActionTarget[] = [];
+      for (const k of UNSHACKLE_TOOLS) {
+        const it = itemOf(h, k);
+        if (it) out.push({ id: pr.id, at: pr.at, itemId: it.id });
+      }
+      out.push({ id: pr.id, at: pr.at });
+      return out;
+    }
     case 'setDown':
       return h.carrying ? [{ id: h.heroId }] : [];
     case 'caltrops': {
@@ -756,7 +838,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
         if (door.open && occupant(c, p)) continue;
         out.push({ at: p });
       }
-      if (!h.acted || cls === 'burglar') {
+      if ((!h.acted || cls === 'burglar') && !h.carrying) { // V4.1 (spec 31.4): a carrier opens doors only
         for (const ch of c.d.chests) if (!ch.opened && !ch.locked && within(ch.at, h.at, 1)) out.push({ at: ch.at, id: ch.id });
       }
       return out;
@@ -793,15 +875,13 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       for (const pot of pots) {
         if (h.hp < def.maxHp) out.push({ id: h.heroId, itemId: pot.id });
         for (const o of others) {
-          if (!adjacent(o.at, h.at)) continue;
+          if (!closeTo(o.at, h.at)) continue; // V4.1 (spec 31.4): a carried body shares the hex
           const od = heroDef(c, o.heroId)!;
           if (o.status === 'downed' || (o.status === 'active' && o.hp < od.maxHp)) out.push({ id: o.heroId, itemId: pot.id });
         }
       }
       return out;
     }
-    case 'revive':
-      return others.filter((o) => o.status === 'downed' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId, at: o.at }));
     case 'charge': {
       // V3.7 (spec 20.3): a bought charge, set with fuse 1 on an adjacent locked thing or wall. Sappers use setCharge.
       if (cls === 'sapper') return [];
@@ -832,12 +912,6 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
     }
     case 'jump':
       return droppablePits(c, h.at, h.heroId).map((at) => ({ at }));
-    case 'free': {
-      const pr = c.d.prisoner;
-      if (!pr || pr.dead || pr.out || !adjacent(pr.at, h.at)) return [];
-      if (pr.freed && pr.escortedBy === h.heroId) return [];
-      return [{ id: pr.id, at: pr.at }];
-    }
     case 'bribe':
       return []; // V3.5: replaced by the parley deals (spec 18.6)
     case 'parley':
@@ -851,9 +925,9 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return mage('pyromancer', 1) ? lightTargets(c, h, 'kindle') : []; // V4.1 (WS2): a torch or lantern held within 3
     case 'mend': {
       if (!mage('hedgewitch', 1)) return [];
-      // V4.0 (spec 29.6): Mend draws out venom too: a hero envenomed or paralyzed is a target even at full HP.
+      // V4.1 (spec 31.4): Mend cures poison too (a poisoned hero is a target even at full HP), and gets a downed hero up at 2.
       return c.d.heroes
-        .filter((o) => o.status === 'active' && within(o.at, h.at, 3) && (o.hp < heroDef(c, o.heroId)!.maxHp || (o.venom ?? 0) > 0 || isParalyzed(o)))
+        .filter((o) => (o.status === 'active' || o.status === 'downed') && within(o.at, h.at, 3) && (o.status === 'downed' || o.hp < heroDef(c, o.heroId)!.maxHp || isPoisoned(o)))
         .map((o) => ({ id: o.heroId }));
     }
     case 'passLantern':
@@ -898,8 +972,8 @@ export function smashable(c: Ctx, p: Pos): boolean {
 
 const LABELS: Record<ActionKind, string> = {
   attack: 'Attack', pick: 'Pick lock', smash: 'Smash', open: 'Open', take: 'Take', drop: 'Drop', give: 'Give',
-  disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', snuff: 'Snuff torch', dropTorch: 'Drop torch', potion: 'Potion', revive: 'Revive',
-  charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
+  disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', snuff: 'Snuff torch', dropTorch: 'Drop torch', potion: 'Potion',
+  charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove',
   bribe: 'Bribe', parley: 'Parley', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
   passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
   overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', setCharge: 'Set charge', setTripwire: 'Set tripwire', dig: 'Dig', fireball: 'Fireball',
@@ -907,12 +981,12 @@ const LABELS: Record<ActionKind, string> = {
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught', unbar: 'Unbar the gate',
   brace: 'Brace', hamstring: 'Hamstring', nightthorn: 'Night thorn', briar: 'Briar', smashProp: 'Smash',
-  venomdart: 'Venom dart', antidote: 'Antidote', shoulder: 'Shoulder', setDown: 'Set down',
+  venomdart: 'Poison dart', antidote: 'Antipoison', carry: 'Carry', unshackle: 'Unshackle', setDown: 'Set down',
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart', 'unshackle'];
 const ORDER: ActionKind[] = [
-  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'shoulder', 'setDown', 'potion', 'antidote', 'mend',
+  'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'carry', 'unshackle', 'setDown', 'potion', 'antidote', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'snuff', 'dropTorch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
@@ -920,14 +994,14 @@ const ORDER: ActionKind[] = [
 /** How the UI targets each action (ActionOption.pick). */
 const PICK: Record<ActionKind, ActionOption['pick']> = {
   attack: 'enemy', pick: 'other', smash: 'other', open: 'other', take: 'hex', drop: 'item', give: 'other', disarm: 'hex',
-  light: 'hex', torch: 'self', snuff: 'self', dropTorch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
-  shove: 'enemy', free: 'other', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
+  light: 'hex', torch: 'self', snuff: 'self', dropTorch: 'self', potion: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
+  shove: 'enemy', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', setTripwire: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', unbar: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
   brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
-  venomdart: 'enemy', antidote: 'ally', shoulder: 'ally', setDown: 'self',
+  venomdart: 'enemy', antidote: 'ally', carry: 'other', unshackle: 'other', setDown: 'self',
 };
 const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2, setTripwire: 2 };
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
@@ -936,10 +1010,14 @@ const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'firebal
 /** Whole-turn actions: need both move and action. */
 const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
 
+/** V4.1 (spec 31.4): what a hero carrying a body may still do: the free actions (and Set down). */
+const CARRY_OK: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'parley', 'setDown', 'shutter'];
+
 function canDo(h: HeroInDelve, action: ActionKind): boolean {
   if ((h as HeroX).dozing) return false;
-  // V4.0 (spec 29.2): the paralyzed do nothing at all, free actions included.
-  if (isParalyzed(h)) return false;
+  // V4.1 (spec 31.4): a crawling downed hero may only Leave; a carrier only the free actions (opening a chest isn't one).
+  if (h.status === 'downed') return action === 'leave';
+  if (h.carrying && !CARRY_OK.includes(action)) return false;
   if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted && !((h.rooted ?? 0) > 0);
   if (FREE.includes(action)) return true;
   return !h.acted;
@@ -947,7 +1025,13 @@ function canDo(h: HeroInDelve, action: ActionKind): boolean {
 
 export function actions(c: Ctx, heroId: string): ActionOption[] {
   const h = hd(c, heroId);
-  if (!h || h.status !== 'active' || c.d.phase !== 'player' || c.s.stage !== 'delve') return [];
+  if (!h || c.d.phase !== 'player' || c.s.stage !== 'delve') return [];
+  // V4.1 (spec 31.4): a crawling downed hero's only action is Leave, on an exit.
+  if (h.status === 'downed') {
+    if (!canCrawl(c, h) || !canLeaveAt(c, h.at)) return [];
+    return [{ action: 'leave', label: LABELS.leave, targets: [{ at: h.at }], rolls: false, pick: PICK.leave }];
+  }
+  if (h.status !== 'active') return [];
   const out: ActionOption[] = [];
   const def = heroDef(c, heroId);
   for (const a of ORDER) {
@@ -1015,12 +1099,8 @@ export interface Spec {
 
 /** Figures (ids) standing on any of `hexes`. */
 function figuresOn(c: Ctx, hexes: Pos[]): string[] {
-  const out: string[] = [];
-  for (const p of hexes) {
-    const o = occupant(c, p);
-    if (o) out.push(o.id);
-  }
-  return out;
+  // V4.1 (spec 31.4): a carrier and the body it carries share a hex: an area hits both.
+  return hexes.flatMap((p) => bodiesOn(c, p));
 }
 
 function areaOf(c: Ctx, at: Pos, radius: number): Pos[] {
@@ -1045,7 +1125,7 @@ function foe(c: Ctx, id?: string) {
   if (!id) return undefined;
   const m = c.d.monsters.find((x) => x.id === id);
   if (m) return { at: m.at, asleep: m.awareness === 'asleep', hunting: m.awareness === 'hunting', monster: m };
-  const r = rivalsOnMap(c).find((x) => x.id === id);
+  const r = rivalsOnMap(c).find((x) => x.id === id) ?? downedCrew(c).find((x) => x.id === id);
   if (r) return { at: r.at, asleep: false, hunting: c.d.rivals?.stance === 'hostile', monster: undefined, rival: r };
   return undefined;
 }
@@ -1110,10 +1190,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   const no = (reason: string): Spec => ({ ok: false, reason, slots: 0, chance: 0, modifiers: [], outcomes: [], noise: 0, light: 0 });
   const h = hd(c, heroId);
   if (!h || c.s.stage !== 'delve') return no('Not in a delve.');
-  if (h.status !== 'active') return no(`${heroName(c, heroId)} can't act.`);
+  // V4.1 (spec 31.4): a crawling downed hero may Leave on an exit.
+  const crawler = h.status === 'downed' && action === 'leave' && canCrawl(c, h);
+  if (h.status !== 'active' && !crawler) return no(`${heroName(c, heroId)} can't act.`);
   if (c.d.phase !== 'player') return no('Wait for your turn.');
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
-  if (isParalyzed(h)) return no(`${heroName(c, heroId)} is paralyzed.`);
+  if (h.carrying && !CARRY_OK.includes(action)) return no(`${heroName(c, heroId)} is carrying ${bodyName(c, h.carrying)}: free actions only. Set them down first.`);
   if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
   if (!t) return no('No valid target.');
@@ -1241,18 +1323,24 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const f = foe(c, t.id)!;
       let p = withLight(def.stats.finesse);
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
-      const v = (f.monster ?? f.rival)?.venom ?? 0;
-      const n = v > 0 ? Math.max(1, v - 1) : VENOM_ROUNDS;
-      return base('finesse', 1, p, ['Miss', `${v > 0 ? 'More venom' : 'Envenomed'}: paralyzed in ${n} ${n === 1 ? 'turn' : 'turns'}`], 0);
+      return base('finesse', 1, p, ['Miss', 'Poisoned: 1 damage a turn, never below 1'], 0);
     }
-    case 'antidote': {
-      const o = hd(c, t.id!)!;
-      return simple(isParalyzed(o) ? `${heroName(c, o.heroId)} can move again` : 'Draws out the venom');
+    case 'antidote':
+      return simple('Cures the poison');
+    case 'carry': {
+      const downed = !!hd(c, t.id!);
+      return simple(`Lift ${bodyName(c, t.id!)}: they share your hex and come along. You move ${CARRY_MOVE} at most and take only free actions while you carry them${downed ? '; a carried hero doesn\'t bleed' : ''}. Leave by an exit and they come out with you`);
     }
-    case 'shoulder':
-      return simple(`Carry ${heroName(c, t.id!)}: they come along on every move. You move ${CARRY_MOVE} at most while you carry them`);
+    case 'unshackle': {
+      const it = t.itemId ? h.pack.find((i) => i.id === t.itemId) : undefined;
+      const who = bodyName(c, t.id!);
+      if (it?.kind === 'lockpicks') return simple(`Pick ${who}'s shackles with the lockpicks. Sure and silent`);
+      if (it?.kind === 'key') return simple(`Open ${who}'s shackles with the skeleton key. Silent; the key is used up`);
+      if (it?.kind === 'improvised') return simple(`Work ${who}'s shackles with an improvised pick. Sure; uses one up. Noise ${UNSHACKLE_IMPROVISED_NOISE}`, UNSHACKLE_IMPROVISED_NOISE);
+      return base('might', UNSHACKLE_SMASH_SLOTS, withLight(def.stats.might), ['Holds, noise 4', `${who} is free, noise 4`, `${who} is free, noise 4`], UNSHACKLE_SMASH_NOISE);
+    }
     case 'setDown':
-      return simple(`Set ${heroName(c, h.carrying ?? '')} down here. Free.`);
+      return simple(`Set ${bodyName(c, h.carrying ?? '')} down. Free.`);
     case 'caltrops':
       return simple('The first monster to step here takes 2 and stops');
     case 'firecracker':
@@ -1297,7 +1385,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'disarm': {
       const tr = c.d.traps[posKey(t.at!)];
-      return base('finesse', 2, withLight(def.stats.finesse), [tr?.venom ? `Sets it off: ${trapDamage(tr)} dmg and venom` : `Sets it off: ${trapDamage(tr)} dmg`, 'Disarmed', 'Disarmed'], 2);
+      return base('finesse', 2, withLight(def.stats.finesse), [tr?.venom ? `Sets it off: ${trapDamage(tr)} dmg and poison` : `Sets it off: ${trapDamage(tr)} dmg`, 'Disarmed', 'Disarmed'], 2);
     }
     case 'shove': {
       const f = foe(c, t.id)!;
@@ -1331,7 +1419,6 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const heal = POTION_HEAL[h.pack.find((i) => i.id === t.itemId)?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3)
       return simple(o.status === 'downed' ? `Back up with ${heal} HP` : `Heal ${heal}`);
     }
-    case 'revive': return simple('Back up with 3 HP');
     case 'charge': return blastSpec(c, h, t.at!, 1);
     case 'rope': return simple('Rope anchored here');
     case 'climb': return simple(t.at!.level < h.at.level ? 'Climb up the rope' : 'Climb down the rope, no damage');
@@ -1351,7 +1438,6 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return s;
     }
     case 'winch': return simple(`The lift runs for the rest of the delve. Noise ${WINCH_NOISE}`, WINCH_NOISE);
-    case 'free': return simple(c.d.prisoner?.freed ? 'Take over the escort' : 'Free the prisoner');
     case 'bribe': return no('Parley instead.');
     case 'parley': return simple('Talk terms: pick a deal. Free.');
     case 'rally': return simple('+1 Focus to allies within 3');
@@ -1364,7 +1450,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'mend': {
       const o = hd(c, t.id!);
-      return withMana(simple(o && ((o.venom ?? 0) > 0 || isParalyzed(o)) ? 'Heal 4 and draw out the venom' : 'Heal 4'), 1);
+      if (o?.status === 'downed') return withMana(simple(`Back up with ${MEND_UP_HP} HP${isPoisoned(o) ? ', the poison drawn out' : ''}`), 1);
+      return withMana(simple(o && isPoisoned(o) ? 'Heal 4 and cure the poison' : 'Heal 4'), 1);
     }
     case 'passLantern': return no('Give the lantern instead.');
     case 'leave': return simple('Leave the castle');
@@ -1411,7 +1498,7 @@ function useItem(h: HeroInDelve, id?: string, kind?: Item['kind']): Item | undef
 function figurePos(c: Ctx, id: string): Pos | undefined {
   const m = c.d.monsters.find((x) => x.id === id);
   if (m) return m.at;
-  const r = rivalsOnMap(c).find((x) => x.id === id);
+  const r = rivalsOnMap(c).find((x) => x.id === id) ?? downedCrew(c).find((x) => x.id === id);
   if (r) return r.at;
   if (c.d.prisoner?.id === id) return c.d.prisoner.at;
   return hd(c, id)?.at;
@@ -1506,6 +1593,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     if (!c.visCache) refreshSight(c);
   }
   if (!FREE.includes(action)) h.acted = true;
+  if (action === 'carry') h.acted = true;
   if (action === 'open' && t.id && def.cls !== 'burglar') h.acted = true;
   if (WHOLE_TURN.includes(action)) h.moved = true;
   if (MANA_COST[action]) h.mana -= MANA_COST[action]!;
@@ -1659,7 +1747,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'blinked', id: heroId, from, to: { ...h.at } });
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
-      endCarry(c, h); // V4.0 (spec 29.4): nobody blinks with a load
       glimpse(c, h.at);
       ventCheck(c, h);
       afterHeroMove(c, h, true);
@@ -1729,28 +1816,51 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       // Silent, and a prick it hardly feels: like the sleep dart, it doesn't make the monster hunt.
       if (r.hits) {
         c.ev.push({ type: 'hit', attacker: heroId, target: tid, damage: 0, crit: r.perfect });
-        envenom(c, tid, heroId);
+        poison(c, tid, heroId);
       } else c.ev.push({ type: 'miss', attacker: heroId, target: tid });
       break;
     }
     case 'antidote': {
       useItem(h, t.itemId);
       const o = hd(c, t.id!)!;
-      const was = isParalyzed(o);
-      cureVenom(c, o.heroId, 'antidote', heroId);
+      curePoison(c, o.heroId, 'antidote', heroId);
       const on = heroName(c, o.heroId);
-      say(c, o === h ? `${name} drinks the antidote. The venom is drawn out.` : was ? `${name} pours the antidote into ${on}. ${on} can move again.` : `${name} gives ${on} the antidote. The venom is drawn out.`);
+      say(c, o === h ? `${name} drinks the antipoison. The poison is gone.` : `${name} gives ${on} the antipoison. The poison is gone.`);
       break;
     }
-    case 'shoulder': {
-      const o = hd(c, t.id!)!;
-      h.carrying = o.heroId;
-      c.ev.push({ type: 'shouldered', by: heroId, id: o.heroId });
-      say(c, `${name} hoists ${heroName(c, o.heroId)} onto their shoulders.`);
+    case 'carry': {
+      // V4.1 (spec 31.4): the body shares the carrier's hex from now on.
+      startCarry(c, h, t.id!);
+      say(c, `${name} lifts ${bodyName(c, t.id!)} onto their shoulders.`);
+      break;
+    }
+    case 'unshackle': {
+      const pr = c.d.prisoner!;
+      const it = t.itemId ? h.pack.find((i) => i.id === t.itemId) : undefined;
+      let how: 'lockpicks' | 'improvised' | 'key' | 'smash';
+      if (it?.kind === 'lockpicks') how = 'lockpicks';
+      else if (it?.kind === 'key') {
+        how = 'key';
+        useItem(h, it.id);
+      } else if (it?.kind === 'improvised') {
+        how = 'improvised';
+        const left = spendPick(h.pack, it);
+        makeNoise(c, pr.at, UNSHACKLE_IMPROVISED_NOISE);
+        if (left === 0) say(c, `${name}'s last improvised pick is spent.`);
+      } else {
+        how = 'smash';
+        const r = doRoll();
+        makeNoise(c, pr.at, UNSHACKLE_SMASH_NOISE);
+        if (r.hits < UNSHACKLE_SMASH_HITS) {
+          say(c, `The shackles hold. Everyone heard that.`);
+          break;
+        }
+      }
+      unshackle(c, h, how);
       break;
     }
     case 'setDown':
-      endCarry(c, h, `${name} sets ${heroName(c, h.carrying ?? '')} down.`);
+      endCarry(c, h, `${name} sets ${bodyName(c, h.carrying ?? '')} down.`);
       break;
     case 'caltrops':
       useItem(h, t.itemId);
@@ -1781,7 +1891,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       levelHeal(c, h);
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
-      endCarry(c, h); // V4.0 (spec 29.4): the load is set down at the foot of the climb
       glimpse(c, h.at);
       afterHeroMove(c, h);
       break;
@@ -1867,9 +1976,9 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         delete c.d.traps[posKey(at)];
         const dmg = trapDamage(tr);
         c.ev.push({ type: 'trap', at, id: heroId, damage: dmg, ...(tr?.venom ? { venom: true } : {}) });
-        say(c, tr?.venom ? `The venom needle goes off in ${name}'s hands.` : `The trap goes off in ${name}'s hands.`);
+        say(c, tr?.venom ? `The poison needle goes off in ${name}'s hands.` : `The trap goes off in ${name}'s hands.`);
         hurtHero(c, h, dmg, 'trap');
-        if (tr?.venom) envenom(c, heroId, 'trap');
+        if (tr?.venom && h.status === 'active') poison(c, heroId, 'trap');
         makeNoise(c, at, 2);
       }
       break;
@@ -1949,6 +2058,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'nightsight':
       break; // V4.1 (WS2): retired (never a target)
     case 'potion': {
+      // V4.1 (spec 31.4): on a downed hero next to you (or on your back): up at the potion's heal (5; a greater potion 8).
       const pot = useItem(h, t.itemId);
       const heal = POTION_HEAL[pot?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3): 5, a greater potion 8
       const o = hd(c, t.id!)!;
@@ -1960,18 +2070,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         c.ev.push({ type: 'revived', id: o.heroId });
       } else o.hp = Math.min(od.maxHp, o.hp + heal);
       if (pot?.kind === 'greaterpotion') say(c, `${heroName(c, o.heroId)} drinks a greater potion (+${heal}).`);
-      break;
-    }
-    case 'revive': {
-      const o = hd(c, t.id!)!;
-      o.status = 'active';
-      o.hp = 3;
-      o.bleed = 0;
-      o.revived = true;
-      o.moved = true;
-      o.acted = true;
-      c.ev.push({ type: 'revived', id: o.heroId });
-      say(c, `${heroName(c, o.heroId)} is back on their feet. Barely.`);
       break;
     }
     case 'charge':
@@ -1993,7 +2091,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       }
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
-      endCarry(c, h);
       ventCheck(c, h);
       afterHeroMove(c, h);
       break;
@@ -2002,7 +2099,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       // V3.7 (spec 20.2): leaving an enemy's side by jumping provokes its free swing first.
       provokeSwings(c, h, h.at, t.at!, new Set());
       if (h.status !== 'active') break;
-      endCarry(c, h);
       say(c, `${name} jumps.`);
       c.ev.push({ type: 'moved', id: heroId, path: [{ ...t.at! }] });
       fall(c, heroId, t.at!, null);
@@ -2013,21 +2109,6 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       c.ev.push({ type: 'liftWorking' });
       say(c, `${name} hauls on the winch. Chains rattle; the lift groans awake.`);
       makeNoise(c, h.at, WINCH_NOISE);
-      break;
-    }
-    case 'free': {
-      const pr = c.d.prisoner!;
-      if (pr.escortedBy) {
-        const old = hd(c, pr.escortedBy);
-        if (old) old.escorting = undefined;
-      }
-      if (!pr.freed) {
-        pr.freed = true;
-        c.ev.push({ type: 'freed', prisonerId: pr.id });
-        say(c, `${pr.name} is free. Stay close.`);
-      }
-      pr.escortedBy = heroId;
-      h.escorting = pr.id;
       break;
     }
     case 'bribe':
@@ -2048,9 +2129,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     case 'mend': {
       const o = hd(c, t.id!)!;
-      o.hp = Math.min(heroDef(c, o.heroId)!.maxHp, o.hp + 4);
-      // V4.0 (spec 29.6): Mend draws out venom, paralysis too.
-      if (cureVenom(c, o.heroId, 'mend', heroId)) say(c, o === h ? `${name}'s mending draws the venom out.` : `${name}'s mending draws the venom out of ${heroName(c, o.heroId)}.`);
+      if (o.status === 'downed') {
+        // V4.1 (spec 31.4): Mend on a downed hero within 3: up at 2.
+        o.status = 'active';
+        o.hp = MEND_UP_HP;
+        o.bleed = 0;
+        c.ev.push({ type: 'revived', id: o.heroId });
+        say(c, `${name}'s mending gets ${heroName(c, o.heroId)} back on their feet.`);
+        checkCarries(c);
+      } else o.hp = Math.min(heroDef(c, o.heroId)!.maxHp, o.hp + 4);
+      // V4.1 (spec 31.4): Mend cures poison.
+      if (curePoison(c, o.heroId, 'mend', heroId)) say(c, o === h ? `${name}'s mending draws the poison out.` : `${name}'s mending draws the poison out of ${heroName(c, o.heroId)}.`);
       break;
     }
     case 'passLantern':
@@ -2141,21 +2230,19 @@ function wakeTarget(c: Ctx, id: string, from: Pos, by?: string): void {
 }
 
 export function leaveCastle(c: Ctx, h: HeroInDelve): void {
+  // V4.1 (spec 31.4): a crawler who reaches an exit gets out at the HP they have (0): 1, as a carried hero.
+  if (h.status === 'downed') {
+    h.hp = CARRIED_OUT_HP;
+    h.bleed = 0;
+  }
   h.status = 'out';
   c.ev.push({ type: 'out', id: h.heroId });
   say(c, `${heroName(c, h.heroId)} is out.`);
-  // V4.0 (spec 29.4, 29.6): the ally on their shoulders comes out with them; outside, the venom is drawn out.
-  const x = h.carrying ? hd(c, h.carrying) : undefined;
-  h.carrying = undefined;
-  if (x && x.status === 'active' && adjacent(x.at, h.at)) {
-    x.status = 'out';
-    c.ev.push({ type: 'out', id: x.heroId });
-    say(c, `${heroName(c, h.heroId)} carries ${heroName(c, x.heroId)} out.`);
-    if (cureVenom(c, x.heroId, 'out')) noteVenomOut(c, x.heroId);
-  }
-  if (cureVenom(c, h.heroId, 'out')) noteVenomOut(c, h.heroId);
+  // V4.1 (spec 31.4): a carried body comes out too (a downed hero at 1 HP; the captive rescued); outside, poison is cured.
+  carryOut(c, h);
+  if (curePoison(c, h.heroId, 'out')) notePoisonOut(c, h.heroId);
   const pr = c.d.prisoner;
-  if (pr && h.escorting === pr.id && !pr.dead && adjacent(pr.at, h.at)) {
+  if (pr && h.escorting === pr.id && !pr.dead && !pr.out && closeTo(pr.at, h.at)) {
     pr.out = true;
     c.ev.push({ type: 'out', id: pr.id });
   } else if (pr && h.escorting === pr.id) {
@@ -2164,14 +2251,31 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
   h.escorting = undefined;
 }
 
-/** V4.0 (spec 29.6): a line in the return report for a hero who came out with venom in them. */
-function noteVenomOut(c: Ctx, heroId: string): void {
-  noteOnce(c, `${heroName(c, heroId)} came out with venom in them; the open air drew it out.`);
+/** V4.1 (spec 31.4): unshackled: the captive follows `h` from now on (walk 4, placed beside them after each move). */
+function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'key' | 'smash'): void {
+  const pr = c.d.prisoner!;
+  for (const o of c.d.heroes) if (o.carrying === pr.id) o.carrying = undefined;
+  pr.freed = true;
+  if (pr.escortedBy) {
+    const old = hd(c, pr.escortedBy);
+    if (old) old.escorting = undefined;
+  }
+  pr.escortedBy = h.heroId;
+  h.escorting = pr.id;
+  if (samePos(pr.at, h.at)) setDownNear(c, pr.id, h.at);
+  c.ev.push({ type: 'freed', prisonerId: pr.id, by: h.heroId, how });
+  const name = heroName(c, h.heroId);
+  say(c, how === 'smash' ? `${name} smashes ${pr.name}'s shackles. Stay close.` : how === 'key' ? `${name} turns the skeleton key in ${pr.name}'s shackles. Stay close.` : `${name} picks ${pr.name}'s shackles. Stay close.`);
+}
+
+/** V4.1 (spec 31.4): a line in the return report for a hero who came out poisoned. */
+function notePoisonOut(c: Ctx, heroId: string): void {
+  noteOnce(c, `${heroName(c, heroId)} came out poisoned; the open air drew it out.`);
 }
 
 export function abandon(c: Ctx): void {
   for (const h of c.d.heroes) {
-    if (canStir(h) && canLeaveAt(c, h.at)) leaveCastle(c, h);
+    if (h.status === 'active' && canLeaveAt(c, h.at)) leaveCastle(c, h);
   }
   endDelve(c);
 }
@@ -2179,8 +2283,8 @@ export function abandon(c: Ctx): void {
 /** No active heroes left: the delve is over. */
 export function checkDelveEnd(c: Ctx): boolean {
   if (c.s.stage !== 'delve') return true;
-  // V4.0 (spec 29.2): the paralyzed don't keep the delve going; left inside, they are lost like the downed.
-  if (c.d.heroes.some((h) => canStir(h))) return false;
+  // V4.1 (spec 31.4): a crawling downed hero (splints) still keeps the delve going.
+  if (c.d.heroes.some((h) => h.status === 'active' || canCrawl(c, h))) return false;
   endDelve(c);
   return true;
 }

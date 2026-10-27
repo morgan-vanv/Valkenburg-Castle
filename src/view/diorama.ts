@@ -1262,18 +1262,32 @@ export class Diorama {
     };
     const draggers = new Map<string, string>();
     for (const r of d.rivals?.members ?? []) if (r.dragging && r.hp > 0 && !r.goneOut) draggers.set(r.dragging, r.name);
+    // V4.1 (spec 31.4): carried bodies share the carrier's hex: drawn lying across its shoulders, lifted over it.
+    const carriers = new Map<string, string>();
+    for (const x of d.heroes) if (x.carrying && x.status === 'active') carriers.set(x.carrying, x.heroId);
+    for (const r of d.rivals?.members ?? []) if (!r.goneOut && r.hp > 0 && !r.downed) {
+      if (r.carrying) carriers.set(r.carrying, r.id);
+      if (r.dragging) carriers.set(r.dragging, r.id);
+    }
+    const shoulder = (v: UnitView, id: string) => {
+      const by = carriers.get(id);
+      const cv = by ? this.units.get(by) : undefined;
+      v.offset.set(0, by ? (cv?.height ?? 2) * 0.62 : 0, 0);
+      if (by) v.lieDown(true);
+    };
     for (const h of d.heroes) {
       if (h.status === 'out' || h.status === 'dead' || h.status === 'captured') continue;
       const hero = state.campaign.roster.find((r) => r.id === h.heroId);
       const v = this.ensureUnit(h.heroId, (hero?.cls ?? 'sellsword') as ModelKey, 'hero', h.at, hero?.name ?? h.heroId);
       keep.add(h.heroId);
-      place(v, h.at);
       v.lieDown(h.status === 'downed');
+      shoulder(v, h.heroId);
+      place(v, h.at);
       v.dead = false;
       v.crouch(h.status === 'active' && (h as { sneaked?: boolean }).sneaked === true); // V4.0 (spec 28.1)
       v.setOpacity(1);
       // V4.0 HUD: a hero's tag is health only; statuses live on the party card.
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10));
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, carriers.has(h.heroId)));
       // V3.9 (24.2): heroes turn to their facing too.
       if (h.facing !== undefined && !v.busy && h.status === 'active') {
         const a = facingAngle(h.facing);
@@ -1307,30 +1321,38 @@ export class Diorama {
       const pip = st === 'hostile' ? 'enemy' : st === 'hired' ? 'ally' : 'rival';
       const flag = st === 'hired' ? `<b class="tag-hired" title="Hired: fighting beside you">hired${d.rivals.hiredRounds ? ` · ${d.rivals.hiredRounds}` : ''}</b>` : st === 'demanding' ? '<b class="tag-toll">toll!</b>' : st === 'truce' ? '<b class="tag-truce">truce</b>' : '';
       for (const r of d.rivals.members) {
-        if (r.goneOut || r.hp <= 0 || d.round < d.rivals.entersRound) continue;
+        if (r.goneOut || (r.hp <= 0 && !r.downed) || d.round < d.rivals.entersRound) continue;
         const want = this.rivalModel(r);
         const have = this.units.get(r.id);
         if (have && have.key !== want && !have.busy) this.removeUnit(r.id);
         const v = this.ensureUnit(r.id, want, 'rival', r.at, r.name);
         keep.add(r.id);
+        v.lieDown(!!r.downed); // V4.1 (spec 31.4): a member down lies down, as a hero
+        shoulder(v, r.id);
         place(v, r.at);
         turn(v, r);
-        v.crouch(!!r.sneaked); // V4.0 (spec 28.1): a sneaking crew member crouches, as a sneaking hero
+        if (!r.downed) v.crouch(!!r.sneaked); // V4.0 (spec 28.1): a sneaking crew member crouches, as a sneaking hero
         v.setOpacity((r.veil ?? 0) > 0 ? 0.45 : 1);
         const tagEl = this.tags.get(r.id)?.el;
         if (tagEl) tagEl.className = `unit-tag tag-rival tag-st-${st} crew-${r.crew}${this.pickedUnit === r.id ? ' tag-picked' : ''}`;
         // V3.7 (20.4): level badge, feared and dragging marks.
         const lvl = r.level && r.level > 1 ? `<b class="tag-lvl" title="Level ${r.level}${r.weaponTier ? `, weapon +${r.weaponTier}` : ''}${r.armorTier ? `, armor +${r.armorTier}` : ''}">L${r.level}</b>` : '';
         const marks = (r.feared ?? 0) > 0 ? '<b class="tag-fear">feared</b>' : r.dragging ? `<b class="tag-dragging">dragging ${state.campaign.roster.find((x) => x.id === r.dragging)?.name ?? ''}</b>` : (r.veil ?? 0) > 0 ? '<b class="tag-veil">veiled</b>' : r.overwatch ? '<b class="tag-ow">overwatch</b>' : '';
-        this.setTag(r.id, lvl + pipsHtml(r.hp, r.maxHp, pip) + flag + marks + venomMark(r));
+        const down = r.downed ? bleedMark(r.bleed, carriers.has(r.id)) : '';
+        const carry = r.carrying ? `<b class="tag-dragging">carrying ${d.rivals.members.find((x) => x.id === r.carrying)?.name ?? ''}</b>` : '';
+        this.setTag(r.id, lvl + pipsHtml(r.hp, r.maxHp, pip) + flag + (r.downed ? down : marks) + carry + venomMark(r));
       }
     }
     if (d.prisoner && !d.prisoner.out && !d.prisoner.dead) {
       const p = d.prisoner;
       const v = this.ensureUnit(p.id, 'prisoner', 'prisoner', p.at, p.name);
       keep.add(p.id);
+      shoulder(v, p.id);
+      if (!carriers.has(p.id)) v.lieDown(false);
       place(v, p.at);
-      this.setTag(p.id, pipsHtml(p.hp, 5, 'ally') + (p.freed ? '' : '<b class="tag-shackled">shackled</b>'));
+      // V4.1 (spec 31.4): shackled until Unshackled (or carried); the shackles on the tag, and on the figure (see setShackles).
+      this.setTag(p.id, pipsHtml(p.hp, 5, 'ally') + (p.freed ? '' : `<b class="tag-shackled" title="Shackled: can't move. Carry them, or Unshackle them (lockpicks, key, an improvised pick, or Smash)">⛓ shackled</b>`));
+      this.setShackles(v, !p.freed);
     }
     for (const id of [...this.units.keys()]) if (!keep.has(id)) this.removeUnit(id);
   }
@@ -2844,17 +2866,24 @@ export class Diorama {
       case 'propSmashed':
         await this.playSmash(e);
         return;
-      // V4.0 (spec 29): venom, paralysis and the cure, as words over the figure.
-      case 'envenomed':
-      case 'paralyzed':
+      // V4.1 (spec 31.4): poison and the cure, as words over the figure.
+      case 'poisoned':
       case 'cured': {
         const v = this.units.get(e.id);
         if (!v || !v.root.visible) return;
         const at = v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.35, 0));
-        const text = e.type === 'envenomed' ? (e.dose > 1 ? 'More venom' : 'Venom') : e.type === 'paralyzed' ? 'Paralyzed' : e.how === 'worn' ? 'Can move again' : e.how === 'out' ? '' : 'Venom drawn out';
+        const text = e.type === 'poisoned' ? 'Poisoned' : e.how === 'out' ? '' : 'Poison cured';
         if (text) this.floatText(at, text, e.type === 'cured' ? 'heal' : 'warn', 1.3);
-        if (e.type === 'paralyzed') this.flash(v.root.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x6fdc5a, 3);
+        if (e.type === 'poisoned') this.flash(v.root.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x6fdc5a, 2);
         await clock.wait(0.15);
+        return;
+      }
+      // V4.1 (spec 31.4): a body lifted: it is drawn on its carrier's hex from now on.
+      case 'carried': {
+        const v = this.units.get(e.id);
+        const by = this.units.get(e.by);
+        if (v && by && (v.root.visible || by.root.visible)) this.floatText(by.root.position.clone().add(new THREE.Vector3(0, by.height + 0.35, 0)), 'Lifted', 'heal', 1.1);
+        this.refreshUnits();
         return;
       }
       case 'rooted': {
@@ -3111,7 +3140,7 @@ export class Diorama {
       }
       case 'freed': {
         const v = this.units.get(e.prisonerId);
-        if (v) this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height, 0)), 'Freed', 'heal', 1.4);
+        if (v) this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height, 0)), 'Unshackled', 'heal', 1.4);
         return;
       }
       case 'out': {
@@ -3583,6 +3612,30 @@ export class Diorama {
     if (sh) sh.visible = on;
   }
 
+  /** V4.1 (spec 31.4): iron shackles on the captive's wrists and ankles while shackled. */
+  private setShackles(v: UnitView, on: boolean): void {
+    let g = v.fig.getObjectByName('shackles') as THREE.Group | undefined;
+    if (!g && on) {
+      g = new THREE.Group();
+      g.name = 'shackles';
+      const iron = new THREE.MeshLambertMaterial({ color: 0x6a6e76, flatShading: true });
+      // Two cuffs at the wrists (in front, joined by a chain), two at the ankles (model space: 1.0 tall, +z forward).
+      for (const [x, y, z] of [[-0.07, 0.42, 0.1], [0.07, 0.42, 0.1], [-0.06, 0.05, 0.02], [0.06, 0.05, 0.02]] as const) {
+        const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 4, 8), iron);
+        cuff.position.set(x, y, z);
+        cuff.rotation.x = Math.PI / 2;
+        g.add(cuff);
+      }
+      for (const y of [0.42, 0.05]) {
+        const chain = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 0.01), iron);
+        chain.position.set(0, y - 0.01, y > 0.2 ? 0.1 : 0.02);
+        g.add(chain);
+      }
+      v.fig.add(g);
+    }
+    if (g) g.visible = on;
+  }
+
   /** 20.5: a crate or barrel breaks: splinters and dust, the prop gone, the loot (if any) on the floor. */
   private async playSmash(e: Extract<GameEvent, { type: 'propSmashed' }>): Promise<void> {
     const lv = this.levels.get(e.at.level);
@@ -3777,6 +3830,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   blink: '⟿',
   hamstring: '➴',
   venomdart: '➶', // V4.0 (spec 29)
+  carry: '⛟', // V4.1 (spec 31.4)
   pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
@@ -3812,7 +3866,8 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   firecracker: 'throws a firecracker to',
   blink: 'blinks away to',
   hamstring: 'shoots the legs of',
-  venomdart: 'throws a venom dart at', // V4.0 (spec 29)
+  venomdart: 'throws a poison dart at', // V4.1 (spec 31.4)
+  carry: 'lifts', // V4.1 (spec 31.4)
   pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 
@@ -3882,8 +3937,9 @@ function pipsHtml(hp: number, max: number, cls: string): string {
 }
 
 /** V4.0 HUD: a hero's tag is their health only (lantern, braced, held and the rest are on the party card). */
-function heroTag(h: HeroInDelve, max: number): string {
-  return pipsHtml(h.hp, max, 'hero');
+function heroTag(h: HeroInDelve, max: number, carried = false): string {
+  // V4.1 (spec 31.4): the downed show their bleed-out count; the poisoned their drop.
+  return pipsHtml(h.hp, max, 'hero') + (h.status === 'downed' ? bleedMark(h.bleed, carried) : '') + venomMark(h);
 }
 
 /** The intent's icon (its glyph when the kind has none yet). */
@@ -3901,13 +3957,16 @@ function monsterTag(m: Monster): string {
   return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}${stuck}${venomMark(m)}`;
 }
 
-/** V4.0 (spec 29): an envenomed figure's drop and countdown, or the paralyzed mark (monsters and crew members). */
-export function venomMark(f: { venom?: number; paralyzed?: number }): string {
-  const p = f.paralyzed ?? 0;
-  if (p > 0) return `<b class="tag-para" title="Paralyzed: can't move or act for ${p} more turn${p === 1 ? '' : 's'}">${iconSvg('venom', 11)}paralyzed</b>`;
-  const v = f.venom ?? 0;
-  if (v > 0) return `<b class="tag-venom" title="Envenomed: paralyzed in ${v} turn${v === 1 ? '' : 's'}">${iconSvg('venom', 11)}${v}</b>`;
-  return '';
+/** V4.1 (spec 31.4): a poisoned figure's drop (heroes, monsters and crew members). */
+export function venomMark(f: { poisoned?: boolean }): string {
+  return f.poisoned ? `<b class="tag-venom" title="Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out.">${iconSvg('venom', 11)}</b>` : '';
+}
+
+/** V4.1 (spec 31.4): a downed hero's or crew member's bleed-out count, on its tag (pillar 15: it decides what you do). */
+function bleedMark(bleed: number | undefined, carried: boolean): string {
+  if (carried) return '<b class="tag-carried" title="Carried: not bleeding">carried</b>';
+  const n = bleed ?? 0;
+  return `<b class="tag-bleed" title="Down: dies in ${n} turn${n === 1 ? '' : 's'}">✚ ${n}</b>`;
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

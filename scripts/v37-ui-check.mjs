@@ -517,7 +517,7 @@ const heroOf = (cls) => s.delve.heroes.find((h) => roster(h.heroId)?.cls === cls
   await idle();
   await p.evaluate(() => { localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: false, fullCards: true })); });
   // The end turn above runs a world phase that may down heroes (V3.9 hits from behind): stand everyone back up.
-  await edit(`s.stage = 'delve'; s.summary = null; s.delve.phase = 'player'; for (const h of s.delve.heroes) { h.status = 'active'; h.hp = Math.max(h.hp, 5); h.moved = false; h.acted = false; h.venom = undefined; h.paralyzed = undefined; h.carrying = undefined; }`); // V4.0 (spec 29): no venom either
+  await edit(`s.stage = 'delve'; s.summary = null; s.delve.phase = 'player'; for (const h of s.delve.heroes) { h.status = 'active'; h.hp = Math.max(h.hp, 5); h.moved = false; h.acted = false; h.poisoned = undefined; h.carrying = undefined; }`); // V4.1 (spec 31.4): no poison either
   await p.evaluate(() => { window.vc.hud.host?.settings && (window.vc.hud.host.settings.noEndTurnAsk = false); });
   await p.waitForTimeout(100);
   // V4.0 HUD: End turn shows one dot per hero who can still act, and says who did nothing yet.

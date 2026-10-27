@@ -14,6 +14,7 @@ import { chance } from './rng';
 import { say, type Ctx, type RivalX } from './state';
 import type { Intent, Item } from './types';
 import { activeHeroes, chestLoot, goAlert, hd, hurtAny, isSatchel, makeNoise, monsterStats, onMap, putOnGround, rivalsOnMap, roll } from './common';
+import { bringCarried } from './common'; // V4.1 (spec 31.4)
 import { canEnter, dijkstra, dirIndex, distField, doorAt, kindAt, litSet, los, seesHex, within } from './world';
 import { approach, blocked, strikeDetailed } from './ai';
 import { hearStep, partySees } from './hearing';
@@ -22,7 +23,7 @@ import { lookAll } from './world-phase';
 import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse, spendPick } from './charges';
 import { digOut } from './delve';
 import { checkWays } from './ways';
-import { envenom, trapDamage } from './venom';
+import { poison, trapDamage } from './poison';
 import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
 
 // ---------------------------------------------------------------- telling the party (pillar 17: visible and named)
@@ -265,6 +266,7 @@ export function crewWalk(c: Ctx, r: RivalX, path: Pos[], sneak = false): boolean
     }
     seg.push(p);
     r.at = { ...p };
+    bringCarried(c, r.id); // V4.1 (spec 31.4): the body it carries shares its hex, step by step
     if (!sneak) hearStep(c, r.id, p);
     if (p.level !== from.level) {
       flush();
@@ -335,14 +337,14 @@ function crewWakeRolls(c: Ctx, r: RivalX, p: Pos, last: boolean, sneak: boolean,
 export function springCrewTrap(c: Ctx, r: RivalX, at: Pos): void {
   const tr = c.d.traps[posKey(at)];
   delete c.d.traps[posKey(at)];
-  // V4.0 (spec 29.5): a venom trap: 1 damage and venom, as on a hero.
+  // V4.1 (spec 31.4): a poison trap: 1 damage and a dose, as on a hero.
   const dmg = trapDamage(tr);
   if (crewSeen(c, r, at)) {
     c.ev.push({ type: 'trap', at: { ...at }, id: r.id, damage: dmg, ...(tr?.venom ? { venom: true } : {}) });
-    say(c, tr?.venom ? `A venom needle bites ${r.name}.` : `A trap bites ${r.name}.`);
+    say(c, tr?.venom ? `A poison needle bites ${r.name}.` : `A trap bites ${r.name}.`);
   }
   hurtAny(c, r.id, dmg, null, { noise: false });
-  if (tr?.venom) envenom(c, r.id, 'trap');
+  if (tr?.venom) poison(c, r.id, 'trap');
   makeNoise(c, at, 2, { what: 'crash' });
 }
 
@@ -389,7 +391,7 @@ function crewDisarm(c: Ctx, r: RivalX, at: Pos): void {
     say(c, `The trap goes off in ${r.name}'s hands.`);
   }
   hurtAny(c, r.id, dmg, null, { noise: false });
-  if (tr?.venom) envenom(c, r.id, 'trap');
+  if (tr?.venom) poison(c, r.id, 'trap');
   makeNoise(c, at, 2, { what: 'crash' });
 }
 

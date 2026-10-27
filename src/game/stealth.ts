@@ -334,13 +334,13 @@ export function wakeRolls(c: Ctx, h: HeroInDelve, p: Pos, last: boolean, sneak: 
 export function monsterCanSwing(m: MonsterX, heroId: string): boolean {
   if (m.buried || m.awareness !== 'hunting') return false;
   if (m.kind === 'dragon' || m.kind === 'gloam') return false;
-  if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0 || (m.paralyzed ?? 0) > 0) return false;
+  if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0) return false;
   return hasNoticed(m, heroId);
 }
 
 export function rivalCanSwing(c: Ctx, r: RivalX): boolean {
   if (c.d.rivals?.stance !== 'hostile') return false;
-  if (r.goneOut || r.hp <= 0 || (r.feared ?? 0) > 0 || (r.paralyzed ?? 0) > 0) return false;
+  if (r.goneOut || r.hp <= 0 || (r.feared ?? 0) > 0) return false;
   return true;
 }
 
@@ -399,7 +399,7 @@ function heroSwingTarget(c: Ctx, id: string): { at: Pos; armor: number; name: st
 
 /** Can this hero swing now: active, free to act, action still ready. */
 export function heroCanSwing(h: HeroInDelve): boolean {
-  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing && !((h.paralyzed ?? 0) > 0);
+  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing;
 }
 
 /**

@@ -6,7 +6,7 @@ import {
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, OIL_LIGHT,
   OVERWATCH_RANGE, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE, THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE,
   VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, ARCHER_RANGE, CAPTAIN_SHOUT_RANGE, GHOUL_RISE_RANGE, KIT_PER_LEVEL,
-  VENOM_ROUNDS, PARALYSIS_ROUNDS, CARRY_MOVE, VENOM_TRAP_DMG,
+  CARRY_MOVE, VENOM_TRAP_DMG, MEND_UP_HP, CARRIED_OUT_HP, UNSHACKLE_SMASH_NOISE,
 } from '../game/data';
 import * as DATA from '../game/data';
 
@@ -226,7 +226,7 @@ export const MONSTER_NAME: Record<MonsterKind | 'gloam', string> = {
 export const MONSTER_NOTE: Record<MonsterKind | 'gloam', string> = {
   rats: 'Weak but quick (moves 4). Runs off when down to 1 HP.',
   orc: 'Hits for 2. Shoves a hero standing on an unrailed edge.',
-  spider: `Webs you from up to 3 away (you can't move next turn), then drags you one hex toward it (pits count). Its bite is venomous: paralyzed ${VENOM_ROUNDS} turns after a bite that hits.`,
+  spider: `Webs you from up to 3 away (you can't move next turn), then drags you one hex toward it (pits count). Its bite is poisonous: a bite that hits poisons you (1 damage a turn, never below 1).`,
   cutpurse: 'Fast. A hit steals a pack item instead of hurting, then it runs for an exit. Kill it to get the item back.',
   berserker: 'Once awake it always hunts, even out of sight. 4 slots, hits hard, knocks heroes back.',
   dragon: `Armor 1. Sleeps on its hoard; noise ${DRAGON_WAKE_NOISE}+ wakes it. Breathes fire down a line (${BREATH_DMG} damage) and sweeps its tail.`,
@@ -282,13 +282,11 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   snuff: '🜂',
   dropTorch: '🜂',
   potion: '⚱',
-  revive: '✚',
   charge: '✹',
   rope: '⌇',
   climb: '⇅',
   jump: '⤓',
   shove: '⇥',
-  free: '⛓',
   bribe: '¤',
   parley: '⚖',
   rally: '⚑',
@@ -330,7 +328,8 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   smashProp: '✊',
   venomdart: '➹',
   antidote: '⚕',
-  shoulder: '⛟',
+  carry: '⛟',
+  unshackle: '⛓',
   setDown: '⇩',
 };
 
@@ -347,26 +346,24 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   take: `Pick up loot next to you or underfoot. Free. Each item fills a pack slot (${PACK_SLOTS} per hero); heirlooms and hoard pieces fill 2.`,
   drop: 'Put a pack item down on this hex. Free.',
   give: 'Hand a pack item to a hero next to you who has room. Free.',
-  disarm: `A spotted trap next to you: 2 Finesse slots. 1 hit disarms it; 0 sets it off (3 damage; a green-ringed venom trap: ${VENOM_TRAP_DMG} and venom). Noise 2.`,
+  disarm: `A spotted trap next to you: 2 Finesse slots. 1 hit disarms it; 0 sets it off (3 damage; a green-ringed poison trap: ${VENOM_TRAP_DMG} and poison). Noise 2.`,
   light: 'Light a brazier next to you: it lights the room around it (radius 3) for good.',
   torch: `Light (or relight) a torch from the pack: radius ${DATA.TORCH_RADIUS} round this hero for ${TORCH_ROUNDS} rounds; it burns 1 a round while lit. Snuff it (free) and it keeps what is left.`,
   snuff: 'Put the torch out. Free. It keeps the rounds it has left; relight it later (an action).',
   dropTorch: 'Set the burning torch down on this hex. Free. It keeps burning there and lights the spot; pick it up again with Take.',
-  potion: 'Drink it, or give it to a hero next to you: heals 5. Gets a downed hero back up.',
-  revive: 'Get a downed hero next to you back up with 3 HP. They come home wounded.',
+  potion: 'Drink it, or give it to a hero next to you: heals 5. A downed hero next to you gets up at 5 (a greater potion: 8).',
   charge: `Set a bought charge on a door, chest or cracked wall next to you, fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; opens locks, breaks cracked walls and built walls on Levels 1 and 2. Noise ${V37.blastNoise}, heard a level up and down.`,
   rope: 'Anchor a rope at this pit edge. From then on anyone here can Climb down and back up.',
   climb: 'Climb the rope to the other level, no damage. Takes the whole turn (move and action).',
   jump: 'Drop into the pit to the level below. The fall hurts, more for each level. Takes the whole turn.',
   shove: 'Push an enemy next to you 1 hex straight away: 2 Might slots (Sellsword 3), needs 2 hits. Into a pit it falls; into a wall it takes 1. Noise 2.',
-  free: 'Unshackle the prisoner next to you. They follow this hero; an escort moves 3 at most. Get them to an exit.',
   bribe: 'Pay the rival crew 40 gold from the party\'s packs: they stop fighting and leave.',
   parley: 'Talk to a rival crew within 4 hexes, in sight. Free. Opens the deal card: pay them to leave, buy a truce, give them a job, hire them, or fight. One deal per crew per round; paid from the party\'s packs.',
   rally: `Every other hero within 3 gains 1 Focus (max ${FOCUS_MAX}). Ready again after 3 rounds.`,
   guard: 'Until your next turn, attacks aimed at the ally next to you hit you instead.',
   firebolt: '1 mana. 3 Wits slots at range 5 in sight, 2 damage per hit; all 3 hit: +1. Noise 3.',
   kindle: `1 mana. Light a torch or lantern held by a hero within ${DATA.KINDLE_RANGE} (yourself too), or add ${KINDLE_LIGHT} rounds to one that burns. Silent, no roll.`,
-  mend: '1 mana. Heal 4 on a hero within 3, yourself included. Silent, no roll.',
+  mend: `1 mana. Heal 4 on a hero within 3, yourself included, and cure their poison. A downed hero within 3 gets up at ${MEND_UP_HP}. Silent, no roll.`,
   passLantern: 'Retired: the lantern is a pack item now. Give hands it to a hero next to you.',
   winch: `Work the winch: the lift runs for the rest of the delve. Noise ${WINCH_NOISE}.`,
   leave: 'Step out of the castle here. Free. This hero is safe, with everything in their pack.',
@@ -400,10 +397,11 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   oil: `Pour a flask into the lantern in your pack: ${OIL_LIGHT} more rounds (${DATA.LANTERN_MAX} at most). Silent.`,
   grapple: 'From a pit landing, climb straight up to the level above. The hook is kept. Takes the whole turn.',
   nightsight: 'The old night-eye draught has gone flat: Night-eye Stout is poured at the Flagon now.',
-  venomdart: `Throw ${THROW_RANGE.venomdart}, 1 Finesse slot, at a monster or crew member in sight (not the Dragon or the Gloam): a hit envenoms it. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: it can't move or act. Silent; a second dart takes a turn off the countdown.`,
-  antidote: 'Drink it while envenomed, or give it to a hero next to you who is envenomed or paralyzed (an action): the venom is drawn out and the paralyzed can move again.',
-  shoulder: `Lift a paralyzed hero next to you onto your shoulders (uses the action). They come along on every move; you move ${CARRY_MOVE} at most. Leave by an exit and they come out with you. Set them down for free.`,
-  setDown: 'Put down the hero you carry, next to you. Free.',
+  venomdart: `Throw ${THROW_RANGE.venomdart}, 1 Finesse slot, at a monster or crew member in sight (not the Dragon or the Gloam): a hit poisons it: 1 damage a turn, never below 1, until it is cured. Silent.`,
+  antidote: 'Drink it while poisoned, or give it to a poisoned hero next to you, up or down (an action): the poison is gone.',
+  carry: `Lift a downed hero or a shackled captive next to you (uses the action). They share your hex and come along; you move ${CARRY_MOVE} at most and take only free actions (doors, Take, Drop, Give, Leave, Parley) while you carry them. No jumping, climbing, grappling or blinking. A carried hero doesn't bleed. Leave by an exit with them: a downed hero comes out alive at ${CARRIED_OUT_HP} HP, a captive is rescued.`,
+  unshackle: `Free the shackled captive next to you (an action): lockpicks (sure, silent), the skeleton key (used up, silent), an improvised pick (uses one, sure), or Smash (2 Might slots, 1 hit, noise ${UNSHACKLE_SMASH_NOISE} either way). Unshackled, they follow you at walk 4 without slowing you; leave with them next to you to rescue them.`,
+  setDown: 'Put down the body you carry, next to you. Free.',
 };
 
 /** Attack help with the hero's own weapon numbers. Everything else: ACTION_HELP. */
@@ -490,8 +488,8 @@ export const ITEM_HELP: Record<string, string> = {
   improvised: `Bent nails and hairpins: each Pick at 2 Finesse slots uses one up, whatever happens. A Burglar brings ${KIT_PER_LEVEL === 1 ? 'one' : KIT_PER_LEVEL} a level each delve; they take no pack slot.`,
   'improvised-charge': `The Sapper's own: black powder in a tin with a fuse. Blasts like a blasting charge: ${V37.blastInner} damage within 1 (and a shove), ${V37.blastOuter} within 2; opens locks, breaks walls on Levels 1 and 2. Noise ${V37.blastNoise}. ${KIT_PER_LEVEL === 1 ? 'One' : KIT_PER_LEVEL} a level each delve, no pack slot, spent before bought charges; can't be given away.`,
   nightsight: 'An old night-eye draught, gone flat. It does nothing now: Night-eye Stout is poured at the Flagon.',
-  venomdart: `1 Finesse slot: a hit envenoms a monster or crew member. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: no moving, no acting. Not the Dragon or the Gloam. Silent.`,
-  antidote: 'Draws out venom: an envenomed hero is clean again, a paralyzed one can move again. Drink it, or give it to a hero next to you (an action).',
+  venomdart: '1 Finesse slot: a hit poisons a monster or crew member: 1 damage a turn, never below 1. Not the Dragon or the Gloam. Silent.',
+  antidote: 'Cures poison. Drink it, or give it to a hero next to you, up or down (an action).',
   greaterpotion: `Heals ${DATA.POTION_HEAL.greaterpotion}, or gets a downed hero back up. Aldric and Ilse's.`, // V4.1 (spec 31.3)
 };
 
@@ -569,13 +567,11 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   snuff: 't',
   dropTorch: 'u',
   potion: 'h',
-  revive: 'v',
   light: 'l',
   rally: 'r',
   guard: 'r',
   kindle: 'k',
   mend: 'm',
-  free: 'g',
   leave: 'q',
   disarm: 'd',
   shove: 'z',
@@ -620,7 +616,8 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   smashProp: 'x',
   venomdart: 'z',
   antidote: 'h',
-  shoulder: 'g',
+  carry: 'g',
+  unshackle: 'u',
   setDown: 'g',
 };
 
@@ -696,8 +693,8 @@ export const ITEM_EFFECT: Record<string, string> = {
   improvised: 'Each Pick at 2 Finesse slots uses one up. A Burglar brings one a level each delve, outside the pack slots.',
   'improvised-charge': "The Sapper's own: one a level each delve, outside the pack slots. Blasts like a blasting charge; spent first.",
   nightsight: 'An old night-eye draught, gone flat. It does nothing now: Night-eye Stout is poured at the Flagon.',
-  venomdart: `Throw 5, 1 Finesse slot: a hit envenoms a monster or crew member; ${VENOM_ROUNDS} turns later it is paralyzed for ${PARALYSIS_ROUNDS}. Silent.`,
-  antidote: 'Drink, or give to a hero next to you: draws out venom, even from the paralyzed.',
+  venomdart: 'Throw 5, 1 Finesse slot: a hit poisons a monster or crew member (1 damage a turn, never below 1). Silent.',
+  antidote: 'Drink, or give to a hero next to you, up or down: cures poison.',
   greaterpotion: `Drink or give: heals ${DATA.POTION_HEAL.greaterpotion}.`, // V4.1 (spec 31.3)
 };
 
@@ -869,7 +866,7 @@ export const CREW: Record<CrewId, { name: string; blurb: string; colour: string;
 export const CREW_KIT: Record<string, string> = {
   ranger: 'Longbow at range 6. Caltrops on the hex you would charge through; overwatch when nobody is in reach.',
   shadowmancer: 'Veils the striker on first contact; a firecracker to pull monsters onto you; blinks away below half.',
-  burglar: 'Walks 5, sneaks 4 on quiet feet. A venom dart for a hero standing alone (the Gallows Choir\'s), sleep darts at whoever carries the most light; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
+  burglar: 'Walks 5, sneaks 4 on quiet feet. A poison dart for a hero standing alone (the Gallows Choir\'s), sleep darts at whoever carries the most light; smoke when two of you have a line on a wounded friend. Picks locks, disarms traps, backstabs a hero who hasn\'t seen her from straight behind.',
   sellsword: 'Shield and sword, armor. Guards the crew\'s caster; glue on your front line when two heroes stand together. Shoves off edges.',
   sapper: 'Hammer, improvised explosives and charges: sets one on your path with a 1-turn fuse, throws one when a hero stands on a pit edge. Digs through cracked walls and blasts locked doors when that\'s the short way.',
   pyromancer: 'Firebolt at range 5; fireball when three heroes stand within 1 of a hex.',
@@ -1032,7 +1029,7 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   oil: { group: 'light', short: 'Tops up the lantern.' },
   lantern: { group: 'light', short: 'A light that lasts, refilled in camp.' },
   potion: { group: 'light', short: 'Heals, or gets a downed friend up.' },
-  antidote: { group: 'light', short: 'Draws out venom, even from the paralyzed.' },
+  antidote: { group: 'light', short: 'Cures poison.' },
   greaterpotion: { group: 'light', short: 'Heals more, or gets a downed friend up.' }, // V4.1 (spec 31.3)
   nightsight: { group: 'light', short: 'See in the dark for a while.' },
   rope: { group: 'around', short: 'Down a pit, and back up.' },
@@ -1041,7 +1038,7 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   key: { group: 'around', short: 'Opens one lock, silently.' },
   lockpicks: { group: 'around', short: 'Pick locks quietly, as often as you like.' },
   dart: { group: 'quiet', short: 'Puts a monster to sleep, silently.' },
-  venomdart: { group: 'quiet', short: 'Envenoms a monster: in 3 turns it locks up.' },
+  venomdart: { group: 'quiet', short: 'Poisons a monster: 1 a turn, never below 1.' },
   smoke: { group: 'quiet', short: 'Blinds both ways. Hunters lose you.' },
   glue: { group: 'quiet', short: 'Sticks monsters where they stand.' },
   firecracker: { group: 'quiet', short: 'A loud bang, somewhere else.' },

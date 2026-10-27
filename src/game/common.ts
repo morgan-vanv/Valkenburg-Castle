@@ -1,7 +1,7 @@
 // Shared delve helpers: lookups, occupancy, rolls, damage, noise, loot.
 
 import { DARK_PENALTY } from './data'; // V4.1 (WS2)
-import { distance, posKey, samePos, type Pos } from './hex';
+import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
   BLEED_START, BRACE_CHANCE, BRACE_DMG, CLASSES, CUTTHROAT_HEAR, FIRESIDE_HEAL, FOCUS_MAX, RESERVE_FOCUS, DRAGON_WAKE_NOISE, GEMS, JEWELRY, MONSTERS, PACK_SLOTS, SEARCH_ROUNDS,
@@ -9,7 +9,7 @@ import {
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX, type RivalX } from './state';
-import { lightTierAt, litSet, nightEyedHero, noiseField, within, type World } from './world';
+import { lightTierAt, litSet, nightEyedHero, noiseField, standable, within, type World } from './world';
 import { faceToward, forgetHeroes, noticeFigure } from './stealth';
 import { CLASH_HEAR, hearLoud, type LoudWhat } from './hearing';
 
@@ -85,16 +85,97 @@ export function shieldWalled(c: Ctx, m: MonsterX): boolean {
 
 // ---------------------------------------------------------------- occupancy
 
-/** Who stands at p: a hero (active/downed), monster, rival on the map, or the prisoner. */
+/**
+ * Who stands at p: a hero (active/downed), monster, rival on the map (V4.1: up or downed), or the prisoner. V4.1 (spec
+ * 31.4): a carried body shares its carrier's hex and isn't counted (the carrier is).
+ */
 export function occupant(c: Ctx, p: Pos): { kind: 'hero' | 'monster' | 'rival' | 'prisoner'; id: string } | null {
   for (const m of c.d.monsters) if (!m.buried && samePos(m.at, p)) return { kind: 'monster', id: m.id };
   for (const r of rivalsOnMap(c)) if (samePos(r.at, p)) return { kind: 'rival', id: r.id };
+  for (const r of downedCrew(c)) if (samePos(r.at, p) && !isCarried(c, r.id)) return { kind: 'rival', id: r.id };
   for (const h of c.d.heroes) {
-    if ((h.status === 'active' || h.status === 'downed') && samePos(h.at, p)) return { kind: 'hero', id: h.heroId };
+    if ((h.status === 'active' || h.status === 'downed') && samePos(h.at, p) && !isCarried(c, h.heroId)) return { kind: 'hero', id: h.heroId };
   }
   const pr = c.d.prisoner;
-  if (pr && !pr.out && !pr.dead && samePos(pr.at, p)) return { kind: 'prisoner', id: pr.id };
+  if (pr && !pr.out && !pr.dead && samePos(pr.at, p) && !isCarried(c, pr.id)) return { kind: 'prisoner', id: pr.id };
   return null;
+}
+
+// ---------------------------------------------------------------- V4.1 (WS3, spec 31.4): carried bodies and downed crew
+
+/**
+ * V4.1 (spec 31.4): every figure on hex `p`, carried bodies included (a carrier and its load share a hex): monsters, crew
+ * members up or down, heroes up or down, the prisoner. For area effects: everyone on the hex is hit.
+ */
+export function bodiesOn(c: Ctx, p: Pos): string[] {
+  const out: string[] = [];
+  for (const m of c.d.monsters) if (!m.buried && samePos(m.at, p)) out.push(m.id);
+  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (samePos(r.at, p)) out.push(r.id);
+  for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && samePos(h.at, p)) out.push(h.heroId);
+  const pr = c.d.prisoner;
+  if (pr && !pr.out && !pr.dead && samePos(pr.at, p)) out.push(pr.id);
+  return out;
+}
+
+/** V4.1 (spec 31.4): crew members down on the map (0 HP, bleeding out). Not in `rivalsOnMap` (which is those still up). */
+export function downedCrew(c: Ctx): RivalX[] {
+  const cr = c.d.rivals;
+  if (!cr || !cr.entered) return [];
+  return cr.members.filter((r) => !r.goneOut && !!r.downed);
+}
+
+/** V4.1 (spec 31.4): who carries body `id` (a hero, a crew member, or nobody): a hero's `carrying`, a member's `carrying` or `dragging`. */
+export function carrierOf(c: Ctx, id: string): { hero?: HeroInDelve; rival?: RivalX } | null {
+  const h = c.d.heroes.find((x) => x.carrying === id && x.status === 'active');
+  if (h) return { hero: h };
+  const r = rivalsOnMap(c).find((x) => x.carrying === id || x.dragging === id);
+  return r ? { rival: r } : null;
+}
+
+export function isCarried(c: Ctx, id: string): boolean {
+  return !!carrierOf(c, id);
+}
+
+/** Set the position of body `id` (a hero, the prisoner or a crew member) without events. */
+function placeBody(c: Ctx, id: string, at: Pos): Pos | undefined {
+  const h = hd(c, id);
+  const f = h ?? (c.d.prisoner?.id === id ? c.d.prisoner : undefined) ?? c.d.rivals?.members.find((x) => x.id === id);
+  if (!f) return undefined;
+  const from = f.at;
+  f.at = { ...at };
+  return from;
+}
+
+/** V4.1 (spec 31.4): every carried body onto its carrier's hex (after any move, push, fall or blink of the carrier). */
+export function syncCarried(c: Ctx): void {
+  for (const h of c.d.heroes) if (h.carrying && h.status === 'active') placeBody(c, h.carrying, h.at);
+  for (const r of rivalsOnMap(c)) {
+    if (r.carrying) placeBody(c, r.carrying, r.at);
+    if (r.dragging) placeBody(c, r.dragging, r.at);
+  }
+}
+
+/** V4.1 (spec 31.4): the body carried by the figure at `carrierId`, moved onto its hex now (one carrier). */
+export function bringCarried(c: Ctx, carrierId: string): string | undefined {
+  const h = hd(c, carrierId);
+  const r = h ? undefined : c.d.rivals?.members.find((x) => x.id === carrierId);
+  const id = h?.carrying ?? r?.carrying ?? r?.dragging;
+  const at = (h ?? r)?.at;
+  if (id && at) placeBody(c, id, at);
+  return id;
+}
+
+/**
+ * V4.1 (spec 31.4): a body put down off a carrier still standing at `at`: onto a free hex next to it (nearest first,
+ * not onto traps, vents or fire), else it stays on the carrier's hex.
+ */
+export function setDownNear(c: Ctx, id: string, at: Pos): void {
+  const w = c.w;
+  const spot = posNeighbors(at).find((p) => standable(w, c.d, p) && !occupant(c, p) && !c.d.traps[posKey(p)] && !w.vents.has(posKey(p)) && !(c.d.burning?.[posKey(p)]));
+  if (spot) {
+    placeBody(c, id, spot);
+    c.ev.push({ type: 'moved', id, path: [{ ...spot }] });
+  }
 }
 
 export function rivalsOnMap(c: Ctx) {
@@ -160,7 +241,7 @@ const SINGLE: Record<ItemKind, string> = {
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
   lockpicks: 'Lockpicks', improvised: 'Improvised pick', 'improvised-charge': 'Improvised explosive', nightsight: 'Night-eye draught',
   gatekey: 'Sally port key',
-  antidote: 'Antidote', venomdart: 'Venom dart', lantern: 'Lantern', // V4.1 (WS2)
+  antidote: 'Antipoison', venomdart: 'Poison dart', lantern: 'Lantern', // V4.1 (WS2); V4.1 (spec 31.4): player-facing names
   greaterpotion: 'Greater potion', // V4.1 (spec 31.3)
 };
 
@@ -271,6 +352,9 @@ export function killHero(c: Ctx, h: HeroInDelve): void {
   h.pack = [];
   if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
   h.escorting = undefined;
+  // V4.1 (spec 31.4): carrying ends; the body lies on this hex. Whoever carried this hero has nothing now.
+  h.carrying = undefined;
+  for (const o of c.d.heroes) if (o.carrying === h.heroId) o.carrying = undefined;
   // V3.7 (spec 20.4): a member dragging them lets go.
   for (const r of c.d.rivals?.members ?? []) if (r.dragging === h.heroId) r.dragging = undefined;
   // V4.1 (WS2): a lit torch or open lantern in the pack drops with it, still burning (lost gear as usual).
@@ -290,6 +374,11 @@ export function hurtHero(c: Ctx, h: HeroInDelve, dmg: number, by: string, crit =
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
       if (h.guarding) h.guarding = undefined;
+      // V4.1 (spec 31.4): a downed carrier drops what they carried: it lies on their hex.
+      if (h.carrying) {
+        c.ev.push({ type: 'setDown', by: h.heroId, id: h.carrying });
+        h.carrying = undefined;
+      }
     }
   } else if (h.status === 'downed') {
     c.ev.push({ type: 'hit', attacker: by, target: h.heroId, damage: dmg, crit });
@@ -310,6 +399,7 @@ export function hurtPrisoner(c: Ctx, dmg: number, by: string): void {
       if (e) e.escorting = undefined;
     }
     p.escortedBy = undefined;
+    for (const h of c.d.heroes) if (h.carrying === p.id) h.carrying = undefined; // V4.1 (spec 31.4)
     c.ev.push({ type: 'died', id: p.id });
     say(c, `${p.name} is dead. So is the contract.`);
     noteOnce(c, `${p.name} died in the castle.`);
@@ -416,31 +506,63 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
       say(c, `${g.name} steps in front of ${r.name}.`);
       r = g;
     }
+    // V4.1 (spec 31.4, pillar 17): any damage to a downed member kills it.
+    const wasDown = !!r.downed;
     r.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: r.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
     if (opts.noise !== false) hearLoud(c, r.at, CLASH_HEAR, 'scream');
     if (by && hd(c, by)) makeHostile(c);
-    if (r.hp <= 0) {
-      r.hp = 0;
-      c.ev.push({ type: 'monsterDied', id: r.id });
-      say(c, `${r.name} falls.`);
-      // Spec 20.4: spoils: the purse and loot, and the pack. A dragged hero is dropped where they lie.
-      // V4.0 (spec 28.6): class kit (a crew Sapper's improvised explosives) goes with the member, as with a hero.
-      putOnGround(c, r.at, [...r.loot, ...(r.pack ?? []).filter((i) => !isKit(i))]);
-      r.loot = [];
-      r.pack = r.pack ? [] : r.pack;
-      dropCaptive(c, r, 'falls');
-      if (by && hd(c, by)) {
-        c.d.kills[by] = (c.d.kills[by] ?? 0) + 1;
-        (c.d.xp ??= {})[by] = (c.d.xp[by] ?? 0) + 1;
-      }
+    if (r.hp <= 0 && !wasDown) {
+      // V4.1 (spec 31.4): at 0 HP a member goes down (bleeds out in BLEED_START) instead of dying outright.
+      downMember(c, r, by);
       if (opts.noise !== false) makeNoise(c, r.at, 2);
-    }
+    } else if (wasDown) killMember(c, r);
     return;
   }
   if (c.d.prisoner?.id === id) return hurtPrisoner(c, dmg, by ?? 'blast');
   const h = hd(c, id);
   if (h) hurtHero(c, h, dmg, by ?? 'blast', !!opts.crit);
+}
+
+/**
+ * V4.1 (spec 31.4, pillar 17): a crew member goes down at 0 HP: it bleeds out in BLEED_START world phases; a hero it held
+ * or carried and a crewmate it carried are dropped where it lies. The kill (and its XP) is the hero's who downed it.
+ */
+export function downMember(c: Ctx, r: RivalX, by: string | null): void {
+  r.hp = 0;
+  r.downed = true;
+  r.bleed = BLEED_START;
+  r.intent = undefined;
+  r.overwatch = false;
+  r.guarding = undefined;
+  r.feared = undefined;
+  c.ev.push({ type: 'downed', id: r.id });
+  say(c, `${r.name} goes down.`);
+  dropCaptive(c, r, 'goes down');
+  if (r.carrying) {
+    c.ev.push({ type: 'setDown', by: r.id, id: r.carrying });
+    r.carrying = undefined;
+  }
+  if (by && hd(c, by)) {
+    c.d.kills[by] = (c.d.kills[by] ?? 0) + 1;
+    (c.d.xp ??= {})[by] = (c.d.xp[by] ?? 0) + 1;
+  }
+}
+
+/** V4.1 (spec 31.4): a downed crew member dies (finished, or bled out): spoils on its hex (spec 20.4), its carrier lets go. */
+export function killMember(c: Ctx, r: RivalX): void {
+  r.hp = 0;
+  r.downed = undefined;
+  r.bleed = undefined;
+  for (const o of c.d.rivals?.members ?? []) if (o.carrying === r.id) o.carrying = undefined;
+  c.ev.push({ type: 'monsterDied', id: r.id });
+  say(c, `${r.name} is dead.`);
+  // Spec 20.4: spoils: the purse and loot, and the pack. V4.0 (spec 28.6): class kit goes with the member, as with a hero.
+  putOnGround(c, r.at, [...r.loot, ...(r.pack ?? []).filter((i) => !isKit(i))]);
+  r.loot = [];
+  r.pack = r.pack ? [] : r.pack;
+  dropCaptive(c, r, 'dies');
+  r.carrying = undefined;
 }
 
 /** Attacked (or told to fight): the crew turns hostile; a paid crew keeps what it was paid (spec 18.6). */
@@ -482,6 +604,8 @@ export function releaseCrewHold(c: Ctx, r: RivalX): string | undefined {
     h.grabbedBy = undefined;
     c.ev.push({ type: 'released', id });
   }
+  // V4.1 (spec 31.4): the hero shared the member's hex; awake, they stand up beside it (downed, they lie where it is).
+  if (h && h.status === 'active' && samePos(h.at, r.at)) setDownNear(c, id, r.at);
   return id;
 }
 
@@ -529,8 +653,7 @@ export function makeNoise(c: Ctx, at: Pos, radius: number, opts: { otherLevels?:
   // Spec 18.5: a waiting cutthroat crew hears noise of 4 or more.
   if (radius >= CUTTHROAT_HEAR && c.d.phase === 'player' && c.d.rivals?.stance === 'waiting' && rivalsOnMap(c).some((r) => heard.has(posKey(r.at)))) crewDemand(c);
   for (const m of c.d.monsters) {
-    // V4.0 (spec 29.2): a paralyzed monster can't turn or go anywhere for a noise.
-    if (m.kind === 'gloam' || m.buried || (m.paralyzed ?? 0) > 0) continue;
+    if (m.kind === 'gloam' || m.buried) continue;
     let hears = heard.has(posKey(m.at));
     if (!hears && opts.otherLevels && Math.abs(m.at.level - at.level) === 1) hears = distance(m.at, at) <= radius;
     if (!hears) continue;

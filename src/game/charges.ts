@@ -12,6 +12,7 @@ import type { Fuse, HeroClass, HeroInDelve, Item, RivalClass } from './types';
 import { BLAST_INNER_DMG, BLAST_NOISE, BLAST_OUTER_DMG, kitPerDelve } from './data';
 import { say, type Ctx, type DelveX } from './state';
 import { chestLoot, hd, hurtAny, isSatchel, makeItem, makeNoise, nameOf, occupant, onMap, putOnGround, rivalsOnMap } from './common';
+import { downedCrew } from './common'; // V4.1 (spec 31.4)
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
 import { checkWays, wayAtHex } from './ways';
@@ -289,7 +290,7 @@ export function blast(c: Ctx, at: Pos, by: string): void {
   // Damage: inner ring 4, outer ring 2; the shield for the setter's side.
   const hurt: [string, Pos][] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && m.at.level === at.level && distance(m.at, at) <= 2) hurt.push([m.id, m.at]);
-  for (const r of rivalsOnMap(c)) if (r.at.level === at.level && distance(r.at, at) <= 2) hurt.push([r.id, r.at]);
+  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (r.at.level === at.level && distance(r.at, at) <= 2) hurt.push([r.id, r.at]); // V4.1 (spec 31.4): the downed too
   for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && h.at.level === at.level && distance(h.at, at) <= 2) hurt.push([h.heroId, h.at]);
   const pr = c.d.prisoner;
   if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= 2) hurt.push([pr.id, pr.at]);

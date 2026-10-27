@@ -11,7 +11,7 @@ export const PACK_SLOTS = 4;
 export const FOCUS_MAX = 3;
 export const MANA_MAX = 3;
 export const TORCH_ROUNDS = 15; // V4.1 (WS2): was 12
-export const BLEED_START = 2;
+export const BLEED_START = 3; // V4.1 (spec 31.4): was 2
 
 export interface Weapon {
   name: string;
@@ -403,13 +403,15 @@ export const SHOP: ShopOffer[] = [
   { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.', needs: 'alchemist' },
   { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.', needs: 'alchemist' },
   // V4.0 (spec 29.3): Mott sold venom darts from the start; V4.1: Ilse does.
-  { kind: 'venomdart', name: 'Venom dart', price: 30, text: 'Throw 5: a Finesse hit envenoms a monster or crew member: paralyzed in 3 turns, for 6. Silent.', needs: 'alchemist' },
+  // V4.1 (spec 31.4): the poison dart (internal kind `venomdart` kept).
+  { kind: 'venomdart', name: 'Poison dart', price: 30, text: 'Throw 5: a Finesse hit poisons a monster or crew member: 1 damage a turn, never below 1. Silent.', needs: 'alchemist' },
   { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
   { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
   { kind: 'oil', name: 'Oil flask', price: 15, text: '+10 to a lantern (an action, or Kindle\'s cousin).', needs: 'alchemist' },
   // V4.0 (spec 29.6): an essential: always sold.
-  { kind: 'antidote', name: 'Antidote', price: 20, text: 'Drink, or give to a hero next to you (an action): draws out venom, even from the paralyzed.' },
+  // V4.1 (spec 31.4): the antipoison (internal kind `antidote` kept).
+  { kind: 'antidote', name: 'Antipoison', price: 20, text: 'Drink, or give to a hero next to you, up or down (an action): cures poison.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
   // V3.6 (spec 19.2, 19.3).
   { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.', needs: 'smith' },
@@ -466,16 +468,29 @@ export const WARD_ROUNDS = 2;
 export const VEIL_BREAK_NOISE = 4;
 export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker' | 'venomdart', number> = { smoke: 4, glue: 4, dart: 5, firecracker: 6, venomdart: 5 };
 
-// V4.0 (spec 29): venom and paralysis.
-/** World phases from the first dose to paralysis; a second dose while envenomed takes 1 off (to 1 at least). */
-export const VENOM_ROUNDS = 3;
-/** World phases a paralyzed figure stays paralyzed before it wears off (owner: a long time). */
-export const PARALYSIS_ROUNDS = 6;
-/** A trap's bite (spec 13.4) and a venom trap's (1 and venom instead). */
+// V4.0 (spec 29): venom and paralysis. V4.1 (spec 31.4): poison replaces both (VENOM_ROUNDS, PARALYSIS_ROUNDS gone).
+/** A trap's bite (spec 13.4) and a poison trap's (1 and a dose instead; internal name kept). */
 export const TRAP_DMG = 3;
 export const VENOM_TRAP_DMG = 1;
-/** A hero shouldering a paralyzed ally moves this far at most (dash too), like HEAVY_MOVE. */
+/** V4.1 (spec 31.4): a hero (or crew member) carrying a body moves this far at most (dash too), like HEAVY_MOVE. */
 export const CARRY_MOVE = 3;
+
+// V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
+/** Poison: damage at step 2 of every world phase, and the HP it never takes a figure below. */
+export const POISON_DMG = 1;
+export const POISON_FLOOR = 1;
+/** Mend on a downed hero (or crew member) within 3 gets them up at this HP. */
+export const MEND_UP_HP = 2;
+/** A downed hero carried out of the castle comes out at this HP. */
+export const CARRIED_OUT_HP = 1;
+/** Splints (Gerda and Aldric home): a downed hero crawls this many hexes a turn. */
+export const CRAWL_MOVE = 1;
+/** Unshackle by Smash: Might slots, hits needed, noise either way (as smashing a chest). */
+export const UNSHACKLE_SMASH_SLOTS = 2;
+export const UNSHACKLE_SMASH_HITS = 1;
+export const UNSHACKLE_SMASH_NOISE = 4;
+/** Unshackle with an improvised pick: sure, but not silent. */
+export const UNSHACKLE_IMPROVISED_NOISE = 2;
 export const SMOKE_ROUNDS = 2;
 export const GLUE_ROUNDS = 2;
 export const CALTROPS_DMG = 2;

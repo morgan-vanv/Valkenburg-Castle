@@ -15,7 +15,7 @@ import { figure } from './falls';
 import { wayAtEntrance, wayOpen } from './ways';
 import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
 import { rivalStats } from './rivals';
-import { envenom } from './venom';
+import { poison } from './poison';
 import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
 
 // ---------------------------------------------------------------- perception
@@ -37,7 +37,8 @@ export function targets(c: Ctx): Target[] {
     out.push({ id: h.heroId, at: h.at, armor: armorOf(heroDef(c, h.heroId)!), hero: h });
   }
   const pr = c.d.prisoner;
-  if (pr && pr.freed && !pr.dead && !pr.out) out.push({ id: pr.id, at: pr.at, armor: 0 });
+  // V4.1 (spec 31.4): the unshackled captive, or a shackled one being carried (a strike on the hex may pick them).
+  if (pr && !pr.dead && !pr.out && (pr.freed || c.d.heroes.some((h) => h.carrying === pr.id && h.status === 'active'))) out.push({ id: pr.id, at: pr.at, armor: 0 });
   return out;
 }
 
@@ -247,7 +248,7 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
   if (h && wasUp && h.status !== 'active' && unseenAttacker) hearLoud(c, h.at, DOWNED_HEAR, 'scream', { seen: false });
-  if (h && spiderBite(c, attacker)) envenom(c, tid, attacker);
+  if (h && h.status === 'active' && spiderBite(c, attacker)) poison(c, tid, attacker); // V4.1 (spec 31.4)
   return { hit: tid, hits: r.hits, damage: total };
 }
 
@@ -270,11 +271,11 @@ function strikeCrew(c: Ctx, attacker: string, r: RivalX, slots: number, p: numbe
   const total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0)) + (rr.perfect ? 1 : 0);
   hurtAny(c, r.id, total, attacker, { crit: rr.perfect });
   turnOnHit(c, r.id, attacker);
-  if (spiderBite(c, attacker)) envenom(c, r.id, attacker); // V4.0 (spec 29.3): crew members too (pillar 17)
+  if (spiderBite(c, attacker)) poison(c, r.id, attacker); // V4.1 (spec 31.4): crew members too (pillar 17)
   return { hit: r.id, hits: rr.hits, damage: total };
 }
 
-/** V4.0 (spec 29.3): a spider's bite that hits envenoms (its attacks and free swings, every level). */
+/** V4.0 (spec 29.3), V4.1 (spec 31.4): a spider's bite that hits poisons (its attacks and free swings, every level). */
 function spiderBite(c: Ctx, attacker: string): boolean {
   return c.d.monsters.some((m) => m.id === attacker && m.kind === 'spider');
 }

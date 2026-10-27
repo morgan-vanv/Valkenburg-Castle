@@ -5,8 +5,8 @@
 // the hovered figure, the monster sight shading on hover, the target card and the roll panel (a % on each die, an
 // outcome bar, Focus diamonds raising the kill chance), the castle's turn (banner, folded hotbar), the Chronicle
 // folding and opening (remembered), the parley tiles, the return report's boxes, and the first-delve coach marks
-// (shown once, gone for good once done). V4.0 venom (spec 29): the countdown on a card, the antidote from the pack, Shoulder
-// next to a paralyzed ally. V4.0 spec 30.3/30.4: the hovered (or Tab-chosen) target marked apart from the other options, a
+// (shown once, gone for good once done). V4.1 poison (spec 31.4): the drop on a card, the antipoison from the pack; a downed ally's
+// bleed count, Carry (the body on the carrier's hex). V4.0 spec 30.3/30.4: the hovered (or Tab-chosen) target marked apart from the other options, a
 // pill entry marking its figure, a jump's landing; a Sapper with no charges and nobody in reach shows no unusable buttons;
 // the hotbar never scrolls at 1280, 1440 and 2560 wide (SHOTS=<dir> saves screenshots). No page errors.
 //   node scripts/v40-hud-check.mjs <baseUrl>      (npx vite preview --port 4185 --strictPort → http://localhost:4185/)
@@ -203,7 +203,7 @@ if (orc) {
   check('Esc closes the roll panel', !(await shown('.dl-roll')));
 }
 
-// ---- V4.0 venom (spec 29): the venom countdown on a card, an antidote from the pack clears it, Shoulder next to a paralyzed ally
+// ---- V4.1 poison (spec 31.4): the drop on a card, an antipoison from the pack clears it; a downed ally's bleed count, Carry
 const SHOTS = process.env.SHOTS ?? '';
 {
   const ids = await p.evaluate((spots) => {
@@ -211,44 +211,40 @@ const SHOTS = process.env.SHOTS ?? '';
     s.delve.monsters = s.delve.monsters.filter((m) => !(m.at.level === 1 && Math.abs(m.at.r - 16) <= 3 && Math.abs(m.at.q - 12) <= 6));
     const [k, f] = s.delve.heroes;
     k.at = spots[0]; f.at = spots[1];
-    for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.venom = undefined; h.paralyzed = undefined; }
-    f.venom = 2;
+    for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.poisoned = undefined; h.carrying = undefined; }
+    f.poisoned = true;
     k.pack = k.pack.filter((i) => i.kind !== 'gold' && i.kind !== 'gem').slice(0, 2);
-    k.pack.push({ id: 'va1', kind: 'antidote', name: 'Antidote', amount: 1, slots: 1 });
+    k.pack.push({ id: 'va1', kind: 'antidote', name: 'Antipoison', amount: 1, slots: 1 });
     window.vc.load(s);
     window.vc.hud.select(k.heroId);
     return { k: k.heroId, f: f.heroId };
   }, [ax(20, 16), ax(20, 17)]);
   await p.waitForTimeout(300);
-  const vcard = await p.evaluate((id) => { const e = document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`); return e ? { text: e.innerText.trim(), tip: e.dataset.tip ?? '', label: e.getAttribute('aria-label') ?? '' } : null; }, ids.f);
-  check('venom: a green drop with the countdown on the card ("Venom 2"), hover "Venom: paralyzed in 2 turns. Antidote, Mend, or get out."', !!vcard && vcard.text === '2' && vcard.label === 'Venom 2' && /^Venom: paralyzed in 2 turns\. Antidote, Mend, or get out\./.test(vcard.tip), JSON.stringify(vcard));
-  if (SHOTS) await p.screenshot({ path: `${SHOTS}/venom-card.png`, clip: { x: 0, y: 80, width: 300, height: 320 }, timeout: 180000 });
+  const vcard = await p.evaluate((id) => { const e = document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`); return e ? { tip: e.dataset.tip ?? '', label: e.getAttribute('aria-label') ?? '' } : null; }, ids.f);
+  check('poison: a green drop on the card ("Poisoned"), hover "Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out."', !!vcard && vcard.label === 'Poisoned' && /^Poisoned: −1 a turn, never below 1\. Antipoison, Mend, or get out\./.test(vcard.tip), JSON.stringify(vcard));
+  if (SHOTS) await p.screenshot({ path: `${SHOTS}/poison-card.png`, clip: { x: 0, y: 80, width: 300, height: 320 }, timeout: 180000 });
   const slot = await p.evaluate(() => { const e = document.querySelector('.dl-pack-slots .dl-slot[data-action="antidote"]'); return e ? { usable: e.classList.contains('usable'), tip: e.dataset.tip ?? '' } : null; });
-  check('the antidote sits in the pack, usable ("Draws out venom")', !!slot && slot.usable && /Draws out venom/.test(slot.tip), slot?.tip.split('\n')[0]);
+  check('the antipoison sits in the pack, usable ("Cures poison")', !!slot && slot.usable && /Antipoison/.test(slot.tip) && /[Cc]ures poison/.test(slot.tip), slot?.tip.split('\n')[0]);
   await p.click('.dl-pack-slots .dl-slot[data-action="antidote"]');
   await p.waitForTimeout(200);
   if (await shown('.dl-roll')) await p.click('.dl-roll-go').catch(() => {});
   await idle();
   await p.waitForTimeout(200);
-  const cured = await p.evaluate((id) => { const s = window.vc.state(); const f = s.delve.heroes.find((h) => h.heroId === id); return { venom: f.venom ?? 0, drop: !!document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`), left: s.delve.heroes[0].pack.some((i) => i.kind === 'antidote') }; }, ids.f);
-  check('using the antidote on the ally next to you clears the venom (and the drop)', cured.venom === 0 && !cured.drop && !cured.left, JSON.stringify(cured));
-  // Paralyzed: the card says so, and Shoulder glows on the hotbar of the hero next to them.
-  await p.evaluate((x) => { const s = structuredClone(window.vc.state()); const f = s.delve.heroes.find((h) => h.heroId === x.f); f.paralyzed = 4; const k = s.delve.heroes.find((h) => h.heroId === x.k); k.acted = false; window.vc.load(s); window.vc.hud.select(x.k); }, ids);
+  const cured = await p.evaluate((id) => { const s = window.vc.state(); const f = s.delve.heroes.find((h) => h.heroId === id); return { poisoned: !!f.poisoned, drop: !!document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`), left: s.delve.heroes[0].pack.some((i) => i.kind === 'antidote') }; }, ids.f);
+  check('using the antipoison on the ally next to you cures them (and the drop goes)', !cured.poisoned && !cured.drop && !cured.left, JSON.stringify(cured));
+  // Downed: the card shows the bleed-out count and what saves them; Carry glows on the hotbar of the hero next to them.
+  await p.evaluate((x) => { const s = structuredClone(window.vc.state()); const f = s.delve.heroes.find((h) => h.heroId === x.f); Object.assign(f, { status: 'downed', hp: 0, bleed: 3 }); const k = s.delve.heroes.find((h) => h.heroId === x.k); k.acted = false; window.vc.load(s); window.vc.hud.select(x.k); }, ids);
   await p.waitForTimeout(300);
-  const para = await p.evaluate((x) => ({ line: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-rcard-fate.para`)?.textContent ?? '', btn: (() => { const e = document.querySelector('.dl-hotbar .dl-ab[data-action="shoulder"]'); return e ? { glow: e.classList.contains('glow'), tip: e.dataset.tip ?? '' } : null; })() }), ids);
-  check('paralyzed: the card says "Paralyzed · wears off in 4 turns. Shoulder them to carry them out."', /^Paralyzed · wears off in 4 turns\. Shoulder them to carry them out\./.test(para.line), para.line);
-  check('...and Shoulder glows on the hotbar of the hero next to them', !!para.btn && para.btn.glow && /^Shoulder/.test(para.btn.tip), JSON.stringify(para.btn));
-  if (SHOTS) {
-    await p.screenshot({ path: `${SHOTS}/venom-shoulder.png`, clip: { x: 0, y: 900 - 200, width: 1440, height: 200 }, timeout: 180000 });
-    await p.screenshot({ path: `${SHOTS}/venom-paralyzed-card.png`, clip: { x: 0, y: 80, width: 300, height: 320 }, timeout: 180000 });
-    await p.screenshot({ path: `${SHOTS}/venom-full.png`, timeout: 180000 });
-  }
-  await p.click('.dl-hotbar .dl-ab[data-action="shoulder"]');
+  const down = await p.evaluate((x) => ({ tag: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-fate`)?.textContent ?? '', line: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-rcard-fate`)?.textContent ?? '', btn: (() => { const e = document.querySelector('.dl-hotbar .dl-ab[data-action="carry"]'); return e ? { glow: e.classList.contains('glow'), tip: e.dataset.tip ?? '' } : null; })(), revive: !!document.querySelector('.dl-hotbar .dl-ab[data-action="revive"]') }), ids);
+  check('downed: the card shows the bleed-out count ("Down · 3", "Dies in 3 turns. A potion ...")', /Down · 3/.test(down.tag) && /^Dies in 3 turns\. A potion/.test(down.line), JSON.stringify(down));
+  check('...Carry glows on the hotbar of the hero next to them, and there is no Revive', !!down.btn && down.btn.glow && /^Carry/.test(down.btn.tip) && !down.revive, JSON.stringify(down.btn));
+  await p.click('.dl-hotbar .dl-ab[data-action="carry"]');
   await idle();
   await p.waitForTimeout(200);
-  const carry = await p.evaluate((x) => ({ carrying: window.vc.state().delve.heroes.find((h) => h.heroId === x.k).carrying ?? '', setDown: !!document.querySelector('.dl-hotbar .dl-ab[data-action="setDown"]'), icon: !!document.querySelector(`.dl-rcard[data-hero="${x.k}"] .dl-si.carry`), line: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-rcard-fate.para`)?.textContent ?? '' }), ids);
-  check('Shoulder: the hero carries them, Set down is offered, the cards say so', carry.carrying === ids.f && carry.setDown && carry.icon && /shoulders/.test(carry.line), JSON.stringify(carry));
-  await p.evaluate(() => { const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.paralyzed = undefined; h.carrying = undefined; h.venom = undefined; } window.vc.load(s); });
+  const carry = await p.evaluate((x) => { const s = window.vc.state(); const k = s.delve.heroes.find((h) => h.heroId === x.k); const f = s.delve.heroes.find((h) => h.heroId === x.f); return { carrying: k.carrying ?? '', same: k.at.q === f.at.q && k.at.r === f.at.r, setDown: !!document.querySelector('.dl-hotbar .dl-ab[data-action="setDown"]'), icon: !!document.querySelector(`.dl-rcard[data-hero="${x.k}"] .dl-si.carry`), line: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-rcard-fate`)?.textContent ?? '', lifted: (window.vc.dio.units?.get?.(x.f)?.offset?.y ?? 0) > 0.5 }; }, ids);
+  check('Carry: the body shares the carrier\'s hex, drawn on its shoulders; Set down is offered; the cards say so', carry.carrying === ids.f && carry.same && carry.setDown && carry.icon && /shoulders: not bleeding/.test(carry.line) && carry.lifted, JSON.stringify(carry));
+  if (SHOTS) await p.screenshot({ path: `${SHOTS}/carry-full.png`, timeout: 180000 });
+  await p.evaluate(() => { const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.poisoned = undefined; h.carrying = undefined; if (h.status === 'downed') Object.assign(h, { status: 'active', hp: 5, bleed: 0 }); } window.vc.load(s); });
 }
 
 // ---- V4.0 play-test fixes 2 (spec 30.3, 30.4): "this one" marked among several targets; the hotbar shows only what a hero can do
