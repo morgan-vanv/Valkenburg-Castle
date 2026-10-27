@@ -82,7 +82,9 @@ check('board: the row labels explain themselves (gifts, win people back; gold)',
 check('board: the village row holds the pleas, work for hire the bounties', rows[0].cards.every((x) => x.story) && rows[1].cards.every((x) => !x.story && !x.captive) && rows[1].cards.length > 0);
 check('board: at most 3 cards a row', rows.every((r) => r.cards.length <= 3), rows.map((r) => r.cards.length).join('+'));
 await p.focus('.lg-board-village .lg-board-h');
-await p.waitForTimeout(60);
+await p.keyboard.press('Tab');
+await p.keyboard.press('Shift+Tab');
+await p.waitForTimeout(80);
 check('board: the village row label shows its tip on keyboard focus', /gifts/.test(await p.evaluate(() => document.querySelector('.lg-tip:not(.hidden)')?.innerText ?? '')));
 
 // ---- step 2: Party
