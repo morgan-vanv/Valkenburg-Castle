@@ -1181,3 +1181,92 @@ Plan: docs/v41-plan.md WS6 (pitch G1). Vendors and hints: docs/v41-vendors.md. D
 **Sim** (scripts/v3-engine-sim.ts, POLICY=v41): a Ranger whose quiver brings fewer than 10 buys a bundle of plain arrows for a Level 2+ contract (when 10 + half the reserve is there) and packs it; on Levels 2 and 3 a Ranger with glow arrows and nothing to shoot lights the unlit hex in sight nearest the goal (3+ away, closer to the goal than they are) with Shoot arrow. Smoke run (2 delves, SEEDs 1–3): runs, no refused commands.
 
 Code: arrows.ts (new: `classQuiver`, `quiverOf`, `plainArrows`, `arrowCount`, `attackArrows`, `bowReady`, `weaponNow`, `spendArrow`, `attackArrow`, `arrowLands`, `addGlow`, `tickGlows`, `figureAt`, `ropeEdge`, `shootTargets`, `crewCounts`, `crewBowReady`, `crewPlainReady`, `spendCrewArrow`, `crewLoosed`, `crewBundle`, `arrowIntent`, `crewCanShoot`, `migrateArrows`); data.ts V4.1 (WS6) block (`ARROWS_PER_LEVEL`, `quiverPerDelve`, `KNIFE`, `ARROW_BUNDLE`, `WHISTLE_NOISE`, `GLOW_ARROW_*`, `FIRE_ARROW_DMG`, `BARB_ROUNDS`, `ROPE_ARROW_RANGE`, `BLAST_ARROW_DMG`, `ARROW_KINDS`, `CREW_ARROWS`), `SHOP` arrow rows, `GIFTS.alchemist`; common.ts (`isKit`, `makeItem`, `arrowName`, item names); delve.ts (`targetsFor` / `actions` / `spec` / `doAct` for `attack`, `knockback`, `hamstring`, `shoot`; `OUT_OF_ARROWS`, `spendHeroArrow`); ai.ts `overwatchCheck`; stealth.ts `heroSwings`, `enemySwing`; charges.ts `blast` (`BlastProfile`); world.ts `lightSources`; light.ts `lightsOf`; world-phase.ts (`tickGlows` at step 1); camp.ts (`startDelve`, `buy`, `shopOffers`); rivals.ts (`rivalStats`, `member`, `rivalOverwatchFire`, `hitMonster`); crewai.ts (`kitIntent`, `useKit` `arrow`/knockback/hamstring, `hostileAct`, `finish`); engine.ts `deserialize`. UI: hud.ts (`arrowChoices`, `arrowRow`, `arrowLine`, `withArrow`, `repickArrow`, `kitChip`, `QUIVER_LINE`, intent text), names.ts (`ARROW_HELP`, item glyphs, uses, wares, `shoot` help), lowgate.ts `kitLine`, vendors.ts (arrow rows live), view/diorama.ts (glow lights, intents, throw colours), style.css. Tests: src/game/arrows.test.ts (new), village.test.ts (Ilse's gift), engine.test.ts (the shop lists), src/ui/vendors.test.ts (arrow rows live).
+
+### 31.9 Crews as an equal power (WS7, owner-approved plan, 2026-10-26)
+
+Plan: docs/v41-plan.md WS7 (the owner's notes replace pitch L1). Owner: crews are "an 'equivalent power' to players ... If you are fighting a crew that outnumbers or outlevels you (or enters the encounter better healed/equipped), you should really feel it ... if the player's party is battle-worn from a delve, and encounters a squad, the player should be reluctant to fight them." Arena target (owner): **even at parity (~50/50 at equal size and level); outlevelled or outnumbered by one, the party loses most fights.** Design pillar 17 (crews play by the party's rules), every new verb named in the log. Code: `src/game/crewpower.ts` (new), with marked `// V4.1 (WS7)` hooks. Tests: `src/game/crewpower.test.ts` (17).
+
+**The arena** (scripts/v37-crew-arena.ts; `SEED=1`, argument = fights per cell; `TALLY=1` counts the new verbs in the log; `FIRST=party|crew|alt`). New cells built per crew (the older l1x3 … l4x4 cells stay, party first, so numbers compare across versions):
+
+- `par`: the party the crew should be even with, by castle level (owner): the Sisters (Level 1) three heroes at level 2; the Ferrymen and the Gallows Choir (Level 2) three at level 3; the Wake (Level 3) four at level 4. Classes in order heir, sellsword, ranger, pyromancer, hedgewitch; gear by level (W1 A0 at 2, W1 A1 at 3, W2 A1 at 4); as many potions as the crew carries; one lit torch (the crew carries light too).
+- `par4` (Level 2 crews): four heroes at level 2 (the owner's "level 2–3 party of 3–4").
+- `lvl-1`: par a level below (its gear too). `short`: par one hero short. `worn`: par at 60% HP with no potions.
+- In these cells the crew moves first in odd fights (it saw the party first). A crew that calls the fight off (below) counts as a party win ("fell back").
+
+**Before** (V4.1 after WS3, before WS7; 20 fights a cell, crew levels 2/3/3/4):
+
+| Crew | par | lvl-1 | short | worn |
+| --- | --- | --- | --- | --- |
+| Lantern Sisters (L2) vs 3 × L2 | won 100% | won 100% | won 75%, lost 25% | won 95%, lost 5% |
+| Ferrymen (L3) vs 3 × L3 | won 60%, lost 40% | won 55%, lost 40% | lost 100% | lost 100% |
+| Gallows Choir (L3) vs 3 × L3 | won 100% | won 100% | won 20%, lost 80% | won 25%, lost 75% |
+| The Wake (L4) vs 4 × L4 | won 100% | won 100% | won 15%, lost 70% | won 90%, lost 10% |
+
+(This first pass used the crew's own level and tiers for the parity party: the Sisters' at level 2 with W1 A1. The final cells use the owner's party sizes and level gear above; with WS7's verbs at the old levels, after merging WS6 arrows, par was won 75% / 75% / 100% / 85%.)
+
+**After** (40 fights a cell, final levels; full table in the report): see the table at the end of this section.
+
+**New crew verbs** (each named in the log when seen; intents shown the round before):
+
+- **Focus on key rolls.** Every level-built member has `CREW_FOCUS` 3 (`Rival.focus`; legacy members none). `keyFocus`: on a strike at a hero (attack, shot, sneak attack, backstab, finishing blow, night thorn), lock enough hits to down them when its Focus covers that, or all it has when that leaves one more hit to roll at 60%+; else none. Never on free swings or overwatch. Log: "X steadies for the kill on Y (Focus n)."
+- **Flanking.** `flankMate`: a crewmate up (not feared) on the hex across the hero from a melee attacker: +1 slot (the heroes' rule, spec 8.2). Log: "X and Y flank Z." Members walking in prefer such a spot (`powerPrefer`, −4 in the spot score).
+- **Perches.** A crew Ranger's shot from raised floor +10 (`CREW_RAISED_BONUS`, the spec 31.7 perches); Rangers prefer a raised spot (−3).
+- **Brace** (intent `brace`). A crew Sellsword with `CREW_BRACE_HEROES` 2 heroes who are up at its blade, down to two thirds of its HP: braced until its next turn (`Rival.braced`, cleared at the start of the crew's phase): heroes −15 to hit it and 1 less a hit (`crewBraceMods`, in the hero attack and firebolt previews as "Braced"; in `strikeCrew` for monsters).
+- **Antipoison** (intent `antidote`). A member carrying one gives it to itself or a poisoned crewmate next to it, when that one is below half or no hero is at its side; any stance. Packs: the Sisters' Shadowmancer (new), the Choir's Pyromancer (replaces her oil).
+- **Sleep** (Shadowmancer, intent `sleep`, 1 mana, 2 Wits slots at the crew spell chance, range 5, monsters only, not the Dragon): an awake monster that hunts a member and stands within 3 of one; at peace, any awake monster within 3 of the crew (the sister putting the orc to sleep to pass it). Log: "X whispers Y to sleep."
+- **Dread** (Shadowmancer, intent `dread`, 1 mana, 2 Wits slots, range 5, the hero's Brace −15 counts): a hero standing over a crewmate below half or downed, else at the blades of two members. A hit sets `HeroInDelve.dreaded` = next round: in that player phase the hero takes no action and no free swings (moving is fine; free actions too); the card shows "Dread". Log: "X fills Y with dread: no action next turn."
+- **Night thorn** (Shadowmancer, intent `nightthorn`, 1 mana, 2 Wits slots, range 5, 1 a hit, armor ignored; ward and brace count): the crew's target, else the weakest hero in sight. Focus applies.
+- **Briar** (Hedgewitch, intent `briar`, 1 mana, 2 Wits slots, range 4, 1 a hit, rooted 1 round, 2 on a Perfect, noise 1): a melee hero closing in (within 4 of a member, not at one's side yet, not rooted).
+- **Kindle** (hired Pyromancer, intent `kindle`, 1 mana): an unlit torch or lantern with rounds, or one burning 3 or less, held by a hero within 3 (`KINDLE_LIGHT` 6).
+- **Getting each other up** (WS3, checked in the arena): potions on a downed member and the Hedgewitch's Mend fire in fights (`TALLY`: potion-up, mend-up).
+
+**Positioning** (where most of the balance moved):
+
+- **Move, then cast** (`castPlan`). A hostile member with ranged kit (a mage with mana, a Burglar with darts) and nothing to use from where it stands looks over the hexes its walk reaches, cheapest first (`spotCost`: fire on the hex; bunching while a hero Pyromancer has 2 mana; for ranged members 4 a hero who could walk up and strike it there), and shows the first use found there; it walks there and uses it in the same turn (`RivalX.castPath`). A member already in melee reach steps out first when a hex still in range allows (`kiteFor`). A mage with mana closes to its spells' reach (4), not its staff's.
+- **Not piecemeal** (`holdBack`). A member that can't strike this round stops before a hex two heroes could close on next turn (`heroThreat`), for up to `CREW_HOLD_ROUNDS` 2 rounds of a fight (`RivalCrew.held`); then it goes in.
+- **Focus fire on a kill** (`likelyKill`). The crew's target is a hero the members in reach would likely down this round (expected damage ≥ HP), the weakest; then as before (the light bearer, the lowest HP in reach, the nearest).
+
+**Retreat and wariness:**
+
+- **Calling the fight off** (`crewRetreat`, at the start of the crew's phase). Hostile, at least `CREW_LOSING_SHARE` 0.5 of the members down, dead or gone, the party's strength at least `CREW_RETREAT_RATIO` 1.5 × the crew's (`partyStrength`/`crewStrength`: per figure who is up, HP + `STRENGTH_PER_LEVEL` 4 × level + `STRENGTH_PER_POTION` 3 a potion), no member carrying off a hero, not done before (`RivalCrew.retreat`): stance `truce`, goal `leave`, they carry their own out. Log: "\"Enough!\" X lowers their blade. The crew call the fight off and fall back toward the way out with their own. Strike them now and they fight to the last."; summary note.
+- **A free truce** (parley). While a hostile crew is beaten (`crewBeaten`, half down), Truce ("Offer a truce") and Leave ("Let them go") cost 0.
+- **Wary prospectors** (`crewWary`, `waryStep`). The Sisters at peace who see a party more than `CREW_WARY_RATIO` 1.25 × their strength within 8 keep `CREW_WARY_GAP` 3 hexes from every hero: their loot walk stops short, and a member a hero comes close to steps back (sneaking; intent `flee`). Log, once: "The Lantern Sisters take your measure and keep their distance." (`RivalCrew.wary`).
+
+**Other rules:**
+
+- **Hooded lights.** A cutthroat crew in stance `waiting` sheds no light (`lightSources`); WS2's crew light comes on when it demands or fights.
+- **A hero's fireball** takes a crew member's armor and ward off each hit (was armor 0: a parity bug; the crew fireball always took a hero's armor).
+
+**Numbers changed** (data.ts):
+
+| What | Was | Now |
+| --- | --- | --- |
+| Lantern Sisters level | 2 | 4 |
+| The Ferrymen level | 3 | 4 |
+| The Gallows Choir level | 3 | 5 |
+| The Wake level | 4 | 6 (MAX_LEVEL) |
+| Purses | `CREW_PURSE` by level (30 at 2–3, 50 at 4) | `CrewDef.purse`: Ferrymen 30, Choir 30, Wake 50 (unchanged amounts) |
+| Sisters' Shadowmancer pack | smoke, firecracker | + antipoison |
+| Choir's Pyromancer pack | potion, oil | potion, antipoison |
+| New constants | | `CREW_FOCUS` 3, `CREW_BRACE_HEROES` 2, `CREW_LOSING_SHARE` 0.5, `CREW_RETREAT_RATIO` 1.5, `CREW_WARY_RATIO` 1.25, `CREW_WARY_GAP` 3, `STRENGTH_PER_LEVEL` 4, `STRENGTH_PER_POTION` 3, `CREW_HOLD_ROUNDS` 2, `CREW_RAISED_BONUS` 10 |
+
+Tiers stay (Sisters, Ferrymen, Choir W1 A1; the Wake W2 A1): the sweeps showed tiers barely move the arena (Sisters L3 W1 A1 / W2 A1 / W1 A2: par won 80% each; the Wake L5 A1 / A2: 55% each), levels do (the Sisters L2 / L3 / L4: par won 75% / 80% / 45%; the Ferrymen L3 / L4: 75% / 55%; the Choir L4 / L5: 90% / 55%; the Wake L5 / L6: 55% / 45%; 20 fights, after WS6).
+
+Derived member numbers at the new levels (clamped at 95): the Sisters' Ranger 14 HP, Burglar 13, Shadowmancer 12 (spells 90); the Ferrymen's Sellsword 16, Ranger 14, Sapper 15; the Choir's Sellsword 18, Burglar 15, Pyromancer 14 (spells 95); the Wake's Sellsword 20, Hedgewitch 17, Shadowmancer 16, Sapper 19. Class kit by crew level (spec 30.2): the Sisters' Burglar 4 improvised picks, the Ferrymen's Sapper 4 explosives, the Choir's Burglar 5 picks, the Wake's Sapper 6 explosives; quivers (WS6) 5 × level: the Sisters' and the Ferrymen's Ranger 20.
+
+**Crews teach their level** (WS8's lesson table; what the party can watch them do):
+
+| Level | Crew | Behaviours on show | Teaches |
+| --- | --- | --- | --- |
+| 1 | The Lantern Sisters (neutral unless provoked) | sneak past sleepers (spec 28.1), carry light (WS2), pick locks with lockpicks or improvised picks (28.3), parley (deals), Sleep a monster in their way, drink an antipoison, keep their distance from a stronger party, call a lost fight off | stealth, light, locks, parley, poison's cure; that a fight with them is chosen |
+| 2 | The Ferrymen, the Gallows Choir | hooded lights while waiting (an ambush in the dark), perches (+10 from raised floor), flanking and focus fire, holding at the edge of your reach (chokepoints), smoke and glue (spec 20.4), the Sapper's ways (28.6), Dread and fire on a bunched party | darkness, positioning, items |
+| 3 | The Wake | all of it, plus the Hedgewitch's Briar and Mend getting members up | everything at once |
+
+**Contract** (types.ts): `Intent.kind` + `brace`, `sleep`, `dread`, `nightthorn`, `briar`, `antidote`, `kindle`; `Rival.focus`, `Rival.braced`; `RivalCrew.retreat`, `wary`, `held`, `holding`; `HeroInDelve.dreaded`; data.ts `CrewDef.purse`. Engine-private: `RivalX.castPath`.
+
+**Presentation:** intent glyphs and words (diorama.ts `INTENT_GLYPH`, `INTENT_WORDS`), `intentText` lines (hud.ts), the hero card's "Dread" chip, the threat chip counting dread, night thorn and briar, the Shadowmancer, Sellsword and Hedgewitch kit hovers (names.ts `CREW_KIT`).
+
+**Tests** (crewpower.test.ts): keyFocus; Focus spent and named; none on a free swing; flank +1 slot and walking to flank; brace when hurt with two heroes adjacent (and the preview); antipoison; Sleep; Dread (no action, moving fine); Night thorn ignoring armor; Briar rooting; Kindle for the hirer; a mage walking then casting; not piecemeal; retreat; the free truce; wary prospectors. light.test.ts: hooded lights. Older tests follow the new levels (or build at the old ones: engine.test.ts `crewDelve`, `OLD_LEVEL`).
+
+Code: crewpower.ts (`crewFocus`, `keyFocus`, `crewEdge`, `flankMate`, `powerPrefer`, `likelyKill`, `spotCost`, `standsOff`, `castPlan`, `kiteFor`, `heroThreat`, `holdBack`, `heldRound`, `partyStrength`, `crewStrength`, `crewBeaten`, `crewRetreat`, `crewWary`, `nearHero`, `waryStep`, `noteWary`, `powerKit`, `powerPlan`, `powerAct`, `crewBraceMods`); ai.ts `strikeDetailed`, `strikeCrew`; crewai.ts `crewTarget`, `attackPlan`, `kitIntent`, `KIT`, `useKit`, `hostilePlan`, `hostileAct`; rivals.ts `member`, `purse`, `planRival`, `lootAct`, `rivalsAct`; parley.ts `deals`, `doDeal`; delve.ts `rivalArmorMods`, `spec`, `actions`, fireball; stealth.ts `heroCanSwing`; world.ts `lightSources`; world-phase.ts.
+

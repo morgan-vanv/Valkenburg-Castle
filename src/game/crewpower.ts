@@ -6,7 +6,7 @@
 // Ranger on a raised perch shoots at +10, a crew at peace keeps its distance from a stronger party, and a hostile crew that is losing badly calls the fight
 // off. Every verb is named in the log when the party can see it. Pure rules: no DOM; dice through the seeded RNG.
 
-import { distance, posNeighbors, samePos, type Pos } from './hex';
+import { distance, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent } from './types';
 import {
   BRACE_CHANCE, BRACE_DMG, BRIAR_DMG, BRIAR_NOISE, BRIAR_RANGE, BRIAR_ROOT, BRIAR_ROOT_PERFECT, BRIAR_SLOTS, CLASSES, CREW_BRACE_HEROES, CREW_FOCUS, CREW_LOOKOUT,
@@ -551,19 +551,8 @@ export function powerAct(c: Ctx, r: RivalX, it: Intent): boolean {
   return false;
 }
 
-/** V4.1 (WS7): a hero a crew Shadowmancer's Dread holds this player phase: no action (moving is fine), no free swings. */
-export function dreadedNow(c: Ctx, h: HeroInDelve): boolean {
-  return (h.dreaded ?? 0) === c.d.round && c.d.phase === 'player';
-}
-
-/** V4.1 (WS7): a cutthroat crew waiting at its post keeps its lights hooded (world.ts lightSources). */
-export function hooded(cr: { temperament: string; stance: string } | null | undefined): boolean {
-  return !!cr && cr.temperament === 'cutthroat' && cr.stance === 'waiting';
-}
-
 /** V4.1 (WS7): a braced crew Sellsword: hits on it do 1 less and roll −15 (the heroes' Brace, BRACE_DMG / BRACE_CHANCE). */
 export function crewBraceMods(r: { braced?: boolean } | undefined): { dmg: number; chance: number } {
   return r?.braced ? { dmg: BRACE_DMG, chance: BRACE_CHANCE } : { dmg: 0, chance: 0 };
 }
 
-void posNeighbors;
