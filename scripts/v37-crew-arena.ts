@@ -24,7 +24,7 @@ import type { ActionKind, GameState, HeroClass, Item } from '../src/game/types';
 import type { GameStateX } from '../src/game/state';
 import { buildCrew } from '../src/game/rivals';
 import { makeHero } from '../src/game/camp';
-import { CREWS, crewSize } from '../src/game/data';
+import { CREWS, crewLineup, crewSize } from '../src/game/data';
 import type { CrewId } from '../src/game/types';
 
 const N = Number(process.argv[2] ?? 40);
@@ -69,9 +69,11 @@ const GEAR: Record<number, [0 | 1 | 2, 0 | 1 | 2]> = { 1: [0, 0], 2: [1, 0], 3: 
 function crewCells(crewId: CrewId): Record<string, PartyDef> {
   const def = CREWS[crewId];
   const { size: n, level: lv } = PAR[crewId];
-  const pots = def.members.reduce((k, m) => k + m.pack.filter((x) => x === 'potion').length, 0);
+  // V4.1 (squads): as many potions as the crew this cell fields carries.
+  const potsFor = (size: number) => crewLineup(def, crewSize(def, size)).reduce((k, m) => k + m.pack.filter((x) => x === 'potion').length, 0);
+  const pots = potsFor(n);
   const mk = (name: string, size: number, level: number, o: Partial<PartyDef> = {}): PartyDef => ({
-    name, heroes: MIX.slice(0, size).map((c) => [c, Math.max(1, level)] as [HeroClass, number]), weaponTier: GEAR[level]![0], armorTier: GEAR[level]![1], potions: pots, torch: true, first: 'alt', ...o,
+    name, heroes: MIX.slice(0, size).map((c) => [c, Math.max(1, level)] as [HeroClass, number]), weaponTier: GEAR[level]![0], armorTier: GEAR[level]![1], potions: potsFor(o.crewFor ?? size), torch: true, first: 'alt', ...o,
   });
   const g = `W${GEAR[lv]![0]} A${GEAR[lv]![1]}`;
   const g1 = `W${GEAR[lv - 1]![0]} A${GEAR[lv - 1]![1]}`;
@@ -80,7 +82,7 @@ function crewCells(crewId: CrewId): Record<string, PartyDef> {
     // V4.1 (squads): parties of 2 and 4 at the parity level, against a crew of their size.
     par2: mk(`parity: 2 L${lv} ${g} vs ${crewSize(def, 2)}`, 2, lv),
     par4: mk(`parity: 4 L${lv} ${g} vs ${crewSize(def, 4)}`, 4, lv),
-    ...(PAR[crewId].level === 3 ? { 'par4-l2': mk(`4 L2 ${g1}, ${pots} potions vs ${crewSize(def, 4)}`, 4, 2) } : {}),
+    ...(PAR[crewId].level === 3 ? { 'par4-l2': mk(`4 L2 ${g1}, ${potsFor(4)} potions vs ${crewSize(def, 4)}`, 4, 2) } : {}),
     'lvl-1': mk(`a level below: ${n} L${lv - 1} ${g1}`, n, lv - 1),
     short: mk(`one short: ${n - 1} L${lv} ${g} vs ${crewSize(def, n)}`, n - 1, lv, { crewFor: n }),
     worn: mk(`battle-worn: parity at 60% HP, no potions`, n, lv, { hpFrac: 0.6, potions: 0 }),
@@ -276,6 +278,13 @@ for (const crewId of CREW_LIST) {
   if (process.env.LEVEL) CREWS[crewId].level = Number(process.env.LEVEL);
   if (process.env.WEAPON) CREWS[crewId].weaponTier = Number(process.env.WEAPON) as 0 | 1 | 2;
   if (process.env.ARMOR) CREWS[crewId].armorTier = Number(process.env.ARMOR) as 0 | 1 | 2;
+  // V4.1 (squads, tuning): DROP="name,name" sets the crew's drop order; PACK="Name=item+item;Name=item" a member's pack.
+  if (process.env.DROP) CREWS[crewId].drop = process.env.DROP.split(',');
+  for (const part of (process.env.PACK ?? '').split(';').filter(Boolean)) {
+    const [who, items] = part.split('=');
+    const m = CREWS[crewId].members.find((x) => x.name === who);
+    if (m) m.pack = (items ?? '').split('+').filter(Boolean) as typeof m.pack;
+  }
   for (const k of Object.keys(tally)) delete tally[k];
   console.log(`\n${CREWS[crewId].name} (level ${CREWS[crewId].level}, W${CREWS[crewId].weaponTier} A${CREWS[crewId].armorTier}, ${CREWS[crewId].members.map((m) => m.cls).join('/')})`);
   const cells = crewCells(crewId);

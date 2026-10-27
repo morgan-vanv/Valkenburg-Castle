@@ -847,10 +847,10 @@ export const CREWS: Record<CrewId, CrewDef> = {
       { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker', 'antidote'] }, // V4.1 (WS7): + antipoison (Level 1's spider)
       { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
       // V4.1 (squads, spec 31.12): a fourth sister for a party of four.
-      { name: SISTER_NAMES[3]!, cls: 'hedgewitch', pack: ['potion', 'smoke'] },
+      { name: SISTER_NAMES[3]!, cls: 'hedgewitch', pack: ['smoke', 'antidote'] },
     ],
-    // V4.1 (squads): 2–4; the Burglar sister (locks, the sally port key) and the Shadowmancer (Sleep, the antipoison) stay.
-    size: [2, 4], drop: [SISTER_NAMES[3]!, SISTER_NAMES[0]!],
+    // V4.1 (squads): 2–4; the Burglar sister (locks, the sally port key) and the Ranger (the striker, glow arrows) stay.
+    size: [2, 4], drop: [SISTER_NAMES[3]!, SISTER_NAMES[1]!],
     hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
@@ -860,7 +860,7 @@ export const CREWS: Record<CrewId, CrewDef> = {
       { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
       { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
       { name: 'Ferryman Brecht', cls: 'sapper', pack: ['charge', 'charge', 'glue'] },
-      { name: 'Ferryman Kees', cls: 'burglar', pack: ['dart', 'glue', 'smoke', 'lockpicks'] }, // V4.1 (squads, spec 31.12)
+      { name: 'Ferryman Kees', cls: 'burglar', pack: ['dart', 'venomdart', 'potion', 'lockpicks'] }, // V4.1 (squads, spec 31.12)
     ],
     // V4.1 (squads): 2–4; Joost and the Sapper Brecht stay.
     size: [2, 4], drop: ['Ferryman Kees', 'Ferryman Sil'],
@@ -868,7 +868,8 @@ export const CREWS: Record<CrewId, CrewDef> = {
   },
   'gallows-choir': {
     // V4.1 (WS7, spec 31.9): level 5 (was 3): even with a party of three at level 3 (no front-line Sapper: its casters need the levels).
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 5, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
+    // V4.1 (squads, spec 31.12): level 6: spec 31.11's free swings moved the arena's parity cell to 75% party wins at 5.
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 6, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
       // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.

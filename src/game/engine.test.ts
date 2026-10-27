@@ -2700,7 +2700,7 @@ describe('V3.5', () => {
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       expect(f.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 16], ['ranger', 14], ['sapper', 15]]); // V4.0 (spec 30.1): the Sapper's HP 9; V4.1 (WS7): level 4
       const g = buildCrew(s as GameStateX, 'gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
-      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 18], ['burglar', 15], ['pyromancer', 14]]); // V4.1 (WS7): level 5
+      expect(g.members.map((r) => [r.cls, r.hp])).toEqual([['sellsword', 20], ['burglar', 17], ['pyromancer', 16]]); // V4.1 (WS7): level 5; V4.1 squads (spec 31.12): level 6
     });
 
     it('waiting cutthroats see a hero within 6: they demand the toll (max of 50 and half the carried value), then turn hostile', () => {

@@ -197,7 +197,7 @@ describe('V4.1 squads (spec 31.12): crews as big as the party', () => {
     const names = (id: CrewId, n: number) => crewLineup(CREWS[id], n).map((m) => m.name);
     expect(names('lantern-sisters', 4)).toEqual(['Sister Wenna', 'Sister Odile', 'Sister Brisk', 'Sister Maud']);
     expect(names('lantern-sisters', 3)).toEqual(['Sister Wenna', 'Sister Odile', 'Sister Brisk']);
-    expect(names('lantern-sisters', 2)).toEqual(['Sister Odile', 'Sister Brisk']); // the Burglar sister (the key) stays
+    expect(names('lantern-sisters', 2)).toEqual(['Sister Wenna', 'Sister Brisk']); // the Burglar sister (the key) and the Ranger stay
     expect(names('ferrymen', 4)).toEqual(['Ferryman Joost', 'Ferryman Sil', 'Ferryman Brecht', 'Ferryman Kees']);
     expect(names('ferrymen', 3)).toEqual(['Ferryman Joost', 'Ferryman Sil', 'Ferryman Brecht']);
     expect(names('ferrymen', 2)).toEqual(['Ferryman Joost', 'Ferryman Brecht']); // the Sapper stays
