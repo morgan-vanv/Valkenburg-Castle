@@ -50,7 +50,7 @@ export interface Reach {
    * V3.7 (spec 20.1, 20.2): what stepping along this path risks, for the move preview.
    * wake: sleepers that could wake (hex where it happens, monster id, chance 0..100).
    * notice: awake enemies that would notice the hero at the destination.
-   * swings: enemies that get a free swing as the hero leaves their reach (with damage range).
+   * swings: enemies that get a free swing as the hero moves from their side (spec 31.11: any step from a hex next to one, once each; with damage range).
    */
   risks?: MoveRisks;
 }

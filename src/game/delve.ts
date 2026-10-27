@@ -313,7 +313,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
         c.ev.push({ type: 'doorChanged', at: p, open: true, locked: door.locked });
       }
     }
-    // V3.7 (spec 20.2): stepping out of an enemy's reach gives it a free swing (once per enemy per move).
+    // V3.7 (spec 20.2), V4.1 (spec 31.11): any step from a hex next to an engaged enemy gives it a free swing (once per enemy per move).
     provokeSwings(c, h, from, p, swung);
     if (h.status !== 'active') break;
     walked.push(p);
@@ -1698,14 +1698,14 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
       if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
-      wakeTarget(c, tid, h.at, heroId);
       if (r.hits < 2) {
+        wakeTarget(c, tid, h.at, heroId);
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
         break;
       }
       c.ev.push({ type: 'cast', by: heroId, spell: 'knockback', targetId: tid, at: figurePos(c, tid) });
       const from = pusherFor(h.at, figurePos(c, tid)!);
-      push(c, tid, from, heroId);
+      wakeTarget(c, tid, h.at, heroId, () => push(c, tid, from, heroId));
       turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
@@ -2023,10 +2023,11 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         wakeTarget(c, tid, h.at, heroId);
         break;
       }
-      wakeTarget(c, tid, h.at, heroId);
-      push(c, tid, h.at, heroId);
-      // Perfect: 1 more damage on top of whatever the push did.
-      if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
+      wakeTarget(c, tid, h.at, heroId, () => {
+        push(c, tid, h.at, heroId);
+        // Perfect: 1 more damage on top of whatever the push did.
+        if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
+      });
       turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
@@ -2195,7 +2196,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'jump': {
-      // V3.7 (spec 20.2): leaving an enemy's side by jumping provokes its free swing first.
+      // V3.7 (spec 20.2): jumping from an enemy's side provokes its free swing first.
       provokeSwings(c, h, h.at, t.at!, new Set());
       if (h.status !== 'active') break;
       say(c, `${name} jumps.`);
@@ -2322,11 +2323,21 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
 }
 
 
-function wakeTarget(c: Ctx, id: string, from: Pos, by?: string): void {
+/**
+ * A monster struck (or missed) by `by` hunts and notices them. V4.1 (spec 31.11, owner): `then` is the strike's effect
+ * (a shove, a knockback): when it kills the monster, the `awake` and `noticed` it raised for this hit are taken back:
+ * a killing blow from stealth is never "noticed" (damage through hurtAny already skips the notice on a kill).
+ */
+function wakeTarget(c: Ctx, id: string, from: Pos, by?: string, then?: () => void): void {
   const m = c.d.monsters.find((x) => x.id === id);
-  if (!m) return;
-  if (m.awareness !== 'hunting') goHunting(c, m, from);
-  if (by) noticeHero(c, m, by);
+  const mark = c.ev.length;
+  if (m) {
+    if (m.awareness !== 'hunting') goHunting(c, m, from);
+    if (by) noticeHero(c, m, by);
+  }
+  const raised = c.ev.length;
+  then?.();
+  if (m && !c.d.monsters.includes(m) && raised > mark) c.ev.splice(mark, raised - mark);
 }
 
 export function leaveCastle(c: Ctx, h: HeroInDelve): void {
