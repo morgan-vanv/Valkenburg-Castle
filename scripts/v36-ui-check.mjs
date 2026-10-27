@@ -36,7 +36,7 @@ await p.reload();
 await p.waitForFunction(() => !!window.vc);
 
 // ---- camp: a new campaign, then the peddler and the notice post
-await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state); });
+await p.evaluate(() => { const E = window.vcEngine; const s0 = E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state; s0.campaign.squadSlots = 4; window.vc.load(s0); });
 await p.waitForTimeout(150);
 // V4.0: the who-is-where panel is gone (owner); the story card keeps the brief, the wagon the rule text on hover.
 const card = await p.$eval('.lg-card.story[data-story="surgeon"]', (e) => e.innerText).catch(() => '');

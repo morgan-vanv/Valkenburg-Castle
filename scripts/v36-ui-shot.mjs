@@ -15,7 +15,7 @@ await p.reload();
 await p.waitForFunction(() => !!window.vc);
 await p.evaluate(async () => {
   const E = window.vcEngine;
-  window.vc.load(E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state);
+  const s0 = E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state; s0.campaign.squadSlots = 4; window.vc.load(s0);
   for (let i = 0; i < 3; i++) {
     const s = window.vc.state();
     const ids = s.campaign.roster.slice(0, 4).map((h) => h.id);

@@ -53,6 +53,7 @@ const seed = await p.evaluate(async () => {
   for (let seed = 1; seed < 80; seed++) {
     const s = E.newGame(seed);
     s.campaign.gold = 1000;
+    s.campaign.squadSlots = 4; // V4.1 (spec 31.12): a new campaign takes 3; this check plays a full four
     window.vc.load(s);
     for (const r of window.vc.state().campaign.recruits) await window.vc.send({ type: 'hire', heroId: r.hero.id });
     for (const k of ['torch', 'potion', 'smoke']) await window.vc.send({ type: 'buy', kind: k });

@@ -83,6 +83,7 @@ if (fixture) {
   await p.evaluate(async () => {
     const E = window.vcEngine;
     const s0 = E.apply(E.newGame(42), { type: 'newCampaign', seed: 42 }).state;
+    s0.campaign.squadSlots = 4; // V4.1 (spec 31.12): these checks play a full four
     s0.campaign.gold = 150; // V3.7.1: the starting 90 buys one hire; this check wants two
     window.vc.load(s0);
     const want = ['sapper', 'shadowmancer'];
