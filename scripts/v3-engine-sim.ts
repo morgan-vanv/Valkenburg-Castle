@@ -59,6 +59,7 @@ import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
 import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
+import type { HeroClass, Contract } from '../src/game/types';
 import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
 import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
@@ -105,7 +106,16 @@ const SAPPER = process.env.SAPPER === '1';
  * a Sapper throws charges at enemies. Off by default so older numbers stay reproducible.
  * CSV=<file> writes one row per delve (gold, wealth, levels, outcome, spending) for the economy curves.
  */
-const V41 = process.env.POLICY === 'v41';
+/**
+ * V4.1 (WS9): POLICY=v41 or prepared plays carefully (buys light and a cure, sneaks, sweeps loot, uses kit);
+ * POLICY=careless buys nothing before a delve and never sneaks, but otherwise fights and loots like v41.
+ * SCENARIO=l2 measures the Level 2 check: every delve is a fresh campaign whose party of four (levels 3, 3, 2, 2:
+ * mean 2.5) takes a regular Level 2 contract with 300 gold to spend, Aldric and Wim home, reputation 2.
+ */
+const CARELESS = process.env.POLICY === 'careless';
+const V41 = process.env.POLICY === 'v41' || process.env.POLICY === 'prepared' || CARELESS;
+const SCENARIO = process.env.SCENARIO ?? '';
+const L2_SQUADS: HeroClass[][] = [['sellsword', 'burglar', 'ranger'], ['sapper', 'shadowmancer', 'hedgewitch'], ['sellsword', 'pyromancer', 'burglar'], ['ranger', 'hedgewitch', 'sapper']];
 const CSV = process.env.CSV ?? '';
 /** Gold the v41 bot keeps back in camp for potions and torches before it spends on the forge or ales. */
 const RESERVE = 60;
@@ -471,6 +481,7 @@ function torchesFor(level: number, gold: number): number {
 
 /** V4.1 (WS2): buy the torches the level wants (Mott, 10 each) and, once, Gerda's lantern when 120 plus a reserve can be spared. */
 function buyLight(st: GameState, level: number): GameState {
+  if (CARELESS) return st;
   const has = (k: string) => st.campaign.stash.filter((i) => i.kind === k).length;
   const want = torchesFor(level, st.campaign.gold);
   while (has('torch') < want && st.campaign.gold >= 10) {
@@ -626,6 +637,7 @@ function nearSleeper(s: GameState, at: Pos): boolean {
  * on the hero's level and nothing is hunting in sight. Otherwise walk. Without the policy: near a sleeper only.
  */
 function wantSneak(s: GameState, me: HeroInDelve): boolean {
+  if (CARELESS) return false;
   if (nearSleeper(s, me.at)) return true;
   if (!V41) return false;
   const d = s.delve!;
@@ -1102,6 +1114,24 @@ for (let i = 0; i < N; i++) {
     campDelve = 0;
   }
   campDelve++;
+  let scenarioContract: Contract | undefined;
+  if (SCENARIO === 'l2') {
+    s = e.newGame(SEED + i * 7919);
+    campaignNo = i + 1;
+    campDelve = 1;
+    const C = s.campaign;
+    const keven = C.roster.find((h) => h.id === 'keven')!;
+    const k3 = makeHero('keven', keven.name, keven.cls, 3);
+    C.roster = [k3, ...L2_SQUADS[i % L2_SQUADS.length]!.map((cls, j) => makeHero(`l2h${i}-${j}`, `${cls[0]!.toUpperCase()}${cls.slice(1)} ${j}`, cls, j === 0 ? 3 : 2))];
+    C.gold = 300;
+    C.reputation = 2;
+    C.village.surgeon = true;
+    C.village.innkeeper = true;
+    const sites = castle.contractSites.filter((x) => x.at.level === 2 && !x.story && !x.hideout);
+    const site = sites[i % sites.length]!;
+    scenarioContract = { id: `l2-${i}`, kind: site.kind, title: `L2 ${site.kind} at ${site.where}`, brief: '', siteId: site.id, level: 2, bounty: 200, warnings: [] };
+    C.board = [scenarioContract, ...C.board];
+  }
   if (V41) s = campSell(s);
   // Heal everyone so a full party goes in, buy a potion and a torch when rich.
   if (DRAGON) {
@@ -1114,7 +1144,7 @@ for (let i = 0; i < N; i++) {
     }
   }
   // Squad building (spec 15.3): 3 heroes to start (Keven + 2), 4 once the gold is there.
-  s = recruit(s, i === 0 ? 3 : 4);
+  if (!SCENARIO) s = recruit(s, i === 0 ? 3 : 4);
   // V3.4 (spec 17.2): HP carries over. V3.5: heal at the infirmary once Brother Aldric is home;
   // before that, drink stash potions (buying one when a hero is badly hurt and the gold is there).
   const v = s.campaign.village;
@@ -1136,7 +1166,7 @@ for (let i = 0; i < N; i++) {
       if (s === before) break;
     }
   }
-  if (s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
+  if (!CARELESS && s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
   // An ale for Keven once Wim can brew (spec 18.4).
   const keven = s.campaign.roster.find((h) => h.id === 'keven');
   if (keven && !keven.ale && s.campaign.gold > 120) {
@@ -1153,7 +1183,7 @@ for (let i = 0; i < N; i++) {
   const story = stories.find((x) => x.story === 'surgeon') ?? (i % 2 === 1 ? stories[0] : undefined);
   // V3.7 (spec 20.4): a captured hero is fetched back first, once the party is 3 strong.
   const rescue = fit.length >= 3 ? rescues[0] : undefined;
-  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? (V41 ? pickContract(s, fit) : undefined)
+  const k = scenarioContract ?? (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? (V41 ? pickContract(s, fit) : undefined)
     ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
   if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
@@ -1161,7 +1191,7 @@ for (let i = 0; i < N; i++) {
   // it and the bot can afford it plus a reserve.
   s = buyLight(s, k.level);
   // V4.1 (WS6, spec 31.8; POLICY=v41): a Ranger going to Level 2+ whose quiver brings under 10 buys a bundle of plain arrows.
-  if (V41 && k.level >= 2) for (const id of fit) {
+  if (V41 && !CARELESS && k.level >= 2) for (const id of fit) {
     const h = s.campaign.roster.find((x) => x.id === id);
     if (!h || h.cls !== 'ranger' || quiverPerDelve(h.level) >= 10) continue;
     if (s.campaign.stash.some((it) => it.kind === 'arrows') || s.campaign.gold < 10 + RESERVE / 2) continue;
@@ -1171,16 +1201,16 @@ for (let i = 0; i < N; i++) {
   }
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   // V4.1 (spec 31.3): oil is Ilse's; only when her bench sells it.
-  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
+  if (!CARELESS && k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
   // V4.0 (spec 29.6): an antidote for the deeper levels (spiders, venom traps, the Gallows Choir), when 20 gold can be spared.
-  if (k.level >= 2 && !s.campaign.stash.some((it) => it.kind === 'antidote') && s.campaign.gold >= 40) {
+  if (!CARELESS && k.level >= 2 && !s.campaign.stash.some((it) => it.kind === 'antidote') && s.campaign.gold >= 40) {
     const before = s;
     s = run(s, { type: 'buy', kind: 'antidote' });
     if (s !== before) venom.bought++;
   }
   // Lockpicks (spec 19.2): once the smith is home, one reusable pair for the party, carried by a non-Burglar.
-  if (s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
-  if (V41) s = campSpend(s, fit, k.level);
+  if (!CARELESS && s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
+  if (V41 && !CARELESS) s = campSpend(s, fit, k.level);
   const setOut = {
     gold: s.campaign.gold,
     wealth: s.campaign.gold + stashValue(s),
