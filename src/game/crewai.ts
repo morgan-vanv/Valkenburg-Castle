@@ -4,6 +4,7 @@
 // a line to it and out of the other heroes' sight. V4.0 (spec 28.8, owner): it carries off only a hero left helpless
 // (downed, dozing from a sleep dart, or V4.0 spec 29 paralyzed) and alone; a downed hero with friends near is finished instead.
 
+import { brightestHero } from './light'; // V4.1 (WS2)
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
 import {
@@ -115,7 +116,8 @@ function inReach(r: RivalX, t: Target): boolean {
 }
 
 /**
- * Spec 20.4: one target a round for the whole crew: the lantern bearer when a member can reach them,
+ * Spec 20.4: one target a round for the whole crew: V4.1 (WS2) the hero carrying the most light (the biggest burning
+ * torch or lantern; was the lantern bearer) when a member can reach them,
  * else the lowest-HP hero a member can reach, else the hero nearest the crew on foot.
  */
 export function crewTarget(c: Ctx): Target | null {
@@ -123,7 +125,8 @@ export function crewTarget(c: Ctx): Target | null {
   const ms = rivalsOnMap(c);
   if (!ts.length || !ms.length) return null;
   const reach = (t: Target) => ms.some((r) => inReach(r, t));
-  const bearer = ts.find((t) => t.id === c.d.lanternBearer);
+  const brightest = brightestHero(c.d, ts.map((t) => t.id));
+  const bearer = brightest ? ts.find((t) => t.id === brightest) : undefined;
   if (bearer && reach(bearer)) return bearer;
   const near = ts.filter(reach).sort((a, b) => a.hero!.hp - b.hero!.hp || (a.id < b.id ? -1 : 1));
   if (near.length) return near[0]!;
@@ -256,11 +259,11 @@ function smokeIntent(c: Ctx, r: RivalX): Intent | null {
   return { kind: 'smoke', item: 'smoke', targetId: m.id, to: { ...m.at } };
 }
 
-/** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the lantern bearer, else the nearest hero in range 5 and sight. */
+/** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the hero carrying the most light (V4.1), else the nearest hero in range 5 and sight. */
 function dartIntent(c: Ctx, r: RivalX): Intent | null {
   if (!hasKit(r, 'dart')) return null;
   const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing && !isParalyzed(t.hero));
-  const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === c.d.lanternBearer) ?? seen[0];
+  const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === brightestHero(c.d, seen.map((y) => y.id))) ?? seen[0];
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
 }
 
@@ -930,10 +933,6 @@ export function capture(c: Ctx, r: RivalX, h: HeroX): void {
   c.ev.push({ type: 'out', id: r.id });
   const name = heroName(c, h.heroId);
   say(c, `${r.name} drags ${name} out of the castle. ${name} is taken.`);
-  if (c.d.lanternBearer === h.heroId) {
-    const cands = activeHeroes(c);
-    if (cands.length) c.d.lanternBearer = cands[0]!.heroId;
-  }
 }
 
 // ---------------------------------------------------------------- the hostile member's round

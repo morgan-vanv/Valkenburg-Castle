@@ -141,6 +141,20 @@ export interface Visibility {
   lit: Set<string>;
 }
 
+/** V4.1 (spec 31.5): one light on the map (`Engine.lights`). */
+export interface LightInfo {
+  at: Pos;
+  radius: number;
+  /** The party's own light (a torch, a lantern, Glowworm); false: a crew member's light, a lit brazier. */
+  party: boolean;
+  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier';
+  /** Hero (or crew member) carrying it; absent for a torch or lantern lying lit on the floor, and braziers. */
+  holder?: string;
+  /** Torches and lanterns: rounds of light left, and the most it holds. */
+  rounds?: number;
+  max?: number;
+}
+
 /** V4.0 (spec 25): one castle entrance as the Set out screen sees it. */
 export interface EntranceInfo {
   /** Index into castle.entrances (the `entrance` of a startDelve command). */
@@ -166,7 +180,12 @@ export interface Engine {
   actions(state: GameState, heroId: string): ActionOption[];
   preview(state: GameState, heroId: string, action: ActionKind, target: ActionTarget): RollPreview;
   visibility(state: GameState): Visibility;
+  /** V4.1 (spec 31.5): the light the first active hero stands in (bright: party light or daylight; dim: a castle light only; dark: unlit). */
   brightness(state: GameState): Brightness;
+  /** V4.1 (spec 31.5): every light on the map now: torches and lanterns (carried: `holder`; dropped lit: none), Glowworm, crews, braziers. */
+  lights?(state: GameState): LightInfo[];
+  /** V4.1 (spec 31.5): the board's "Unlit" chip: the site is in castle memory and no fixed light reaches it. */
+  siteUnlit?(state: GameState, siteId: string): boolean;
   /** Intent per visible, awake monster id. */
   intents(state: GameState): Record<string, Intent>;
   /** Noise radius a move would make (for the ripple preview). */

@@ -1,5 +1,5 @@
 // V4.0 in-delve HUD check (the board is the screen), headless, by DOM and state, real engine only; no screenshots.
-// Covers: the top strip (lantern stage and notched bar, the job, Carrying, "?" level tabs), the party rail (a card per
+// Covers: the top strip (V4.1: the light readout, the job, Carrying, "?" level tabs), the party rail (a card per
 // hero with its pack row; mana diamonds on casters), the hotbar for the selected hero (Walk/Sneak per hero, pack slots
 // that use their item, More with Give and Drop, End turn with a dot per hero who can still act), the hover card beside
 // the hovered figure, the monster sight shading on hover, the target card and the roll panel (a % on each die, an
@@ -71,19 +71,17 @@ check('coach mark 1 on the first delve: "Click a lit hex to move <hero>"', coach
 const strip = await p.evaluate(() => ({
   stage: document.querySelector('.dl-lantern-stage')?.textContent ?? '',
   round: document.querySelector('.dl-round')?.textContent ?? '',
-  notches: document.querySelectorAll('.dl-notch').length,
-  lit: document.querySelectorAll('.dl-notch.on').length,
-  bands: ['bright', 'dim', 'dark'].map((b) => document.querySelectorAll(`.dl-notch.${b}`).length),
-  light: window.vc.state().delve.light,
+  chips: document.querySelectorAll('.dl-lchip:not(.none)').length,
+  none: document.querySelector('.dl-lchip.none')?.textContent ?? '',
   job: document.querySelector('.dl-job-title')?.textContent ?? '',
   where: document.querySelector('.dl-job-where')?.textContent ?? '',
   title: window.vc.state().delve.contract.title,
   carry: document.querySelector('.dl-carry')?.innerText ?? '',
   levels: [...document.querySelectorAll('.dl-lvl')].map((e) => ({ t: e.textContent, off: e.getAttribute('aria-disabled') === 'true', tip: e.dataset.tip ?? '' })),
 }));
-check('lantern: a stage word and the round', /^(Bright|Dim|Dark|Pitch|Shut)$/.test(strip.stage) && /^R\d+$/.test(strip.round), `${strip.stage} ${strip.round}`);
-check('lantern: a notched bar of 20 in its bands (8 bright, 6 dim, 6 dark), lit up to the oil left', strip.notches === 20 && strip.bands.join() === '8,6,6' && strip.lit === Math.min(20, strip.light), `${strip.lit} lit of ${strip.notches}, bands ${strip.bands}`);
-check('lantern hover gives the numbers', /of 20 rounds of light/.test(await tip('.dl-lantern')));
+check('V4.1 light readout: "Light" and the round', strip.stage === 'Light' && /^R\d+$/.test(strip.round), `${strip.stage} ${strip.round}`);
+check('V4.1 light readout: no free lantern, nothing lit yet (the torch is packed)', strip.chips === 0 && /Light a torch/.test(strip.none), `${strip.chips} chips, "${strip.none}"`);
+check('light hover gives the numbers', /sight 8 \/ 7 \/ 6/.test(await tip('.dl-lantern')) && /15 rounds/.test(await tip('.dl-lantern')));
 check('job: the contract title, where, and "not yet seen"', strip.job === strip.title && /not yet seen/.test(strip.where), `${strip.job} · ${strip.where}`);
 check('job hover: bounty and brief', /\d+ gold/.test(await tip('.dl-job')));
 check('Carrying: "Nothing yet" on an empty-handed party', /Carrying/i.test(strip.carry) && /Nothing yet/.test(strip.carry), strip.carry.replace(/\n/g, ' '));
@@ -136,13 +134,15 @@ await p.evaluate(() => { const s = structuredClone(window.vc.state()); const [a,
 await p.click('.dl-hotbar [data-more]');
 await p.waitForTimeout(100);
 const more = await p.evaluate(() => ({ open: !document.querySelector('.dl-more').classList.contains('hidden'), items: [...document.querySelectorAll('.dl-more [data-action]')].map((e) => e.dataset.action) }));
-check('More opens a small menu with Give and Drop (and the lantern for its bearer)', more.open && more.items.includes('give') && more.items.includes('drop'), more.items.join(','));
+check('More opens a small menu with Give and Drop (and the lantern for whoever packs one)', more.open && more.items.includes('give') && more.items.includes('drop'), more.items.join(','));
 await p.keyboard.press('Escape');
 // A pack slot uses its item: the torch lights.
 await p.click('.dl-pack-slots .dl-slot[data-action="torch"]');
 await idle();
 await p.waitForTimeout(150);
-check('clicking the torch slot lights it', await p.evaluate((id) => window.vc.state().delve.heroes.find((h) => h.heroId === id).torch > 0, keven));
+check('clicking the torch slot lights it (V4.1: the torch item burns)', await p.evaluate((id) => window.vc.state().delve.heroes.find((h) => h.heroId === id).pack.some((i) => i.kind === 'torch' && i.lit), keven));
+check('...and the light readout shows it: who carries it, 15 rounds', await p.evaluate(() => [...document.querySelectorAll('.dl-lchip.torch')].some((e) => /Keven/.test(e.textContent) && /15/.test(e.textContent))));
+check('...and the bar offers Snuff', !!(await p.$('.dl-hotbar [data-action="snuff"]')));
 check('the coach marks go in order: mark 1 still waits for a move after the torch', await p.evaluate(() => document.querySelector('.dl-coach')?.dataset.mark === '1'));
 
 // ---- the Chronicle: folded shows two lines; open shows rounds; remembered

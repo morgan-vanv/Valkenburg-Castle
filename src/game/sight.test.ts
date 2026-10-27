@@ -4,6 +4,7 @@
 // again (blowing friends' cover); the move preview plays the same through the monsters' eyes.
 
 import { describe, it, expect } from 'vitest';
+import { lanternIsOpen, setLantern } from './test/light'; // V4.1 (WS2)
 import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { distance, posKey, samePos, type Pos } from './hex';
@@ -31,8 +32,8 @@ function scene(heroes = ['keven', 'brann', 'pim']): GameState {
   d.monsters = [];
   d.rivals = null;
   d.traps = {};
-  d.light = 20;
-  d.lanternOpen = true;
+  setLantern(s, { rounds: 20 });
+  setLantern(s, { open: true });
   d.fuses = [{ at: at(3, 5, 5), rounds: 99, by: 'x' }]; // a far fuse: the budgeted move rules, not a calm walk
   // Everyone parked out of the way on Level 1 until placed.
   heroes.forEach((id, i) => put(s, id, at(1, 2 + i, 7)));
@@ -182,7 +183,7 @@ describe('V4.0 sight by mood (spec 27)', () => {
   describe('monsters look whenever anything moves', () => {
     it('the lantern carried past lights a sneaking friend: noticed at that step (the bearer behind it is not); the preview says so', () => {
       const s = scene(['keven', 'brann']);
-      s.delve!.lanternBearer = 'brann';
+      setLantern(s, { bearer: 'brann' });
       const m = monster(s, 'archer', M, 'unaware', 0);
       put(s, 'keven', L2(13, 2), { sneaking: true }); // front 3, unlit: unlit sneak 1
       put(s, 'brann', L2(7, 2), { sneaking: true }); // straight behind it, 3 away
@@ -204,13 +205,13 @@ describe('V4.0 sight by mood (spec 27)', () => {
 
     it('opening the lantern next to a sneaking hero lets monsters look again at once', () => {
       const s = scene(['keven', 'brann']);
-      s.delve!.lanternBearer = 'keven';
-      s.delve!.lanternOpen = false;
+      setLantern(s, { bearer: 'keven' });
+      setLantern(s, { open: false });
       const m = monster(s, 'archer', M, 'unaware', 0);
       put(s, 'keven', L2(13, 2), { sneaking: true }); // front 3: unlit sneak 1, lit 4
       put(s, 'brann', at(1, 2, 7));
       const r = ok(s, { type: 'act', heroId: 'keven', action: 'shutter', target: { id: 'keven' }, focus: 0 });
-      expect(r.state.delve!.lanternOpen).toBe(true);
+      expect(lanternIsOpen(r.state)).toBe(true);
       expect(noticed(r.events)).toEqual([{ by: m.id, hero: 'keven' }]);
       expect(mon(r.state, m.id).awareness).toBe('hunting');
       // Shuttering it again changes nothing for a monster already hunting him.
@@ -225,8 +226,8 @@ describe('V4.0 sight by mood (spec 27)', () => {
     const path = [L2(11, 1), L2(10, 1), L2(10, 2)];
     function setup(lit: boolean) {
       const s = scene(['keven', 'brann']);
-      s.delve!.lanternBearer = 'brann';
-      s.delve!.lanternOpen = lit;
+      setLantern(s, { bearer: 'brann' });
+      setLantern(s, { open: lit });
       const m = monster(s, 'archer', W, 'unaware', 2);
       put(s, 'brann', L2(12, 1), { sneaking: false });
       put(s, 'keven', L2(11, 2), { sneaking: true });
@@ -344,8 +345,8 @@ describe('V4.0 sight by mood (spec 27)', () => {
         const spots = [...FLOOR];
         const take = () => spots.splice(rnd(spots.length), 1)[0]!;
         for (const id of ['keven', 'brann', 'pim']) put(s, id, take(), { sneaking: rnd(2) === 0 });
-        s.delve!.lanternBearer = ['keven', 'brann', 'pim'][rnd(3)]!;
-        s.delve!.lanternOpen = rnd(3) !== 0;
+        setLantern(s, { bearer: ['keven', 'brann', 'pim'][rnd(3)]! });
+        setLantern(s, { open: rnd(3) !== 0 });
         for (let i = 0; i < 3; i++) monster(s, KINDS[rnd(3)]!, take(), MOODS[rnd(4)]!, rnd(6));
         const mover = ['keven', 'brann', 'pim'][rnd(3)]!;
         const sneak = rnd(2) === 0;
@@ -378,7 +379,7 @@ describe('V4.0 HUD: the sight wash on hover (engine.sightWash)', () => {
   it('unaware: ahead full, the sides faint within 2, nothing behind; searching: the sides full; asleep: nothing', () => {
     const s = scene();
     const m = monster(s, 'orc', M, 'unaware', 0);
-    s.delve!.light = 20;
+    setLantern(s, { rounds: 20 });
     let w8 = e.sightWash!(s, m.id);
     expect(has(w8.front, L2(11, 2))).toBe(true);
     expect(has(w8.side, L2(8, 1))).toBe(true); // side 2, walking

@@ -2,6 +2,7 @@
 // monsters and crew members during the world phase become `Heard` entries (`Delve.heard`) and
 // `heard` events: where, not who. For the heroes only: nothing here touches monsters or crews.
 
+import { lightSig } from './world'; // V4.1 (WS2)
 import { distance, posKey, type Pos } from './hex';
 import type { Heard, MonsterKind } from './types';
 import type { Ctx } from './state';
@@ -40,7 +41,7 @@ function sightSig(c: Ctx): string {
   const doors = Object.entries(d.doors).filter(([, x]) => x.open).map(([k]) => k).join(',');
   const smoke = Object.keys(d.smoke ?? {}).join(',');
   const fire = Object.keys(d.burning ?? {}).join(',');
-  return `${heroes}|${doors}|${d.light}${d.lanternOpen}${d.lanternBearer}|${smoke}|${fire}|${Object.keys(d.revealed ?? {}).join(',')}`;
+  return `${heroes}|${doors}|${lightSig(d)}|${smoke}|${fire}|${Object.keys(d.revealed ?? {}).join(',')}`;
 }
 
 /**

@@ -13,12 +13,11 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE, PARALYSIS_ROUNDS, VENOM_ROUNDS } from '../game/data';
-import { BRAZIER_LIGHT, BURGLAR_WALK, CLASSES, DARK_SIGHT, FOCUS_MAX, HEAVY_MOVE, KINDLE_LIGHT, LIGHT_MAX, MONSTERS, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, SMUGGLER_SNEAK, VEIL_BREAK_NOISE, WALK_MOVE, FACING, TOLL_MIN, BETRAY_LOOT } from '../game/data';
-import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
+import { BURGLAR_WALK, CLASSES, DARK_SIGHT, FOCUS_MAX, HEAVY_MOVE, KINDLE_LIGHT, MONSTERS, OIL_LIGHT, TORCH_ROUNDS, OVERWATCH_RANGE, PACK_SLOTS, SMUGGLER_SNEAK, VEIL_BREAK_NOISE, WALK_MOVE, FACING, TOLL_MIN, BETRAY_LOOT } from '../game/data';
 import { isKit } from '../game/charges';
 import type { Settings } from './settings';
 import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
@@ -48,7 +47,7 @@ interface PreviewState {
   focus: number;
 }
 
-const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote']);
 
 /** V4.0 (spec 29.2): a hero who can move and act (active, not paralyzed). */
 const able = (x: HeroInDelve) => x.status === 'active' && !((x.paralyzed ?? 0) > 0);
@@ -58,6 +57,7 @@ const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'v
 const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'setTripwire', 'throwCharge', 'brace', 'hamstring']);
 /** V4.0 HUD: rare and free actions, folded into the More menu. */
 const MORE_ACTIONS = new Set<ActionKind>(['give', 'drop', 'passLantern', 'shutter', 'parley']);
+/** V4.1 (WS2): Light torch, Snuff and Drop torch are bar buttons (the torch's pack slot lights or snuffs it too); the lantern's slot and L shutter it. */
 
 /** V4.0 HUD: the icon on each action button (no entry: the action's glyph). */
 const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconName>> = {
@@ -114,6 +114,8 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   key: 'key',
   grapple: 'rope',
   torch: 'torch',
+  snuff: 'torch',
+  dropTorch: 'drop',
   potion: 'potion',
   smoke: 'smoke',
   glue: 'smoke',
@@ -1406,7 +1408,7 @@ export class Hud {
       else act('Door', 'Open, then walk through');
     } else if (t.kind === 'brazier') {
       if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
-      else act('Brazier', this.full ? `Light: +${BRAZIER_LIGHT} lantern light, lit for good` : 'Light it: oil for the lantern, lit for good');
+      else act('Brazier', this.full ? 'Light: lights the room (radius 3), for good' : 'Light it: it lights the room for good');
     } else if (t.kind === 'prop' || t.kind === 'tallprop') {
       if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
       else if ((t.prop === 'crate' || t.prop === 'barrel' || (!t.prop && t.kind === 'prop')) && (d.smashed ?? []).includes(k)) parts.push(`Splinters <span class="dim">a smashed ${t.prop ?? 'crate'}</span>`);
@@ -2148,7 +2150,7 @@ export class Hud {
     const s = this.state!;
     const d = s.delve!;
     clear(this.strip);
-    this.strip.append(this.lightMeter(d.light, this.engine.brightness(s)), this.goalBox(), this.carryBox());
+    this.strip.append(this.lightMeter(), this.goalBox(), this.carryBox());
     const right = h('div', { class: 'dl-strip-r' });
     const levels = h('div', { class: 'dl-levels dl-pan', role: 'group', 'aria-label': 'Levels' });
     const mem = s.campaign.explored ?? {};
@@ -2179,88 +2181,93 @@ export class Hud {
     this.strip.append(right);
   }
 
-  updateLight(light: number, b: Brightness): void {
+  /** V4.1 (WS2): the light readout is redrawn from the state (the args are kept for app.ts's `light` event). */
+  updateLight(_light?: number, _b?: Brightness): void {
     const old = this.strip.querySelector('.dl-lantern');
-    if (old) old.replaceWith(this.lightMeter(light, b));
+    if (old) old.replaceWith(this.lightMeter());
   }
 
-  private scale: LightScale | null = null;
-  private scaleDelve = -1;
-
-  /** Stage edges from engine.brightness. */
-  private lightScale(): LightScale {
-    const s = this.state!;
-    const delve = s.campaign.delveCount;
-    if (this.scale && this.scaleDelve === delve) return this.scale;
-    const probe = (l: number) => this.engine.brightness({ ...s, delve: { ...s.delve!, light: l } });
-    this.scale = lightScale(probe, LIGHT_MAX);
-    this.scaleDelve = delve;
-    return this.scale;
+  /** V4.1 (WS2): the lantern the selected hero carries (the first one), for the shutter key L. */
+  private heldLantern(heroId?: string): { hero: HeroInDelve; item: Item } | null {
+    const d = this.state?.delve;
+    if (!d) return null;
+    const order = [heroId ?? this.selectedId, ...d.heroes.map((x) => x.heroId)];
+    for (const id of order) {
+      const hd = d.heroes.find((x) => x.heroId === id && x.status === 'active');
+      const it = hd?.pack.find((i) => i.kind === 'lantern');
+      if (hd && it) return { hero: hd, item: it };
+    }
+    return null;
   }
 
-  /** 16.2: is the lantern open (burning and lighting)? Old saves without the flag count as open. */
+  /** 16.2, V4.1: is the selected hero's lantern open? (No lantern: false.) */
   private lanternOpen(): boolean {
-    return this.state?.delve?.lanternOpen !== false;
+    return !!this.heldLantern()?.item.lit;
   }
 
-  /** 16.2: toggle the shutter for the bearer (free; any time in the player phase). */
+  /** V4.1 (WS2): open or shutter a lantern (free; the selected hero's first, else anyone's). */
   toggleShutter(): void {
     const d = this.state?.delve;
     if (!d || this.busy || d.phase !== 'player') return;
-    const bearer = d.heroes.find((x) => x.heroId === d.lanternBearer);
-    if (!bearer || bearer.status !== 'active') {
-      this.toast('Nobody holds the lantern.');
+    const l = this.heldLantern();
+    if (!l) {
+      this.toast('Nobody carries a lantern. Gerda sells one once she is home.');
       return;
     }
-    sfx.play('click', { pitch: this.lanternOpen() ? 0.8 : 1.2 });
+    const o = this.engine.actions(this.state!, l.hero.heroId).find((x) => x.action === 'shutter');
+    if (!o) {
+      this.toast('The lantern is empty. Oil or Kindle brings it back.');
+      return;
+    }
+    sfx.play('click', { pitch: l.item.lit ? 0.8 : 1.2 });
     this.cancel();
-    void this.host.send({ type: 'act', heroId: bearer.heroId, action: 'shutter', target: {}, focus: 0 });
+    void this.host.send({ type: 'act', heroId: l.hero.heroId, action: 'shutter', target: { itemId: l.item.id }, focus: 0 });
   }
 
-  /** The lantern: stage, a short line, the round, and a notched bar of the light left in its stage bands. */
-  private lightMeter(light: number, b: Brightness): HTMLElement {
-    const sc = this.lightScale();
-    const open = this.lanternOpen();
-    const d = this.state?.delve;
-    const onL1 = !!d && d.heroes.some((x) => x.status === 'active' && x.at.level === 1);
-    const daylight = open && onL1 && !!d && d.round <= 10;
-    const ctx = !open ? 'shut: no light, no burn' : light <= 0 ? 'out' : daylight ? 'daylight: shut it to save oil' : 'burning';
-    const notches = h('span', { class: 'dl-notches', role: 'img', 'aria-label': `Lantern ${light} of ${LIGHT_MAX}` });
-    // Left to right: the bright band (20 down to 13), dim (12 to 7), dark (6 to 1); it burns from the left.
-    for (let v = LIGHT_MAX; v >= 1; v--) {
-      const band: Brightness = v >= sc.min.bright ? 'bright' : v >= sc.min.dim ? 'dim' : 'dark';
-      const gap = v === sc.min.bright - 1 || v === sc.min.dim - 1;
-      notches.append(h('i', { class: `dl-notch ${band} ${v <= light ? 'on' : ''} ${gap ? 'gap' : ''}` }));
-    }
-    const next = roundsToNext(light, sc);
+  /**
+   * V4.1 (WS2, pillar 15): the light readout, where the lantern bar was. One chip per lit torch or open lantern: who
+   * carries it (or "on the floor") and the rounds left, because they decide when to leave. None lit: says so.
+   */
+  private lightMeter(): HTMLElement {
+    const s = this.state!;
+    const d = s.delve!;
+    const lights = (this.engine.lights?.(s) ?? []).filter((L) => (L.kind === 'torch' || L.kind === 'lantern') && L.rounds !== undefined);
+    const spare = d.heroes.filter((x) => x.status === 'active').flatMap((x) => x.pack.filter((i) => (i.kind === 'torch' || i.kind === 'lantern') && !i.lit).map((i) => ({ who: x.heroId, i })));
+    const low = lights.some((L) => (L.rounds ?? 0) <= 3);
+    const chips = lights.map((L) => {
+      const who = L.holder ? this.nameOf(L.holder) : 'on the floor';
+      const word = L.kind === 'lantern' ? 'Lantern' : 'Torch';
+      const r = L.rounds ?? 0;
+      return h(
+        'span',
+        { class: `dl-lchip ${L.kind} ${r <= 3 ? 'low' : ''}`, tabindex: 0, 'data-tip': `${word} · ${who}${L.holder ? ' carries it' : ''}
+${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.kind === 'torch' ? ' Snuff it (free) to save the rest.' : ' The shutter is free (L).'}` },
+        icon(L.kind === 'lantern' ? 'lantern' : 'torch', 12),
+        h('span', { class: 'dl-lchip-n' }, L.holder ? who : 'floor'),
+        h('b', { class: 'num' }, `${r}`),
+      );
+    });
+    const ctx = lights.length ? (low ? 'running low' : `${lights.length} lit`) : spare.length ? `none lit · ${spare.length} packed` : 'no light';
+    const tip = [
+      'Light · what lights the party, and how long it lasts.',
+      'Party light (a torch, a lantern, Glowworm) or daylight: sight 8 / 7 / 6 on Levels 1 / 2 / 3, no penalty.',
+      `Only a castle light (a sconce, a fire, a brazier, fungus, the pit glow): sight 4 / 3 / 2, rolls −10%. Unlit: sight ${DARK_SIGHT[1]} / ${DARK_SIGHT[2]} / ${DARK_SIGHT[3]}, rolls −20%.`,
+      `A torch lights 3 for ${TORCH_ROUNDS} rounds; Gerda's lantern 4 (3 when low) for 20, refilled free in camp. Each burns 1 a round while lit.`,
+      `Kindle lights a friend's torch or lantern within 3, or adds ${KINDLE_LIGHT}; oil adds ${OIL_LIGHT} to a lantern. In the Hollow the dark itself hunts anyone standing unlit.`,
+    ].join('\n');
     return h(
       'button',
       {
         type: 'button',
-        class: `dl-lantern dl-pan lt-${b} ${open ? '' : 'shut'}`,
-        'data-tip': this.lightTip(light, sc, open, next),
-        'aria-label': `Lantern ${open ? BRIGHTNESS_NAME[b] : 'shut'}, ${light} of ${LIGHT_MAX}. Click or L to ${open ? 'shut' : 'open'} it.`,
-        disabled: this.busy || d?.phase !== 'player',
-        onclick: () => this.toggleShutter(),
+        class: `dl-lantern dl-pan dl-lights ${lights.length ? (low ? 'lt-dim' : 'lt-bright') : 'lt-dark shut'}`,
+        'data-tip': tip,
+        'aria-label': `Light: ${ctx}.${this.heldLantern() ? ' Press L to open or shutter the lantern.' : ''}`,
+        disabled: this.busy || d.phase !== 'player',
+        onclick: () => (this.heldLantern() ? this.toggleShutter() : undefined),
       },
-      h('span', { class: 'dl-lantern-head' }, icon('lantern', 14, 'dl-lantern-ic'), h('span', { class: 'dl-lantern-stage' }, open ? (b === 'pitch' ? 'Pitch' : BRIGHTNESS_NAME[b]) : 'Shut'), h('span', { class: 'dl-lantern-ctx' }, `· ${ctx}`), h('span', { class: 'dl-round num', 'data-tip': `Round ${d?.round ?? 1} · A round is your turn (each hero moves once and acts once), then the castle's turn.` }, `R${d?.round ?? 1}`)),
-      notches,
+      h('span', { class: 'dl-lantern-head' }, icon('torch', 14, 'dl-lantern-ic'), h('span', { class: 'dl-lantern-stage' }, 'Light'), h('span', { class: 'dl-lantern-ctx' }, `· ${ctx}`), h('span', { class: 'dl-round num', 'data-tip': `Round ${d.round} · A round is your turn (each hero moves once and acts once), then the castle's turn.` }, `R${d.round}`)),
+      h('span', { class: 'dl-lchips' }, ...(chips.length ? chips : [h('span', { class: 'dl-lchip none' }, spare.length ? 'Light a torch from a pack' : 'Nobody carries a light')])),
     );
-  }
-
-  /** The light panel explained: stages with their numbers, sight, shutter, daylight (spec 16.2). */
-  private lightTip(light: number, sc: LightScale, open: boolean, next: { stage: Brightness; rounds: number }): string {
-    const st = (b: Brightness, range: string) => `${BRIGHTNESS_NAME[b]} ${range}: lantern lights ${LANTERN_RADIUS[b]} around the bearer, sight ${SIGHT_BY_STAGE[b]}${b === 'bright' ? '' : `, rolls ${b === 'dim' ? '−10%' : b === 'dark' ? '−20%' : '−30%'}`}`;
-    return [
-      `Lantern · ${light} of ${LIGHT_MAX} rounds of light. Burns 1 a round while open.${open && light > 0 ? ` ${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage].toLowerCase()}.` : ''}`,
-      st('bright', `${sc.min.bright}+`),
-      st('dim', `${sc.min.dim}–${sc.min.bright - 1}`),
-      st('dark', `1–${sc.min.dim - 1}`),
-      'Pitch black at 0: no lantern light; lit braziers and torches still shine.',
-      `Sight is 1 less on Level 2, 2 less on Level 3. A hero standing unlit sees ${DARK_SIGHT[1]} / ${DARK_SIGHT[2]} / ${DARK_SIGHT[3]} on Levels 1 / 2 / 3.`,
-      `Click or L to ${open ? 'shut it: no light and no burn until you open it again' : 'open it again'} (free). Daylight on Level 1 lets you save oil.`,
-      `Refill: Kindle +${KINDLE_LIGHT}, oil flask +${OIL_LIGHT}, light a brazier +${BRAZIER_LIGHT}. In the Hollow the dark itself hunts anyone standing unlit.`,
-    ].join('\n');
   }
 
   /** The job: what, where (or "not yet seen"), and a compass arrow toward it once it's known on this level. */
@@ -2410,9 +2417,11 @@ export class Hud {
     const d = this.state!.delve!;
     const out: HTMLElement[] = [];
     const add = (cls: string, ic: IconName | null, tip: string, text = '') => out.push(h('span', { class: `dl-si ${cls}`, tabindex: 0, 'data-tip': tip }, ic ? icon(ic, 13) : '', text));
-    if (hd.heroId === d.lanternBearer) {
-      const open = this.lanternOpen();
-      add(`lantern ${open ? '' : 'shut'}`, 'lantern', `Lantern · ${name} carries it${open ? '' : ' (shut)'}\nIts light goes where ${name} goes. L shuts or opens it (free); Pass lantern (in More) hands it to a hero next to you.`);
+    // V4.1 (WS2): the torch or lantern this hero carries lit, with its rounds.
+    for (const it of hd.pack.filter((i) => i.kind === 'lantern' || i.kind === 'torch')) {
+      const r = it.rounds ?? (it.kind === 'lantern' ? 20 : TORCH_ROUNDS);
+      if (it.lit && r > 0) out.push(h('span', { class: `dl-si lantern ${it.kind}`, tabindex: 0, 'data-tip': `${it.kind === 'lantern' ? 'Lantern' : 'Torch'} lit · ${name} carries it: ${r} round${r === 1 ? '' : 's'} left.\nIts light goes where ${name} goes. ${it.kind === 'lantern' ? 'L shuts or opens it (free).' : 'Snuff it (free) to save the rest; Drop torch leaves it burning here.'}` }, icon(it.kind === 'lantern' ? 'lantern' : 'torch', 13), h('b', { class: 'num' }, `${r}`)));
+      else if (it.kind === 'lantern') add('lantern shut', 'lantern', `Lantern · ${name} carries it, shut (${r} rounds). L opens it (free).`);
     }
     // V4.0 (spec 29.1): envenomed: the countdown on a green drop.
     if ((hd.venom ?? 0) > 0 && !((hd.paralyzed ?? 0) > 0)) {
@@ -2427,7 +2436,8 @@ export class Hud {
     if (threats.length) add('bad threat', 'sword', `Targeted · ${threats.map(([id, it]) => `${cap(this.theName(id))} ${intentText(this.state!, it, id)}`).join('; ')} next turn.`);
     if (this.backExposed(hd.heroId)) add('bad back-exposed', 'eyeOff', `Back exposed · ${FACING_HELP.backExposed}`);
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
-    if (darkSight !== null) add(`dark ${hd.nightEyes ? 'night' : ''}`, 'moon', hd.nightEyes && hd.nightEyes > 0 ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+    const nightEye = (hd.nightEyes ?? 0) > 0 || hd.ale === 'nighteye'; // V4.1 (WS2): Night-eye Stout
+    if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
     else if ((hd.rooted ?? 0) > 0) add('bad rooted', 'chain', `Rooted · can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
@@ -2441,7 +2451,6 @@ export class Hud {
     const more: string[] = [];
     if (this.heroDef(hd.heroId)?.shield) more.push('Shield: ranged hits do 1 less (2 while braced).');
     if (hd.overwatch) more.push(`Overwatch: shoots the first enemy that moves or acts within ${OVERWATCH_RANGE}.`);
-    if (hd.torch > 0) more.push(`Torch lit: ${hd.torch} more round${hd.torch === 1 ? '' : 's'} of light around ${name}.`);
     if (hd.nightEyes && hd.nightEyes > 0) more.push(`Night-eye: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties.`);
     if (hd.guarding) more.push(`Guarding ${this.nameOf(hd.guarding)}.`);
     if (hd.escorting) more.push(`Escorting ${this.nameOf(hd.escorting)}: moves 3 at most.`);
@@ -2550,7 +2559,7 @@ export class Hud {
       acts.append(btn);
     }
     // The pack takes the item actions; More takes the rare ones.
-    const bearer = sel.heroId === d.lanternBearer;
+    const bearer = sel.pack.some((i) => i.kind === 'lantern'); // V4.1 (WS2): L opens or shutters this hero's lantern
     if (bearer) usedKeys.add('l');
     const dealsNow = this.dealsFor(sel.heroId).length > 0;
     if (dealsNow) usedKeys.add('b');
@@ -2627,7 +2636,8 @@ export class Hud {
       if (isKit(it)) continue;
       const span = Math.max(1, Math.min(it.slots, PACK_SLOTS - used));
       used += it.slots;
-      const o = this.options.find((x) => (ITEM_ACTIONS.has(x.action) || x.action === 'unbar') && x.targets.some((t) => t.itemId === it.id));
+      // V4.1 (WS2): a lit torch's slot snuffs it; a lantern's opens or shutters it.
+      const o = this.options.find((x) => (ITEM_ACTIONS.has(x.action) || x.action === 'unbar' || x.action === 'torch' || x.action === 'snuff' || x.action === 'shutter') && x.targets.some((t) => t.itemId === it.id));
       const item = o ? { ...o, targets: o.targets.filter((t) => t.itemId === it.id) } : null;
       const key = o ? keyFor(o.action, ACTION_KEY[o.action]) : undefined;
       const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
@@ -2670,9 +2680,9 @@ export class Hud {
       const key = keyFor(kind, ACTION_KEY[kind]);
       out.push({ label: o.label, key, tip: `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}\n${actionHelp(o.action, def.cls)}`, icon: ACTION_ICON[kind]!, action: kind, run: () => this.startAction(o), blocked: o.blocked });
     }
-    if (bearer) {
+    if (bearer && opts.some((x) => x.action === 'shutter')) {
       const open = this.lanternOpen();
-      out.push({ label: open ? 'Shut the lantern' : 'Open the lantern', key: 'l', tip: `${open ? 'Shut the lantern' : 'Open the lantern'} · free · key L\nShut: no light and no burn. Open: light, and 1 oil a round.`, icon: 'lantern', action: 'shutter', run: () => this.toggleShutter() });
+      out.push({ label: open ? 'Shut the lantern' : 'Open the lantern', key: 'l', tip: `${open ? 'Shut the lantern' : 'Open the lantern'} · free · key L\nShut: no light and no burn. Open: light, and 1 round of oil a round.`, icon: 'lantern', action: 'shutter', run: () => this.toggleShutter() });
     }
     if (dealsNow) out.push({ label: 'Parley', key: 'b', tip: 'Parley · free · key B\nTalk to the crew: pay, hire, give a job, or fight.', icon: 'scales', action: 'parley', run: () => this.openParley() });
     if (FACING.faceCommand && sel.status === 'active') out.push({ label: this.facing ? 'Stop facing' : 'Face', key: 'f', tip: `Face · free · key F\n${FACING_HELP.face}`, icon: 'face', action: 'face', run: () => this.setFacing(!this.facing) });
@@ -3000,7 +3010,8 @@ export class Hud {
   private applyDark(): void {
     const sel = this.selected();
     const unlit = !!sel && sel.status === 'active' && !this.isLit(sel.heroId);
-    const b: Brightness = unlit ? (sel!.at.level === 3 ? 'pitch' : 'dark') : this.lanternOpen() ? this.baseDark : 'dark';
+    // V4.1 (WS2): the light the selected hero stands in (engine.brightness: bright, dim castle light, dark).
+    const b: Brightness = unlit ? (sel!.at.level === 3 ? 'pitch' : 'dark') : this.baseDark;
     this.vignette.dataset.b = b;
   }
 
@@ -3353,6 +3364,9 @@ const SHORT_LABEL: Partial<Record<ActionKind, string>> = {
   setTripwire: 'Tripwire', // V4.1 (spec 31.3)
   throwCharge: 'Throw charge',
   passLantern: 'Pass lantern',
+  torch: 'Light', // V4.1 (WS2)
+  snuff: 'Snuff',
+  dropTorch: 'Drop torch',
   nightthorn: 'Thorn',
   overwatch: 'Overwatch',
   knockback: 'Knockback',
