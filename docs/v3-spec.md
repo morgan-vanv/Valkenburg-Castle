@@ -1068,3 +1068,18 @@ Plan: docs/v41-plan.md WS2 (pitch C1, C3, D, D1, E as amended, L3). Design pilla
 **Sim** (scripts/v3-engine-sim.ts): buys 1 torch per Level 2 contract, 3 per Level 3 (one more at 300+ gold), Gerda's lantern once sold and 120 + 100 can be spared; lights one (the lantern first) when the lead stands unlit on Level 2 or 3, snuffs or shutters on Level 1 in a castle light, kindles a light at 6 or less, oils a lantern at 10 or less; heads out when out of light on Level 2/3 (`outOfLight`, was `LOW_LIGHT`). The "lead" the others keep near is whoever carries the most light.
 
 Code: data.ts V4.1 (WS2) block (`FREE_LANTERN`, `TORCH_RADIUS`, `LANTERN_*`, `KINDLE_RANGE`, `CREW_LIGHT_RADIUS`, `SISTERS_LEAVE_ROUND`, `NIGHTEYE_ALE`, `DARK_PENALTY`, `NIGHTSIGHT_REFUND`), `TORCH_ROUNDS`, `OIL_LIGHT`, SHOP `lantern`; light.ts (new: `lightTargets`, `lightSpecText`, `doLight`, `burnLights`, `lightsOf`, `migrateLight`, `freeLantern`, `restLight`, `siteUnlit`, `brightestHero`); world.ts (`roundsOf`, `lightRadius`, `lightSources`, `emitsLight`, `lightSig`, `litSet`, `lightTierAt`, `nightEyedHero`, `sightRangeAt`, `partyLights`, `fixedLightReaches`); common.ts `brightnessAt`, `LIGHT_PENALTY`, `nightEyed`; delve.ts targets/spec/effects for the light actions; world-phase.ts (`burnLights` at step 1, `gloamPhase`); rivals.ts (Sisters' leave); crewai.ts (`crewTarget`, `dartIntent`); camp.ts (`startDelve`, `backToCamp`); engine.ts (`brightness`, `lights`, `siteUnlit`, `deserialize`); data/castle/level1.ts. UI: hud.ts (`lightMeter`, `toggleShutter`, `statusIcons`), lowgate.ts (`riskChips`, `plan`), names.ts, app.ts, view/diorama.ts. Tests: src/game/light.test.ts (new, 20), castle.test.ts (dark rooms), test/light.ts (the old free lantern as a loaner for pre-WS2 tests).
+
+### 31.7 Level 1 teaches, Level 2 tests (WS8, owner-approved 2026-10-26)
+
+From docs/v41-levels.md (all eight changes approved). Castle data only; no rule changed.
+
+- **L1-1** Aldric's guard, the chapel orc at L1 (35, 24), sleeps on a campaign's first delve (`firstDelveAsleep`, built in 31.2).
+- **L1-2** The library stacks, the armory and the tower top are dark (built in 31.5).
+- **L1-3** A second orc posts the tower stair at L1 (35, 5), beside the first at (36, 4). A firecracker landing in the tower passage at L1 (33, 8) (the hall side of the passage door) is heard by both: the lure has a clear use on the level that sells firecrackers.
+- **L1-4** The servants' passage at L1 (6, 8) loses its daylight: its trap sits in the dark, where the Wits roll to spot it takes the −20 dark penalty.
+- **L1-5** The hall's west orc moves from L1 (21, 13) to (22, 13), on the pit's unrailed lip: a shove, knockback or gust drops it to Level 2.
+- **L2-1** Ugluk Red-Hand (berserker) sleeps by the forge at L2 (34, 27): Gerda's rescue is a stealth test; woken, he never stops hunting.
+- **L2-2** The archers' perches, L2 (28, 7) and (35, 10), are raised floor (`TileDef.raised`): +10 to ranged attacks from them, for archers and for heroes who take them.
+- **L2-3** Grub the Jailer moves from the cellblock to L2 (21, 23), the cellblock passage's winch-room end, within the winch's noise (6): working the winch draws him unless he's lured off or dealt with first.
+- Tests (castle.test.ts, "castle V4.1: Level 1 teaches, Level 2 tests"): each change, including the firecracker reach at (33, 8) and the winch's reach to Grub, by `noiseField`.
+
