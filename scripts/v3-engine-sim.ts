@@ -911,6 +911,25 @@ function campSell(st: GameState): GameState {
   return st;
 }
 
+/**
+ * V4.1 (POLICY=v41): contracts a careful player takes. Level 2 once the party is 3 strong and averages
+ * level L2_AT; Level 3 once it is 4 strong and averages L3_AT (env knobs, to find the threshold). Among what
+ * fits: a captive to bring back, then a story contract, then the deepest regular contract; else the first
+ * Level 1 contract.
+ */
+const L2_AT = Number(process.env.L2_AT ?? 2.5);
+const L3_AT = Number(process.env.L3_AT ?? 3.5);
+function pickContract(st: GameState, ids: string[]) {
+  const lv = ids.map((id) => st.campaign.roster.find((h) => h.id === id)?.level ?? 1);
+  const mean = lv.reduce((a, b) => a + b, 0) / Math.max(1, lv.length);
+  const fits = (level: number) => level <= 1 || (level === 2 && ids.length >= 3 && mean >= L2_AT) || (level >= 3 && ids.length >= 4 && mean >= L3_AT);
+  const board = st.campaign.board.filter((x) => fits(x.level));
+  return board.find((x) => x.id.startsWith('cap-'))
+    ?? board.find((x) => x.story === 'surgeon') ?? board.find((x) => x.story)
+    ?? board.filter((x) => !x.story && !x.id.startsWith('cap-')).sort((a, b) => b.level - a.level)[0]
+    ?? st.campaign.board.find((x) => x.level === 1);
+}
+
 const FRONT_CLS = new Set(['heir', 'sellsword', 'sapper']);
 /**
  * V4.1 (POLICY=v41): spend in camp like a careful player, keeping RESERVE back: forge gear for the party
@@ -1020,7 +1039,8 @@ for (let i = 0; i < N; i++) {
   const story = stories.find((x) => x.story === 'surgeon') ?? (i % 2 === 1 ? stories[0] : undefined);
   // V3.7 (spec 20.4): a captured hero is fetched back first, once the party is 3 strong.
   const rescue = fit.length >= 3 ? rescues[0] : undefined;
-  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
+  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? (V41 ? pickContract(s, fit) : undefined)
+    ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
   if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.

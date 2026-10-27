@@ -146,3 +146,27 @@ Heroes dead / captured across the arena: 564 / 137 (unchanged from spec 30.6).
 
 Read: crew strength is a cliff, not a slope. A level 3 crew wipes a three-hero level 1 party almost every time, and one hero level plus a weapon tier later the same crew never wins. The Wake is the only crew that stays dangerous to geared parties. Lethality is concentrated in fights a level 1 party shouldn't be having: the Ferrymen and the Choir live on Level 2, so the first L2 contract is where a party meets them.
 
+### The V4.1 bot (`POLICY=v41 v3-engine-sim.ts 30`, seeds 1–4, 120 delves; CSV per delve)
+
+It sells on return, buys forge gear, ales, potions and torches, sweeps known chests and coins while it's quiet, sneaks past awake monsters that haven't seen it, and its Sapper throws charges. It still picks contracts carelessly (it rotates through the board, so it goes to Level 2 at a mean party level of 2.3).
+
+| Contract level | Party level (mean) | Delves | Done | Deaths per delve |
+| --- | --- | --- | --- | --- |
+| L1 | 1 | 48 | 79% | 0.40 |
+| L1 | 2 | 31 | 97% | 0.23 |
+| L2 | 1 | 3 | 0% | 3.67 |
+| L2 | 2 | 14 | 7% | 2.86 |
+| L2 | 3 | 8 | 63% | 2.00 |
+| L3 | 2 | 5 | 0% | 3.60 |
+| L3 | 3–4 | 7 | 29% | 3.43 |
+
+- **Campaigns are short.** 42 campaigns in 120 delves: median 2–3 delves, longest 9. Of the 38 that ended, 13 ended on a Level 1 story delve (usually the first, the heir and one recruit), 15 on Level 2, 10 on Level 3.
+- **Level 2 is a wall.** Below party level 3 a Level 2 contract almost never succeeds and costs nearly the whole party. At level 3 it becomes a coin flip.
+- **Gold.** Loot carried out averaged 75 a delve (63 on L1, 109 on L2), bounties 44. Wealth peaked at 1,144. Spending: hiring 7,480, forge 2,830 plus shields 150 (spent in only two of the four runs: few campaigns live long enough to bring Gerda home), healing 1,464, potions 980, antidotes 400, ales 180, torches 220.
+- **Charges and stealth are now exercised:** 63 Sapper blasts, 60 of them charges thrown in combat (was 8 blasts, none in combat), 6% of moves sneaked (was 1.5%).
+- **Crew fights:** 37 fights, won 2, lost 29, fled 6; 65 heroes dead and 10 captured in them.
+
+Read: with a more careful bot the economy barely gets going, because the party dies before it can spend. The first numbers to fix are survival on the first delve and the step from Level 1 to Level 2; the gold curve only means something once campaigns last.
+
+Next for the sim: pick contracts the way a careful player does (stay on Level 1 until the party is level 2–3 and four strong; take story contracts that fit), then rerun for the gold and level curves.
+
