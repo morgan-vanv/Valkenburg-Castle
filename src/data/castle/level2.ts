@@ -78,6 +78,8 @@ export function buildLevel2(): LevelBuilder {
 
   // Railing: the arcade's pit side, broken at (28, 7) and (15, 14).
   b.railing([[26, 7], [27, 7], [29, 7], [30, 7], [31, 7], [15, 13], [15, 15]]);
+  // V4.1 (WS8 L2-2): the archers' perches are raised floor (+10 to ranged from them, for whoever stands there).
+  b.set(28, 7, { kind: 'floor', raised: true }).set(35, 10, { kind: 'floor', raised: true });
 
   // Lights (V3.3, spec 16.2): sparse. Four sconces, the forge's fire and the pit glow at the
   // Crossing; the arcade, the bridges and the ledge are dark.

@@ -466,7 +466,7 @@ Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLig
 | Brightness | 0 / −10 / −20 / −30 | every hero roll |
 | Weapon tier | +10 per tier | weapon attacks, knockback, hamstring, free swings, overwatch |
 | Target asleep | +20 | attack, knockback, firebolt, dart, overwatch |
-| Raised floor (ranged) | +10 | bow attack, firebolt, fireball (no raised hexes exist in the current castle) |
+| Raised floor (ranged) | +10 | bow attack, firebolt, fireball (V4.1: the two archer perches on Level 2 are raised) |
 | Flanked | +1 slot | melee: an active ally on the hex directly across the target |
 | Sneak attack | +1 slot | weapon `attack` on an enemy that hasn't noticed this hero (asleep, or not in its `noticedIds`; crew: not hostile or demanding) |
 | Backstab (Burglar) | +1 slot, weapon damage ×2 per hit before armor | melee from outside the target's front (a monster's sides or straight behind it; straight behind a crew member), target unaware of the Burglar; monsters and crew members, not the Dragon or the Gloam. Stacks with sneak attack |
@@ -695,8 +695,8 @@ Code: data.ts `MONSTERS`, `TIERS`, `ARCHER_RANGE`, `ARCHER_KEEP`, `CAPTAIN_SHOUT
 
 | Level | Spawns |
 | --- | --- |
-| 1 Ruined Keep | 2 sleeping rats (kitchens), sleeping spider (library), cutpurse (courtyard), 5 orcs at posts (hall ×2, tower stair, courtyard, chapel), 1 patrolling orc (round the hall's pit mouth) |
-| 2 Crossing | Sleeping barracks squad (4 orcs, the captain), Grub the Jailer (orc, cellblock), spider (archive), Ugluk Red-Hand (berserker, forge), rats (south rim), 2 orcs patrolling the arcade loop, orc patrolling guard post ↔ barracks, orc patrolling the east ledge, 2 archers (arcade, east ledge), orc (winch room), cutpurse (archive) |
+| 1 Ruined Keep | 2 sleeping rats (kitchens), sleeping spider (library), cutpurse (courtyard), 6 orcs at posts (hall ×2, the west one on the pit's unrailed lip; tower stair ×2; courtyard; chapel, asleep on a campaign's first delve), 1 patrolling orc (round the hall's pit mouth) (V4.1, spec 31.7) |
+| 2 Crossing | Sleeping barracks squad (4 orcs, the captain), Grub the Jailer (orc, the cellblock passage's winch-room end, within the winch's noise; V4.1), spider (archive), Ugluk Red-Hand (berserker, asleep at the forge; V4.1), rats (south rim), 2 orcs patrolling the arcade loop, orc patrolling guard post ↔ barracks, orc patrolling the east ledge, 2 archers (arcade, east ledge), orc (winch room), cutpurse (archive) |
 | 3 Hollow | Rats (Bone Pile), 3 buried ghouls (Bone Pile), 2 spiders (Spider Nest), 2 orcs (lift base), berserker (the Drain), the Dragon asleep (the Lair) |
 
 Code: src/data/castle/index.ts `castle.spawns`.
@@ -914,7 +914,7 @@ Code: delve.ts `leaveCastle`, `canLeaveAt`, `afterHeroMove`; camp.ts `contractDo
 | `bribe` action | dead | Replaced by parley deals; always returns no targets |
 | `Hero.wounded`, `HeroInDelve.revived` | vestigial | Always 0 / unused by rules |
 | Legacy crew numbers (`RIVAL_CLASSES`, `SISTER`, `CUTTHROAT_TIER`, `SISTER_DART_CHANCE`, `PYRO_BOLT_CHANCE`) | old saves only | Members without `level` |
-| Raised floor (`TileDef.raised`) | rule live, no data | +10 for ranged from raised floor; no raised hex in the castle |
+| Raised floor (`TileDef.raised`) | live (V4.1) | +10 for ranged from raised floor; the two archer perches on Level 2 |
 | Later ideas | not built | docs/ideas-later.md: arrows as ammunition, tripwire charges, ceiling collapse, Nerve checks, companions, endless descent past the Sealed Stair |
 
 ---

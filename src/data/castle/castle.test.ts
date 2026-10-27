@@ -3,7 +3,8 @@ import { distance, hexKey, posKey, posNeighbors, samePos, type Pos } from '../..
 import type { LevelDef, TileDef } from '../../game/types';
 import { castle } from './index';
 import { STORIES } from '../../game/data';
-import { World, fixedLightReaches } from '../../game/world';
+import { World, fixedLightReaches, noiseField } from '../../game/world';
+import { at } from './build';
 import { breakableWall } from '../../game/charges';
 
 function level(n: number): LevelDef {
@@ -468,11 +469,12 @@ describe('castle V3.3: awareness', () => {
   const on = (lv: number) => castle.spawns.filter((s) => s.at.level === lv);
   const room = (p: Pos) => tile(p)?.room;
 
-  it('marks exactly the brief’s sleepers: L1 rats and spider, L2 the barracks squad, L3 the Dragon', () => {
+  it('marks exactly the brief’s sleepers: L1 rats and spider, L2 the barracks squad and Ugluk (V4.1 WS8), L3 the Dragon', () => {
     for (const s of castle.spawns) {
       const shouldSleep =
         (s.at.level === 1 && (s.kind === 'rats' || s.kind === 'spider')) ||
         (s.at.level === 2 && room(s.at) === 'barracks') ||
+        s.name === 'Ugluk Red-Hand' ||
         s.kind === 'dragon';
       expect(s.asleep === true, `${s.kind} at ${show(s.at)} asleep=${s.asleep}`).toBe(shouldSleep);
       // Awake is the default now; nothing says asleep: false.
@@ -481,7 +483,7 @@ describe('castle V3.3: awareness', () => {
       if (s.asleep) expect(s.patrol, `${s.kind} at ${show(s.at)}`).toBeUndefined();
     }
     expect(on(1).filter((s) => s.asleep).map((s) => s.kind).sort()).toEqual(['rats', 'rats', 'spider']);
-    const squad = on(2).filter((s) => s.asleep);
+    const squad = on(2).filter((s) => s.asleep && s.name !== 'Ugluk Red-Hand'); // V4.1 (WS8 L2-1): Ugluk sleeps at the forge
     expect(squad.length).toBeGreaterThanOrEqual(4);
     expect(squad.filter((s) => s.kind === 'captain').length).toBe(1);
     expect(squad.every((s) => s.kind === 'orc' || s.kind === 'captain')).toBe(true);
@@ -812,5 +814,61 @@ describe('castle V4.0: the shut ways in (spec 25)', () => {
       }
       expect(seen.has(posKey(castle.entrances[0]!)), way.id).toBe(true);
     }
+  });
+});
+
+describe('castle V4.1: Level 1 teaches, Level 2 tests (WS8, docs/v41-levels.md)', () => {
+  const w = new World(castle);
+  const L = (lv: number, c: number, r: number) => at(lv, c, r);
+  const spawnAt = (p: Pos) => castle.spawns.find((s) => samePos(s.at, p));
+  const d = { doors: {}, blown: [], collapsed: [], dug: [], fuses: [], monsters: [], heroes: [] } as unknown as Parameters<typeof noiseField>[1];
+
+  it('L1-1: the chapel orc (Aldric\'s guard) sleeps on a first delve only', () => {
+    const s = spawnAt(L(1, 35, 24));
+    expect(s?.kind).toBe('orc');
+    expect(s?.firstDelveAsleep).toBe(true);
+    expect(s?.asleep).toBeFalsy();
+  });
+
+  it('L1-3: two orcs post the tower stair, and a firecracker in the tower passage reaches both', () => {
+    const posts = [L(1, 36, 4), L(1, 35, 5)];
+    for (const p of posts) expect(spawnAt(p)?.kind, show(p)).toBe('orc');
+    const field = noiseField(w, d, L(1, 33, 8), 6);
+    for (const p of posts) expect(field.has(posKey(p)), show(p)).toBe(true);
+  });
+
+  it('L1-4: the servants\' passage trap sits in the dark', () => {
+    const trap = castle.traps.find((t) => samePos(t.at, L(1, 6, 8)));
+    expect(trap).toBeTruthy();
+    expect(fixedLightReaches(w, L(1, 6, 8))).toBe(false);
+  });
+
+  it('L1-5: the hall\'s west orc stands on an unrailed pit lip', () => {
+    const p = L(1, 22, 13);
+    expect(spawnAt(p)?.kind).toBe('orc');
+    expect(tile(p)?.railing).toBeFalsy();
+    expect(posNeighbors(p).some((n) => tile(n)?.kind === 'pit')).toBe(true);
+  });
+
+  it('L2-1: Ugluk Red-Hand sleeps by the forge, in sight of Gerda', () => {
+    const ugluk = castle.spawns.find((s) => s.name === 'Ugluk Red-Hand')!;
+    expect(ugluk.asleep).toBe(true);
+    const gerda = castle.contractSites.find((x) => x.story === 'smith')!;
+    expect(distance(ugluk.at, gerda.at)).toBeLessThanOrEqual(5);
+  });
+
+  it('L2-2: the archer perches are raised floor next to walkable floor', () => {
+    for (const p of [L(2, 28, 7), L(2, 35, 10)]) {
+      expect(tile(p)?.kind, show(p)).toBe('floor');
+      expect(tile(p)?.raised, show(p)).toBe(true);
+      expect(castle.spawns.some((s) => s.kind === 'archer' && samePos(s.at, p)), show(p)).toBe(true);
+      expect(posNeighbors(p).some((n) => tile(n)?.kind === 'floor'), show(p)).toBe(true);
+    }
+  });
+
+  it('L2-3: working the winch is heard where Grub the Jailer stands', () => {
+    const grub = castle.spawns.find((s) => s.name === 'Grub the Jailer')!;
+    const winch = L(2, 25, 27);
+    expect(noiseField(w, d, winch, 6).has(posKey(grub.at))).toBe(true);
   });
 });
