@@ -878,8 +878,7 @@ export const CREWS: Record<CrewId, CrewDef> = {
   },
   'gallows-choir': {
     // V4.1 (WS7, spec 31.9): level 5 (was 3): even with a party of three at level 3 (no front-line Sapper: its casters need the levels).
-    // V4.1 (squads, spec 31.12): level 6: spec 31.11's free swings moved the arena's parity cell to 75% party wins at 5.
-    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 6, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
+    id: 'gallows-choir', name: 'The Gallows Choir', temperament: 'cutthroat', level: 5, weaponTier: 1, armorTier: 1, contracts: [2], purse: 30,
     members: [
       { name: 'Deacon Harl', cls: 'sellsword', pack: ['potion', 'glue'] },
       // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.

@@ -1322,12 +1322,36 @@ Owner-approved (decisions.md, 2026-10-27). Pillars 9 (squad building is strategy
 | The Gallows Choir | Verger Crane, Shadowmancer | smoke, firecracker | Crane, Vey | Deacon Harl and Little Mags (her poison dart) |
 | The Wake | Pall, Ranger | 2 caltrops, potion (quiver 30) | Pall, Candle | three: Mother Grave, Sexton, Spade |
 
-- **The Gallows Choir at level 6** (was 5): spec 31.11's free swings moved the arena's parity cell from 53% to 75% party wins with the crew unchanged; at 6 it is even again (below).
+- **The Gallows Choir stays at level 5.** Spec 31.11's free swings moved its parity cell (three at level 3, the crew unchanged) from 53% to 65–75% party wins; level 6 was tried (below) and evened that cell only by stalling it and sinking the pair cell, so the level is left for the owner.
 - **UI:** Lowgate's Party step shows the campaign's slots ("Up to three for now." / "Up to four.") and, while the fourth is locked, a locked slot ("🔒 Locked", `data-locked="muster"`) with Wim's hint "Wim says the old muster roll is in the officers' quarters. With it, a fourth could sign on." (the hover adds "The job is on the notice post." when it is). The bench, hiring into a free slot, the loadout (`cleanLoadout`: Outfit and Set out), "Same as last time" and the Delve button keep to the slots. The step's subtitle reads "Who goes in: hire, heal, pick the party." The sim bot hires and takes no more than the slots.
 
 **The arena** (scripts/v37-crew-arena.ts): every cell builds the crew at its party's size (`short`: one hero short against the crew sized for the full party); the party gets as many potions as the crew it meets carries. New cells per crew: `par2` and `par4` (2 and 4 heroes at the parity level, against a crew of 2 / 4, the Wake 3 / 4); the Level 2 crews' old `par4` (four at level 2) is `par4-l2`. Tuning knobs: `CREWSIZE=n`, `DROP="name,name"`, `PACK="Name=item+item"`.
 
-ARENA_TABLES
+**Before** (origin/v4.1 at spec 31.13, crews always at full strength: 3, the Wake 4; `SEED=1 npx tsx scripts/v37-crew-arena.ts 40`, 40 fights a cell; won includes "fell back"; the rest of a row to 100% is fights still going at round 30):
+
+| Crew | par | par4 (4 × L2) | lvl-1 | short | worn |
+| --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (L4) vs 3 × L2 | won 50%, lost 48% | | won 18%, lost 83% | lost 100% | lost 100% |
+| Ferrymen (L4) vs 3 × L3 | won 53%, lost 48% | won 53%, lost 48% (vs 3) | lost 98% | won 3%, lost 98% | won 3%, lost 98% |
+| Gallows Choir (L5) vs 3 × L3 | won 65%, lost 13% (22% stalled) | won 100% (vs 3) | lost 100% | lost 100% | lost 100% |
+| The Wake (L6) vs 4 × L4 | won 45%, lost 43% | | won 40%, lost 53% | won 15%, lost 78% | lost 100% |
+
+(The Choir's parity cell was 53% before spec 31.11; 31.11's free swings, not this change, moved it.)
+
+**After** (this change, `SEED=1 PARTY=par,par2,par4,par4-l2,lvl-1,short,worn npx tsx scripts/v37-crew-arena.ts 40`; the crew sized to the party, `short` against the crew sized for the full party):
+
+| Crew | par | par2 (2 at par level) | par4 (4 at par level) | par4-l2 (4 × L2) | lvl-1 | short | worn |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (L4) vs 3 × L2 | won 50%, lost 48% | won 48%, lost 53% (vs 2) | won 55%, lost 40% (vs 4) | | won 18%, lost 83% | lost 100% (2 vs 3) | lost 100% |
+| Ferrymen (L4) vs 3 × L3 | won 53%, lost 48% | won 53%, lost 0% (47% stalled; vs 2) | won 65%, lost 35% (vs 4) | won 5%, lost 95% (vs 4) | lost 98% | won 3%, lost 98% | won 3%, lost 98% |
+| Gallows Choir (L5) vs 3 × L3 | won 65%, lost 13% (22% stalled) | won 35%, lost 65% (vs 2) | won 55%, lost 28% (vs 4) | won 60%, lost 38% (vs 4) | lost 100% | lost 100% | lost 100% |
+| The Wake (L6) vs 4 × L4 | won 45%, lost 43% | lost 100% (2 vs 3) | = par (4 vs 4) | | won 40%, lost 53% | won 15%, lost 78% (3 vs 4) | lost 100% |
+
+The three-hero parity cells are the same crews as before and play the same fights. At equal size and level: 48–55% party wins for every crew and size but the Ferrymen's four (65%), the Ferrymen's pair (53%, the rest stalled: the last Ferryman holds across the Crossing's pit from two hurt heroes) and the Gallows Choir (65% at three, the 31.11 drift; 35% at two). A level below or a hero short, the party loses 53–100% (the Wake a level below 53%, as before). A party of four at level 2 now meets four Ferrymen and loses 95% (it met three and won 53%); against four of the Choir it wins 60% (was 100% against three).
+
+Tuning on the way (20 fights a cell unless noted): the Sisters' pair was Odile and Brisk (the party won 100%, 95% by the pair calling it off once one fell); Wenna and Brisk, 45%. The Ferrymen's pair with Sil and Brecht instead lost the arena's all-melee pair (Keven and a Sellsword) every fight. Maud with a potion: the party of four won 65%; with smoke and an antipoison 55%. Kees with glue and smoke 75%, with the poison dart and a potion 65%. The Gallows Choir at level 6 (40 fights): parity won 45% with 40% stalled, the pair 18%, four 40%, four at level 2 35%: not taken. The Wake at five against four (`CREWSIZE=5`, 20 fights): the party won 5%, lost 90%.
+
+**Open questions for the owner:** (1) the Wake's 3–5 with clamp(party size): with at most four heroes the Wake never fields its fifth (Pall); field one more than the party (3–5 = party + 1) instead? At five against four the party wins 5%. (2) The Gallows Choir's parity cell after spec 31.11 (65%; level 6 overcorrects). (3) Two-hero parties at Level 2 against the Choir's pair (35%).
 
 ### 31.13 Reactions: the castle's turn can pause (owner, 2026-10-27)
 
