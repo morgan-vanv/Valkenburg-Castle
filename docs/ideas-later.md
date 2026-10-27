@@ -20,11 +20,9 @@ Open ideas, newest batch last. Built-then-shelved features with code are in `doc
 
 Crews play by the party's rules (spec 28 did movement, sneaking, noise and wake rolls, monsters vs crews, locks, traps, the Burglar's backstab, the Sapper's dig and blast). Still to give them, each visible and named in the log:
 - **Rope, jump, climb, grapple** (2026-10-26): crews rope down into the pit, jump to a lower level, climb back up, grapple out; prospectors racing the party down levels.
-- **Light** (2026-10-26): crews carry their own light in the fiction but not in the rules (litSet ignores them; monsters see them by the unlit ranges unless fixed light reaches them). Give them a lantern or torches that light hexes, and let them light braziers. Then the Gloam can hunt unlit crew members on Level 3 the same way it hunts heroes (left out of spec 28 on purpose).
-- **Focus, flanking, brace** (2026-10-26): crews spend Focus on key rolls, flank (+1 slot with a member across the target), and their Heir, Sellsword and Sapper brace.
-- **The missing spells** (2026-10-26): Sleep, Dread, Night thorn, Briar, Kindle for crew mages (the Shadowmancer sister putting an orc to sleep to pass it).
-- **Revive** (2026-10-26): a member downed instead of killed, and a crewmate reviving them.
-- **Venom, the crew side (spec 29)** (2026-10-26): crews are envenomed and paralyzed by the party's rules, their Burglar throws venom darts at heroes and their Hedgewitch mends venom out, but they don't yet Shoulder a paralyzed crewmate and carry them out (the crew's walk, dash and Sapper ways would each need the carried member placed after every step: not a clean fit in pass 1, so a paralyzed member simply waits it out), carry antidotes, or dart monsters with venom.
+- **Light, the rest** (2026-10-26; V4.1 WS2 gave every member radius 2 and WS7 hoods a waiting cutthroat crew): crews lighting braziers, and the Gloam hunting an unlit crew member on Level 3 (crews are never unlit today).
+- **Poison, the crew side, the rest** (2026-10-26; V4.1 WS3 gave crews poison, carry and getting up, WS7 the antipoison): crew Burglars darting monsters with poison.
+- **Crew parity, pass 3** (2026-10-27, from WS7): a hero mage's Kindle reaching crew torches (crews have no light items to kindle); crew Sapper's Brace was removed with the hero Sapper's (spec 30.1), so only the crew Sellsword braces; crews at peace using Dread to break off from monsters; a crew Shadowmancer's Dread lasting 2 rounds like the heroes' on monsters (heroes have no flee rule: it is "no action next turn" instead); ranged crews pulling back between rounds (they kite only on the turn they cast).
 - **Smaller gaps** (2026-10-26): the party's caltrops catching crews; grab, web, drag, steal and hamstring by monsters on crew members (they attack instead today); the Dragon going for crews; crews picking or blasting locked doors on their way when they aren't the Sapper; a crew Burglar's improvised pick.
 
 ## Shelved (code exists)
@@ -36,6 +34,7 @@ Crews play by the party's rules (spec 28 did movement, sneaking, noise and wake 
 
 ## Shipped since being filed
 
+- Crew parity pass 2: Focus, flanking and brace; the missing spells (Sleep, Dread, Night thorn, Briar, Kindle); getting a downed member up (V4.1 WS3); the antipoison; crews carrying light (V4.1 WS2) → V4.1 WS7 (spec 31.9), with move-then-cast, a beaten crew calling the fight off and a wary crew keeping its distance.
 - Hiring or allying with rival crews (V3 GDD) → V3.5 parley card: hire for a job or 5 rounds.
 - Rival crews fleshed out (parley, prospectors on Level 1, cutthroats on Level 2) → V3.5.
 - The Gilded Flagon, a Deep Rock-style pub with ales, opened by rescuing Old Wim and recovering the copper and the cask book → V3.5.

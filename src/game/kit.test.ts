@@ -7,7 +7,7 @@ import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { posKey } from './hex';
 import type { Command, GameState, HeroClass, Item } from './types';
-import { CLASSES, kitPerDelve } from './data';
+import { CLASSES, CREWS, kitPerDelve } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { World } from './world';
 import { fitClass, makeHero } from './camp';
@@ -59,11 +59,12 @@ describe('V4.0 play-test fixes 2 (spec 30)', () => {
       expect(e.apply(s, { type: 'act', heroId: 'sam', action: 'brace', target: {}, focus: 0 }).error).toBeDefined();
     });
 
-    it('crew Sappers follow the class: the Ferrymen\'s Brecht (level 3) HP 13, armor 0 + 1', () => {
+    it('crew Sappers follow the class: the Ferrymen\'s Brecht HP 9 + 2 a level above 1, armor 0 + 1', () => {
       const s = delve([['brann', 'sellsword', 1]]);
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       const brecht = f.members.find((r) => r.cls === 'sapper')!;
-      expect([brecht.hp, brecht.maxHp]).toEqual([13, 13]);
+      const hp = 9 + 2 * (CREWS.ferrymen.level - 1); // V4.1 (WS7): crew levels retuned
+      expect([brecht.hp, brecht.maxHp]).toEqual([hp, hp]);
     });
 
     it('old saves: Sappers come down to the table (HP and Might, wounds kept), once; a Sapper mid-delve is capped', () => {
@@ -144,13 +145,14 @@ describe('V4.0 play-test fixes 2 (spec 30)', () => {
       const own = (items: Item[] | undefined, kind: string) => items?.find((i) => i.kind === kind);
       const f = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       const brecht = f.members.find((r) => r.cls === 'sapper')!;
-      expect(own(brecht.pack, 'improvised-charge')).toMatchObject({ amount: 3, slots: 0 });
+      expect(own(brecht.pack, 'improvised-charge')).toMatchObject({ amount: CREWS.ferrymen.level, slots: 0 }); // one a crew level
       expect(brecht.pack!.filter((i) => i.kind === 'charge')).toHaveLength(2);
       const wake = buildCrew(s as GameStateX, 'the-wake', [at(3, 3, 4), at(3, 4, 4), at(3, 3, 5), at(3, 5, 5)]);
-      expect(own(wake.members.find((r) => r.cls === 'sapper')!.pack, 'improvised-charge')).toMatchObject({ amount: 4 });
+      expect(own(wake.members.find((r) => r.cls === 'sapper')!.pack, 'improvised-charge')).toMatchObject({ amount: CREWS['the-wake'].level });
       const sis = buildCrew(s as GameStateX, 'lantern-sisters', [at(1, 3, 6), at(1, 4, 6), at(1, 5, 6)]);
       const brisk = sis.members.find((r) => r.cls === 'burglar')!;
-      expect(own(brisk.pack, 'improvised')).toMatchObject({ amount: 2, slots: 0, name: 'Improvised picks (2)' });
+      const n = CREWS['lantern-sisters'].level;
+      expect(own(brisk.pack, 'improvised')).toMatchObject({ amount: n, slots: 0, name: `Improvised picks (${n})` });
       expect(own(brisk.pack, 'lockpicks')).toBeDefined(); // her proper picks come first
     });
 
@@ -163,7 +165,8 @@ describe('V4.0 play-test fixes 2 (spec 30)', () => {
       const c: Ctx = { w, s: s as GameStateX, d: s.delve as DelveX, ev: [] };
       crewWorkLock(c, brisk, at(1, 17, 1));
       expect(c.ev.some((x) => x.type === 'roll' && x.roll.slots === 2)).toBe(true);
-      expect(brisk.pack!.find((i) => i.kind === 'improvised')).toMatchObject({ amount: 1, name: 'Improvised pick' });
+      const left = CREWS['lantern-sisters'].level - 1;
+      expect(brisk.pack!.find((i) => i.kind === 'improvised')).toMatchObject({ amount: left, name: left === 1 ? 'Improvised pick' : `Improvised picks (${left})` });
     });
 
     it('old saves: a Burglar mid-delve with the old single pick, and a level 1 Sapper with 3 explosives, load and work', () => {

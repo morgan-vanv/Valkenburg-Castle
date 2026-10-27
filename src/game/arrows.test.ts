@@ -7,7 +7,7 @@ import { at, testCastle } from './test/testCastle';
 import { oldLantern } from './test/light';
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { ActionKind, ActionTarget, Command, GameEvent, GameState, HeroClass, ItemKind, Monster, MonsterKind } from './types';
-import { ARROWS_PER_LEVEL, BARB_ROUNDS, BLAST_ARROW_DMG, GLOW_ARROW_ROUNDS, KNIFE, MONSTERS, WHISTLE_NOISE, quiverPerDelve } from './data';
+import { ARROWS_PER_LEVEL, BARB_ROUNDS, BLAST_ARROW_DMG, CREWS, GLOW_ARROW_ROUNDS, KNIFE, MONSTERS, WHISTLE_NOISE, quiverPerDelve } from './data';
 import { World, lightSources, litSet } from './world';
 import type { Ctx, DelveX, GameStateX, MonsterX } from './state';
 import { makeHero } from './camp';
@@ -358,12 +358,12 @@ describe('V4.1 WS6 arrows (spec 31.8)', () => {
       const s = delve(1);
       const sis = buildCrew(s as GameStateX, 'lantern-sisters', [at(1, 16, 2), at(1, 17, 2), at(1, 18, 2)]);
       const ran = sis.members.find((r) => r.cls === 'ranger')!;
-      expect(quiverOf(ran.pack!)).toMatchObject({ amount: 10, slots: 0 }); // level 2
+      expect(quiverOf(ran.pack!)).toMatchObject({ amount: 5 * CREWS['lantern-sisters'].level, slots: 0 }); // V4.1 (WS7): by crew level
       expect(ran.pack!.find((i) => i.kind === 'glowarrows')).toMatchObject({ amount: 3 });
       expect(sis.members.filter((r) => r.cls !== 'ranger').every((r) => !quiverOf(r.pack!))).toBe(true);
       const fm = buildCrew(s as GameStateX, 'ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       const sil = fm.members.find((r) => r.cls === 'ranger')!;
-      expect(quiverOf(sil.pack!)!.amount).toBe(15); // level 3
+      expect(quiverOf(sil.pack!)!.amount).toBe(5 * CREWS.ferrymen.level); // V4.1 (WS7): by crew level
       expect(sil.pack!.find((i) => i.kind === 'barbarrows')).toMatchObject({ amount: 3 });
       // Spent like a hero's: plain first, then the bundle; out of arrows, a knife.
       quiverOf(sil.pack!)!.amount = 1;
@@ -383,7 +383,7 @@ describe('V4.1 WS6 arrows (spec 31.8)', () => {
       const m = monster(s, 'berserker', ORC_AT);
       m.hp = 99;
       hitMonster(ctx(s), ran, m.id);
-      expect(plainArrows(ran.pack!)).toBe(9);
+      expect(plainArrows(ran.pack!)).toBe(5 * CREWS['lantern-sisters'].level - 1);
     });
 
     it('the Sisters\' Ranger looses a glow arrow at a hero in the dark, and it lights them (named in the log)', () => {
@@ -436,7 +436,7 @@ describe('V4.1 WS6 arrows (spec 31.8)', () => {
       s.delve!.rivals.members[0]!.pack = s.delve!.rivals.members[0]!.pack!.filter((i) => i.kind !== 'quiver');
       const back = e.deserialize(e.serialize(s))!;
       expect(quiverOf(back.delve!.heroes.find((h) => h.heroId === 'rae')!.pack)!.amount).toBe(10);
-      expect(quiverOf(back.delve!.rivals!.members[0]!.pack!)!.amount).toBe(10);
+      expect(quiverOf(back.delve!.rivals!.members[0]!.pack!)!.amount).toBe(5 * CREWS['lantern-sisters'].level);
       quiverOf(back.delve!.heroes.find((h) => h.heroId === 'rae')!.pack)!.amount = 0;
       const again = e.deserialize(e.serialize(back))!;
       expect(quiverOf(again.delve!.heroes.find((h) => h.heroId === 'rae')!.pack)!.amount).toBe(0);

@@ -14,7 +14,7 @@ import { buildCrew, planRival } from './rivals';
 import { makeHero } from './camp';
 import { strike } from './ai';
 import { hostileAct, hostilePlan } from './crewai';
-import { crewBeaten, crewEdge, crewRetreat, crewWary, keyFocus, powerAct } from './crewpower';
+import { crewBeaten, crewEdge, crewRetreat, crewWary, heroThreat, keyFocus, powerAct } from './crewpower';
 import { deals } from './parley';
 
 const e = createEngine(testCastle);
@@ -277,6 +277,22 @@ describe('V4.1 crews as an equal power (spec 31.9)', () => {
     });
   });
 
+  describe('not piecemeal', () => {
+    it('a member that can\'t strike this round stops short of where two heroes could close on it (for CREW_HOLD_ROUNDS rounds)', () => {
+      const s = delve();
+      park(s, at(3, 4, 4));
+      put(s, 'brann', at(3, 4, 5));
+      const [sell] = crew(s, 'ferrymen', [at(3, 16, 4), at(3, 17, 1), at(3, 17, 2)]);
+      const c = ctx(s);
+      const stop = hostilePlan(c, sell!).path.at(-1)!;
+      expect(heroThreat(c, stop)).toBeLessThan(2);
+      // Held twice already: it goes in.
+      s.delve!.rivals!.held = 2;
+      const go = hostilePlan(c, sell!).path.at(-1)!;
+      expect(heroThreat(c, go)).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   describe('retreat and wariness', () => {
     it('a hostile crew with half its members down, facing a stronger party, calls the fight off (once, logged)', () => {
       const s = delve();
@@ -314,8 +330,9 @@ describe('V4.1 crews as an equal power (spec 31.9)', () => {
       put(s, 'brann', at(3, 6, 5));
       put(s, 'aldous', at(3, 5, 4));
       const [ranger] = crew(s, 'lantern-sisters', [at(3, 8, 4), at(3, 12, 1), at(3, 12, 2)], 'neutral');
-      for (const m of s.delve!.rivals!.members) m.hp = 1;
       const c = ctx(s);
+      expect(crewWary(c)).toBe(false); // the Sisters at full strength aren't afraid of three level 1 heroes
+      for (const m of s.delve!.rivals!.members) Object.assign(m, { hp: 1, level: 1, pack: [] });
       expect(crewWary(c)).toBe(true);
       const it = planRival(c, ranger!);
       expect(it.kind).toBe('flee');

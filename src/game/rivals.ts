@@ -107,7 +107,7 @@ function spotsAround(w: World, d: DelveX, from: Pos, n: number, taken: (p: Pos) 
 
 /** The purse each member carries (spec 20.4: 30 gold at level 2-3, 50 at level 4), dropped when killed. */
 function purse(s: GameStateX, def: CrewDef): Item {
-  return makeItem({ s }, 'gold', CREW_PURSE[def.level] ?? CREW_PURSE[3]!);
+  return makeItem({ s }, 'gold', def.purse ?? CREW_PURSE[def.level] ?? CREW_PURSE[3]!); // V4.1 (WS7): fixed per crew
 }
 
 /** A cutthroat crew from `def` at `post` (members on the free hexes around it), or null if there's no room. */
