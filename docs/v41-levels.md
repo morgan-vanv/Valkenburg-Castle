@@ -1,4 +1,4 @@
-# V4.1 levels: Level 1 teaches, Level 2 tests (WS8, for owner review)
+# V4.1 levels: Level 1 teaches, Level 2 tests (WS8, owner-approved 2026-10-26: build all)
 
 Owner (2026-10-26): every core mechanic is taught, or at least shown in play, on Level 1, and every one is tested in some way on Level 2. Darkness is Level 2's first check, but sound, stealth, positioning, items and class utility must not be neglected. This note lists what each level already does and the changes proposed (marked **Change**). Numbers and rules for light, poison and carrying come from docs/v41-plan.md (WS2, WS3).
 
