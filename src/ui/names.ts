@@ -319,6 +319,7 @@ export const ACTION_GLYPH: Partial<Record<ActionKind, string>> = {
   escape: '⛓',
   nightsight: '◉',
   setCharge: '✹',
+  setTripwire: '⌁', // V4.1 (spec 31.3)
   dread: '☠',
   brace: '⛨',
   hamstring: '➴',
@@ -370,6 +371,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   overwatch: `Spend the action: in the next world phase, shoot the first enemy that moves or acts in sight within ${OVERWATCH_RANGE} (a full roll).`,
   knockback: `2 Finesse slots at range ${KNOCKBACK_RANGE} or less: 2 hits push the target 1 hex away from you (into pits!).`,
   throwCharge: `Throw a charge up to ${THROW_CHARGE_RANGE} hexes (in sight), fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; breaks walls within 1 on Levels 1 and 2. Noise ${V37.blastNoise}. You take nothing from your own blast; other heroes take half.`,
+  setTripwire: `Sapper, with Gerda and Ilse home. Set a charge on a tripwire on a free floor hex next to you: it goes off the moment a monster or crew member steps onto a hex next to it, or when its fuse of ${DATA.TRIPWIRE_FUSE} runs out. ${V37.blastInner} damage within 1, ${V37.blastOuter} within 2, as any charge. Heroes don't set it off.`,
   setCharge: `Sapper. Set a charge on a hex, a breakable wall, a door or a chest next to you, then pick the fuse: 1 blows at the end of the coming castle turn, 2 the turn after. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away: pits count), ${V37.blastOuter} within 2. Opens locks, breaks built walls on Levels 1 and 2 into rubble. Noise ${V37.blastNoise}, heard a level up and down. You take nothing from your own blast; other heroes take half. The fuse and the blast area show to everyone.`,
   brace: `Plant your feet until your next turn: every hit on you does 1 less (after armor), enemies roll −${V37.bracePenalty}% against you, and your free swings keep their full slots. A shield counts double while braced.`,
   hamstring: `A bow shot at the legs: 1 Finesse slot at −${V37.hamstringPenalty}%, range ${V37.hamstringRange} in sight. A hit roots the target for ${V37.hamstringRounds} rounds: it can't move or dash, it can still act. Noise 1.`,
@@ -485,6 +487,7 @@ export const ITEM_HELP: Record<string, string> = {
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
   venomdart: `1 Finesse slot: a hit envenoms a monster or crew member. In ${VENOM_ROUNDS} turns it is paralyzed for ${PARALYSIS_ROUNDS}: no moving, no acting. Not the Dragon or the Gloam. Silent.`,
   antidote: 'Draws out venom: an envenomed hero is clean again, a paralyzed one can move again. Drink it, or give it to a hero next to you (an action).',
+  greaterpotion: `Heals ${DATA.POTION_HEAL.greaterpotion}, or gets a downed hero back up. Aldric and Ilse's.`, // V4.1 (spec 31.3)
 };
 
 /**
@@ -511,6 +514,7 @@ export const ITEM_USE: Record<string, { pack?: boolean; then?: string; how?: str
   nightsight: { pack: true },
   venomdart: { pack: true, then: `a target within ${THROW_RANGE.venomdart}` },
   antidote: { pack: true, then: 'yourself or the hero' },
+  greaterpotion: { pack: true, then: 'yourself or a hero next to you' }, // V4.1 (spec 31.3)
 };
 
 /** The "Use: ..." line for an item kind: "Use: click it in the pack, then a hex within 4" / "Use: Pick, next to a lock". */
@@ -599,6 +603,7 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   escape: 'x',
   nightsight: 'n',
   setCharge: 'w',
+  setTripwire: 'w', // V4.1 (spec 31.3): Set charge's key; the bar gives it to whichever comes first
   dread: 'k', // V3.9: F is Face
   brace: 'x',
   hamstring: 'h',
@@ -636,6 +641,7 @@ export const ITEM_GLYPH: Record<string, string> = {
   nightsight: '◉',
   venomdart: '➹',
   antidote: '⚕',
+  greaterpotion: '⚱', // V4.1 (spec 31.3)
 };
 
 /** Glyph for any item kind, tolerant of names the engine picks (smokeBomb, sleepDart, skeletonKey...). */
@@ -682,6 +688,7 @@ export const ITEM_EFFECT: Record<string, string> = {
   nightsight: 'Drink: 8 rounds without dark penalties to your sight or rolls. The dark still hides you from nothing, and the Gloam still comes.',
   venomdart: `Throw 5, 1 Finesse slot: a hit envenoms a monster or crew member; ${VENOM_ROUNDS} turns later it is paralyzed for ${PARALYSIS_ROUNDS}. Silent.`,
   antidote: 'Drink, or give to a hero next to you: draws out venom, even from the paralyzed.',
+  greaterpotion: `Drink or give: heals ${DATA.POTION_HEAL.greaterpotion}.`, // V4.1 (spec 31.3)
 };
 
 export function itemLabel(i: Item): string {
@@ -782,6 +789,20 @@ export const STORY: Record<StoryId, {
     itemTip: 'Carry it out and it goes home to Lowgate, not the cart. It can\'t be sold.',
     when: 'once the copper is home and Level 3 is open',
   },
+  // V4.1 (spec 31.3)
+  alchemist: {
+    who: 'Ilse the alchemist',
+    where: 'Level 2, the archive',
+    verb: 'Rescue',
+    unlocks: "Ilse's bench: darts, smoke, glue and oil",
+    step: 'outfit',
+    home: 'Ilse the alchemist is home.',
+    homeLine: "She sets up her bench in the old dye-house. Darts, smoke, glue and oil are hers now, and she works with the others: ask at the forge, the Flagon and the chapel.",
+    service: 'Darts, smoke, glue and oil when you outfit the party.',
+    line: "Ilse unpacks her alembics in the old dye-house. Ilse's bench is open.",
+    itemTip: '',
+    when: 'once Brother Aldric is home and Level 2 is open',
+  },
 };
 
 /** "Rescue Gerda the smith (Level 2, the forge)." */
@@ -799,6 +820,10 @@ export const ALE: Record<AleKind, { name: string; glyph: string; text: string }>
   smuggler: { name: "Smuggler's Mead", glyph: '☾', text: 'The drinker sneaks 4 hexes, and sneaking makes no noise.' },
   fireside: { name: 'Fireside Porter', glyph: '♨', text: 'The drinker heals 3 each time they change level: stairs, lift, fall, rope or hook (after any fall damage).' },
   blackcask: { name: 'Black Cask', glyph: '⚑', text: 'Nobody knows what is in it. 7 in 10: one of the six other ales. 3 in 10: hiccups or a heavy head.' },
+  // V4.1 (spec 31.3): Wim and Ilse's brews.
+  nighteye: { name: 'Night-eye Stout', glyph: '◉', text: 'All delve, the drinker sees as if lit: no dark penalty. Still dark to monsters, and lights nothing for anyone else.' },
+  spidermilk: { name: 'Spider-milk Stout', glyph: '❋', text: "Poison can't take hold of the drinker this delve." },
+  dragonfire: { name: 'Dragonfire Porter', glyph: '♨', text: `Fire, burning, the Dragon's breath and blasts do ${DATA.DRAGONFIRE_WARD} less to the drinker.` },
 };
 
 /** What an ale does in the delve (the Black Cask resolved). */
@@ -811,10 +836,14 @@ export const ALE_EFFECT: Record<AleEffect, { name: string; glyph: string; text: 
   fireside: ALE.fireside,
   hiccups: { name: 'Hiccups', glyph: '!', text: 'Black Cask gone wrong: noise 1 at the drinker every castle turn.', bad: true },
   heavyhead: { name: 'Heavy head', glyph: '☁', text: 'Black Cask gone wrong: Focus starts at 1.', bad: true },
+  nighteye: ALE.nighteye,
+  spidermilk: ALE.spidermilk,
+  dragonfire: ALE.dragonfire,
 };
 
 /** Where an ale's brewing gear comes from (locked ales say this). */
-export function aleNeeds(needs: 'copper' | 'caskbook'): string {
+export function aleNeeds(needs: 'copper' | 'caskbook' | 'alchemist'): string {
+  if (needs === 'alchemist') return 'Needs Ilse with Wim: rescue Ilse the alchemist (Level 2, the archive).';
   return needs === 'copper' ? 'Needs the brewing copper: recover it from the barracks (Level 2).' : "Needs Wim's cask book: recover it from the Drain (Level 3).";
 }
 
@@ -993,6 +1022,7 @@ export const WARE: Record<string, { group: 'light' | 'around' | 'quiet'; short: 
   oil: { group: 'light', short: 'Tops up the lantern.' },
   potion: { group: 'light', short: 'Heals, or gets a downed friend up.' },
   antidote: { group: 'light', short: 'Draws out venom, even from the paralyzed.' },
+  greaterpotion: { group: 'light', short: 'Heals more, or gets a downed friend up.' }, // V4.1 (spec 31.3)
   nightsight: { group: 'light', short: 'See in the dark for a while.' },
   rope: { group: 'around', short: 'Down a pit, and back up.' },
   charge: { group: 'around', short: 'Blows doors, chests and walls open. Loud.' },
@@ -1027,6 +1057,9 @@ export const ALE_SHORT: Record<AleKind, string> = {
   smuggler: 'Sneaks farther, and silently.',
   fireside: 'Heals a little at every change of level.',
   blackcask: 'Nobody knows. Usually good.',
+  nighteye: 'Sees in the dark all delve.',
+  spidermilk: "Poison can't take hold.",
+  dragonfire: 'Fire and blasts hurt less.',
 };
 
 /** V4.0: the known ways into the castle, in a line each (open ones; locked and blocked ones use the engine's hint). */

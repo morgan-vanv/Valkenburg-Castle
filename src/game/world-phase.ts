@@ -28,6 +28,7 @@ import { relockGate } from './ways';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, lookRound, moodOf, noticeFigure, perceivable, sightedHeroes, type Sighted } from './stealth';
 import { checkCarries, isParalyzed, venomTick } from './venom';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- planning
 
@@ -755,8 +756,11 @@ function burnPhase(c: Ctx): void {
   const pr = c.d.prisoner;
   if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) ids.push(pr.id);
   for (const id of ids) {
+    // V4.1 (spec 31.3): Dragonfire Porter's drinker takes 2 less (to 0: no hit).
+    const dmg = fireWard(c, id, BURN_DMG);
+    if (!dmg) continue;
     say(c, `${nameOf(c, id)} burns.`);
-    hurtAny(c, id, BURN_DMG, null, { noise: false });
+    hurtAny(c, id, dmg, null, { noise: false });
   }
 }
 

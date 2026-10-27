@@ -16,6 +16,7 @@ import { wayAtEntrance, wayOpen } from './ways';
 import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
 import { rivalStats } from './rivals';
 import { envenom } from './venom';
+import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
 
 // ---------------------------------------------------------------- perception
 
@@ -177,6 +178,13 @@ export function walk(c: Ctx, id: string, at: { at: Pos; facing?: number }, path:
     }
     seg.push(p);
     hearStep(c, id, p);
+    // V4.1 (spec 31.3): a Sapper's tripwire next to the step goes off now; the walk ends here (or with the monster).
+    if (isMonster && tripwireNear(c, p) && c.d.monsters.find((m) => m.id === id)?.kind !== 'gloam') {
+      c.ev.push({ type: 'moved', id, path: [...seg] });
+      at.at = { ...p };
+      springTripwires(c, id, p);
+      return true;
+    }
     if (p.level !== from.level) {
       c.ev.push({ type: 'moved', id, path: [...seg] });
       seg.length = 0;

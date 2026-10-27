@@ -55,7 +55,7 @@ const able = (x: HeroInDelve) => x.status === 'active' && !((x.paralyzed ?? 0) >
 const turnsWord = (n: number) => `${n} turn${n === 1 ? '' : 's'}`;
 const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust', 'dread', 'nightthorn', 'briar']);
 /** Class abilities that aren't spells. */
-const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'throwCharge', 'brace', 'hamstring']);
+const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'setTripwire', 'throwCharge', 'brace', 'hamstring']);
 /** V4.0 HUD: rare and free actions, folded into the More menu. */
 const MORE_ACTIONS = new Set<ActionKind>(['give', 'drop', 'passLantern', 'shutter', 'parley']);
 
@@ -71,6 +71,7 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   hamstring: 'shoot',
   dig: 'dig',
   setCharge: 'blast',
+  setTripwire: 'trap', // V4.1 (spec 31.3)
   throwCharge: 'blast',
   firebolt: 'bolt',
   fireball: 'blast',
@@ -1217,7 +1218,7 @@ export class Hud {
     if (!o || this.pv || this.pill.classList.contains('fuse')) return;
     const t = this.hotTarget();
     const at = t ? this.targetPos(t) : null;
-    if (o.area || ['setCharge', 'throwCharge', 'charge'].includes(o.action)) this.drawPendingArea(t && t.at ? t.at : at);
+    if (o.area || ['setCharge', 'setTripwire', 'throwCharge', 'charge'].includes(o.action)) this.drawPendingArea(t && t.at ? t.at : at);
     this.dio.showLanding(null, null, '', false);
     if (t) this.showActionLanding(o.action, t);
     const d = this.state?.delve;
@@ -1437,7 +1438,7 @@ export class Hud {
     if (fuse) {
       const side = fuseSide(s, fuse.by);
       const words = this.blastWords(this.blastPlan(at));
-      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="dl-card-k">· set by ${esc(this.nameOf(fuse.by))}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
+      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">${fuse.tripwire ? 'Tripwire' : 'Charge'} · fuse ${fuse.rounds}</b> <span class="dl-card-k">· set by ${esc(this.nameOf(fuse.by))}, ${fuseWords(fuse.rounds)}${fuse.tripwire ? ', or when an enemy steps next to it' : ''}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
     }
     if (t.railing) parts.push('Railing');
     const vent = castle.lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
@@ -3349,6 +3350,7 @@ const GOAL_TEXT: Record<string, string> = { loot: 'looting', objective: 'after y
 const SHORT_LABEL: Partial<Record<ActionKind, string>> = {
   smashProp: 'Smash',
   setCharge: 'Set charge',
+  setTripwire: 'Tripwire', // V4.1 (spec 31.3)
   throwCharge: 'Throw charge',
   passLantern: 'Pass lantern',
   nightthorn: 'Thorn',

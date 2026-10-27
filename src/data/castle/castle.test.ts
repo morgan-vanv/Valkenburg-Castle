@@ -378,6 +378,7 @@ describe('story sites (19.1)', () => {
       innkeeper: [1, 'kitchen', 'l1-story-kitchens'],
       smith: [2, 'forge', 'l2-story-forge'],
       copper: [2, 'barracks', 'l2-story-barracks'],
+      alchemist: [2, 'archive', 'l2-story-archive'], // V4.1 (spec 31.3)
     };
     expect(story.map((s) => s.story).sort()).toEqual(Object.keys(want).sort());
     const taken = new Set([

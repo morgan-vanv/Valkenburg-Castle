@@ -120,6 +120,8 @@ export interface SpawnDef {
   buried?: boolean;
   /** V3.7 (spec 20.1): the direction the monster faces when placed (0..5, hex.ts DIRS). Default 0. */
   facing?: number;
+  /** V4.1 (spec 31.2, B1): asleep on a campaign's first delve (`campaign.delveCount` 0), as placed otherwise. */
+  firstDelveAsleep?: boolean;
 }
 
 export interface ChestDef {
@@ -269,7 +271,9 @@ export type ItemKind =
   | 'gatekey' // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
   // V4.0 (spec 29): venom
   | 'antidote' // drink or give to an adjacent ally (an action): cures venom and paralysis
-  | 'venomdart'; // throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
+  | 'venomdart' // throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
+  // V4.1 (spec 31.3): Aldric and Ilse together
+  | 'greaterpotion'; // heals 8 (POTION_HEAL), or gets a downed hero up at 8
 
 export interface Item {
   id: string;
@@ -332,7 +336,7 @@ export interface Contract {
 // ---------------------------------------------------------------- V3.5: the village (spec 18)
 
 /** Story contracts and the villagers or things they bring home to Lowgate. */
-export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook';
+export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook' | 'alchemist';
 
 /** What Lowgate has won back. All false at the start. */
 export interface Village {
@@ -346,9 +350,13 @@ export interface Village {
   copper: boolean;
   /** Wim's cask book is home: the rest of the ales and level 3 recruits. */
   caskbook: boolean;
+  /** V4.1 (spec 31.3): Ilse the alchemist is home: her bench (darts, smoke, glue, oil) and the pairs with her. Absent in older saves (= false). */
+  alchemist: boolean;
 }
 
-export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask';
+export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask'
+  // V4.1 (spec 31.3): Wim and Ilse's brews
+  | 'nighteye' | 'spidermilk' | 'dragonfire';
 /** What an ale does once drunk: the Black Cask turns into another ale or a drawback. */
 export type AleEffect = Exclude<AleKind, 'blackcask'> | 'hiccups' | 'heavyhead';
 
@@ -357,8 +365,8 @@ export interface AleOffer {
   name: string;
   price: number;
   text: string;
-  /** What has to be home before it's poured. */
-  needs: 'copper' | 'caskbook';
+  /** What has to be home before it's poured (V4.1: 'alchemist' = Wim and Ilse both home; the copper isn't needed). */
+  needs: 'copper' | 'caskbook' | 'alchemist';
   /** Why it can't be bought now (not brewed yet), if so. */
   locked?: string;
 }
@@ -368,15 +376,22 @@ export type ShopKind =
   | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker'
   | 'lockpicks' | 'nightsight'
   // V4.0 (spec 29): Mott's essentials and his quiet work
-  | 'antidote' | 'venomdart';
+  | 'antidote' | 'venomdart'
+  // V4.1 (spec 31.3)
+  | 'greaterpotion';
+
+/** V4.1 (spec 31.3): who sells a ware (for the vendor tabs, WS4). */
+export type Vendor = 'mott' | 'gerda' | 'ilse' | 'aldric';
 
 export interface ShopOffer {
   kind: ShopKind;
   name: string;
   price: number;
   text: string;
-  /** V3.5 (spec 18.2): metalwork needs the smith home; V3.7.1 (spec 21.3): the night-eye draught needs the innkeeper. */
-  needs?: 'smith' | 'innkeeper';
+  /** V3.5 (spec 18.2): metalwork needs the smith home. V4.1 (spec 31.3): Ilse's wares 'alchemist'; a pair's wares both of them. */
+  needs?: StoryId | StoryId[];
+  /** V4.1 (spec 31.3): who sells it now (shopOffers fills it in: Mott unless the ware needs someone, or a pair sells it cheaper). */
+  vendor?: Vendor;
   /** Why it can't be bought now, if so ("Needs a smith: rescue Gerda"). */
   locked?: string;
 }
@@ -415,6 +430,8 @@ export interface Campaign {
   village: Village;
   /** V3.7 (spec 20.4): heroes a crew carried off; each has a rescue contract on the board until freed or given up. */
   captives: Captive[];
+  /** V4.1 (spec 31.2): free things owed by the village. `shield`: shields the forge gives free (Gerda's gift). */
+  credits?: { shield?: number };
   /**
    * V4.0 (spec 25): the shut ways in (CastleDef.shutWays) opened for good. A new campaign starts with
    * `{}` (all shut); a save without the field had every entrance open, so the field absent = all open.
@@ -679,6 +696,8 @@ export interface Fuse {
   rounds: number;
   /** Who set it (hero or rival id), for kills and the blast shield. */
   by: string;
+  /** V4.1 (spec 31.3): a Sapper's tripwire: also goes off when a monster or crew member steps within 1 of it. */
+  tripwire?: boolean;
 }
 
 export interface DoorState {
@@ -843,6 +862,7 @@ export type ActionKind =
   | 'briar' // Hedgewitch [enemy]: 1 mana, 2 Wits slots at range 4, 1 dmg per hit; any hit roots 1 round (perfect: 2); noise 1
   | 'smashProp' // [adjacent crate or barrel]: action, noise 4; may drop gold or a small item
   | 'setCharge' // V3.7 Sapper [hex adjacent, floor or breakable wall]: set a charge with a fuse (target.fuse 1 or 2)
+  | 'setTripwire' // V4.1 (spec 31.3) Sapper, Gerda and Ilse home: as setCharge, and it also goes off when an enemy steps within 1
   | 'dread' // V3.7 Shadowmancer [enemy]: 1 mana, 2 Wits slots at range 5, 1+ hits = feared 2 rounds
   | 'parley' // V3.5: open the deal card with a crew in sight within 4 (free; the deal is a 'deal' command)
   | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3

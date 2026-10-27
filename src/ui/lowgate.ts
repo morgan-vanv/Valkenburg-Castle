@@ -6,6 +6,7 @@
 import type { Engine } from '../game/api';
 import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
 import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
+import { GIFTS } from '../game/data'; // V4.1 (spec 31.2)
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -422,6 +423,8 @@ const HOUSES: House[] = [
   { id: 'chapel', story: 'surgeon', windows: [], name: "Brother Aldric's infirmary", place: 'chapel' },
   { id: 'flagon', story: 'innkeeper', windows: ['copper', 'caskbook'], name: 'The Gilded Flagon', place: 'Gilded Flagon' },
   { id: 'forge', story: 'smith', windows: [], name: "Gerda's forge", place: 'forge' },
+  // V4.1 (spec 31.3)
+  { id: 'bench', story: 'alchemist', windows: [], name: "Ilse's bench", place: 'dye-house' },
 ];
 
 function houseSvg(home: boolean, windows: boolean[] | null): SVGElement {
@@ -554,7 +557,7 @@ function delveButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
 
 // ------------------------------------------------------------ step 1: Job
 
-const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false };
+const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
 export function villageOf(s: GameState): Village {
   return s.campaign.village ?? NO_VILLAGE;
 }
@@ -671,6 +674,18 @@ function riskChips(k: Contract, engine: Engine, captive?: Captive): HTMLElement[
   return out;
 }
 
+/**
+ * V4.1 (spec 31.2, pillar 18): the card's pay: gold for a regular job; a story job shows the villager's gift instead
+ * ("Gift: 2 potions", or "No pay" for the copper and the cask book); a "Bring back" job "No pay".
+ */
+function bountyTag(k: Contract): HTMLElement {
+  if (k.bounty > 0) return h('span', { class: 'lg-bounty' }, h('span', { class: 'num' }, `${k.bounty}`), h('span', { class: 'lg-bounty-w' }, ' gold'));
+  const gift = k.story ? GIFTS[k.story] : undefined;
+  const tip = gift ? `A gift, not gold · ${gift.short}, the first time they come home.
+Jobs that win something back for Lowgate pay no bounty.` : 'No pay · Jobs that win something back pay no bounty.';
+  return h('span', { class: 'lg-bounty lg-gift', tabindex: 0, 'data-tip': tip }, h('span', { class: 'lg-bounty-w' }, gift ? `Gift: ${gift.short.charAt(0).toLowerCase()}${gift.short.slice(1)}` : 'No pay'));
+}
+
 function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive): HTMLElement {
   const st = k.story ? STORY[k.story] : null;
   const crew = captive ? CREW[captive.crew] : null;
@@ -694,7 +709,7 @@ function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive
     st ? h('span', { class: 'lg-seal lg-card-seal', 'aria-hidden': 'true' }, '✦') : '',
     captive ? h('span', { class: 'lg-seal lg-seal-cap lg-card-seal', 'aria-hidden': 'true' }, '⛓') : '',
     h('span', { class: `lg-kick ${st || captive ? '' : 'lg-kick-dim'}` }, st ? 'Pinned by the village' : captive ? `Taken by ${crew?.name ?? 'a crew'}` : 'Bounty'),
-    h('span', { class: 'lg-card-row' }, h('span', { class: 'lg-card-kind' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'lg-bounty' }, h('span', { class: 'num' }, `${k.bounty}`), h('span', { class: 'lg-bounty-w' }, ' gold'))),
+    h('span', { class: 'lg-card-row' }, h('span', { class: 'lg-card-kind' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), bountyTag(k)),
     h('span', { class: 'lg-card-title' }, k.title),
     h('span', { class: 'lg-card-brief' }, k.brief),
     st ? h('span', { class: 'lg-winsback', 'data-tip': `Wins back · ${st.unlocks}.\n${cap(st.who)} goes home to Lowgate, not ${k.kind === 'rescue' ? 'into your roster' : 'to the cart. It can\'t be sold'}.` }, h('span', { class: 'lg-kick' }, 'Wins back'), h('span', null, st.unlocks)) : '',
@@ -1065,8 +1080,9 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
     packSlots(c, l, hr, host, 'outfit'),
     kitLine(hr),
   );
-  // The forge and the Flagon, once won back.
-  if (v.smith || (v.innkeeper && v.copper)) {
+  // The forge and the Flagon, once won back. V4.1 (spec 31.3): Wim and Ilse pour without the copper; Wim's gift shows.
+  const taps = v.innkeeper && (v.copper || v.alchemist);
+  if (v.smith || taps || hr.ale) {
     const gear = h('div', { class: 'lg-gear-row' });
     if (v.smith) {
       const part = (p: 'weapon' | 'armor') => {
@@ -1091,7 +1107,7 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
         );
       };
       gear.append(part('weapon'), part('armor'));
-      const shieldPrice = V37.shieldPrice;
+      const shieldPrice = (c.credits?.shield ?? 0) > 0 ? 0 : V37.shieldPrice; // V4.1 (spec 31.2): Gerda's gift
       gear.append(
         hr.shield
           ? h('div', { class: 'lg-gear have', tabindex: 0, 'data-tip': `Shield · carried\nRanged hits on ${hr.name} do 1 less; 2 less while braced. Not the Dragon's breath.` }, h('span', { class: 'lg-gl' }, 'Shield'), h('span', { class: 'lg-gear-p dim' }, 'Carried'))
@@ -1107,11 +1123,11 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
                 },
               },
               h('span', { class: 'lg-gl' }, 'Shield'),
-              h('span', { class: 'lg-gear-p' }, 'Buy · ', h('span', { class: 'num' }, `${shieldPrice}`)),
+              h('span', { class: 'lg-gear-p' }, shieldPrice ? ['Buy · ', h('span', { class: 'num' }, `${shieldPrice}`)] : 'Free · a gift'),
             ),
       );
     }
-    if (v.innkeeper && v.copper) {
+    if (taps || hr.ale) {
       const open = ui.alePick === hr.id;
       gear.append(
         hr.ale
@@ -1204,7 +1220,7 @@ function peddler(el: HTMLElement, s: GameState, l: Loadout, host: CampHost): voi
   const offers = host.engine.shop(s);
   const packed = packedIds(l);
   const metal = offers.filter((o) => o.needs === 'smith');
-  const order = ['torch', 'oil', 'potion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
+  const order = ['torch', 'oil', 'potion', 'greaterpotion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
   const shown = offers.filter((o) => !o.locked).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   for (const g of ['light', 'around', 'quiet'] as const) {
     const list = shown.filter((o) => (WARE[o.kind]?.group ?? 'around') === g);
@@ -1547,7 +1563,7 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   const box = h('aside', { class: 'lg-plan', 'aria-label': 'The plan' }, h('div', { class: 'lg-kick' }, 'The plan'));
   box.append(
     k
-      ? h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-t' }, k.title), h('span', { class: 'lg-plan-s' }, h('span', { class: 'num lg-goldtxt' }, `${k.bounty}`), ` gold${st ? ` · wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}` : ''}`), h('span', { class: 'lg-plan-s' }, k.brief))
+      ? h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-t' }, k.title), h('span', { class: 'lg-plan-s' }, k.bounty ? h('span', { class: 'num lg-goldtxt' }, `${k.bounty}`) : '', k.bounty ? ` gold${st ? ` · wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}` : ''}` : st ? `Wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}${k.story && GIFTS[k.story] ? ` · gift: ${GIFTS[k.story]!.short.charAt(0).toLowerCase()}${GIFTS[k.story]!.short.slice(1)}` : ''}` : 'No pay: bring them home'), h('span', { class: 'lg-plan-s' }, k.brief))
       : h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-s' }, 'No job chosen.')),
   );
   const who = h('div', { class: 'lg-plan-who' });

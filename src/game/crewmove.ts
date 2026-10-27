@@ -23,6 +23,7 @@ import { blastArea, blastableWall, fuseAt, fuses, satchelName, setFuse, spendPic
 import { digOut } from './delve';
 import { checkWays } from './ways';
 import { envenom, trapDamage } from './venom';
+import { springTripwires, tripwireNear } from './village'; // V4.1 (spec 31.3): the tripwire
 
 // ---------------------------------------------------------------- telling the party (pillar 17: visible and named)
 
@@ -288,6 +289,12 @@ export function crewWalk(c: Ctx, r: RivalX, path: Pos[], sneak = false): boolean
       flush();
       springCrewTrap(c, r, p);
       if (!alive()) return true;
+    }
+    // V4.1 (spec 31.3): a hero Sapper's tripwire next to the step goes off; the walk ends here.
+    if (tripwireNear(c, p)) {
+      flush();
+      springTripwires(c, r.id, p);
+      return true;
     }
   }
   flush();

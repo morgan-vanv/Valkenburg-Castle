@@ -114,9 +114,9 @@ const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
 
 describe('camp', () => {
-  it('new game: 90 gold (V3.7.1), Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
+  it('new game: 120 gold (V4.1, spec 31.2), Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
     const s = e.newGame(7);
-    expect(s.campaign.gold).toBe(90);
+    expect(s.campaign.gold).toBe(120);
     expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
     expect(s.campaign.roster.map((h) => h.id)).toEqual(['keven']);
     expect(s.campaign.board).toHaveLength(2); // the test castle has only 2 sites
@@ -147,7 +147,7 @@ describe('camp', () => {
   it('buys, hires, refuses when poor', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
-    expect(s.campaign.gold).toBe(70);
+    expect(s.campaign.gold).toBe(100);
     expect(s.campaign.stash.map((i) => i.kind)).toEqual(['potion']);
     s.campaign.gold = 5;
     const r = e.apply(s, { type: 'buy', kind: 'charge' });
@@ -155,12 +155,15 @@ describe('camp', () => {
     expect(r.state).toBe(s);
   });
 
-  it('the starting purse buys one level-1 hire and an item or two, not a second hire (21.2)', () => {
+  it('the starting purse buys one level-1 hire and 60 to try the shop (21.2; V4.1 spec 31.2: 120), or two hires and nothing else', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
-    expect(s.campaign.gold).toBe(30);
-    expect(e.apply(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).error).toBe('Not enough gold.');
-    s = ok(s, { type: 'buy', kind: 'torch' }).state;
+    expect(s.campaign.gold).toBe(60);
+    const two = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
+    expect(two.campaign.gold).toBe(0);
+    expect(e.apply(two, { type: 'hire', heroId: two.campaign.recruits[0]!.hero.id }).error).toBe('Not enough gold.');
+    s = ok(s, { type: 'buy', kind: 'potion' }).state;
+    s = ok(s, { type: 'buy', kind: 'potion' }).state;
     s = ok(s, { type: 'buy', kind: 'rope' }).state;
     expect(s.campaign.gold).toBe(5);
     expect(e.apply(s, { type: 'buy', kind: 'firecracker' }).error).toBeTruthy();
@@ -664,13 +667,13 @@ describe('contracts and summary', () => {
     const r = act(s, 'keven', 'leave', {});
     s = r.state;
     expect(s.stage).toBe('summary');
-    expect(s.summary).toMatchObject({ contractDone: true, bounty: 100, lootValue: 60 });
+    expect(s.summary).toMatchObject({ contractDone: true, bounty: 140, lootValue: 60 }); // V4.1 (spec 31.2): recover L1 140
     expect(r.events.some((x) => x.type === 'delveOver')).toBe(true);
     const gold = s.campaign.gold;
     const brannXp = s.campaign.roster.find((h) => h.id === 'brann')!.xp;
     s = ok(s, { type: 'backToCamp' }).state;
     expect(s.stage).toBe('camp');
-    expect(s.campaign.gold).toBe(gold + 100);
+    expect(s.campaign.gold).toBe(gold + 140);
     expect(s.campaign.stash.some((i) => i.kind === 'heirloom')).toBe(true);
     expect(s.campaign.reputation).toBe(1);
     expect(s.campaign.roster.find((h) => h.id === 'brann')!.xp).toBe(brannXp + 4);
@@ -690,7 +693,7 @@ describe('contracts and summary', () => {
     s.delve!.prisoner!.at = at(1, 17, 7);
     s = act(s, 'brann', 'leave', {}).state;
     expect(s.summary!.contractDone).toBe(true);
-    expect(s.summary!.bounty).toBe(80);
+    expect(s.summary!.bounty).toBe(110); // V4.1 (spec 31.2): rescue L1 110
     const n = s.campaign.roster.length;
     s = ok(s, { type: 'backToCamp' }).state;
     expect(s.campaign.roster.length).toBe(n + 1);
@@ -1094,7 +1097,7 @@ describe('slay contract', () => {
     s = ok(s, { type: 'backToCamp' }).state;
     const k = s.campaign.board.find((x) => x.kind === 'slay')!;
     expect(k).toBeTruthy();
-    expect(k.bounty).toBe(500);
+    expect(k.bounty).toBe(600); // V4.1 (spec 31.2)
     expect(k.level).toBe(3);
     s = ok(s, { type: 'startDelve', contractId: k.id, heroIds: ['keven', 'brann'], entrance: 0, packs: {} }).state;
     s.delve!.rivals = null;
@@ -1110,7 +1113,7 @@ describe('slay contract', () => {
     s = ok(s, { type: 'abandon' }).state; // Brann is left behind, the contract still counts
     const sum = s.summary!;
     expect(sum.contractDone).toBe(true);
-    expect(sum.bounty).toBe(500);
+    expect(sum.bounty).toBe(600);
     expect(sum.xp.keven).toBe(5 + 1 + 3);
     expect(sum.dead).toEqual(['brann']);
   });
@@ -1568,13 +1571,13 @@ describe('15.3 classes', () => {
 });
 
 describe('15.4 quartermaster', () => {
-  it('sells sixteen items (V3.6: lockpicks and the night-eye draught; V4.0: venom darts and the antidote); buying puts them in the stash', () => {
+  it('sells sixteen items (V3.6: lockpicks; V4.0: venom darts and the antidote; V4.1: no night-eye draught, the greater potion); buying puts them in the stash', () => {
     const shop = e.shop();
-    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'nightsight']);
+    expect(shop.map((o) => o.kind)).toEqual(['torch', 'potion', 'rope', 'charge', 'smoke', 'glue', 'dart', 'venomdart', 'caltrops', 'hook', 'key', 'oil', 'antidote', 'firecracker', 'lockpicks', 'greaterpotion']);
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
-    expect(s.campaign.gold).toBe(80);
+    expect(s.campaign.gold).toBe(110);
     expect(s.campaign.stash[0]!.kind).toBe('firecracker');
   });
 
@@ -2319,6 +2322,7 @@ const storyCastle: CastleDef = {
     { id: 'l2-story-forge', kind: 'rescue', at: at(2, 16, 8), where: 'the forge', story: 'smith' },
     { id: 'l2-story-barracks', kind: 'recover', at: at(2, 16, 3), where: 'the barracks', story: 'copper' },
     { id: 'l3-recover-drain', kind: 'recover', at: at(3, 5, 5), where: 'the Drain' },
+    { id: 'l2-story-archive', kind: 'rescue', at: at(2, 15, 8), where: 'the archive', story: 'alchemist' }, // V4.1 (spec 31.3)
   ],
 };
 const se = createEngine(storyCastle);
@@ -2379,7 +2383,7 @@ describe('V3.5', () => {
     it('starts with nothing won back; the campfire has 3 level-1 drifters at 60', () => {
       for (let seed = 1; seed < 20; seed++) {
         const s = se.newGame(seed);
-        expect(s.campaign.village).toEqual({ surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false });
+        expect(s.campaign.village).toEqual({ surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false });
         expect(s.campaign.recruits).toHaveLength(3);
         expect(new Set(s.campaign.recruits.map((r) => r.hero.cls)).size).toBe(3);
         expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
@@ -2416,14 +2420,16 @@ describe('V3.5', () => {
       expect(se.apply(s, { type: 'upgrade', heroId: 'brann', part: 'weapon' }).error).toBe('The forge is cold. Rescue Gerda the smith (Level 2, the forge).');
       for (const k of ['caltrops', 'hook', 'key', 'lockpicks'] as const) expect(se.apply(s, { type: 'buy', kind: k }).error).toMatch(/Gerda/);
       expect(se.apply(s, { type: 'buy', kind: 'torch' }).error).toBeUndefined();
-      expect(se.apply(s, { type: 'buy', kind: 'nightsight' }).error).toMatch(/Gilded Flagon.*Old Wim/);
+      expect(se.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBe('Not for sale.'); // V4.1 (spec 31.3): an ale now
       const shop = se.shop(s);
-      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['caltrops', 'hook', 'key', 'lockpicks', 'nightsight']);
+      // V4.1 (spec 31.3): Ilse's wares and the greater potion are locked too.
+      expect(shop.filter((o) => o.locked).map((o) => o.kind).sort()).toEqual(['caltrops', 'dart', 'glue', 'greaterpotion', 'hook', 'key', 'lockpicks', 'oil', 'smoke', 'venomdart']);
       expect(shop.find((o) => o.kind === 'key')!.needs).toBe('smith');
       expect(se.shop().some((o) => o.locked)).toBe(false);
       s.campaign.village.smith = true;
       s.campaign.village.surgeon = true;
       s.campaign.village.innkeeper = true;
+      s.campaign.village.alchemist = true;
       expect(se.shop(s).some((o) => o.locked)).toBe(false);
       expect(se.apply(s, { type: 'upgrade', heroId: 'brann', part: 'weapon' }).error).toBeUndefined();
       expect(se.apply(s, { type: 'buy', kind: 'key' }).error).toBeUndefined();
@@ -2447,25 +2453,26 @@ describe('V3.5', () => {
   });
 
   describe('18.3 story contracts', () => {
-    it('pins every available story contract on top of the regular ones, half bounty rounded down to 5', () => {
+    it('pins every available story contract on top of the regular ones; V4.1 (spec 31.2): they pay no gold', () => {
       const s = se.newGame(5);
       const stories = s.campaign.board.filter((k) => k.story);
       expect(stories.map((k) => k.story)).toEqual(['surgeon']);
       expect(s.campaign.board.filter((k) => !k.story).length).toBeGreaterThan(0);
-      expect(stories[0]).toMatchObject({ kind: 'rescue', siteId: 'l1-story-chapel', bounty: 40, level: 1 });
+      expect(stories[0]).toMatchObject({ kind: 'rescue', siteId: 'l1-story-chapel', bounty: 0, level: 1 });
       expect(stories[0]!.title).toBe('Rescue Brother Aldric');
       // Reputation 1: Wim and Gerda join; the copper needs Wim home; the cask book the copper and Level 3.
       let t = se.newGame(5);
       t.campaign.reputation = 1;
       t = finishStory(t, 'surgeon').state; // rep 2 now
-      expect(t.campaign.board.filter((k) => k.story).map((k) => k.story)).toEqual(['innkeeper', 'smith']);
-      expect(t.campaign.board.find((k) => k.story === 'smith')).toMatchObject({ level: 2, bounty: 75 });
+      // V4.1 (spec 31.3): Ilse joins once Aldric is home and Level 2 is open.
+      expect(t.campaign.board.filter((k) => k.story).map((k) => k.story)).toEqual(['innkeeper', 'smith', 'alchemist']);
+      expect(t.campaign.board.find((k) => k.story === 'smith')).toMatchObject({ level: 2, bounty: 0 });
       t = finishStory(t, 'innkeeper').state;
-      expect(t.campaign.board.filter((k) => k.story).map((k) => k.story)).toEqual(['smith', 'copper']);
-      expect(t.campaign.board.find((k) => k.story === 'copper')!.bounty).toBe(90);
+      expect(t.campaign.board.filter((k) => k.story).map((k) => k.story)).toEqual(['smith', 'copper', 'alchemist']);
+      expect(t.campaign.board.find((k) => k.story === 'copper')!.bounty).toBe(0);
       t.campaign.village.copper = true;
       t = finishStory(t, 'smith').state;
-      expect(t.campaign.board.find((k) => k.story === 'caskbook')).toMatchObject({ level: 3, bounty: 130 });
+      expect(t.campaign.board.find((k) => k.story === 'caskbook')).toMatchObject({ level: 3, bounty: 0 });
     });
 
     it('a rescued villager stays in Lowgate: not recruited; the village flag is set with an event and a line', () => {
@@ -2478,7 +2485,8 @@ describe('V3.5', () => {
       expect(r.events.some((x) => x.type === 'say' && /infirmary is open/.test(x.text))).toBe(true);
       expect(r.state.campaign.board.some((k) => k.story === 'surgeon')).toBe(false);
       expect(r.state.campaign.reputation).toBe(1);
-      expect(r.state.campaign.gold).toBe(90 + 40);
+      expect(r.state.campaign.gold).toBe(120); // V4.1 (spec 31.2): no gold, Aldric's 2 potions instead
+      expect(r.state.campaign.stash.filter((i) => i.kind === 'potion')).toHaveLength(2);
     });
 
     it('the brewing copper: 2 slots, heavy (its carrier moves 3, dash too), value 0; carried out it goes to the village', () => {
@@ -2523,7 +2531,7 @@ describe('V3.5', () => {
       expect(se.ales(s).find((a) => a.kind === 'smuggler')!.locked).toMatch(/cask book/);
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'smuggler' }).error).toMatch(/cask book/);
       s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'reserve' }).state;
-      expect(s.campaign.gold).toBe(70);
+      expect(s.campaign.gold).toBe(100);
       expect(s.campaign.roster.find((h) => h.id === 'brann')!.ale).toBe('reserve');
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'glowworm' }).error).toMatch(/already/);
       s = sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann', 'keven'], entrance: 0, packs: {} }).state;
@@ -3789,7 +3797,7 @@ describe('V3.7 crews', () => {
     expect(s.campaign.roster.map((h) => h.id)).not.toContain('brann');
     expect(s.campaign.captives).toMatchObject([{ crew: 'ferrymen', siteId: 'ferrymen-hideout', hero: { id: 'brann', hp: 1, level: 1 } }]);
     const job = s.campaign.board.find((k) => k.id === 'cap-brann')!;
-    expect(job).toMatchObject({ kind: 'rescue', title: 'Bring back Brann', siteId: 'ferrymen-hideout', level: 3, bounty: 220 });
+    expect(job).toMatchObject({ kind: 'rescue', title: 'Bring back Brann', siteId: 'ferrymen-hideout', level: 3, bounty: 0 }); // V4.1 (spec 31.2)
     expect(job.warnings).toContain('The Ferrymen');
     // The regular board never uses a hideout.
     expect(s.campaign.board.filter((k) => k.siteId.endsWith('-hideout') && k.id !== 'cap-brann')).toEqual([]);
@@ -4460,18 +4468,12 @@ describe('V3.7.1', () => {
     expect(ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['keven'], entrance: 0, packs: {} }).state.stage).toBe('delve');
   });
 
-  it('21.3 night-eye: locked at the peddler until Old Wim is home, then bought into the stash', () => {
+  it('21.3 night-eye: V4.1 (spec 31.3) no longer sold at the peddler, even with Old Wim home (Night-eye Stout, an ale)', () => {
     const s = e.newGame(4);
     s.campaign.gold = 100;
-    const o = e.shop(s).find((x) => x.kind === 'nightsight')!;
-    expect(o.needs).toBe('innkeeper');
-    expect(o.locked).toBe('Brewed at the Gilded Flagon: rescue Old Wim (Level 1, the kitchens).');
-    expect(e.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBe(o.locked);
+    expect(e.shop(s).find((x) => x.kind === 'nightsight')).toBeUndefined();
     s.campaign.village.innkeeper = true;
-    expect(e.shop(s).find((x) => x.kind === 'nightsight')!.locked).toBeUndefined();
-    const r = ok(s, { type: 'buy', kind: 'nightsight' }).state;
-    expect(r.campaign.gold).toBe(70);
-    expect(r.campaign.stash.map((i) => i.kind)).toEqual(['nightsight']);
+    expect(e.apply(s, { type: 'buy', kind: 'nightsight' }).error).toBe('Not for sale.');
   });
 
   describe('21.4 lockpicks', () => {

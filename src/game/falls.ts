@@ -8,6 +8,7 @@ import { VENT_DMG } from './data';
 import { say, type Ctx, type MonsterX } from './state';
 import { hd, heroName, levelHeal, hurtAny, hurtHero, hurtPrisoner, killHero, killMonster, nameOf, occupant, rivalsOnMap, wakeAdjacent } from './common';
 import { canEnter, doorAt, fallColumn, fallDamage, freeNear, kindAt, pitsNextTo, standable } from './world';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- figures
 
@@ -233,7 +234,7 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
       break;
     case 'fire':
       say(c, `${nameOf(c, id)} is thrown into the fire.`);
-      hurtRaw(c, f, 3, by);
+      hurtRaw(c, f, f.kind === 'hero' ? fireWard(c, f.h.heroId, 3) : 3, by); // V4.1 (spec 31.3): Dragonfire Porter
       break;
     case 'figure': {
       const other = figure(c, o.other!);
@@ -254,7 +255,7 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
       setPos(c, f, o.dest);
       if (o.kind === 'vent') {
         say(c, `${nameOf(c, id)} lands on a fire vent.`);
-        hurtRaw(c, f, VENT_DMG, by);
+        hurtRaw(c, f, f.kind === 'hero' ? fireWard(c, f.h.heroId, VENT_DMG) : VENT_DMG, by); // V4.1 (spec 31.3): Dragonfire Porter
       }
       if (f.kind === 'hero' && alive(c, f)) afterLanding?.(c, f.h);
       break;
@@ -267,7 +268,8 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
 export function ventCheck(c: Ctx, h: HeroInDelve): void {
   if (h.status !== 'active' || !c.w.vents.has(posKey(h.at))) return;
   say(c, `${heroName(c, h.heroId)} steps on a fire vent.`);
-  hurtHero(c, h, VENT_DMG, 'vent');
+  const dmg = fireWard(c, h.heroId, VENT_DMG); // V4.1 (spec 31.3): Dragonfire Porter
+  if (dmg) hurtHero(c, h, dmg, 'vent');
 }
 
 export function samePlace(a: Pos, b: Pos): boolean {

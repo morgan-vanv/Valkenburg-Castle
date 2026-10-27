@@ -22,7 +22,8 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 
 ### 2.1 Start
 
-- Gold 90 (`START_GOLD`). Reputation 0. Roster: Keven alone. Village: nothing won back.
+- Gold 120 (`START_GOLD`; V4.1, was 90): one level 1 hire and 60 to try the shop. Reputation 0. Roster: Keven alone. Village: nothing won back.
+- V4.1 (spec 31.2, B1): on the campaign's first delve (`campaign.delveCount` 0 at `startDelve`), spawns marked `firstDelveAsleep` start asleep: in the castle, only the orc posted in the chapel by Brother Aldric (L1 (35, 24)). Later delves place it awake as usual.
 - Keven may delve alone; the camp does not force a hire.
 - Entrances: only the main gate is open (`campaign.opened = {}`); the sally port and the east breach are shut until opened in play (section 3.1). Castle memory empty (`campaign.explored = {}`).
 
@@ -32,10 +33,12 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 | --- | --- | --- | --- |
 | Notice post | Up to 3 regular contracts, plus every available story contract, plus every "Bring back" contract | always | |
 | Hiring | Campfire: 3 level-1 recruits | Old Wim (`innkeeper`) | Gilded Flagon: 4 recruits, 35% level 2. With `caskbook`: 25% level 2, 10% level 3 |
-| Peddler | Everything but metalwork and night-eye | Gerda (`smith`): metalwork; Wim: night-eye draught | |
+| Peddler (Mott) | Torch, potion, antidote, rope, firecracker, blasting charge (45) | Gerda (`smith`): metalwork | |
+| Ilse's bench (V4.1) | Locked | Ilse the alchemist (`alchemist`) | Sleep dart, venom dart, smoke, glue, oil |
 | Forge | Cold | Gerda (`smith`) | Weapon/armor tiers, shield |
 | Infirmary | Only `drink` (a stash potion: +5 HP) | Brother Aldric (`surgeon`) | `heal`: 3 gold per HP, up to full or what the gold covers |
-| Ales | Locked | Brewing copper (`copper`) home, and Wim | 4 ales; 3 more with the cask book |
+| Ales | Locked | Brewing copper (`copper`) home, and Wim | 4 ales; 3 more with the cask book; V4.1: 3 more with Wim and Ilse (no copper needed) |
+| Pairs (V4.1) | | Both villagers home (`pairHome`) | Section 2.12 |
 
 Refusal texts name the fix (`LOCKED` in camp.ts).
 
@@ -43,15 +46,17 @@ Refusal texts name the fix (`LOCKED` in camp.ts).
 
 Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board shows story status itself); only "Level N" and the copper's "Heavy" line.
 
-| Story | Kind | Site | On the board when | Bounty | Unlocks |
+| Story | Kind | Site | On the board when | Gift (first time home) | Unlocks |
 | --- | --- | --- | --- | --- | --- |
-| surgeon | rescue Brother Aldric | l1-story-chapel (L1 Chapel) | from the start | 40 | infirmary |
-| innkeeper | rescue Old Wim | l1-story-kitchens (L1 Kitchens) | reputation ≥ 1 | 40 | Gilded Flagon, night-eye draught |
-| smith | rescue Gerda the smith | l2-story-forge (L2 Forge) | reputation ≥ 1 | 75 | forge, shield, metalwork |
-| copper | recover the brewing copper | l2-story-barracks (L2 Barracks) | Wim home | 90 | the first four ales |
-| caskbook | recover Wim's cask book | l3-recover-drain (L3 the Drain) | copper home and reputation ≥ 2 | 130 | three strong ales, better recruits |
+| surgeon | rescue Brother Aldric | l1-story-chapel (L1 Chapel) | from the start | 2 potions to the cart | infirmary |
+| innkeeper | rescue Old Wim | l1-story-kitchens (L1 Kitchens) | reputation ≥ 1 | a free Hobart's Reserve for every hero on the roster | Gilded Flagon |
+| smith | rescue Gerda the smith | l2-story-forge (L2 Forge) | reputation ≥ 1 | the next shield free (`campaign.credits.shield`) | forge, shield, metalwork |
+| alchemist (V4.1) | rescue Ilse the alchemist | l2-story-archive (L2 Archive, (6, 11), next to the spider) | Aldric home and reputation ≥ 1 | 2 antidotes to the cart | Ilse's bench |
+| copper | recover the brewing copper | l2-story-barracks (L2 Barracks) | Wim home | none | the first four ales |
+| caskbook | recover Wim's cask book | l3-recover-drain (L3 the Drain) | copper home and reputation ≥ 2 | none | three strong ales, better recruits |
 
-- Story bounty = half the regular bounty for kind and level, rounded down to 5. Reputation +1 as usual.
+- V4.1 (spec 31.2, pillar 18): story contracts pay 0 gold (`STORY_PAY`; was half the regular bounty). Reputation +1 and XP as usual. The card shows the gift instead of a bounty ("Gift: 2 potions"; "No pay" for the copper and the cask book).
+- Gifts (`GIFTS`, `giveGift` in camp.ts) are given in `backToCamp` the first time the villager comes home, after the roster is settled, with a `say` line. Wim's round: every hero on the roster without an ale waiting gets `ale = 'reserve'`, drunk at their next `startDelve` (Focus 4, max 4), even before the copper is home. Gerda's shield: `buyShield` with `credits.shield` > 0 costs 0 and takes one credit ("On the house.").
 - A rescued villager does not join the roster; the village flag is set on return and a `villageUnlocked` event fires.
 - The copper takes 2 pack slots and is `heavy` (carrier moves 3 at most, dash too). The cask book takes 1 slot. Both are worth 0, never sold, never handed over in parley, and go to the village, not the stash.
 
@@ -60,7 +65,7 @@ Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board show
 - Up to 3 regular contracts, rebuilt (seeded) every time camp refreshes (after every delve).
 - Levels open by reputation (`REP_FOR_LEVEL`): Level 1 always, Level 2 at 1, Level 3 at 2. The slay contract appears at reputation 3 (`REP_FOR_SLAY`) and is always one of the three once unlocked. At least one Level 1 contract is on the board.
 - Story sites and crew hideouts are never used by the regular board.
-- Bounties (`BOUNTY`): rescue 80 / 150 / 220 (L1/L2/L3), recover 100 / 180 / 260, slay 500. Paid only if the contract is done.
+- Bounties (`BOUNTY`, V4.1 spec 31.2): rescue 110 / 200 / 280 (L1/L2/L3), recover 140 / 250 / 340 (plus the heirloom, 60 / 120 / 180), slay 600. Paid only if the contract is done.
 - Done: rescue = the prisoner got out; recover = a hero got out with the contract item in their pack; slay = the Dragon died and at least one hero got out.
 - Reputation +1 per contract done.
 - A rescued regular prisoner joins the roster free as a level 1 hero of a random recruitable class.
@@ -74,22 +79,26 @@ Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board show
 
 | Item | Price | Needs | Effect (details in section 9) |
 | --- | --- | --- | --- |
-| Torch | 10 | | 12 rounds of radius-2 light |
-| Potion | 20 | | Heal 5, or get a downed hero up at 5 HP |
-| Rope | 15 | | Anchor at a pit edge to climb down and back |
-| Blasting charge | 30 | | Set with fuse 1 on an adjacent lock or breakable wall |
-| Smoke bomb | 20 | | Throw 4: smoke on the hex and neighbours, 2 rounds |
-| Glue bomb | 25 | | Throw 4: monsters within 1 stuck 2 rounds |
-| Sleep dart | 25 | | Throw 5: 1 Finesse slot, a hit puts a monster to sleep |
-| Venom dart (V4.0) | 30 | | Throw 5: 1 Finesse slot, a hit envenoms a monster or crew member (section 8.6) |
-| Oil flask | 15 | | +8 lantern light |
-| Antidote (V4.0) | 20 | | Essential, always sold: cures venom and paralysis, self or an adjacent ally (section 8.6) |
-| Firecracker | 10 | | Throw 6: noise 6 there |
-| Caltrops | 15 | smith | Adjacent hex: first monster across takes 2 and stops |
-| Grappling hook | 40 | smith | Reusable: climb from a pit landing up a level |
-| Skeleton key | 30 | smith | One use: opens a lock silently, anyone |
-| Lockpicks | 25 | smith | Permanent picks: Burglar 3 slots, others 2 |
-| Night-eye draught | 30 | innkeeper | Drink: 8 rounds of full sight, no dark penalty |
+| Item | Price | Needs (vendor) | Effect (details in section 9) |
+| --- | --- | --- | --- |
+| Torch | 10 | (Mott) | 12 rounds of radius-2 light |
+| Potion | 20 | (Mott) | Heal 5, or get a downed hero up at 5 HP |
+| Rope | 15 | (Mott) | Anchor at a pit edge to climb down and back |
+| Blasting charge | 45 (V4.1, was 30); 30 at Gerda with Gerda and Ilse home | (Mott) | Set with fuse 1 on an adjacent lock or breakable wall |
+| Smoke bomb | 20 | alchemist (Ilse) | Throw 4: smoke on the hex and neighbours, 2 rounds |
+| Glue bomb | 25 | alchemist (Ilse) | Throw 4: monsters within 1 stuck 2 rounds |
+| Sleep dart | 25 | alchemist (Ilse) | Throw 5: 1 Finesse slot, a hit puts a monster to sleep |
+| Venom dart (V4.0) | 30 | alchemist (Ilse) | Throw 5: 1 Finesse slot, a hit envenoms a monster or crew member (section 8.6) |
+| Oil flask | 15 | alchemist (Ilse) | +8 lantern light |
+| Antidote (V4.0) | 20; 12 from Aldric with Aldric and Ilse home | (Mott) | Essential, always sold: cures venom and paralysis, self or an adjacent ally (section 8.6) |
+| Firecracker | 10 | (Mott) | Throw 6: noise 6 there |
+| Caltrops | 15 | smith (Gerda) | Adjacent hex: first monster across takes 2 and stops |
+| Grappling hook | 40 | smith (Gerda) | Reusable: climb from a pit landing up a level |
+| Skeleton key | 30 | smith (Gerda) | One use: opens a lock silently, anyone |
+| Lockpicks | 25 | smith (Gerda) | Permanent picks: Burglar 3 slots, others 2 |
+| Greater potion (V4.1) | 35 | surgeon and alchemist (Ilse) | Heal 8, or get a downed hero up at 8 HP |
+
+- V4.1 (spec 31.3): the night-eye draught is no longer sold (it becomes Night-eye Stout, an ale; its in-castle rules are unchanged for copies already in a pack or on the cart). `shopOffers` fills in `vendor` (`mott`, `gerda`, `ilse`, `aldric`) and the pair price (`PAIR_PRICES`, the cheapest that applies); a ware whose villagers are away is `locked` with a line naming them ("Ilse's work: rescue Ilse the alchemist (Level 2, the archive).", "Needs Brother Aldric and Ilse the alchemist together. Still away: ..."). `ShopOffer.needs` is a story id or a list of them.
 
 Bought items go to the stash. `sellAll` sells every gem, jewelry, heirloom and hoard piece in the stash for its value (story items excluded).
 
@@ -112,6 +121,11 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 | Smuggler's Mead | 20 | caskbook | Sneak moves 4 (silent as always) |
 | Fireside Porter | 25 | caskbook | Heal 3 each time the drinker changes level (stairs, lift, fall, rope, hook), after fall damage |
 | Black Cask | 10 | caskbook | At delve start (seeded): 70% one of the six above; 30% hiccups (noise 1 at the drinker every world phase) or heavy head (Focus starts at 1) |
+| Night-eye Stout (V4.1) | 25 | Wim and Ilse | The drinker sees as if lit by party light, no dark penalty; stays unlit to monsters and the Gloam (effect built with the light rules, WS2; today: the ale only) |
+| Spider-milk Stout (V4.1) | 20 | Wim and Ilse | Poison can't take hold of the drinker (effect built with the poison rules, WS3; today: the ale only) |
+| Dragonfire Porter (V4.1) | 25 | Wim and Ilse | Fire, burning, the Dragon's breath and blasts do 2 less to the drinker (to 0; section 2.12) |
+
+V4.1: Wim and Ilse's three brews need Wim and Ilse home, not the copper (`AleOffer.needs` 'alchemist'). The Black Cask never turns into one of them.
 
 ### 2.9 Heroes between delves
 
@@ -127,21 +141,31 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 ### 2.10 Captives
 
 - A hero carried out by a crew leaves the roster for `campaign.captives` at HP 1 (gold, gems and jewelry already taken by the robbing; the rest of their pack is lost; level, tiers and shield stay with the hero record).
-- A "Bring back <name>" rescue contract is pinned at the top of the board for each captive. Site: the crew's hideout. Bounty: the full regular rescue bounty for the hideout's level. The prisoner is the hero at HP 1. Freed and extracted, they rejoin the roster with the HP they came out with. If they die there, they go to the fallen.
+- A "Bring back <name>" rescue contract is pinned at the top of the board for each captive. Site: the crew's hideout. V4.1 (spec 31.2): it pays 0 gold (`CAPTIVE_PAY`; was the full regular rescue bounty); getting your hero back is the prize. The prisoner is the hero at HP 1. Freed and extracted, they rejoin the roster with the HP they came out with. If they die there, they go to the fallen.
 
-| Crew | Hideout | Level | Bounty |
-| --- | --- | --- | --- |
-| Lantern Sisters | officers' quarters | 2 | 150 |
-| Ferrymen | the Drain | 3 | 220 |
-| Gallows Choir | the Tunnels | 3 | 220 |
-| The Wake | the Bone Pile | 3 | 220 |
+| Crew | Hideout | Level |
+| --- | --- | --- |
+| Lantern Sisters | officers' quarters | 2 |
+| Ferrymen | the Drain | 3 |
+| Gallows Choir | the Tunnels | 3 |
+| The Wake | the Bone Pile | 3 |
 
 ### 2.11 Campaign end
 
 - Keven dead: stage 'over', "The heir has fallen. Valkenburg stays dark."
 - Keven captured: stage 'over', "The heir is taken. Valkenburg stays dark."
 
-Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `captiveBoard`, `shopOffers`, `aleOffers`, `healQuote`, `backToCamp`); data.ts (`START_GOLD`, `BOUNTY`, `HEIRLOOM_VALUE`, `REP_FOR_LEVEL`, `REP_FOR_SLAY`, `SHOP`, `ALES`, `STORIES`, `RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`, `CAMPFIRE_SIZE`, `FLAGON_SIZE`, `FLAGON_L2`, `CASKBOOK_L2`, `CASKBOOK_L3`, `HEAL_PER_HP`, `DRINK_HEAL`, `WEAPON_PRICE`, `ARMOR_PRICE`, `SHIELD_PRICE`, `LEVEL_XP`, `MAX_LEVEL`, `SLAY_XP`).
+### 2.12 The village pairs (V4.1, spec 31.3)
+
+When two villagers are both home (`pairHome(village, a, b)` in data.ts), they make something together:
+
+- **Wim + Ilse:** Night-eye Stout, Spider-milk Stout, Dragonfire Porter at the Flagon (section 2.8). **Dragonfire Porter**: fire (fireball, a crew fireball, being thrown into the forge, fire vents), burning hexes, the Dragon's breath and blasts do 2 less to the drinker (`DRAGONFIRE_WARD`, `fireWard` in village.ts), to 0 at least; at 0 there is no hit at all (so a downed drinker isn't killed by it).
+- **Gerda + Ilse:** blasting charges at Gerda for 30 (Mott's stay 45). **The tripwire:** a Sapper (with charges) may Set tripwire (action) on a free floor hex next to them: a charge with fuse 2 (`TRIPWIRE_FUSE`) marked `tripwire`; it goes off with its fuse as any charge, or at once when a monster (not the Gloam) or crew member steps onto a hex within 1 of it (`springTripwires`; the mover's walk ends there). Heroes never set it off. Same blast, shield and noise as a charge.
+- **Aldric + Ilse:** the greater potion (35): through Potion, heals 8 (`POTION_HEAL`), or gets a downed hero up at 8; in camp, `drink` uses one (heals 8) when no plain potion is on the cart. The antidote costs 12 (sold by Aldric).
+- **Aldric + Wim:** the hot supper: every hero who gets out heals 2 HP on return (`SUPPER_HEAL`, in `backToCamp`, up to max), with a line naming them.
+- **Gerda + Aldric:** splints: downed heroes crawl (WS3, built with the downed rules; `pairHome(v, 'smith', 'surgeon')`).
+
+Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `captiveBoard`, `shopOffers`, `aleOffers`, `healQuote`, `backToCamp`, V4.1 `giveGift`); village.ts (V4.1 `fireWard`, `canTripwire`, `tripwireNear`, `springTripwires`); data.ts (V4.1 `STORY_PAY`, `CAPTIVE_PAY`, `GIFTS`, `pairHome`, `PAIR_PRICES`, `POTION_HEAL`, `DRAGONFIRE_WARD`, `SUPPER_HEAL`, `TRIPWIRE_FUSE`; `START_GOLD`, `BOUNTY`, `HEIRLOOM_VALUE`, `REP_FOR_LEVEL`, `REP_FOR_SLAY`, `SHOP`, `ALES`, `STORIES`, `RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`, `CAMPFIRE_SIZE`, `FLAGON_SIZE`, `FLAGON_L2`, `CASKBOOK_L2`, `CASKBOOK_L3`, `HEAL_PER_HP`, `DRINK_HEAL`, `WEAPON_PRICE`, `ARMOR_PRICE`, `SHIELD_PRICE`, `LEVEL_XP`, `MAX_LEVEL`, `SLAY_XP`).
 
 ---
 
@@ -462,7 +486,7 @@ Damage to a monster or crew member per hit: max(1, weapon damage − armor), min
 - At 0 HP an active hero is downed with bleed 2; each world phase bleed −1; at 0 they die (they die in the second world phase after going down). Any damage to a downed hero kills them.
 - Monsters ignore downed heroes as targets (area damage still hits them).
 - Revive (action, adjacent downed hero): back up at 3 HP; the revived hero has used their move and action this round.
-- Potion on an adjacent downed hero: back up at 5 HP (move and action not spent).
+- Potion on an adjacent downed hero: back up at 5 HP (move and action not spent); a greater potion (V4.1): at 8.
 - A dead hero's pack drops on their hex (not their class kit); if they carried the lantern, the nearest active hero takes it.
 - Crew members have no downed state: at 0 HP they die and drop loot and pack.
 
@@ -545,6 +569,7 @@ V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Mig
 | Ranger | Knockback shot | 2 Finesse slots at range ≤ 5 in sight, not the Dragon; 2 hits push the target 1 hex away from the Ranger with all shove outcomes; noise 1 |
 | Ranger (any bow) | Hamstring | 1 Finesse slot at −20, range ≤ 5 in sight, awake target, not the Dragon; a hit roots it 2 rounds (heroes: no move or dash; monsters and crew: stuck in place); noise 1 |
 | Sapper | Set charge | Action, 1 charge: an adjacent floor-like hex, cracked wall or breakable wall with no fuse; fuse 1 or 2 |
+| Sapper | Set tripwire (V4.1) | Action, 1 charge, Gerda and Ilse home: an adjacent free floor hex with no fuse; fuse 2, and it goes off when a monster or crew member steps within 1 (section 2.12) |
 | Sapper | Throw charge | Action, 1 charge: a hex within 3 the party can see; fuse 1 |
 | Sapper (and Mole's Brown) | Dig | Action: adjacent rubble or cracked wall becomes floor; noise 4; no roll |
 | Sapper | Improvised explosives | One a hero level each delve (`kitPerDelve`: level 1 brings 1, level 6 brings 6; was 3 at any level), one slotless item, "Improvised explosives" ("Improvised explosive" with 1 left); the same blast, fuse, set and throw rules as a bought blasting charge; bought charges add to them; the improvised ones are spent first |
@@ -585,13 +610,13 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 
 - Pack: 4 slots. Most items 1 slot; heirlooms and hoard pieces 2; the copper 2 and heavy; class kit (improvised explosives, improvised pick) 0. Gold stacks to 100 per slot.
 - Torch: action; 12 rounds of radius-2 light round the carrier.
-- Potion: action; heal 5 on self or an adjacent hurt active hero, or get an adjacent downed hero up at 5 HP.
+- Potion: action; heal 5 on self or an adjacent hurt active hero, or get an adjacent downed hero up at 5 HP. V4.1: the greater potion (1 slot) is used the same way (one set of targets per kind carried): heal 8, or up at 8 (`POTION_HEAL`).
 - Oil flask: action; +8 light.
-- Night-eye draught: action, silent; 8 rounds (ticks each world phase): sight range 8/7/6 by level whatever the light, no brightness penalty. Still unlit for monsters' noticing and for the Gloam.
+- Night-eye draught (no longer sold since V4.1; copies already owned still work): action, silent; 8 rounds (ticks each world phase): sight range 8/7/6 by level whatever the light, no brightness penalty. Still unlit for monsters' noticing and for the Gloam.
 - Smoke bomb: throw 4 at a hex the party can see: that hex and neighbours smoked 2 rounds. Smoke blocks sight both ways beyond 1 (light passes). Hunting monsters inside go alert and forget who they noticed.
 - Glue bomb: throw 4: monsters (not the Dragon or the Gloam) within 1 stuck 2 rounds (can't move).
 - Sleep dart: throw 5 at an awake visible monster (not the Dragon, not crew): 1 Finesse slot; a hit puts it to sleep. Silent.
-- Venom dart (V4.0, 1 slot): throw 5 at a visible monster (not the Dragon or the Gloam) or crew member, not paralyzed already, in line of sight: 1 Finesse slot (+20 asleep, light penalty); a hit envenoms it (section 8.6). Silent; a hit doesn't make a monster hunt (as the sleep dart); thrown at a crew member it makes the crew hostile.
+- Venom dart (V4.0, 1 slot; V4.1 sold by Ilse): throw 5 at a visible monster (not the Dragon or the Gloam) or crew member, not paralyzed already, in line of sight: 1 Finesse slot (+20 asleep, light penalty); a hit envenoms it (section 8.6). Silent; a hit doesn't make a monster hunt (as the sleep dart); thrown at a crew member it makes the crew hostile.
 - Antidote (V4.0, 1 slot): action: on yourself while envenomed, or on an adjacent hero (up or downed) envenomed or paralyzed: the venom and paralysis are gone.
 - Caltrops: an adjacent free floor hex: the first monster stepping there takes 2 and stops. Lasts the delve. The party's own caltrops never catch heroes.
 - Firecracker: throw 6: noise 6 at the hex.
@@ -781,6 +806,8 @@ The Dragon and the Gloam can't be pushed.
 
 ### 13.5 Fire vents, the forge, burning
 
+V4.1: a hero who drank Dragonfire Porter takes 2 less from all of these, from fireballs and from blasts (section 2.12).
+
 - Fire vents: walkable hexes with a radius-1 `fire` light (the three in the Lair). Ending a move there or being pushed onto one: 3 damage.
 - The forge (L2): a solid tall prop that burns; being pushed into it: 3 damage.
 - Burning hexes (fireball): 1 damage per world phase to anyone standing there, 2 world phases; monsters won't path into them.
@@ -802,6 +829,7 @@ The Dragon and the Gloam can't be pushed.
 ### 13.8 Charges and blasts
 
 - A charge is a fuse on a hex (`Delve.fuses`). At the end of each world phase fuses count down; at 0 it goes off. Fuse 1 = the end of the coming world phase. A fuse lit during a world phase (a crew's) skips that phase's countdown.
+- V4.1 (spec 31.3): a tripwire (`Fuse.tripwire`, the Sapper's Set tripwire with Gerda and Ilse home, fuse 2) also goes off the moment a monster (not the Gloam) or crew member steps within 1 of it; that walk ends on the step. Section 2.12.
 - Blast at hex X: 4 damage to every figure within 1 (X included), 2 within 2, no armor; the setter takes 0; if a hero set it, other heroes take half (rounded down); if a crew member set it, crewmates take half; the prisoner takes full. Figures in the ring around X (not on X) still standing are pushed 1 hex away (all push outcomes). Kills credit a hero setter.
 - Within 1: locked or closed doors are opened and unlocked (they can be closed again); unopened chests open (loot rolled); cracked walls break; breakable walls become rubble.
 - Floor within 1 on Levels 1 and 2: floor next to a pit hex collapses into the pit column (`collapsed`; anything on it falls; loot on it drops to the landing; ropes and fuses on it go). Other floor becomes rubble. On Level 3 floor only rubbles. Never affected: stairs, lift, exits, doors, braziers, props and tall props, chest hexes, hoard hexes, the sealed stair, `unbreakable` hexes (around the tower stair and lift ends).
