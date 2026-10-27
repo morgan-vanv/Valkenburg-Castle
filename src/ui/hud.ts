@@ -13,12 +13,12 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, BRIGHTNESS_NAME, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, lightScale, roundsToNext, type LightScale } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
-import { CARRY_MOVE, PARALYSIS_ROUNDS, VENOM_ROUNDS } from '../game/data';
-import { BRAZIER_LIGHT, BURGLAR_WALK, CLASSES, DARK_SIGHT, FOCUS_MAX, HEAVY_MOVE, KINDLE_LIGHT, LIGHT_MAX, MONSTERS, OIL_LIGHT, OVERWATCH_RANGE, PACK_SLOTS, SMUGGLER_SNEAK, VEIL_BREAK_NOISE, WALK_MOVE, FACING, TOLL_MIN, BETRAY_LOOT } from '../game/data';
-import { LANTERN_RADIUS, SIGHT_BY_STAGE } from '../game/world';
+import { CARRY_MOVE } from '../game/data';
+import { BURGLAR_WALK, CLASSES, DARK_SIGHT, FOCUS_MAX, HEAVY_MOVE, KINDLE_LIGHT, MONSTERS, OIL_LIGHT, TORCH_ROUNDS, OVERWATCH_RANGE, PACK_SLOTS, SMUGGLER_SNEAK, VEIL_BREAK_NOISE, WALK_MOVE, FACING, TOLL_MIN, BETRAY_LOOT } from '../game/data';
+import { pairHome as pairsHome } from '../game/data'; // V4.1 (spec 31.4): splints
 import { isKit } from '../game/charges';
 import type { Settings } from './settings';
 import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
@@ -48,16 +48,19 @@ interface PreviewState {
   focus: number;
 }
 
-const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'torch', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote']);
+const ITEM_ACTIONS = new Set<ActionKind>(['smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple', 'potion', 'rope', 'charge', 'nightsight', 'venomdart', 'antidote']);
+/** V4.1 (spec 31.4): the poison line, everywhere it shows (pillar 15: what it does and what cures it). */
+const POISON_TIP = 'Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out.';
 
-/** V4.0 (spec 29.2): a hero who can move and act (active, not paralyzed). */
-const able = (x: HeroInDelve) => x.status === 'active' && !((x.paralyzed ?? 0) > 0);
+/** A hero who can move and act (V4.1: active; paralysis is gone). */
+const able = (x: HeroInDelve) => x.status === 'active';
 const turnsWord = (n: number) => `${n} turn${n === 1 ? '' : 's'}`;
 const SPELLS = new Set<ActionKind>(['firebolt', 'fireball', 'kindle', 'mend', 'veil', 'sleep', 'blink', 'ward', 'gust', 'dread', 'nightthorn', 'briar']);
 /** Class abilities that aren't spells. */
-const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'throwCharge', 'brace', 'hamstring']);
+const ABILITIES = new Set<ActionKind>(['guard', 'rally', 'overwatch', 'knockback', 'dig', 'setCharge', 'setTripwire', 'throwCharge', 'brace', 'hamstring']);
 /** V4.0 HUD: rare and free actions, folded into the More menu. */
 const MORE_ACTIONS = new Set<ActionKind>(['give', 'drop', 'passLantern', 'shutter', 'parley']);
+/** V4.1 (WS2): Light torch, Snuff and Drop torch are bar buttons (the torch's pack slot lights or snuffs it too); the lantern's slot and L shutter it. */
 
 /** V4.0 HUD: the icon on each action button (no entry: the action's glyph). */
 const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconName>> = {
@@ -71,6 +74,7 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   hamstring: 'shoot',
   dig: 'dig',
   setCharge: 'blast',
+  setTripwire: 'trap', // V4.1 (spec 31.3)
   throwCharge: 'blast',
   firebolt: 'bolt',
   fireball: 'blast',
@@ -85,8 +89,7 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   nightthorn: 'thorn',
   briar: 'thorn',
   escape: 'chain',
-  revive: 'heart',
-  free: 'chain',
+  unshackle: 'chain',
   take: 'hand',
   open: 'door',
   pick: 'lock',
@@ -113,6 +116,8 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   key: 'key',
   grapple: 'rope',
   torch: 'torch',
+  snuff: 'torch',
+  dropTorch: 'drop',
   potion: 'potion',
   smoke: 'smoke',
   glue: 'smoke',
@@ -123,7 +128,7 @@ const ACTION_ICON: Partial<Record<ActionKind | 'link' | 'face' | 'follow', IconN
   nightsight: 'eye',
   venomdart: 'venom',
   antidote: 'potion',
-  shoulder: 'carry',
+  carry: 'carry',
   setDown: 'down',
 };
 
@@ -361,7 +366,7 @@ export class Hud {
   select(id: string): void {
     const d = this.state?.delve;
     const hd = d?.heroes.find((x) => x.heroId === id);
-    if (!hd || hd.status !== 'active') return;
+    if (!hd || (hd.status !== 'active' && !this.crawler(hd))) return;
     this.selectedId = id;
     this.pending = null;
     this.otherReach = null;
@@ -502,13 +507,20 @@ export class Hud {
     return !!d && d.phase === 'player' && !!sel && sel.status === 'active' && !sel.grabbedBy && !sel.webbed && !(sel.rooted ?? 0) && this.calmState().calm;
   }
 
+  /** V4.1 (spec 31.4): a downed hero who may crawl (splints, nobody carries or holds them): selectable, moves 1, may Leave. */
+  private crawler(h: HeroInDelve): boolean {
+    const d = this.state?.delve;
+    if (!d || h.status !== 'downed' || h.grabbedBy || !this.state || !pairsHome(this.state.campaign.village, 'smith', 'surgeon')) return false;
+    return !d.heroes.some((x) => x.carrying === h.heroId && x.status === 'active') && !d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut);
+  }
+
   /** Recompute reach and options and redraw panels and highlights. */
   refresh(): void {
     const s = this.state;
     const d = s?.delve;
     if (!s || !d) return;
     const sel = this.selected();
-    const canAct = !!sel && sel.status === 'active' && d.phase === 'player';
+    const canAct = !!sel && (sel.status === 'active' || this.crawler(sel)) && d.phase === 'player';
     this.reach = canAct && !this.busy ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
     this.otherReach = null;
     if (canAct && !this.busy && this.freeMove()) {
@@ -554,7 +566,7 @@ export class Hud {
     }
     if (this.pending) {
       const ats = this.pending.targets.map((t) => this.targetPos(t)).filter((p): p is Pos => !!p);
-      const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'revive', 'passLantern', 'free', 'veil', 'ward'].includes(this.pending.action);
+      const friendly = this.pending.pick === 'ally' || ['mend', 'potion', 'give', 'guard', 'carry', 'unshackle', 'passLantern', 'veil', 'ward'].includes(this.pending.action);
       const hexPick = this.pending.pick === 'hex' && !['jump', 'dig', 'key', 'unbar'].includes(this.pending.action);
       if (this.pending.action === 'setCharge' || this.pending.action === 'charge') {
         const castle = this.engine.castle();
@@ -940,7 +952,6 @@ export class Hud {
   /** The mood words: "unaware, at its post", "searching", "hunting Corin". */
   private moodWords(m: Monster): string {
     if (m.kind === 'gloam') return 'the dark itself';
-    if ((m.paralyzed ?? 0) > 0) return 'paralyzed';
     if (m.awareness === 'asleep') return 'asleep';
     if (m.awareness === 'hunting') {
       const it = this.intents[m.id];
@@ -997,24 +1008,37 @@ export class Hud {
     const out: CardLine[] = [{ html: `<b>${esc(m.name)}</b> <span class="dl-card-k">${esc(this.moodWords(m))}</span>` }];
     const it = this.intentLine(this.intents[m.id], m.id);
     if (m.kind === 'gloam') out.push({ html: esc(MONSTER_NOTE.gloam) });
-    else if ((m.paralyzed ?? 0) > 0) out.push({ html: esc(venomLine(m)), cls: 'good' });
     else if (it) out.push({ html: `Next: ${esc(it)}`, cls: 'bad' });
     else if (m.awareness === 'asleep') out.push({ html: 'Sees nothing; wakes by sound.' });
     else if (m.awareness === 'hunting' || (m.awareness === 'alert' && m.searchRounds !== undefined)) out.push({ html: 'Looks ahead and to its sides. Nothing straight behind.' });
     else out.push({ html: `Looks ahead. At its sides it catches only a walker within ${V37.sideWalk}, or anyone right beside it.` });
-    if ((m.venom ?? 0) > 0 && !((m.paralyzed ?? 0) > 0)) out.push({ html: esc(venomLine(m)), cls: 'good' });
+    if (m.poisoned) out.push({ html: esc(venomLine(m)), cls: 'good' });
     const rel = m.kind === 'gloam' || m.kind === 'dragon' ? null : this.relationLine(m.id, m.at, m.noticedIds ?? [], m.awareness === 'asleep');
     if (rel) out.push(rel);
     return out;
   }
 
+  /**
+   * V4.1 (spec 31.4, pillar 15): a downed hero's line: the bleed-out count (it decides what you do) and what saves them.
+   * Carried, they don't bleed; with splints they crawl.
+   */
+  downLine(hero: HeroInDelve): string {
+    const d = this.state?.delve;
+    const carrier = d?.heroes.find((x) => x.carrying === hero.heroId && x.status === 'active');
+    if (carrier) return `On ${this.nameOf(carrier.heroId)}'s shoulders: not bleeding. A potion or Mend gets them up; out by an exit, they live (1 HP).`;
+    const dragger = d?.rivals?.members.find((r) => r.dragging === hero.heroId && r.hp > 0 && !r.goneOut);
+    if (dragger) return `${dragger.name} is carrying them off!`;
+    const crawl = this.state && pairsHome(this.state.campaign.village, 'smith', 'surgeon') ? ' Splints: they can crawl 1 a turn.' : '';
+    return `Dies in ${turnsWord(hero.bleed)}. A potion from next to them gets them up (5), Mend within 3 (2); or Carry them out.${crawl}`;
+  }
+
   private heroCard(hero: HeroInDelve): CardLine[] {
     const def = this.heroDef(hero.heroId);
     const out: CardLine[] = [{ html: `<b>${esc(def?.name ?? hero.heroId)}</b> <span class="dl-card-k">${def ? esc(className(def.cls)) : ''}${def ? ` · level ${def.level}` : ''}</span>` }];
-    if (hero.status === 'downed') out.push({ html: `Down: dies in ${hero.bleed} turn${hero.bleed === 1 ? '' : 's'}. Revive or a potion, from next to them.`, cls: 'bad' });
+    if (hero.status === 'downed') out.push({ html: esc(this.downLine(hero)), cls: 'bad' });
     else out.push({ html: `HP ${hero.hp} of ${def?.maxHp ?? '?'}${this.full ? ` · Focus ${hero.focus}` : ''}${hero.moveMode === 'sneak' ? ' · sneaking' : ''}` });
-    if ((hero.paralyzed ?? 0) > 0) out.push({ html: `Paralyzed · wears off in ${turnsWord(hero.paralyzed!)}. Shoulder them to carry them out.`, cls: 'bad' });
-    else if ((hero.venom ?? 0) > 0) out.push({ html: `Venom: paralyzed in ${turnsWord(hero.venom!)}. Antidote, Mend, or get out.`, cls: 'bad' });
+    if (hero.poisoned) out.push({ html: esc(POISON_TIP), cls: 'bad' });
+    if (hero.carrying) out.push({ html: `Carrying ${esc(this.nameOf(hero.carrying))}.`, cls: 'dim' });
     const hf = facingOf(hero);
     if (hf !== undefined && hero.status === 'active' && this.full) out.push({ html: `Faces ${this.facingWords(hero.at, hf)} (the way they last moved or acted): blind only straight behind.`, cls: 'dim' });
     if (this.backExposed(hero.heroId)) out.push({ html: 'Back exposed: nobody covers the hex behind them.', cls: 'bad' });
@@ -1027,10 +1051,10 @@ export class Hud {
     const st = STANCE[cr.stance];
     const out: CardLine[] = [{ html: `<b>${esc(rival.name)}</b> <span class="dl-card-k">${esc(cr.name)} · ${esc(st.name.toLowerCase())}</span>` }];
     const it = this.intents[rival.id] ?? rival.intent;
-    if ((rival.paralyzed ?? 0) > 0) out.push({ html: esc(venomLine(rival)), cls: 'good' });
+    if (rival.downed) out.push({ html: `Down: dies in ${turnsWord(rival.bleed ?? 1)} unless a crewmate gets them up. Any hit finishes them.`, cls: 'good' });
     else if (it && it.kind !== 'wait') out.push({ html: `Next: ${esc(intentText(this.state!, it, rival.id))}`, cls: cr.stance === 'hired' ? 'good' : 'bad' });
     else out.push({ html: esc(st.text) });
-    if ((rival.venom ?? 0) > 0 && !((rival.paralyzed ?? 0) > 0)) out.push({ html: esc(venomLine(rival)), cls: 'good' });
+    if (rival.poisoned) out.push({ html: esc(venomLine(rival)), cls: 'good' });
     if (this.full) {
       out.push({ html: `HP ${rival.hp}/${rival.maxHp}${rival.cls ? ` · ${esc(className(rival.cls))}` : ''}${rival.level ? ` L${rival.level}` : ''}`, cls: 'nums' });
       const line = crewMemberLine(rival);
@@ -1066,9 +1090,9 @@ export class Hud {
     // V4.0 (spec 29.5): a spotted trap on the way, in words (the venom kind especially).
     const traps = this.state?.delve?.traps ?? {};
     const onPath = r.path.map((p) => traps[posKey(p)]).filter((t): t is NonNullable<typeof t> => !!t && t.spotted);
-    if (onPath.some((t) => t.venom)) out.push({ html: `${iconSvg('venom', 14)} A venom trap on the way: 1 damage, and paralyzed in ${VENOM_ROUNDS} turns`, cls: 'rk bad' });
+    if (onPath.some((t) => t.venom)) out.push({ html: `${iconSvg('venom', 14)} A poison trap on the way: 1 damage, and poisoned (−1 a turn, never below 1)`, cls: 'rk bad' });
     else if (onPath.length) out.push({ html: `${iconSvg('trap', 14)} A trap on the way: 3 damage`, cls: 'rk bad' });
-    if (sel.carrying) out.push({ html: `Carrying ${esc(this.nameOf(sel.carrying))}: they come along.`, cls: 'dim' });
+    if (sel.carrying) out.push({ html: `Carrying ${esc(this.nameOf(sel.carrying))}: they come along, on your hex.`, cls: 'dim' });
     const noticeMe = (r.risks?.notice ?? []).some((x) => !x.hero || x.hero === sel.heroId);
     if (noticeMe && !this.sneak) {
       const alt = this.otherReachAt(r.to);
@@ -1096,9 +1120,9 @@ export class Hud {
   private moveBudget(h: HeroInDelve, sneak: boolean): number {
     const cls = this.heroDef(h.heroId)?.cls;
     let b = sneak ? (cls === 'burglar' || h.ale === 'smuggler' ? SMUGGLER_SNEAK : 2) : cls === 'burglar' ? BURGLAR_WALK : WALK_MOVE;
-    if (h.escorting) b = Math.min(b, 3);
+    if (h.status === 'downed') return 1; // V4.1 (spec 31.4): a crawl (splints)
     if (h.pack.some((i) => i.heavy)) b = Math.min(b, HEAVY_MOVE);
-    if (h.carrying) b = Math.min(b, CARRY_MOVE); // V4.0 (spec 29.4)
+    if (h.carrying) b = Math.min(b, CARRY_MOVE); // V4.1 (spec 31.4)
     return b;
   }
 
@@ -1162,7 +1186,7 @@ export class Hud {
     } else if (this.full) out.push({ html: esc(actionHelp(o.action, def?.cls)), cls: 'dim' });
     const tint = t.id ? this.intents[t.id] ?? this.state?.delve?.rivals?.members.find((r) => r.id === t.id)?.intent : undefined;
     // V4.0 (spec 29.3): the venom dart in words.
-    if (o.action === 'venomdart' && pr && pr.ok) out.splice(1, 0, { html: `${esc(pr.outcomes[1] ?? 'Envenoms it')} if it hits.`, cls: 'head' });
+    if (o.action === 'venomdart' && pr && pr.ok) out.splice(1, 0, { html: `${esc(pr.outcomes[1] ?? 'Poisons it')} if it hits.`, cls: 'head' });
     if (tint && tint.kind !== 'wait' && pr && pr.slots > 0) out.push({ html: `Then: ${esc(intentText(this.state!, tint, t.id))} next turn, unless you stop it.`, cls: 'then' });
     if (unarmed && t.id) {
       const m = this.state?.delve?.monsters.find((x) => x.id === t.id);
@@ -1217,7 +1241,7 @@ export class Hud {
     if (!o || this.pv || this.pill.classList.contains('fuse')) return;
     const t = this.hotTarget();
     const at = t ? this.targetPos(t) : null;
-    if (o.area || ['setCharge', 'throwCharge', 'charge'].includes(o.action)) this.drawPendingArea(t && t.at ? t.at : at);
+    if (o.area || ['setCharge', 'setTripwire', 'throwCharge', 'charge'].includes(o.action)) this.drawPendingArea(t && t.at ? t.at : at);
     this.dio.showLanding(null, null, '', false);
     if (t) this.showActionLanding(o.action, t);
     const d = this.state?.delve;
@@ -1405,7 +1429,7 @@ export class Hud {
       else act('Door', 'Open, then walk through');
     } else if (t.kind === 'brazier') {
       if (d.lit.includes(k)) parts.push('<b>Brazier</b>, lit for good');
-      else act('Brazier', this.full ? `Light: +${BRAZIER_LIGHT} lantern light, lit for good` : 'Light it: oil for the lantern, lit for good');
+      else act('Brazier', this.full ? 'Light: lights the room (radius 3), for good' : 'Light it: it lights the room for good');
     } else if (t.kind === 'prop' || t.kind === 'tallprop') {
       if (t.prop === 'winch') act('Winch', d.liftWorking ? 'the lift runs' : 'work it to run the lift, loud');
       else if ((t.prop === 'crate' || t.prop === 'barrel' || (!t.prop && t.kind === 'prop')) && (d.smashed ?? []).includes(k)) parts.push(`Splinters <span class="dim">a smashed ${t.prop ?? 'crate'}</span>`);
@@ -1437,7 +1461,7 @@ export class Hud {
     if (fuse) {
       const side = fuseSide(s, fuse.by);
       const words = this.blastWords(this.blastPlan(at));
-      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">Charge · fuse ${fuse.rounds}</b> <span class="dl-card-k">· set by ${esc(this.nameOf(fuse.by))}, ${fuseWords(fuse.rounds)}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
+      parts.push(`<b class="${side === 'rival' ? 'neg' : 'warn-word'}">${fuse.tripwire ? 'Tripwire' : 'Charge'} · fuse ${fuse.rounds}</b> <span class="dl-card-k">· set by ${esc(this.nameOf(fuse.by))}, ${fuseWords(fuse.rounds)}${fuse.tripwire ? ', or when an enemy steps next to it' : ''}: ${V37.blastInner} within 1 (and a shove), ${V37.blastOuter} within 2${words ? `; ${words}` : ''}</span>`);
     }
     if (t.railing) parts.push('Railing');
     const vent = castle.lights.find((l) => l.kind === 'fire' && l.radius === 1 && samePos(l.at, at));
@@ -1487,7 +1511,7 @@ export class Hud {
     const crew = this.state?.delve?.rivals;
     const isRival = !!unitId && !!crew?.members.some((m) => m.id === unitId);
     // 18.6: clicking a crew member that isn't fighting you opens the deal card, not an attack.
-    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley', 'free', 'revive'] : ['attack', 'firebolt', 'free', 'revive', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'smashProp', 'winch', 'leave', 'dig', 'jump'];
+    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley'] : ['attack', 'firebolt', 'potion', 'carry', 'unshackle', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'smashProp', 'winch', 'leave', 'dig', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -2060,18 +2084,15 @@ export class Hud {
     if (e.type === 'hit' && (e.attacker === this.captionFor || !this.captionFor)) {
       text = e.damage > 0 ? `${e.damage} damage` : 'Hits.';
       cls = 'dmg';
-    } else if (e.type === 'envenomed' && e.by === this.captionFor) {
-      // V4.0 (spec 29): "The spider bites Fenna: 2 damage, venom."
+    } else if (e.type === 'poisoned' && e.by === this.captionFor) {
+      // V4.1 (spec 31.4): "The spider bites Fenna: 2 damage, poisoned."
       const last = [...body.querySelectorAll('.dl-cap-res.dmg')].pop();
       if (last) {
-        last.textContent = `${(last.textContent ?? '').replace(/\.$/, '')}, venom.`;
+        last.textContent = `${(last.textContent ?? '').replace(/\.$/, '')}, poisoned.`;
         return;
       }
-      text = 'Venom.';
+      text = 'Poisoned.';
       cls = 'dmg';
-    } else if (e.type === 'paralyzed') {
-      text = `${this.nameOf(e.id)} is paralyzed.`;
-      cls = 'down';
     } else if (e.type === 'miss' && e.attacker === this.captionFor) text = 'Misses.';
     else if (e.type === 'downed') {
       text = `${this.nameOf(e.id)} goes down.`;
@@ -2147,7 +2168,7 @@ export class Hud {
     const s = this.state!;
     const d = s.delve!;
     clear(this.strip);
-    this.strip.append(this.lightMeter(d.light, this.engine.brightness(s)), this.goalBox(), this.carryBox());
+    this.strip.append(this.lightMeter(), this.goalBox(), this.carryBox());
     const right = h('div', { class: 'dl-strip-r' });
     const levels = h('div', { class: 'dl-levels dl-pan', role: 'group', 'aria-label': 'Levels' });
     const mem = s.campaign.explored ?? {};
@@ -2178,88 +2199,93 @@ export class Hud {
     this.strip.append(right);
   }
 
-  updateLight(light: number, b: Brightness): void {
+  /** V4.1 (WS2): the light readout is redrawn from the state (the args are kept for app.ts's `light` event). */
+  updateLight(_light?: number, _b?: Brightness): void {
     const old = this.strip.querySelector('.dl-lantern');
-    if (old) old.replaceWith(this.lightMeter(light, b));
+    if (old) old.replaceWith(this.lightMeter());
   }
 
-  private scale: LightScale | null = null;
-  private scaleDelve = -1;
-
-  /** Stage edges from engine.brightness. */
-  private lightScale(): LightScale {
-    const s = this.state!;
-    const delve = s.campaign.delveCount;
-    if (this.scale && this.scaleDelve === delve) return this.scale;
-    const probe = (l: number) => this.engine.brightness({ ...s, delve: { ...s.delve!, light: l } });
-    this.scale = lightScale(probe, LIGHT_MAX);
-    this.scaleDelve = delve;
-    return this.scale;
+  /** V4.1 (WS2): the lantern the selected hero carries (the first one), for the shutter key L. */
+  private heldLantern(heroId?: string): { hero: HeroInDelve; item: Item } | null {
+    const d = this.state?.delve;
+    if (!d) return null;
+    const order = [heroId ?? this.selectedId, ...d.heroes.map((x) => x.heroId)];
+    for (const id of order) {
+      const hd = d.heroes.find((x) => x.heroId === id && x.status === 'active');
+      const it = hd?.pack.find((i) => i.kind === 'lantern');
+      if (hd && it) return { hero: hd, item: it };
+    }
+    return null;
   }
 
-  /** 16.2: is the lantern open (burning and lighting)? Old saves without the flag count as open. */
+  /** 16.2, V4.1: is the selected hero's lantern open? (No lantern: false.) */
   private lanternOpen(): boolean {
-    return this.state?.delve?.lanternOpen !== false;
+    return !!this.heldLantern()?.item.lit;
   }
 
-  /** 16.2: toggle the shutter for the bearer (free; any time in the player phase). */
+  /** V4.1 (WS2): open or shutter a lantern (free; the selected hero's first, else anyone's). */
   toggleShutter(): void {
     const d = this.state?.delve;
     if (!d || this.busy || d.phase !== 'player') return;
-    const bearer = d.heroes.find((x) => x.heroId === d.lanternBearer);
-    if (!bearer || bearer.status !== 'active') {
-      this.toast('Nobody holds the lantern.');
+    const l = this.heldLantern();
+    if (!l) {
+      this.toast('Nobody carries a lantern. Gerda sells one once she is home.');
       return;
     }
-    sfx.play('click', { pitch: this.lanternOpen() ? 0.8 : 1.2 });
+    const o = this.engine.actions(this.state!, l.hero.heroId).find((x) => x.action === 'shutter');
+    if (!o) {
+      this.toast('The lantern is empty. Oil or Kindle brings it back.');
+      return;
+    }
+    sfx.play('click', { pitch: l.item.lit ? 0.8 : 1.2 });
     this.cancel();
-    void this.host.send({ type: 'act', heroId: bearer.heroId, action: 'shutter', target: {}, focus: 0 });
+    void this.host.send({ type: 'act', heroId: l.hero.heroId, action: 'shutter', target: { itemId: l.item.id }, focus: 0 });
   }
 
-  /** The lantern: stage, a short line, the round, and a notched bar of the light left in its stage bands. */
-  private lightMeter(light: number, b: Brightness): HTMLElement {
-    const sc = this.lightScale();
-    const open = this.lanternOpen();
-    const d = this.state?.delve;
-    const onL1 = !!d && d.heroes.some((x) => x.status === 'active' && x.at.level === 1);
-    const daylight = open && onL1 && !!d && d.round <= 10;
-    const ctx = !open ? 'shut: no light, no burn' : light <= 0 ? 'out' : daylight ? 'daylight: shut it to save oil' : 'burning';
-    const notches = h('span', { class: 'dl-notches', role: 'img', 'aria-label': `Lantern ${light} of ${LIGHT_MAX}` });
-    // Left to right: the bright band (20 down to 13), dim (12 to 7), dark (6 to 1); it burns from the left.
-    for (let v = LIGHT_MAX; v >= 1; v--) {
-      const band: Brightness = v >= sc.min.bright ? 'bright' : v >= sc.min.dim ? 'dim' : 'dark';
-      const gap = v === sc.min.bright - 1 || v === sc.min.dim - 1;
-      notches.append(h('i', { class: `dl-notch ${band} ${v <= light ? 'on' : ''} ${gap ? 'gap' : ''}` }));
-    }
-    const next = roundsToNext(light, sc);
+  /**
+   * V4.1 (WS2, pillar 15): the light readout, where the lantern bar was. One chip per lit torch or open lantern: who
+   * carries it (or "on the floor") and the rounds left, because they decide when to leave. None lit: says so.
+   */
+  private lightMeter(): HTMLElement {
+    const s = this.state!;
+    const d = s.delve!;
+    const lights = (this.engine.lights?.(s) ?? []).filter((L) => (L.kind === 'torch' || L.kind === 'lantern') && L.rounds !== undefined);
+    const spare = d.heroes.filter((x) => x.status === 'active').flatMap((x) => x.pack.filter((i) => (i.kind === 'torch' || i.kind === 'lantern') && !i.lit).map((i) => ({ who: x.heroId, i })));
+    const low = lights.some((L) => (L.rounds ?? 0) <= 3);
+    const chips = lights.map((L) => {
+      const who = L.holder ? this.nameOf(L.holder) : 'on the floor';
+      const word = L.kind === 'lantern' ? 'Lantern' : 'Torch';
+      const r = L.rounds ?? 0;
+      return h(
+        'span',
+        { class: `dl-lchip ${L.kind} ${r <= 3 ? 'low' : ''}`, tabindex: 0, 'data-tip': `${word} · ${who}${L.holder ? ' carries it' : ''}
+${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.kind === 'torch' ? ' Snuff it (free) to save the rest.' : ' The shutter is free (L).'}` },
+        icon(L.kind === 'lantern' ? 'lantern' : 'torch', 12),
+        h('span', { class: 'dl-lchip-n' }, L.holder ? who : 'floor'),
+        h('b', { class: 'num' }, `${r}`),
+      );
+    });
+    const ctx = lights.length ? (low ? 'running low' : `${lights.length} lit`) : spare.length ? `none lit · ${spare.length} packed` : 'no light';
+    const tip = [
+      'Light · what lights the party, and how long it lasts.',
+      'Party light (a torch, a lantern, Glowworm) or daylight: sight 8 / 7 / 6 on Levels 1 / 2 / 3, no penalty.',
+      `Only a castle light (a sconce, a fire, a brazier, fungus, the pit glow): sight 4 / 3 / 2, rolls −10%. Unlit: sight ${DARK_SIGHT[1]} / ${DARK_SIGHT[2]} / ${DARK_SIGHT[3]}, rolls −20%.`,
+      `A torch lights 3 for ${TORCH_ROUNDS} rounds; Gerda's lantern 4 (3 when low) for 20, refilled free in camp. Each burns 1 a round while lit.`,
+      `Kindle lights a friend's torch or lantern within 3, or adds ${KINDLE_LIGHT}; oil adds ${OIL_LIGHT} to a lantern. In the Hollow the dark itself hunts anyone standing unlit.`,
+    ].join('\n');
     return h(
       'button',
       {
         type: 'button',
-        class: `dl-lantern dl-pan lt-${b} ${open ? '' : 'shut'}`,
-        'data-tip': this.lightTip(light, sc, open, next),
-        'aria-label': `Lantern ${open ? BRIGHTNESS_NAME[b] : 'shut'}, ${light} of ${LIGHT_MAX}. Click or L to ${open ? 'shut' : 'open'} it.`,
-        disabled: this.busy || d?.phase !== 'player',
-        onclick: () => this.toggleShutter(),
+        class: `dl-lantern dl-pan dl-lights ${lights.length ? (low ? 'lt-dim' : 'lt-bright') : 'lt-dark shut'}`,
+        'data-tip': tip,
+        'aria-label': `Light: ${ctx}.${this.heldLantern() ? ' Press L to open or shutter the lantern.' : ''}`,
+        disabled: this.busy || d.phase !== 'player',
+        onclick: () => (this.heldLantern() ? this.toggleShutter() : undefined),
       },
-      h('span', { class: 'dl-lantern-head' }, icon('lantern', 14, 'dl-lantern-ic'), h('span', { class: 'dl-lantern-stage' }, open ? (b === 'pitch' ? 'Pitch' : BRIGHTNESS_NAME[b]) : 'Shut'), h('span', { class: 'dl-lantern-ctx' }, `· ${ctx}`), h('span', { class: 'dl-round num', 'data-tip': `Round ${d?.round ?? 1} · A round is your turn (each hero moves once and acts once), then the castle's turn.` }, `R${d?.round ?? 1}`)),
-      notches,
+      h('span', { class: 'dl-lantern-head' }, icon('torch', 14, 'dl-lantern-ic'), h('span', { class: 'dl-lantern-stage' }, 'Light'), h('span', { class: 'dl-lantern-ctx' }, `· ${ctx}`), h('span', { class: 'dl-round num', 'data-tip': `Round ${d.round} · A round is your turn (each hero moves once and acts once), then the castle's turn.` }, `R${d.round}`)),
+      h('span', { class: 'dl-lchips' }, ...(chips.length ? chips : [h('span', { class: 'dl-lchip none' }, spare.length ? 'Light a torch from a pack' : 'Nobody carries a light')])),
     );
-  }
-
-  /** The light panel explained: stages with their numbers, sight, shutter, daylight (spec 16.2). */
-  private lightTip(light: number, sc: LightScale, open: boolean, next: { stage: Brightness; rounds: number }): string {
-    const st = (b: Brightness, range: string) => `${BRIGHTNESS_NAME[b]} ${range}: lantern lights ${LANTERN_RADIUS[b]} around the bearer, sight ${SIGHT_BY_STAGE[b]}${b === 'bright' ? '' : `, rolls ${b === 'dim' ? '−10%' : b === 'dark' ? '−20%' : '−30%'}`}`;
-    return [
-      `Lantern · ${light} of ${LIGHT_MAX} rounds of light. Burns 1 a round while open.${open && light > 0 ? ` ${next.rounds} round${next.rounds === 1 ? '' : 's'} to ${BRIGHTNESS_NAME[next.stage].toLowerCase()}.` : ''}`,
-      st('bright', `${sc.min.bright}+`),
-      st('dim', `${sc.min.dim}–${sc.min.bright - 1}`),
-      st('dark', `1–${sc.min.dim - 1}`),
-      'Pitch black at 0: no lantern light; lit braziers and torches still shine.',
-      `Sight is 1 less on Level 2, 2 less on Level 3. A hero standing unlit sees ${DARK_SIGHT[1]} / ${DARK_SIGHT[2]} / ${DARK_SIGHT[3]} on Levels 1 / 2 / 3.`,
-      `Click or L to ${open ? 'shut it: no light and no burn until you open it again' : 'open it again'} (free). Daylight on Level 1 lets you save oil.`,
-      `Refill: Kindle +${KINDLE_LIGHT}, oil flask +${OIL_LIGHT}, light a brazier +${BRAZIER_LIGHT}. In the Hollow the dark itself hunts anyone standing unlit.`,
-    ].join('\n');
   }
 
   /** The job: what, where (or "not yet seen"), and a compass arrow toward it once it's known on this level. */
@@ -2363,42 +2389,37 @@ export class Hud {
     const badge = h('span', { class: `cbadge dl-hexb cls-${def.cls}`, 'aria-hidden': 'true' }, classGlyph(def.cls));
     const tipLines = [`${def.name} · ${word}, level ${def.level}`, CLASS_ROLE[def.cls as keyof typeof CLASS_ROLE] ?? '', `Focus ${hd.focus} of ${hd.ale === 'reserve' ? 4 : FOCUS_MAX}: spent in the roll panel.`, `Click or press ${i + 1} to select.`];
     if (!active) {
-      const fate = hd.status === 'downed' ? { tag: 'Down', line: `Dies in ${hd.bleed} turn${hd.bleed === 1 ? '' : 's'}. Revive or a potion, next to them.` } : hd.status === 'dead' ? { tag: 'Dead', line: 'Gone for good.' } : hd.status === 'out' ? { tag: 'Out', line: 'Safe outside, with what they carry.' } : { tag: 'Taken', line: `Dragged out by ${this.state?.delve?.rivals?.name ?? 'a crew'}.` };
+      // V4.1 (spec 31.4, pillar 15): the bleed-out count, because it decides what you do (potion, Mend, Carry, or run).
+      const fate = hd.status === 'downed' ? { tag: `Down · ${hd.bleed}`, line: this.downLine(hd) } : hd.status === 'dead' ? { tag: 'Dead', line: 'Gone for good.' } : hd.status === 'out' ? { tag: 'Out', line: 'Safe outside, with what they carry.' } : { tag: 'Taken', line: `Dragged out by ${this.state?.delve?.rivals?.name ?? 'a crew'}.` };
       // A crew member hauling a downed hero out: say so, and what stops it.
       const dragger = hd.status === 'downed' ? this.state?.delve?.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut) : undefined;
       if (dragger) fate.line = `${dragger.name} is hauling them out!`;
-      const drag = dragger ? h('span', { class: 'dl-si bad dragged', tabindex: 0, 'data-tip': `Dragged · ${dragger.name} is hauling ${def.name} toward the way out, ${3} a round. Kill, down or fear ${dragger.name} to free them.` }, icon('hand', 13)) : '';
+      const drag = dragger ? h('span', { class: 'dl-si bad dragged', tabindex: 0, 'data-tip': `Carried off · ${dragger.name} is carrying ${def.name} toward the way out, ${3} a round. Kill, down or fear ${dragger.name} to free them.` }, icon('hand', 13)) : '';
+      const poisonMark = hd.status === 'downed' && hd.poisoned ? h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': 'Poisoned', 'data-tip': `${POISON_TIP}\nDown, it doesn't hurt them; cure it before they get up.` }, icon('venom', 13)) : '';
       return h(
         'div',
-        { class: `dl-rcard st-${hd.status} cls-${def.cls}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}` },
+        { class: `dl-rcard st-${hd.status} cls-${def.cls} ${sel ? 'sel' : ''}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}`, ...(this.crawler(hd) ? { onclick: () => this.select(hd.heroId) } : {}) },
         badge,
-        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
+        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
       );
     }
     const pip = (on: boolean, what: string, tip: string) => h('span', { class: `dl-pip ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': `${what} ${on ? 'ready' : 'used'}` }, on ? icon(what === 'Move' ? 'move' : 'dot', 9) : '');
-    const para = (hd.paralyzed ?? 0) > 0;
-    const held = !!hd.grabbedBy || hd.webbed || (hd.rooted ?? 0) > 0 || para;
-    const mv = para ? 'Paralyzed' : held ? "Can't move" : hd.moved ? 'Moved this round' : 'Move ready';
-    const ac = para ? 'Paralyzed' : hd.dashed ? 'Dashed: the action went on a second move' : hd.acted ? 'Acted this round' : 'Action ready';
-    const pips = h('span', { class: 'dl-pips' }, pip(!hd.moved && !held, 'Move', `Move · ${mv}\nEach hero moves once and acts once a round, in either order. Moving again spends the action (a dash).`), pip(!hd.acted && !para, 'Action', `Action · ${ac}`));
-    // V4.0 (spec 29.2, 29.4): a paralyzed hero's card says how long, and what saves them.
-    const carrier = para ? this.state?.delve?.heroes.find((x) => x.carrying === hd.heroId && x.status === 'active') : undefined;
-    const paraLine = para
-      ? h('span', { class: 'dl-rcard-fate para', 'data-tip': `Paralyzed · ${def.name} can't move or act, and doesn't bleed. Hits still hurt, and monsters still come for them.\nAn antidote or a Hedgewitch's Mend from a friend ends it; or Shoulder them (an action, next to them) and carry them out by an exit. Left inside when the delve ends, they are lost.` }, carrier ? `On ${this.nameOf(carrier.heroId)}'s shoulders · wears off in ${turnsWord(hd.paralyzed!)}.` : `Paralyzed · wears off in ${turnsWord(hd.paralyzed!)}. Shoulder them to carry them out.`)
-      : '';
+    const held = !!hd.grabbedBy || hd.webbed || (hd.rooted ?? 0) > 0;
+    const mv = held ? "Can't move" : hd.moved ? 'Moved this round' : 'Move ready';
+    const ac = hd.carrying ? `Carrying ${this.nameOf(hd.carrying)}: free actions only` : hd.dashed ? 'Dashed: the action went on a second move' : hd.acted ? 'Acted this round' : 'Action ready';
+    const pips = h('span', { class: 'dl-pips' }, pip(!hd.moved && !held, 'Move', `Move · ${mv}\nEach hero moves once and acts once a round, in either order. Moving again spends the action (a dash).`), pip(!hd.acted && !hd.carrying, 'Action', `Action · ${ac}`));
     const max = def.maxHp;
     const hurt = hd.hp < max;
     const manaMax = CLASSES[def.cls]?.mana ?? 0;
     return h(
       'button',
-      { type: 'button', class: `dl-rcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${(hd.moved && hd.acted) || para ? 'done' : ''} ${dark ? 'dark' : ''} ${para ? 'paralyzed' : ''}`, 'data-hero': hd.heroId, 'aria-pressed': sel ? 'true' : 'false', onclick: () => this.select(hd.heroId) },
+      { type: 'button', class: `dl-rcard cls-${def.cls} st-${hd.status} ${sel ? 'sel' : ''} ${hd.moved && hd.acted ? 'done' : ''} ${dark ? 'dark' : ''} ${hd.poisoned ? 'poisoned' : ''}`, 'data-hero': hd.heroId, 'aria-pressed': sel ? 'true' : 'false', onclick: () => this.select(hd.heroId) },
       h('span', { class: 'dl-hexwrap', 'data-tip': tipLines.filter(Boolean).join('\n') }, badge, h('kbd', { class: 'dl-hexkey' }, `${i + 1}`)),
       h(
         'span',
         { class: 'dl-rcard-b' },
         h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), h('span', { class: 'dl-stat-icons' }, ...this.statusIcons(hd, def.name, risk, dark ? this.sightOf(hd.heroId) : null)), pips),
-        h('span', { class: 'dl-hprow', 'data-tip': `HP · ${hd.hp} of ${max}\nAt 0 a hero is down and bleeds out unless someone next to them revives them or gives a potion. Wounds stay after the delve.` }, h('span', { class: `dl-hp ${hd.hp / max <= 0.34 ? 'low' : ''}` }, h('i', { style: `width:${Math.max(0, Math.min(1, hd.hp / max)) * 100}%` })), h('span', { class: `num dl-hpn ${hurt ? 'hurt' : ''}` }, `${hd.hp}/${max}`)),
-        paraLine,
+        h('span', { class: 'dl-hprow', 'data-tip': `HP · ${hd.hp} of ${max}\nAt 0 a hero is down and bleeds out in 3 turns: a potion from next to them gets them up, so does a Hedgewitch's Mend within 3; or Carry them out. Wounds stay after the delve.` }, h('span', { class: `dl-hp ${hd.hp / max <= 0.34 ? 'low' : ''}` }, h('i', { style: `width:${Math.max(0, Math.min(1, hd.hp / max)) * 100}%` })), h('span', { class: `num dl-hpn ${hurt ? 'hurt' : ''}` }, `${hd.hp}/${max}`)),
         h('span', { class: 'dl-packrow' }, manaMax > 0 ? manaDias(hd.mana, manaMax) : '', packMini(hd.pack, def.name)),
       ),
     );
@@ -2409,16 +2430,15 @@ export class Hud {
     const d = this.state!.delve!;
     const out: HTMLElement[] = [];
     const add = (cls: string, ic: IconName | null, tip: string, text = '') => out.push(h('span', { class: `dl-si ${cls}`, tabindex: 0, 'data-tip': tip }, ic ? icon(ic, 13) : '', text));
-    if (hd.heroId === d.lanternBearer) {
-      const open = this.lanternOpen();
-      add(`lantern ${open ? '' : 'shut'}`, 'lantern', `Lantern · ${name} carries it${open ? '' : ' (shut)'}\nIts light goes where ${name} goes. L shuts or opens it (free); Pass lantern (in More) hands it to a hero next to you.`);
+    // V4.1 (WS2): the torch or lantern this hero carries lit, with its rounds.
+    for (const it of hd.pack.filter((i) => i.kind === 'lantern' || i.kind === 'torch')) {
+      const r = it.rounds ?? (it.kind === 'lantern' ? 20 : TORCH_ROUNDS);
+      if (it.lit && r > 0) out.push(h('span', { class: `dl-si lantern ${it.kind}`, tabindex: 0, 'data-tip': `${it.kind === 'lantern' ? 'Lantern' : 'Torch'} lit · ${name} carries it: ${r} round${r === 1 ? '' : 's'} left.\nIts light goes where ${name} goes. ${it.kind === 'lantern' ? 'L shuts or opens it (free).' : 'Snuff it (free) to save the rest; Drop torch leaves it burning here.'}` }, icon(it.kind === 'lantern' ? 'lantern' : 'torch', 13), h('b', { class: 'num' }, `${r}`)));
+      else if (it.kind === 'lantern') add('lantern shut', 'lantern', `Lantern · ${name} carries it, shut (${r} rounds). L opens it (free).`);
     }
-    // V4.0 (spec 29.1): envenomed: the countdown on a green drop.
-    if ((hd.venom ?? 0) > 0 && !((hd.paralyzed ?? 0) > 0)) {
-      out.push(h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': `Venom ${hd.venom}`, 'data-tip': `Venom: paralyzed in ${turnsWord(hd.venom!)}. Antidote, Mend, or get out.\nAt 0 ${name} can't move or act for ${PARALYSIS_ROUNDS} turns. Another dose takes a turn off.` }, icon('venom', 13), h('b', { class: 'num' }, `${hd.venom}`)));
-    }
-    if ((hd.paralyzed ?? 0) > 0) add('venom para', 'venom', `Paralyzed · wears off in ${turnsWord(hd.paralyzed!)}. An antidote or Mend from a friend ends it now.`);
-    if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most. Leave by an exit and ${this.nameOf(hd.carrying)} comes out too. Set down (free) puts them down.`);
+    // V4.1 (spec 31.4): poisoned: a green drop.
+    if (hd.poisoned) out.push(h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': 'Poisoned', 'data-tip': `${POISON_TIP}\n${name} has ${hd.hp} HP; the poison never takes the last one.` }, icon('venom', 13)));
+    if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
     if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
@@ -2426,7 +2446,8 @@ export class Hud {
     if (threats.length) add('bad threat', 'sword', `Targeted · ${threats.map(([id, it]) => `${cap(this.theName(id))} ${intentText(this.state!, it, id)}`).join('; ')} next turn.`);
     if (this.backExposed(hd.heroId)) add('bad back-exposed', 'eyeOff', `Back exposed · ${FACING_HELP.backExposed}`);
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
-    if (darkSight !== null) add(`dark ${hd.nightEyes ? 'night' : ''}`, 'moon', hd.nightEyes && hd.nightEyes > 0 ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+    const nightEye = (hd.nightEyes ?? 0) > 0 || hd.ale === 'nighteye'; // V4.1 (WS2): Night-eye Stout
+    if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
     else if ((hd.rooted ?? 0) > 0) add('bad rooted', 'chain', `Rooted · can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
@@ -2440,16 +2461,14 @@ export class Hud {
     const more: string[] = [];
     if (this.heroDef(hd.heroId)?.shield) more.push('Shield: ranged hits do 1 less (2 while braced).');
     if (hd.overwatch) more.push(`Overwatch: shoots the first enemy that moves or acts within ${OVERWATCH_RANGE}.`);
-    if (hd.torch > 0) more.push(`Torch lit: ${hd.torch} more round${hd.torch === 1 ? '' : 's'} of light around ${name}.`);
     if (hd.nightEyes && hd.nightEyes > 0) more.push(`Night-eye: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties.`);
     if (hd.guarding) more.push(`Guarding ${this.nameOf(hd.guarding)}.`);
-    if (hd.escorting) more.push(`Escorting ${this.nameOf(hd.escorting)}: moves 3 at most.`);
+    if (hd.escorting) more.push(`${this.nameOf(hd.escorting)} follows ${name}. Leave with them next to you to get them out.`);
     if (hd.rallyCooldown > 0) more.push(`Rally ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
     if (hd.ale) {
       const a = ALE_EFFECT[hd.ale];
       more.push(`${a.name}: ${a.text}${hd.ale === 'featherfoot' && hd.aleSpent ? ' (used)' : ''}`);
     }
-    if (hd.revived) more.push('Revived this delve: comes home wounded.');
     if (more.length) add('more', 'dot', `Also · ${more.join('\n')}`);
     return out;
   }
@@ -2549,7 +2568,7 @@ export class Hud {
       acts.append(btn);
     }
     // The pack takes the item actions; More takes the rare ones.
-    const bearer = sel.heroId === d.lanternBearer;
+    const bearer = sel.pack.some((i) => i.kind === 'lantern'); // V4.1 (WS2): L opens or shutters this hero's lantern
     if (bearer) usedKeys.add('l');
     const dealsNow = this.dealsFor(sel.heroId).length > 0;
     if (dealsNow) usedKeys.add('b');
@@ -2626,7 +2645,8 @@ export class Hud {
       if (isKit(it)) continue;
       const span = Math.max(1, Math.min(it.slots, PACK_SLOTS - used));
       used += it.slots;
-      const o = this.options.find((x) => (ITEM_ACTIONS.has(x.action) || x.action === 'unbar') && x.targets.some((t) => t.itemId === it.id));
+      // V4.1 (WS2): a lit torch's slot snuffs it; a lantern's opens or shutters it.
+      const o = this.options.find((x) => (ITEM_ACTIONS.has(x.action) || x.action === 'unbar' || x.action === 'torch' || x.action === 'snuff' || x.action === 'shutter') && x.targets.some((t) => t.itemId === it.id));
       const item = o ? { ...o, targets: o.targets.filter((t) => t.itemId === it.id) } : null;
       const key = o ? keyFor(o.action, ACTION_KEY[o.action]) : undefined;
       const val = it.kind === 'gold' || it.kind === 'gem' || it.kind === 'jewelry' || it.kind === 'hoard';
@@ -2669,9 +2689,9 @@ export class Hud {
       const key = keyFor(kind, ACTION_KEY[kind]);
       out.push({ label: o.label, key, tip: `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}\n${actionHelp(o.action, def.cls)}`, icon: ACTION_ICON[kind]!, action: kind, run: () => this.startAction(o), blocked: o.blocked });
     }
-    if (bearer) {
+    if (bearer && opts.some((x) => x.action === 'shutter')) {
       const open = this.lanternOpen();
-      out.push({ label: open ? 'Shut the lantern' : 'Open the lantern', key: 'l', tip: `${open ? 'Shut the lantern' : 'Open the lantern'} · free · key L\nShut: no light and no burn. Open: light, and 1 oil a round.`, icon: 'lantern', action: 'shutter', run: () => this.toggleShutter() });
+      out.push({ label: open ? 'Shut the lantern' : 'Open the lantern', key: 'l', tip: `${open ? 'Shut the lantern' : 'Open the lantern'} · free · key L\nShut: no light and no burn. Open: light, and 1 round of oil a round.`, icon: 'lantern', action: 'shutter', run: () => this.toggleShutter() });
     }
     if (dealsNow) out.push({ label: 'Parley', key: 'b', tip: 'Parley · free · key B\nTalk to the crew: pay, hire, give a job, or fight.', icon: 'scales', action: 'parley', run: () => this.openParley() });
     if (FACING.faceCommand && sel.status === 'active') out.push({ label: this.facing ? 'Stop facing' : 'Face', key: 'f', tip: `Face · free · key F\n${FACING_HELP.face}`, icon: 'face', action: 'face', run: () => this.setFacing(!this.facing) });
@@ -2999,7 +3019,8 @@ export class Hud {
   private applyDark(): void {
     const sel = this.selected();
     const unlit = !!sel && sel.status === 'active' && !this.isLit(sel.heroId);
-    const b: Brightness = unlit ? (sel!.at.level === 3 ? 'pitch' : 'dark') : this.lanternOpen() ? this.baseDark : 'dark';
+    // V4.1 (WS2): the light the selected hero stands in (engine.brightness: bright, dim castle light, dark).
+    const b: Brightness = unlit ? (sel!.at.level === 3 ? 'pitch' : 'dark') : this.baseDark;
     this.vignette.dataset.b = b;
   }
 
@@ -3349,8 +3370,12 @@ const GOAL_TEXT: Record<string, string> = { loot: 'looting', objective: 'after y
 const SHORT_LABEL: Partial<Record<ActionKind, string>> = {
   smashProp: 'Smash',
   setCharge: 'Set charge',
+  setTripwire: 'Tripwire', // V4.1 (spec 31.3)
   throwCharge: 'Throw charge',
   passLantern: 'Pass lantern',
+  torch: 'Light', // V4.1 (WS2)
+  snuff: 'Snuff',
+  dropTorch: 'Drop torch',
   nightthorn: 'Thorn',
   overwatch: 'Overwatch',
   knockback: 'Knockback',
@@ -3374,7 +3399,7 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
   switch (it.kind) {
     case 'attack':
       // V4.0 (spec 29.3): a spider's bite carries venom.
-      if (who && d?.monsters.find((m) => m.id === who)?.kind === 'spider') return `bites ${name(it.targetId)}${dmg} (venom)`;
+      if (who && d?.monsters.find((m) => m.id === who)?.kind === 'spider') return `bites ${name(it.targetId)}${dmg} (poison)`;
       return `strikes ${name(it.targetId)}${dmg}`;
     case 'move':
       return it.sneak ? 'sneaks' : 'moves';
@@ -3405,7 +3430,9 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
     case 'dart':
       return `throws a sleep dart at ${name(it.targetId)}`;
     case 'venomdart':
-      return `throws a venom dart at ${name(it.targetId)} (a hit: paralyzed in ${VENOM_ROUNDS} turns)`;
+      return `throws a poison dart at ${name(it.targetId)} (a hit poisons: −1 a turn, never below 1)`;
+    case 'carry':
+      return `lifts ${name(it.targetId)} to carry them out`;
     case 'toll':
       return `demands a toll: pay ${d?.rivals?.toll ?? 50} or they attack next turn`;
     case 'firebolt':
@@ -3415,15 +3442,15 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
     case 'fuse':
       return 'sets a charge with a 1-turn fuse on the marked hex: 4 within 1, 2 within 2, breaks walls';
     case 'rob':
-      return `robs ${name(it.targetId)} and drags them toward the way out`;
+      return `robs ${name(it.targetId)} and carries them toward the way out`;
     case 'potion':
-      return 'backs off a hex and drinks a potion';
+      return it.targetId && it.targetId !== who ? `gives ${name(it.targetId)} a potion: back up` : 'backs off a hex and drinks a potion';
     case 'item':
       return `uses ${it.item ? `a ${it.item}` : 'an item'}${it.targetId ? ` on ${name(it.targetId)}` : ''}`;
     case 'fireball':
       return 'hurls a fireball at the marked hexes (3 Wits slots, 2 per hit)';
     case 'mend':
-      return `mends ${name(it.targetId)} (heals 4)`;
+      return d?.rivals?.members.find((r) => r.id === it.targetId)?.downed || d?.heroes.find((h) => h.heroId === it.targetId)?.status === 'downed' ? `mends ${name(it.targetId)} back up (2 HP)` : `mends ${name(it.targetId)} (heals 4)`;
     case 'gust':
       return 'gusts everything round the marked hex outward (pits!)';
     case 'ward':
@@ -3445,12 +3472,9 @@ export function intentText(s: GameState, it: Intent, who?: string): string {
   }
 }
 
-/** V4.0 (spec 29): an enemy's venom in words ("Envenomed: paralyzed in 2 turns." / "Paralyzed: can't move or act for 5 more turns."). */
-function venomLine(f: { venom?: number; paralyzed?: number }): string {
-  const p = f.paralyzed ?? 0;
-  if (p > 0) return `Paralyzed: can't move or act for ${p} more turn${p === 1 ? '' : 's'}.`;
-  const v = f.venom ?? 0;
-  return v > 0 ? `Envenomed: paralyzed in ${v} turn${v === 1 ? '' : 's'}.` : '';
+/** V4.1 (spec 31.4): an enemy's poison in words. */
+function venomLine(f: { poisoned?: boolean }): string {
+  return f.poisoned ? 'Poisoned: −1 a turn, never below 1.' : '';
 }
 
 /** Compass word from one hex to another, in world space (north = away from the default camera). */

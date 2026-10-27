@@ -1,17 +1,20 @@
 // Camp: new campaign, board, recruits, shop, smithy, infirmary, starting a
 // delve, and applying the summary afterwards.
 
+import { freeLantern, restLight } from './light'; // V4.1 (WS2)
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type {
-  AleOffer, Campaign, Command, Contract, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Item, Recruit, ShopOffer, SpawnDef, Village,
+  AleOffer, Campaign, Command, Contract, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Item, Recruit, ShopOffer, SpawnDef, StoryId, Village,
 } from './types';
 import {
-  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
+  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP,
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP,
   START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
   ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
   HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
 } from './data';
+// V4.1 (WS1/WS5, spec 31.2, 31.3)
+import { CAPTIVE_PAY, GIFTS, PAIR_PRICES, POTION_HEAL, STORY_PAY, SUPPER_HEAL, pairHome } from './data';
 import { placeHoard } from './dragon';
 import { HOARD_PIECES, SHIELD_PRICE } from './data';
 import { pick, random, shuffle } from './rng';
@@ -110,7 +113,7 @@ export function newGame(w: World, seed: number): GameStateX {
 }
 
 export function newVillage(): Village {
-  return { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false };
+  return { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
 }
 
 /** The village as saved (older saves have none). */
@@ -232,7 +235,8 @@ export function captiveBoard(w: World, s: GameStateX): Contract[] {
       brief: `${cp.hero.name} was dragged off by ${crew.name}. They are held at ${crew.name.replace(/^The /, 'the ')}' hideout in ${site.where}, alive for now.`,
       siteId: site.id,
       level: lvl,
-      bounty: BOUNTY.rescue[lvl] ?? 0,
+      // V4.1 (spec 31.2, pillar 18): bringing one of your own back wins them back, not gold.
+      bounty: CAPTIVE_PAY,
       warnings: [crew.name, `Level ${lvl}`, 'Held at HP 1'],
       subject: cp.hero.name,
       captiveId: cp.hero.id,
@@ -253,12 +257,17 @@ export function storyAvailable(s: GameState, st: StoryDef): boolean {
     case 'smith': return rep >= (REP_FOR_LEVEL[2] ?? 1);
     case 'copper': return v.innkeeper;
     case 'caskbook': return v.copper && rep >= (REP_FOR_LEVEL[3] ?? 2);
+    // V4.1 (spec 31.3): Aldric asks you to fetch Ilse once he's home and Level 2 is open.
+    case 'alchemist': return v.surgeon && rep >= (REP_FOR_LEVEL[2] ?? 1);
   }
 }
 
-/** Half the regular bounty for the kind and level, rounded down to 5. */
-export function storyBounty(kind: 'rescue' | 'recover', level: number): number {
-  return Math.floor((BOUNTY[kind][Math.min(3, level)] ?? 0) / 2 / 5) * 5;
+/**
+ * What a story contract pays. V4.1 (spec 31.2, pillar 18): nothing (`STORY_PAY`); the villager's gift instead (GIFTS).
+ * Was half the regular bounty for the kind and level, rounded down to 5.
+ */
+export function storyBounty(_kind: 'rescue' | 'recover', _level: number): number {
+  return STORY_PAY;
 }
 
 function storyBoard(w: World, s: GameStateX): Contract[] {
@@ -308,7 +317,7 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       if (C.gold < o.price) return err('Not enough gold.');
       C.gold -= o.price;
       C.stash.push(makeItem({ s }, o.kind, 1, o.name));
-      events.push({ type: 'say', text: `Bought a ${o.name.toLowerCase()}.` });
+      events.push({ type: 'say', text: `Bought a ${o.name.toLowerCase()}${o.price !== SHOP.find((x) => x.kind === o.kind)?.price ? ` (${o.price} gold)` : ''}.` });
       return { events };
     }
     case 'sellAll': {
@@ -357,11 +366,12 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       const h = C.roster.find((x) => x.id === cmd.heroId);
       if (!h) return err('No such hero.');
       if (h.hp >= h.maxHp) return err(`${h.name} is unhurt.`);
-      const pot = C.stash.find((i) => i.kind === 'potion');
+      // V4.1 (spec 31.3): a greater potion does too, when there's no plain one (heals 8).
+      const pot = C.stash.find((i) => i.kind === 'potion') ?? C.stash.find((i) => i.kind === 'greaterpotion');
       if (!pot) return err('No potion in the cart. The peddler sells them.');
       C.stash = C.stash.filter((i) => i !== pot);
       const before = h.hp;
-      h.hp = Math.min(h.maxHp, h.hp + DRINK_HEAL);
+      h.hp = Math.min(h.maxHp, h.hp + (pot.kind === 'greaterpotion' ? POTION_HEAL.greaterpotion : DRINK_HEAL));
       events.push({ type: 'say', text: `${h.name} drinks a potion (+${h.hp - before} HP).` });
       return { events };
     }
@@ -384,10 +394,13 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       if (!h) return err('No such hero.');
       if (!villageOf(s).smith) return err(LOCKED.smith);
       if (h.shield) return err(`${h.name} already carries a shield.`);
-      if (C.gold < SHIELD_PRICE) return err('Not enough gold.');
-      C.gold -= SHIELD_PRICE;
+      // V4.1 (spec 31.2): Gerda's gift: the next shield (or shields) costs nothing.
+      const free = (C.credits?.shield ?? 0) > 0;
+      if (!free && C.gold < SHIELD_PRICE) return err('Not enough gold.');
+      if (free) C.credits!.shield! -= 1;
+      else C.gold -= SHIELD_PRICE;
       h.shield = true;
-      events.push({ type: 'say', text: `Gerda straps a shield to ${h.name}'s arm (${SHIELD_PRICE} gold).` });
+      events.push({ type: 'say', text: free ? `Gerda straps a shield to ${h.name}'s arm. "On the house."` : `Gerda straps a shield to ${h.name}'s arm (${SHIELD_PRICE} gold).` });
       return { events };
     }
     case 'upgrade': {
@@ -420,17 +433,49 @@ export const LOCKED = {
   caskbook: 'Wim needs his cask book: recover it (Level 3, the Drain).',
   innkeeper: 'The Flagon is dark. Rescue Old Wim (Level 1, the kitchens).',
   brewed: 'Brewed at the Gilded Flagon: rescue Old Wim (Level 1, the kitchens).',
+  // V4.1 (spec 31.3)
+  alchemist: "Ilse's work: rescue Ilse the alchemist (Level 2, the archive).",
+  alchemistAle: 'Wim needs Ilse for this brew: rescue Ilse the alchemist (Level 2, the archive).',
 } as const;
 
+/** V4.1 (spec 31.3): who each villager is, for "needs" refusals. */
+const NEEDS_WHO: Record<StoryId, string> = {
+  surgeon: 'Brother Aldric (Level 1, the chapel)', innkeeper: 'Old Wim (Level 1, the kitchens)', smith: 'Gerda the smith (Level 2, the forge)',
+  copper: 'the brewing copper (Level 2, the barracks)', caskbook: "Wim's cask book (Level 3, the Drain)", alchemist: 'Ilse the alchemist (Level 2, the archive)',
+};
+
+/** Why a ware that needs `needs` can't be bought with this village, or undefined. */
+function needsLocked(v: Village, needs: ShopOffer['needs']): string | undefined {
+  if (!needs) return undefined;
+  const list = Array.isArray(needs) ? needs : [needs];
+  const away = list.filter((id) => !v[id]);
+  if (!away.length) return undefined;
+  if (list.length === 1 && needs === 'smith') return LOCKED.metal;
+  if (list.length === 1 && needs === 'alchemist') return LOCKED.alchemist;
+  if (list.length === 1 && needs === 'innkeeper') return LOCKED.brewed;
+  const names = list.map((id) => NEEDS_WHO[id].replace(/ \(.*$/, ''));
+  return `Needs ${names.join(' and ')} together. Still away: ${away.map((id) => NEEDS_WHO[id]).join(', ')}.`;
+}
+
 /**
- * The peddler's stock; metalwork `locked` until the smith is home, the night-eye draught until
- * Old Wim is (spec 21.3: brewed at the Flagon). With no state, nothing is locked.
+ * The peddler's stock; metalwork `locked` until the smith is home. V4.1 (spec 31.3): Ilse's wares until she is,
+ * the greater potion until Aldric and Ilse both are; a pair home makes a ware cheaper (`PAIR_PRICES`: Gerda's
+ * charge 30, Aldric's antidote 12) and says who sells it (`vendor`). With no state, nothing is locked.
  */
 export function shopOffers(s?: GameState): ShopOffer[] {
   const v = s ? villageOf(s) : null;
   return SHOP.map((o) => {
-    const locked = !v ? undefined : o.needs === 'smith' && !v.smith ? LOCKED.metal : o.needs === 'innkeeper' && !v.innkeeper ? LOCKED.brewed : undefined;
-    return { ...o, ...(locked ? { locked } : {}) };
+    const locked = !v ? undefined : needsLocked(v, o.needs);
+    const list = Array.isArray(o.needs) ? o.needs : o.needs ? [o.needs] : [];
+    let vendor: ShopOffer['vendor'] = list.includes('alchemist') ? 'ilse' : list.includes('smith') ? 'gerda' : 'mott';
+    let price = o.price;
+    for (const pp of PAIR_PRICES) {
+      if (pp.kind === o.kind && v && pairHome(v, pp.needs[0], pp.needs[1]) && pp.price < price) {
+        price = pp.price;
+        vendor = pp.vendor;
+      }
+    }
+    return { ...o, price, vendor, ...(locked ? { locked } : {}) };
   });
 }
 
@@ -440,6 +485,8 @@ export function aleOffers(s: GameState): AleOffer[] {
   return ALES.map((o) => {
     let locked: string | undefined;
     if (!v.innkeeper) locked = LOCKED.innkeeper;
+    // V4.1 (spec 31.3): Wim and Ilse's brews need the two of them, not the copper.
+    else if (o.needs === 'alchemist') locked = v.alchemist ? undefined : LOCKED.alchemistAle;
     else if (!v.copper) locked = LOCKED.copper;
     else if (o.needs === 'caskbook' && !v.caskbook) locked = LOCKED.caskbook;
     return { ...o, ...(locked ? { locked } : {}) };
@@ -509,6 +556,8 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   }
   for (const k of Object.keys(cmd.packs)) if (!ids.includes(k) && (cmd.packs[k]?.length ?? 0) > 0) return err('Packs only for heroes going in.');
   C.stash = C.stash.filter((i) => !used.has(i.id));
+  // V4.1 (spec 31.2, B1): the campaign's first delve: spawns marked `firstDelveAsleep` (the chapel's guard) doze.
+  const firstDelve = C.delveCount === 0;
   C.delveCount += 1;
 
   // Build the delve.
@@ -518,7 +567,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
       if (t.kind === 'door') doors[`${l.level}:${k}`] = { open: false, locked: !!t.locked, jammed: false };
     }
   }
-  const monsters: MonsterX[] = w.castle.spawns.map((sp, i) => spawnMonster(sp, `m${i + 1}`));
+  const monsters: MonsterX[] = w.castle.spawns.map((sp, i) => spawnMonster(firstDelve && sp.firstDelveAsleep ? { ...sp, asleep: true, patrol: undefined } : sp, `m${i + 1}`));
   const d: DelveX = {
     contract,
     round: 1,
@@ -526,8 +575,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     heroes: [],
     monsters,
     rivals: null,
-    light: LIGHT_MAX,
-    lanternBearer: ids.includes('keven') ? 'keven' : ids[0]!,
+    // V4.1 (WS2, spec 31.5): no free lantern (no `light`, `lanternBearer`, `lanternOpen`): light is what the party packs.
     doors,
     chests: w.castle.chests.map((c) => ({ id: c.id, at: { ...c.at }, tier: c.tier, locked: !!c.locked, jammed: false, opened: false })),
     ground: [],
@@ -536,7 +584,6 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     blown: [],
     ropes: [],
     liftWorking: false,
-    lanternOpen: true,
     knownRoutes: [],
     gloamCalm: 0,
     smoke: {},
@@ -563,7 +610,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     if (way.kind === 'gate' && way.keyAt && !wayOpen(s, way.id)) d.ground.push({ at: { ...way.keyAt }, items: [makeItem({ s }, 'gatekey')] });
   }
   for (const lg of C.lostGear) {
-    d.ground.push({ at: { ...lg.at }, items: lg.items.map((i) => ({ ...i })) });
+    d.ground.push({ at: { ...lg.at }, items: lg.items.map((i) => ({ ...i, ...(i.lit ? { lit: false } : {}) })) }); // V4.1: lost torches lie out
     d.lostIds!.push(...lg.items.map((i) => i.id));
   }
   // Objective.
@@ -625,6 +672,9 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     else if (kit) hid.pack.push(kit);
     // V3.9 (spec 24.2): everyone starts facing into the castle.
     hid.facing = facingInto(w, d, hid.at);
+    // V4.1 (WS2): FREE_LANTERN (off) hands the first hero the old free lantern; packed torches and lanterns go in unlit.
+    for (const it of hid.pack) if (it.kind === 'torch' || it.kind === 'lantern') it.lit = false;
+    if (id === (ids.includes('keven') ? 'keven' : ids[0])) freeLantern(s, hid);
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -759,7 +809,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
       if (it.story || isGateKey(it)) continue; // spec 18.3: to the village, below; V4.0: the sally key opens its gate (ways.ts)
       if (isKit(it)) continue; // spec 20.3, 21.4, 26.5: class kit (improvised explosives, the improvised pick) refills each delve
       if (it.kind === 'gold') C.gold += it.amount;
-      else C.stash.push(it);
+      else if (restLight(it)) C.stash.push(it); // V4.1 (WS2): a lantern is refilled free, a torch put out (keeps its rounds); a loaner is gone
     }
   }
   C.gold += sum.bounty;
@@ -789,7 +839,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i) && !isGateKey(i));
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i) && !isGateKey(i) && !i.loaner);
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;
@@ -800,11 +850,19 @@ export function backToCamp(w: World, s: GameStateX): Res {
   for (const text of mergeDelve(w, s, d)) events.push({ type: 'say', text });
   const story = d.contract.story;
   C.village ??= newVillage();
+  let gift: StoryId | null = null;
   if (story && sum.contractDone && !C.village[story]) {
     C.village[story] = true;
     const st = STORIES.find((x) => x.id === story)!;
     events.push({ type: 'villageUnlocked', story });
     events.push({ type: 'say', text: st.line });
+    gift = story; // V4.1 (spec 31.2): given below, once the roster is settled
+  }
+  // V4.1 (spec 31.3): Aldric and Wim's hot supper: every hero who got out heals a little (with them both home now).
+  if (pairHome(C.village, 'surgeon', 'innkeeper')) {
+    const fed = C.roster.filter((h) => out.some((x) => x.heroId === h.id) && h.hp < h.maxHp);
+    for (const h of fed) h.hp = Math.min(h.maxHp, h.hp + SUPPER_HEAL);
+    if (fed.length) events.push({ type: 'say', text: `A hot supper at the Flagon, Brother Aldric's broth and Wim's bread: ${fed.map((h) => h.name).join(', ')} ${fed.length === 1 ? 'heals' : 'heal'} ${SUPPER_HEAL}.` });
   }
   // V3.7 (spec 20.4): a captive brought back rejoins the roster with the HP they came out with; one who
   // died in the crew's hands is mourned. (The contract comes off the board with the captive.)
@@ -844,6 +902,8 @@ export function backToCamp(w: World, s: GameStateX): Res {
     if (h.id === 'keven') heirTaken = true;
     events.push({ type: 'say', text: `${h.name} was carried off by ${cr.name}. A "Bring back" job goes up on the post.` });
   }
+  // V4.1 (spec 31.2): the villager's gift, the first time they come home (instead of gold).
+  if (gift) giveGift(s, gift, events);
   const heirDead = sum.dead.includes('keven');
   s.delve = null;
   s.summary = null;
@@ -860,4 +920,22 @@ export function backToCamp(w: World, s: GameStateX): Res {
   refreshCamp(w, s);
   s.stage = 'camp';
   return { events };
+}
+
+/**
+ * V4.1 (spec 31.2, pillar 18): a villager's gift the first time they come home: items to Keven's cart (Aldric 2 potions,
+ * Ilse 2 antidotes), a free Hobart's Reserve for every hero on the roster without an ale waiting (Wim's last cask), or a
+ * free shield at the forge (Gerda: `campaign.credits.shield`). The copper and the cask book give nothing.
+ */
+export function giveGift(s: GameStateX, story: StoryId, events: GameEvent[]): void {
+  const g = GIFTS[story];
+  if (!g) return;
+  const C = s.campaign;
+  for (const [kind, n] of g.items ?? []) for (let i = 0; i < n; i++) C.stash.push(makeItem({ s }, kind));
+  if (g.ale) for (const h of C.roster) h.ale ??= g.ale;
+  if (g.shields) {
+    C.credits ??= {};
+    C.credits.shield = (C.credits.shield ?? 0) + g.shields;
+  }
+  events.push({ type: 'say', text: g.line });
 }

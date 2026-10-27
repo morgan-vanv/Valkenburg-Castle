@@ -48,7 +48,7 @@ export function longPaths(castle: CastleDef, s: GameState, vis: Visibility, hero
   if (!d || !h) return out;
   const blocked = new Set<string>();
   for (const m of d.monsters) if (m.hp > 0 && !m.buried) blocked.add(posKey(m.at));
-  for (const r of d.rivals?.members ?? []) if (r.hp > 0 && !r.goneOut && d.round >= d.rivals!.entersRound) blocked.add(posKey(r.at));
+  for (const r of d.rivals?.members ?? []) if ((r.hp > 0 || r.downed) && !r.goneOut && d.round >= d.rivals!.entersRound) blocked.add(posKey(r.at));
   if (d.prisoner && !d.prisoner.out && !d.prisoner.dead && !d.prisoner.freed) blocked.add(posKey(d.prisoner.at));
   const cost = (p: Pos) => (castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)]?.kind === 'rubble' || (d.blown.includes(posKey(p)) && castle.levels.find((l) => l.level === p.level)?.tiles[hexKey(p)]?.kind === 'wall') ? 2 : 1);
   const start = posKey(h.at);

@@ -12,11 +12,11 @@ import {
 import { chance, pick } from './rng';
 import { say, type Ctx, type MonsterX } from './state';
 import {
-  activeHeroes, goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, isKit, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
+  goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, isKit, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
   onMap, releaseHold, rivalsOnMap, roll,
 } from './common';
-import { canEnter, dijkstra, isFloorish, kindAt, lanternPos, litSet, los, pathTo, visibleSet, within } from './world';
-import { awayFrom, checkDelveEnd, pusherFor, refreshSight, setLight, unlitOnL3, visNow } from './delve';
+import { canEnter, dijkstra, isFloorish, kindAt, litSet, los, pathTo, visibleSet, within } from './world';
+import { awayFrom, checkDelveEnd, pusherFor, refreshSight, unlitOnL3, visNow } from './delve';
 import { push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
 import {
@@ -27,7 +27,10 @@ import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
 import { faceToward, fleePlan, lookRound, moodOf, noticeFigure, perceivable, sightedHeroes, type Sighted } from './stealth';
-import { checkCarries, isParalyzed, venomTick } from './venom';
+import { checkCarries, poisonTick } from './poison';
+import { carrierOf, downedCrew, killMember } from './common'; // V4.1 (spec 31.4)
+import { burnLights } from './light'; // V4.1 (WS2)
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- planning
 
@@ -43,7 +46,7 @@ const SHOWN_FIRST: Intent['kind'][] = ['shout', 'grab', 'drag', 'shove', 'hamstr
 
 /** What a cutpurse can lift: never the heirloom, the sally key (V4.0) or class kit (spec 26.5). */
 function stealable(i: Item): boolean {
-  return i.kind !== 'heirloom' && i.kind !== 'gatekey' && !isKit(i);
+  return i.kind !== 'heirloom' && i.kind !== 'gatekey' && !isKit(i) && !i.loaner; // V4.1: not the old free lantern
 }
 
 function canSteal(t: Target): boolean {
@@ -178,7 +181,6 @@ export function planMonster(c: Ctx, m: MonsterX, lit: Set<string>, opts: { noAbi
   if (m.kind === 'gloam') return planGloam(c, m, lit);
   if (m.kind === 'dragon') return planDragon(c, m);
   if (m.awareness === 'asleep' || m.buried) return WAIT;
-  if (isParalyzed(m)) return WAIT; // V4.0 (spec 29.2)
   const st = monsterStats(m);
   const move = (m.stuck ?? 0) > 0 ? 0 : st.move;
   const noAbility = !!opts.noAbility;
@@ -313,7 +315,7 @@ function planGloam(c: Ctx, g: MonsterX, lit: Set<string>): Plan {
 export function computeIntents(c: Ctx): void {
   const lit = litSet(c.w, c.d);
   for (const m of c.d.monsters) {
-    if (m.awareness === 'asleep' || m.buried || isParalyzed(m)) {
+    if (m.awareness === 'asleep' || m.buried) {
       m.intent = undefined;
       continue;
     }
@@ -374,8 +376,7 @@ export function lookAll(c: Ctx, first?: string, before?: () => void, anyPhase = 
   const lit = litSet(c.w, c.d);
   const found: { m: MonsterX; ids: string[]; turnedTo?: string }[] = [];
   for (const m of onMap(c)) {
-    // V4.0 (spec 29.2): a paralyzed monster can't turn its head.
-    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep' || isParalyzed(m)) continue;
+    if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') continue;
     const hs = heroes.filter((x) => x.at.level === m.at.level);
     if (!hs.length) continue;
     const r = lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first);
@@ -495,11 +496,6 @@ function honored(c: Ctx, m: MonsterX, move: number): Plan | null {
 }
 
 function monsterAct(c: Ctx, m: MonsterX): void {
-  // V4.0 (spec 29.2): paralyzed: it neither moves nor acts.
-  if (isParalyzed(m)) {
-    m.intent = undefined;
-    return;
-  }
   const lit = litSet(c.w, c.d);
   const wasPatrol = m.awareness === 'patrol';
   perceive(c, m, lit);
@@ -678,16 +674,16 @@ function monsterAct(c: Ctx, m: MonsterX): void {
 // ---------------------------------------------------------------- the Gloam
 
 /**
- * Spec 5 and 16.2. The Gloam is present when the lantern is out (any level) or when an active
- * hero stands in the dark on Level 3. It rises near its quarry, out of sight if it can, and acts
+ * Spec 5 and 16.2; V4.1 (WS2): the Gloam is present only when an active hero stands in the dark on Level 3 (the
+ * "lantern out anywhere" trigger is gone with the free lantern). It hunts unlit heroes only: never a crew member
+ * (crews carry light), never a lit hero. It rises near its quarry, out of sight if it can, and acts
  * at once. It fades after GLOAM_CALM_FADE world phases with nobody in the dark.
  */
 function gloamPhase(c: Ctx): void {
   const lit = litSet(c.w, c.d);
   let g = c.d.monsters.find((m) => m.kind === 'gloam');
   const unlit3 = unlitOnL3(c, lit);
-  const pitch = c.d.light <= 0 && activeHeroes(c).length > 0;
-  if (!pitch && !unlit3.length) {
+  if (!unlit3.length) {
     if (g) {
       c.d.gloamCalm = (c.d.gloamCalm ?? 0) + 1;
       if (c.d.gloamCalm >= GLOAM_CALM_FADE) {
@@ -701,9 +697,8 @@ function gloamPhase(c: Ctx): void {
   }
   c.d.gloamCalm = 0;
   if (!g) {
-    const hollow = unlit3.length > 0;
-    const anchor = hollow ? unlit3[0]!.at : (lanternPos(c.d) ?? activeHeroes(c)[0]!.at);
-    const [lo, hi] = hollow ? [GLOAM_RISE_MIN, GLOAM_RISE_MAX] : [8, 10];
+    const anchor = unlit3[0]!.at;
+    const [lo, hi] = [GLOAM_RISE_MIN, GLOAM_RISE_MAX];
     const vis = visibleSet(c.w, c.d, lit);
     const dark = (p: Pos) => kindAt(c.w, c.d, p) === 'floor' && !occupant(c, p) && !lit.has(posKey(p));
     const ring = range(anchor, hi).map((h) => ({ level: anchor.level, ...h })).filter((p) => distance(p, anchor) >= lo && dark(p));
@@ -726,7 +721,7 @@ function gloamPhase(c: Ctx): void {
     c.d.monsters.push(g);
     c.ev.push({ type: 'gloam', at });
     c.ev.push({ type: 'spawned', id: g.id, at });
-    say(c, hollow ? 'The dark here is awake.' : 'Something moves in the dark.');
+    say(c, 'The dark here is awake.');
   }
   monsterAct(c, g);
 }
@@ -750,13 +745,16 @@ function burnPhase(c: Ctx): void {
   const keys = new Set(burning);
   const ids: string[] = [];
   for (const m of onMap(c)) if (m.kind !== 'gloam' && keys.has(posKey(m.at))) ids.push(m.id);
-  for (const r of rivalsOnMap(c)) if (keys.has(posKey(r.at))) ids.push(r.id);
+  for (const r of [...rivalsOnMap(c), ...downedCrew(c)]) if (keys.has(posKey(r.at))) ids.push(r.id); // V4.1 (spec 31.4): the downed too
   for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at))) ids.push(h.heroId);
   const pr = c.d.prisoner;
   if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) ids.push(pr.id);
   for (const id of ids) {
+    // V4.1 (spec 31.3): Dragonfire Porter's drinker takes 2 less (to 0: no hit).
+    const dmg = fireWard(c, id, BURN_DMG);
+    if (!dmg) continue;
     say(c, `${nameOf(c, id)} burns.`);
-    hurtAny(c, id, BURN_DMG, null, { noise: false });
+    hurtAny(c, id, dmg, null, { noise: false });
   }
 }
 
@@ -772,23 +770,29 @@ export function worldPhase(c: Ctx): void {
   c.visCache = undefined;
   c.ev.push({ type: 'phase', phase: 'world', round: d.round });
   const webbedBefore = new Set(d.heroes.filter((h) => h.webbed).map((h) => h.heroId));
-  // 1. Light (an open lantern burns), torches, bleeding, fire.
-  if (d.lanternOpen !== false) setLight(c, d.light - 1);
+  // 1. Light (V4.1, WS2: every lit torch and open lantern burns 1, carried or dropped), bleeding, fire.
+  burnLights(c);
   burnPhase(c);
   // Spec 18.4: the Black Cask's hiccups: noise 1 at the drinker every world phase.
   for (const h of d.heroes) if (h.ale === 'hiccups' && h.status === 'active') makeNoise(c, h.at, HICCUP_NOISE);
-  for (const h of d.heroes) if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) h.torch -= 1;
   // V3.7 (spec 20.5): roots (hamstring, briar) wear off at the start of the phase: a hero rooted by an archer sits out two of their turns.
   for (const h of d.heroes) if ((h.rooted ?? 0) > 0) h.rooted! -= 1;
   for (const h of d.heroes) {
     if (h.status !== 'downed') continue;
     // V3.7 (spec 20.4): a crew member dragging them keeps them breathing (they're worth more alive).
-    if (d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut)) continue;
+    // V4.1 (spec 31.4): so does anyone carrying them (a friend's Carry).
+    if (carrierOf(c, h.heroId)) continue;
     h.bleed -= 1;
     if (h.bleed <= 0) killHero(c, h);
   }
-  // V4.0 (spec 29.1, 29.2): venom counts down; paralysis wears off.
-  venomTick(c);
+  // V4.1 (spec 31.4, pillar 17): downed crew members bleed out the same way (not while a crewmate carries them).
+  for (const r of downedCrew(c)) {
+    if (carrierOf(c, r.id)) continue;
+    r.bleed = (r.bleed ?? 1) - 1;
+    if (r.bleed <= 0) killMember(c, r);
+  }
+  // V4.1 (spec 31.4): poison: 1 damage to every poisoned figure that is up, never below 1.
+  poisonTick(c);
   // 2. Monsters, in id order.
   const order = [...d.monsters].filter((m) => m.kind !== 'gloam').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   for (const m of order) {

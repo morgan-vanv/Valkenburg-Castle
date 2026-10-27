@@ -39,20 +39,21 @@
 // it that nobody sees; a Burglar sneaks round behind a seen sleeper in reach and backstabs it. The
 // report prints enemy strikes from behind, unseen hits and backstabs.
 //
-// V4.0 (spec 29): venom. The bot buys an antidote for Level 2 and 3 contracts (one, when it can spare 20 gold),
-// drinks it when envenomed, gives it to an envenomed or paralyzed friend next to it, mends venom out with a
-// Hedgewitch, and shoulders a paralyzed friend it has no cure for. The report prints heroes envenomed and
-// paralyzed, cures by kind, carries, and heroes lost paralyzed.
+// V4.1 (spec 31.4): poison, downed, carry and unshackle. The bot buys an antipoison for Level 2 and 3 contracts (one,
+// when it can spare 20 gold), drinks it when poisoned and down to half, gives it to a poisoned friend next to it, mends
+// poison out with a Hedgewitch; a potion (or Mend) gets a downed friend up; with none, it Carries the downed friend
+// toward the exit and Leaves with them. A shackled captive is Unshackled with picks or the key, else Carried out.
 //
 // The bot is simple: the party walks toward the objective together, hits
 // what's adjacent, takes what's near, grabs the objective, then heads for the
 // nearest exit. It shows what a careless player banks, not what a good one can.
 
+import { writeFileSync } from 'node:fs';
 import { createEngine } from '../src/game/engine';
 import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
 import { posKey, samePos, type Pos } from '../src/game/hex';
-import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '../src/game/types';
+import type { ActionKind, ActionTarget, Command, Delve, GameState, HeroInDelve } from '../src/game/types';
 import { World, dirIndex, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
 import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
@@ -60,7 +61,7 @@ import type { Ctx, DelveX, GameStateX } from '../src/game/state';
 import { makeHero } from '../src/game/camp';
 import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
-import { FACING } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
+import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -69,13 +70,47 @@ const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
 const e = createEngine(castle);
 const w = new World(castle);
 const ROUND_CAP = 80;
-/** The bot heads out when the lantern gets this low (it holds 20 since V3.3). */
-const LOW_LIGHT = 5;
-/** Heroes keep within this many hexes of the lantern bearer (a careless player still stays in the light). */
+/**
+ * V4.1 (WS2): no free lantern. The bot heads out on Level 2 or 3 when the party is out of light: no burning torch or
+ * lantern and nothing left to light (was LOW_LIGHT: the lantern at 5).
+ */
+function outOfLight(s: GameState): boolean {
+  const d = s.delve!;
+  const up = d.heroes.filter((h) => h.status === 'active');
+  if (!up.some((h) => h.at.level >= 2)) return false;
+  return lightLeft(d) <= 0;
+}
+/** V4.1 (WS2): rounds of light the party still carries (burning or not; lanterns count their oil). */
+function lightLeft(d: Delve): number {
+  let n = 0;
+  for (const h of d.heroes) if (h.status === 'active') for (const i of h.pack) if (i.kind === 'torch' || i.kind === 'lantern') n += i.rounds ?? (i.kind === 'lantern' ? 20 : 15);
+  return n;
+}
+/** V4.1 (WS2): the hero the others follow: whoever carries the most light (lit first), else the first one up. Was the lantern bearer. */
+function leadOf(d: Delve): HeroInDelve | undefined {
+  const up = d.heroes.filter((h) => h.status === 'active');
+  const glow = (h: HeroInDelve) => h.pack.reduce((n, i) => n + ((i.kind === 'torch' || i.kind === 'lantern') ? (i.lit ? 100 : 1) : 0), 0);
+  return [...up].sort((a, b) => glow(b) - glow(a))[0];
+}
+/** Heroes keep within this many hexes of the lead (the hero carrying the light). */
 const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
 const SAPPER = process.env.SAPPER === '1';
+/**
+ * V4.1 (audit step 2): POLICY=v41 plays like a careful player in camp and in the castle:
+ * sells valuables on return, buys forge gear, ales for everyone and torches for the deep levels;
+ * detours for known chests and coins while it's quiet; sneaks past awake monsters that haven't seen it;
+ * a Sapper throws charges at enemies. Off by default so older numbers stay reproducible.
+ * CSV=<file> writes one row per delve (gold, wealth, levels, outcome, spending) for the economy curves.
+ */
+const V41 = process.env.POLICY === 'v41';
+const CSV = process.env.CSV ?? '';
+/** Gold the v41 bot keeps back in camp for potions and torches before it spends on the forge or ales. */
+const RESERVE = 60;
+/** Gold moved by camp commands, by kind (negative = spent). */
+const ledger: Record<string, number> = {};
+const throws = { thrown: 0, hits: 0, kills: 0, heroHits: 0 };
 const sap = { fuses: 0, blasts: 0, walls: 0, collapsed: 0, rubbled: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
 const sapLog: string[] = [];
 const pits: Pos[] = [];
@@ -93,11 +128,16 @@ const calm = { moves: 0, follows: 0, steps: 0, turns: 0, stopped: 0, braces: 0, 
 let stabbing = false;
 /** V4.0 (spec 28): crews play by the party's rules: what crew members did, and what monsters did to them. */
 /** V4.0 (spec 29): venom on heroes and monsters. */
-const venom = { heroDoses: 0, heroParalyzed: 0, monsterDoses: 0, monsterParalyzed: 0, crewParalyzed: 0, antidotes: 0, mends: 0, worn: 0, out: 0, shoulders: 0, carriedOut: 0, lostParalyzed: 0, venomTraps: 0, darts: 0, bought: 0 };
+const venom = { heroDoses: 0, monsterDoses: 0, crewDoses: 0, antidotes: 0, mends: 0, out: 0, carries: 0, carriedOut: 0, upByPotion: 0, upByMend: 0, unshackled: 0, crewDowned: 0, crewUp: 0, venomTraps: 0, darts: 0, bought: 0 };
 const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarms: 0, trapsSprung: 0, trapsSpotted: 0, woke: 0, fuses: 0, backstabs: 0, sneakAttacks: 0, killedByMonsters: 0, lootedPiles: 0, leftWithLoot: 0, members: 0 };
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
+  if (!r.error && s.stage === 'camp' && cmd.type !== 'startDelve') {
+    const delta = r.state.campaign.gold - s.campaign.gold;
+    const key = cmd.type === 'buy' ? `buy:${cmd.kind}` : cmd.type;
+    if (delta) ledger[key] = (ledger[key] ?? 0) + delta;
+  }
   const gloamId = s.delve?.monsters.find((m) => m.kind === 'gloam')?.id;
   if (cmd.type === 'move' && !r.error && s.delve?.calm) {
     calm.moves++;
@@ -134,19 +174,23 @@ function run(s: GameState, cmd: Command): GameState {
     const heroIds = new Set((s.delve?.heroes ?? []).map((h) => h.heroId));
     const crewIds = new Set((s.delve?.rivals?.members ?? []).map((m) => m.id));
     for (const ev of r.events) {
-      if (ev.type === 'envenomed') heroIds.has(ev.id) ? venom.heroDoses++ : venom.monsterDoses++;
-      if (ev.type === 'paralyzed') heroIds.has(ev.id) ? venom.heroParalyzed++ : crewIds.has(ev.id) ? venom.crewParalyzed++ : venom.monsterParalyzed++;
+      if (ev.type === 'poisoned') heroIds.has(ev.id) ? venom.heroDoses++ : crewIds.has(ev.id) ? venom.crewDoses++ : venom.monsterDoses++;
       if (ev.type === 'cured' && heroIds.has(ev.id)) {
         if (ev.how === 'antidote') venom.antidotes++;
         if (ev.how === 'mend') venom.mends++;
-        if (ev.how === 'worn') venom.worn++;
         if (ev.how === 'out') venom.out++;
       }
-      if (ev.type === 'shouldered') venom.shoulders++;
+      if (ev.type === 'carried' && heroIds.has(ev.by)) venom.carries++;
+      if (ev.type === 'freed') venom.unshackled++;
+      if (ev.type === 'downed' && crewIds.has(ev.id)) venom.crewDowned++;
+      if (ev.type === 'revived' && crewIds.has(ev.id)) venom.crewUp++;
+      if (ev.type === 'revived' && heroIds.has(ev.id)) {
+        if (cmd.type === 'act' && cmd.action === 'mend') venom.upByMend++;
+        else venom.upByPotion++;
+      }
       if (ev.type === 'trap' && ev.venom && heroIds.has(ev.id)) venom.venomTraps++;
       if (ev.type === 'thrown' && ev.kind === 'venomdart') venom.darts++;
-      if (ev.type === 'out' && (s.delve?.heroes.find((h) => h.heroId === ev.id)?.paralyzed ?? 0) > 0) venom.carriedOut++;
-      if (ev.type === 'died' && (s.delve?.heroes.find((h) => h.heroId === ev.id)?.paralyzed ?? 0) > 0) venom.lostParalyzed++;
+      if (ev.type === 'out' && s.delve?.heroes.find((h) => h.heroId === ev.id)?.status === 'downed') venom.carriedOut++;
     }
   }
   for (const ev of r.events) {
@@ -251,7 +295,8 @@ function recruit(s: GameState, want: number): GameState {
 function objectiveDone(s: GameState): boolean {
   const d = s.delve!;
   if (d.contract.kind === 'slay') return !d.monsters.some((m) => m.kind === 'dragon');
-  if (d.contract.kind === 'rescue') return !!d.prisoner?.freed && !!d.prisoner.escortedBy;
+  // V4.1 (spec 31.4): unshackled and following, or carried by a hero.
+  if (d.contract.kind === 'rescue') return !!d.prisoner?.out || (!!d.prisoner?.freed && !!d.prisoner.escortedBy) || d.heroes.some((h) => h.carrying === d.prisoner?.id && h.status === 'active');
   return d.heroes.some((h) => h.pack.some((i) => i.kind === 'heirloom'));
 }
 
@@ -271,7 +316,13 @@ function openExits(s: GameState): Pos[] {
 
 function goalFor(s: GameState): Pos[] {
   const d = s.delve!;
-  const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
+  // V4.1 (spec 31.4): carrying a downed friend out counts as leaving.
+  const leaving = objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || d.round > 50 || d.heroes.some((h) => h.status === 'active' && h.carrying && h.carrying !== d.prisoner?.id);
+  // V4.1 (POLICY=v41): a careful player sweeps what it knows of on the way, while it's quiet and there's time.
+  if (V41) {
+    const loot = lootGoals(s);
+    if (loot.length) return loot;
+  }
   if (leaving) return openExits(s);
   if (d.contract.kind === 'slay') {
     const dr = d.monsters.find((m) => m.kind === 'dragon');
@@ -280,6 +331,55 @@ function goalFor(s: GameState): Pos[] {
   if (d.contract.kind === 'rescue') return [d.prisoner!.at];
   const g = d.ground.find((x) => x.items.some((i) => i.kind === 'heirloom'));
   return g ? [g.at] : openExits(s);
+}
+
+/** How far (straight-line, same level) the v41 bot will detour from its lead hero for loot. */
+const LOOT_REACH = 12;
+const VALUABLE = new Set(['gold', 'gem', 'jewelry', 'heirloom', 'hoard']);
+/**
+ * V4.1 (POLICY=v41): known, unopened, unlocked chests (their neighbours) and ground piles with valuables
+ * within LOOT_REACH of the lead hero on its level, while no hunting monster or hostile crew is in sight,
+ * the light holds and there's pack room. Locked chests count when the party carries picks or keys.
+ */
+function lootGoals(s: GameState): Pos[] {
+  const d = s.delve as DelveX;
+  if ((lightLeft(d) < 10 && d.heroes.some((h) => h.status === 'active' && h.at.level >= 2)) || d.round > 35) return [];
+  const active = d.heroes.filter((h) => h.status === 'active');
+  const lead = leadOf(d) ?? active[0];
+  if (!lead) return [];
+  if (!active.some((h) => slotsUsed(h) < 4)) return [];
+  const vis = e.visibility(s).visible;
+  const danger = d.monsters.some((m) => m.awareness === 'hunting' && !m.buried && m.kind !== 'gloam' && m.at.level === lead.at.level && vis.has(posKey(m.at)))
+    || (d.rivals?.stance === 'hostile' && d.rivals.members.some((r) => r.hp > 0 && !r.goneOut && r.at.level === lead.at.level));
+  if (danger) return [];
+  const known = new Set(d.explored);
+  const canPick = active.some((h) => h.pack.some((i) => i.kind === 'lockpicks' || i.kind === 'key' || i.kind === 'improvised'));
+  const goals: Pos[] = [];
+  for (const c of d.chests) {
+    if (c.opened || c.jammed || (c.locked && !canPick) || c.at.level !== lead.at.level || !known.has(posKey(c.at))) continue;
+    if (hexDistance(c.at, lead.at) > LOOT_REACH) continue;
+    goals.push(...posNeighbors(c.at).filter((p) => kindAt(w, d, p) === 'floor'));
+  }
+  for (const g of d.ground) {
+    if (g.at.level !== lead.at.level || !known.has(posKey(g.at)) || hexDistance(g.at, lead.at) > LOOT_REACH) continue;
+    if (g.items.some((i) => VALUABLE.has(i.kind) && i.kind !== 'heirloom' && i.kind !== 'hoard')) {
+      goals.push(...(kindAt(w, d, g.at) === 'floor' ? [g.at] : posNeighbors(g.at).filter((p) => kindAt(w, d, p) === 'floor')));
+    }
+  }
+  if (!goals.length) return goals;
+  // Only what the lead can walk to soon (an unreachable goal would send routeFor to the winch or a pit).
+  const near = distField(w, d, [lead.at], { stairs: false, allowLocked: false });
+  return goals.filter((p) => (near.get(posKey(p)) ?? 99) <= LOOT_REACH + 4);
+}
+
+/** Pack slots in use (class kit takes none; heirlooms, hoard and the copper take 2). */
+function slotsUsed(h: HeroInDelve): number {
+  let n = 0;
+  for (const i of h.pack) {
+    if (i.kind === 'improvised' || i.kind === 'improvised-charge') continue;
+    n += i.kind === 'heirloom' || i.kind === 'hoard' || (i as { slots?: number }).slots === 2 ? 2 : 1;
+  }
+  return n;
 }
 
 /**
@@ -306,20 +406,53 @@ function routeFor(s: GameState, at: Pos): { goals: Pos[]; jump: Pos[]; winch: bo
 }
 
 /**
- * Lantern discipline (spec 16.2): on Level 1 shutter while the bearer stands in fixed light
- * (daylight and sconces light most of the level), open otherwise; always open on Levels 2 and 3.
+ * V4.1 (WS2) light discipline: the lead keeps one light burning on Levels 2 and 3 when standing unlit (a lantern
+ * first, else a torch), and snuffs or shutters it on Level 1 in daylight or another castle light (saving the rounds).
+ * Light is a free shutter or an action (a torch): the bot lights a torch before it acts.
  */
-function lanternCheck(s: GameState, id: string): GameState {
+function lightCheck(s: GameState, id: string): GameState {
   const d = s.delve as DelveX;
-  if (d.lanternBearer !== id) return s;
   const me = d.heroes.find((x) => x.heroId === id)!;
+  if (me.status !== 'active') return s;
+  const lead = leadOf(d);
+  const burning = me.pack.find((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit);
   const fixed = fixedLit(w, d);
-  const wantOpen = me.at.level !== 1 || !fixed.has(posKey(me.at));
-  if (wantOpen !== d.lanternOpen) {
-    const o = option(s, id, 'shutter');
-    if (o) s = act(s, id, 'shutter', o.targets[0]!);
+  const inCastleLight = fixed.has(posKey(me.at));
+  if (me.at.level === 1) {
+    if (burning && inCastleLight) {
+      if (burning.kind === 'lantern') s = act(s, id, 'shutter', { itemId: burning.id });
+      else s = act(s, id, 'snuff', { itemId: burning.id });
+    }
+    return s;
   }
+  if (burning || (lead && lead.heroId !== id)) return s;
+  // Somebody else already lights this hex? Leave it.
+  if (litSet(w, d).has(posKey(me.at))) return s;
+  const sh = option(s, id, 'shutter');
+  if (sh) return act(s, id, 'shutter', sh.targets[0]!);
+  const t = option(s, id, 'torch');
+  if (t) return act(s, id, 'torch', t.targets[0]!);
   return s;
+}
+
+/** V4.1 (WS2): torches the bot packs for a contract level: 1 for Level 2, 3 for Level 3 (one more when rich); Level 1 none. */
+function torchesFor(level: number, gold: number): number {
+  const base = level >= 3 ? 3 : level === 2 ? 1 : 0;
+  return base + (base && gold >= 300 ? 1 : 0);
+}
+
+/** V4.1 (WS2): buy the torches the level wants (Mott, 10 each) and, once, Gerda's lantern when 120 plus a reserve can be spared. */
+function buyLight(st: GameState, level: number): GameState {
+  const has = (k: string) => st.campaign.stash.filter((i) => i.kind === k).length;
+  const want = torchesFor(level, st.campaign.gold);
+  while (has('torch') < want && st.campaign.gold >= 10) {
+    const before = st;
+    st = run(st, { type: 'buy', kind: 'torch' });
+    if (st === before) break;
+  }
+  const lantern = e.shop(st).find((o) => o.kind === 'lantern');
+  if (lantern && !lantern.locked && !has('lantern') && st.campaign.gold >= lantern.price + RESERVE + 40) st = run(st, { type: 'buy', kind: 'lantern' });
+  return st;
 }
 
 /** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. V3.7: on every third crew delve, fight on purpose. */
@@ -460,6 +593,20 @@ function nearSleeper(s: GameState, at: Pos): boolean {
   return s.delve!.monsters.some((m) => m.awareness === 'asleep' && !m.buried && m.kind !== 'dragon' && m.at.level === at.level
     && Math.max(Math.abs(m.at.q - at.q), Math.abs(m.at.r - at.r), Math.abs(m.at.q + m.at.r - at.q - at.r)) <= 4);
 }
+/**
+ * V4.1 (POLICY=v41): sneak near a sleeper, or while an awake monster the party has seen (not hunting) is within 6
+ * on the hero's level and nothing is hunting in sight. Otherwise walk. Without the policy: near a sleeper only.
+ */
+function wantSneak(s: GameState, me: HeroInDelve): boolean {
+  if (nearSleeper(s, me.at)) return true;
+  if (!V41) return false;
+  const d = s.delve!;
+  const seen = e.seenEnemies(s);
+  const mons = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.kind !== 'dragon' && m.at.level === me.at.level && seen.has(m.id));
+  if (mons.some((m) => m.awareness === 'hunting')) return false;
+  if (e.heroById(s, me.heroId)?.cls === 'burglar') return true; // quiet feet: sneaking costs a Burglar one hex
+  return mons.some((m) => m.awareness !== 'asleep' && hexDistance(m.at, me.at) <= 6);
+}
 let sneakMoves = 0;
 let walkMoves = 0;
 
@@ -518,7 +665,7 @@ function faceParty(s: GameState): GameState {
     const group = act.filter((o) => o.at.level === h.at.level && hexDistance(o.at, h.at) <= 2);
     if (group.length < 2 || !FACING.faceCommand) continue;
     for (const g of group) done.add(g.heroId);
-    const lead = group.find((g) => g.heroId === d.lanternBearer) ?? group[0]!;
+    const lead = group.find((g) => g.heroId === leadOf(d)?.heroId) ?? group[0]!;
     const fwd = lead.facing ?? 0;
     const back = group.filter((g) => g !== lead).at(-1)!;
     for (const g of group) {
@@ -538,7 +685,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   s = backstabCheck(s, id);
   if (s.stage !== 'delve') return s;
   const hero = () => s.delve?.heroes.find((x) => x.heroId === id);
-  const alive = () => s.stage === 'delve' && hero()?.status === 'active' && !((hero()?.paralyzed ?? 0) > 0);
+  const alive = () => s.stage === 'delve' && hero()?.status === 'active';
   const tryAct = (): boolean => {
     if (!alive() || hero()!.acted) return false;
     const me = hero()!;
@@ -556,12 +703,52 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         }
       }
     }
+    // V4.1 (POLICY=v41): a Sapper throws a charge where it catches two enemies, or one hunting enemy it can't reach,
+    // and no hero (the prisoner neither) but the thrower.
+    if (V41 && def.cls === 'sapper') {
+      const o = option(s, id, 'throwCharge');
+      if (o) {
+        const d = s.delve!;
+        const heroIds = new Set(d.heroes.map((x) => x.heroId).concat(d.prisoner ? [d.prisoner.id] : []));
+        const foes = new Map<string, boolean>();
+        for (const m of d.monsters) if (!m.buried && m.kind !== 'gloam') foes.set(m.id, m.awareness === 'hunting');
+        if (d.rivals?.stance === 'hostile') for (const r of d.rivals.members) if (r.hp > 0 && !r.goneOut) foes.set(r.id, true);
+        const inReach = !!option(s, id, 'attack');
+        let best: { t: ActionTarget; n: number } | undefined;
+        for (const t of o.targets) {
+          if (!t.at) continue;
+          const hit = e.blastPreview(s, t.at).hit;
+          if (hit.some((x) => heroIds.has(x) && x !== id)) continue;
+          const n = hit.filter((x) => foes.has(x)).length;
+          const hunting = hit.some((x) => foes.get(x));
+          if ((n >= 2 || (n === 1 && hunting && !inReach)) && (!best || n > best.n)) best = { t, n };
+        }
+        if (best) {
+          const before = s;
+          s = act(s, id, 'throwCharge', best.t, 0);
+          if (s !== before) {
+            throws.thrown++;
+            return true;
+          }
+        }
+      }
+    }
     // Kill what's in reach before picking anyone up: a hero revived under fire just goes down again.
-    const order: ActionKind[] = ['escape', 'antidote', 'potion', 'attack', 'firebolt', 'free', 'take', 'revive', 'mend', 'shoulder', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
+    // V4.1 (spec 31.4): a carrier only Leaves (or does free things); everyone else as before, with Unshackle (tools first)
+    // and Carry (a downed friend nobody can get up, or the captive with no tools) after the healing.
+    const order: ActionKind[] = me.carrying ? ['leave'] : ['escape', 'antidote', 'potion', 'attack', 'firebolt', 'unshackle', 'take', 'mend', 'carry', 'oil', 'kindle', 'open', 'pick', 'light', 'leave'];
     for (const a of order) {
       const o = option(s, id, a);
       if (!o) continue;
       // V3.7: a potion on oneself below half (crews focus fire; a careful player drinks).
+      // V4.1 (spec 31.4): a downed friend next to you gets the potion first (up at 5).
+      const downedFriend = o.targets.find((t) => t.id !== id && s.delve!.heroes.find((y) => y.heroId === t.id)?.status === 'downed');
+      if (a === 'potion' && downedFriend) {
+        const before = s;
+        s = act(s, id, a, downedFriend, 0);
+        if (s !== before) return true;
+        continue;
+      }
       if (a === 'potion' && !(me.hp * 2 < def.maxHp && o.targets.some((t) => t.id === id))) continue;
       if (a === 'potion') {
         const self = o.targets.find((t) => t.id === id)!;
@@ -575,11 +762,14 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         const hpOf = (tid: string) => s.delve!.monsters.find((m) => m.id === tid)?.hp ?? s.delve!.rivals?.members.find((r) => r.id === tid)?.hp ?? 99;
         o.targets.sort((x, y) => hpOf(x.id!) - hpOf(y.id!));
       }
-      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50)) continue;
-      // V4.0 (spec 29.6): venom first: the paralyzed, then the envenomed; else the badly hurt.
-      const sick = (t: ActionTarget) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return !!x && ((x.paralyzed ?? 0) > 0 || (x.venom ?? 0) > 0); };
+      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || s.delve!.round > 50)) continue;
+      // V4.1 (spec 31.4): the downed first (Mend gets them up at 2), then the poisoned; else the badly hurt.
+      const sick = (t: ActionTarget) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return !!x && (x.status === 'downed' || !!x.poisoned); };
       if (a === 'antidote') {
-        const t = o.targets.find((x) => (s.delve!.heroes.find((y) => y.heroId === x.id)?.paralyzed ?? 0) > 0) ?? o.targets[0]!;
+        // Poison never downs: drink it once it has cost half (or give it to a poisoned friend, a downed one first).
+        const tgt = (x: ActionTarget) => s.delve!.heroes.find((y) => y.heroId === x.id);
+        const t = o.targets.find((x) => tgt(x)?.status === 'downed') ?? o.targets.find((x) => x.id !== id) ?? o.targets.find((x) => x.id === id && me.hp * 2 <= def.maxHp);
+        if (!t) continue;
         const before = s;
         s = act(s, id, a, t, 0);
         if (s !== before) return true;
@@ -591,14 +781,31 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         if (s !== before) return true;
         continue;
       }
-      // Shoulder a paralyzed friend only when nobody near has a cure for them.
-      if (a === 'shoulder' && s.delve!.heroes.some((x) => x.status === 'active' && !((x.paralyzed ?? 0) > 0) && (x.pack.some((i) => i.kind === 'antidote') || (e.heroById(s, x.heroId)?.cls === 'hedgewitch' && x.mana > 0)))) continue;
+      // V4.1 (spec 31.4): Carry a downed friend only when nobody up has a potion or a Hedgewitch's mana for them; the
+      // shackled captive when nobody has picks or a key (Unshackle came first in the order).
+      if (a === 'carry') {
+        const d = s.delve!;
+        const cure = d.heroes.some((x) => x.status === 'active' && (x.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') || (e.heroById(s, x.heroId)?.cls === 'hedgewitch' && x.mana > 0)));
+        const t = o.targets.find((x) => x.id === d.prisoner?.id) ?? (cure ? undefined : o.targets[0]);
+        if (!t) continue;
+        o.targets = [t];
+      }
+      // V4.1 (spec 31.4): Unshackle with picks or a key (never Smash: noise 4 by a sleeping guard); without them, Carry.
+      if (a === 'unshackle') {
+        const t = o.targets.find((x) => x.itemId);
+        if (!t) continue;
+        o.targets = [t];
+      }
       if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
-      if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
-      if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
-      if (a === 'free' && s.delve!.prisoner?.escortedBy) continue;
+      // V4.1 (WS2): kindle a burning light running low (or an unlit one when nothing burns, below Level 1); oil a lantern at 10 or less.
+      if (a === 'kindle') {
+        const kt = o.targets.find((t) => { const it = s.delve!.heroes.find((x) => x.heroId === t.id)?.pack.find((i) => i.id === t.itemId); return !!it && it.lit && (it.rounds ?? 20) <= 6; });
+        if (!kt) continue;
+        o.targets = [kt];
+      }
+      if (a === 'oil' && (me.pack.find((i) => i.kind === 'lantern')?.rounds ?? 20) > 10) continue;
       if (a === 'open' && !o.targets.some((t) => t.id)) continue;
-      if (a === 'take' && me.pack.length >= 4) continue;
+      if (a === 'take' && (V41 ? slotsUsed(me) >= 4 : me.pack.length >= 4)) continue;
       const target = a === 'open' ? o.targets.find((t) => t.id)! : a === 'mend' ? o.targets.sort((x, y) => (s.delve!.heroes.find((z) => z.heroId === x.id)!.hp) - (s.delve!.heroes.find((z) => z.heroId === y.id)!.hp))[0]! : o.targets[0]!;
       const p = e.preview(s, id, a, target);
       const focus = a === 'attack' || a === 'firebolt' ? Math.min(p.maxFocus, 1) : 0;
@@ -619,7 +826,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   let calmMoved = false;
   if (!me.webbed && s.delve!.calm && !option(s, id, 'attack')) {
     const d = s.delve as DelveX;
-    const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+    const bearer = leadOf(d);
     const isBearer = !bearer || bearer.heroId === id;
     const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
     const behind = !isBearer && bearer && (bearer.at.level !== me.at.level || hexDist(me.at, bearer.at) > COHESION);
@@ -660,13 +867,14 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const vis = e.visibility(s).visible;
       const hunters = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness === 'hunting' && m.at.level === me.at.level
         && vis.has(posKey(m.at)) && Math.max(Math.abs(m.at.q - me.at.q), Math.abs(m.at.r - me.at.r), Math.abs(m.at.q + m.at.r - me.at.q - me.at.r)) <= 4);
-      const goals = hunters.length && !me.acted ? hunters.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : routeFor(s, me.at).goals;
+      // V4.1 (spec 31.4): a carrier can't fight: it makes for the way out whatever hunts it.
+      const goals = hunters.length && !me.acted && !me.carrying ? hunters.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : routeFor(s, me.at).goals;
       const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
       const here = field.get(posKey(me.at)) ?? 999;
-      const sneak = nearSleeper(s, me.at);
+      const sneak = wantSneak(s, me);
       const reach = e.reachable(s, id, sneak);
       // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
-      const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+      const bearer = leadOf(d);
       const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
       const isBearer = !bearer || bearer.heroId === id;
       const stragglers = isBearer
@@ -708,7 +916,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       }
     }
   }
-  if (alive()) s = lanternCheck(s, id);
+  if (alive()) s = lightCheck(s, id);
   tryAct();
   // Dash (spec 15.2): nothing to do with the action, so move again toward the goal.
   if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
@@ -719,7 +927,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     let best: ReturnType<typeof e.reachable>[0] | undefined;
     let bestD = here;
     const d2 = s.delve as DelveX;
-    const bearer2 = d2.heroes.find((h) => h.heroId === d2.lanternBearer && h.status === 'active');
+    const bearer2 = leadOf(d2);
     for (const r of e.reachable(s, id, false)) {
       if (!r.dash || inBlast(d2, r.to)) continue;
       if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
@@ -767,13 +975,105 @@ interface Row {
   story: string;
   dragonDead: boolean;
   reachedL3: boolean;
+  /** V4.1: which campaign (a new one starts when the heir falls), and the delve within it. */
+  campaign: number;
+  cd: number;
+  /** Camp gold as the party set out, and gold plus stash valuables. */
+  gold: number;
+  wealth: number;
+  /** Mean and highest level of the party that went in; reputation and villagers home when it set out. */
+  partyLv: number;
+  maxLv: number;
+  rep: number;
+  village: number;
+  captured: number;
+  goldAfter: number;
 }
 
 const rows: Row[] = [];
+let campaignNo = 1;
+let campDelve = 0;
+const stashValue = (st: GameState) => st.campaign.stash.filter((i) => VALUABLE.has(i.kind) && !i.story).reduce((a, i) => a + i.amount, 0);
+
+/** V4.1 (POLICY=v41): sell every valuable on the cart, as a player who wants gold for the forge would. */
+function campSell(st: GameState): GameState {
+  if (stashValue(st) > 0) st = run(st, { type: 'sellAll' });
+  return st;
+}
+
+/**
+ * V4.1 (POLICY=v41): contracts a careful player takes. Level 2 once the party is 3 strong and averages
+ * level L2_AT; Level 3 once it is 4 strong and averages L3_AT (env knobs, to find the threshold). Among what
+ * fits: a captive to bring back, then a story contract, then the deepest regular contract; else the first
+ * Level 1 contract.
+ */
+const L2_AT = Number(process.env.L2_AT ?? 2.5);
+const L3_AT = Number(process.env.L3_AT ?? 3.5);
+function pickContract(st: GameState, ids: string[]) {
+  const lv = ids.map((id) => st.campaign.roster.find((h) => h.id === id)?.level ?? 1);
+  const mean = lv.reduce((a, b) => a + b, 0) / Math.max(1, lv.length);
+  const fits = (level: number) => level <= 1 || (level === 2 && ids.length >= 3 && mean >= L2_AT) || (level >= 3 && ids.length >= 4 && mean >= L3_AT);
+  const board = st.campaign.board.filter((x) => fits(x.level));
+  return board.find((x) => x.id.startsWith('cap-'))
+    ?? board.find((x) => x.story === 'surgeon') ?? board.find((x) => x.story)
+    ?? board.filter((x) => !x.story && !x.id.startsWith('cap-')).sort((a, b) => b.level - a.level)[0]
+    ?? st.campaign.board.find((x) => x.level === 1);
+}
+
+const FRONT_CLS = new Set(['heir', 'sellsword', 'sapper']);
+/**
+ * V4.1 (POLICY=v41): spend in camp like a careful player, keeping RESERVE back: forge gear for the party
+ * (front-liners first; armor, weapon, a shield for the front, then the second tiers), an ale each once the copper
+ * is home, two potions in the stash, and torches for the deep levels.
+ */
+function campSpend(st: GameState, ids: string[], level: number): GameState {
+  const gold = () => st.campaign.gold;
+  const pot = () => st.campaign.stash.filter((i) => i.kind === 'potion').length;
+  while (pot() < 2 && gold() >= 20 + RESERVE / 2) {
+    const before = st;
+    st = run(st, { type: 'buy', kind: 'potion' });
+    if (st === before) break;
+  }
+  // V4.1 (WS2): torches bought in the main camp step (buyLight).
+  if (st.campaign.village.smith) {
+    const heroes = () => ids.map((id) => st.campaign.roster.find((h) => h.id === id)!).filter(Boolean)
+      .sort((a, b) => Number(FRONT_CLS.has(b.cls)) - Number(FRONT_CLS.has(a.cls)));
+    const steps: { part: 'armor' | 'weapon' | 'shield'; tier: number }[] = [
+      { part: 'armor', tier: 1 }, { part: 'weapon', tier: 1 }, { part: 'shield', tier: 1 }, { part: 'armor', tier: 2 }, { part: 'weapon', tier: 2 },
+    ];
+    for (const step of steps) for (const h of heroes()) {
+      if (step.part === 'shield') {
+        if (h.shield || !FRONT_CLS.has(h.cls) || gold() - SHIELD_PRICE < RESERVE) continue;
+        st = run(st, { type: 'buyShield', heroId: h.id });
+        continue;
+      }
+      const have = step.part === 'weapon' ? h.weaponTier : h.armorTier;
+      const price = (step.part === 'weapon' ? WEAPON_PRICE : ARMOR_PRICE)[step.tier] ?? 999;
+      if (have !== step.tier - 1 || gold() - price < RESERVE) continue;
+      st = run(st, { type: 'upgrade', heroId: h.id, part: step.part });
+    }
+  }
+  const offers = e.ales(st).filter((a) => !a.locked);
+  if (offers.length) for (const id of ids) {
+    const h = st.campaign.roster.find((x) => x.id === id);
+    if (!h || h.ale) continue;
+    const want = (h.cls === 'burglar' ? ['smuggler', 'reserve'] : level >= 3 ? ['fireside', 'glowworm', 'reserve'] : ['reserve', 'featherfoot'])
+      .map((k) => offers.find((a) => a.kind === k)).find(Boolean);
+    if (!want || gold() - want.price < RESERVE) continue;
+    st = run(st, { type: 'buyAle', heroId: id, ale: want.kind });
+  }
+  return st;
+}
 const unlocked: string[] = [];
 let s = e.newGame(SEED);
 for (let i = 0; i < N; i++) {
-  if (s.stage === 'over') s = e.newGame(SEED + i * 7919);
+  if (s.stage === 'over') {
+    s = e.newGame(SEED + i * 7919);
+    campaignNo++;
+    campDelve = 0;
+  }
+  campDelve++;
+  if (V41) s = campSell(s);
   // Heal everyone so a full party goes in, buy a potion and a torch when rich.
   if (DRAGON) {
     s.campaign.reputation = Math.max(3, s.campaign.reputation);
@@ -824,11 +1124,16 @@ for (let i = 0; i < N; i++) {
   const story = stories.find((x) => x.story === 'surgeon') ?? (i % 2 === 1 ? stories[0] : undefined);
   // V3.7 (spec 20.4): a captured hero is fetched back first, once the party is 3 strong.
   const rescue = fit.length >= 3 ? rescues[0] : undefined;
-  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
+  const k = (DRAGON ? s.campaign.board.find((x) => x.kind === 'slay') : undefined) ?? (V41 ? pickContract(s, fit) : undefined)
+    ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
   if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
+  // V4.1 (WS2): light. Torches: 1 per Level 2 contract, 3 per Level 3 (one more when rich); the lantern once Gerda sells
+  // it and the bot can afford it plus a reserve.
+  s = buyLight(s, k.level);
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
-  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
+  // V4.1 (spec 31.3): oil is Ilse's; only when her bench sells it.
+  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
   // V4.0 (spec 29.6): an antidote for the deeper levels (spiders, venom traps, the Gallows Choir), when 20 gold can be spared.
   if (k.level >= 2 && !s.campaign.stash.some((it) => it.kind === 'antidote') && s.campaign.gold >= 40) {
     const before = s;
@@ -837,17 +1142,35 @@ for (let i = 0; i < N; i++) {
   }
   // Lockpicks (spec 19.2): once the smith is home, one reusable pair for the party, carried by a non-Burglar.
   if (s.campaign.village.smith && !s.campaign.stash.some((it) => it.kind === 'lockpicks') && s.campaign.gold >= 60) s = run(s, { type: 'buy', kind: 'lockpicks' });
+  if (V41) s = campSpend(s, fit, k.level);
+  const setOut = {
+    gold: s.campaign.gold,
+    wealth: s.campaign.gold + stashValue(s),
+    lv: fit.map((id) => s.campaign.roster.find((h) => h.id === id)?.level ?? 1),
+    rep: s.campaign.reputation,
+    village: Object.values(s.campaign.village).filter(Boolean).length,
+  };
   const packs: Record<string, string[]> = {};
   const picks = s.campaign.stash.find((it) => it.kind === 'lockpicks');
   const picker = fit.find((id) => e.heroById(s, id)?.cls !== 'burglar');
   if (picks && picker) (packs[picker] ??= []).push(picks.id);
+  // V4.1 (WS2): lights first: the lantern (if any) and the torches the level wants, on the first heroes.
+  const lights = [
+    ...s.campaign.stash.filter((it) => it.kind === 'lantern').slice(0, 1),
+    ...s.campaign.stash.filter((it) => it.kind === 'torch').slice(0, torchesFor(k.level, s.campaign.gold) + (k.level === 1 ? 1 : 0)),
+  ];
+  lights.forEach((it, j) => {
+    (packs[fit[j % fit.length]!] ??= []).push(it.id);
+  });
   const carry = [
     ...(k.level >= 3 ? s.campaign.stash.filter((it) => it.kind === 'oil').slice(0, 1) : []),
-    ...s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2),
+    ...s.campaign.stash.filter((it) => it.kind === 'potion').slice(0, DRAGON ? 4 : 2),
     ...(k.level >= 2 ? s.campaign.stash.filter((it) => it.kind === 'antidote').slice(0, 1) : []),
   ];
   carry.forEach((it, j) => {
-    (packs[fit[j % fit.length]!] ??= []).push(it.id);
+    const room = (id: string) => (packs[id] ?? []).length < 4;
+    const who = [...fit.slice(j % fit.length), ...fit].find(room);
+    if (who) (packs[who] ??= []).push(it.id);
   });
   // V4.0 (spec 25): only the open ways in (a new campaign has the main gate alone); rotate through them.
   const ways = e.entrances(s).filter((x) => x.state === 'open');
@@ -868,8 +1191,8 @@ for (let i = 0; i < N; i++) {
   let darkRounds = 0;
   const strikesBefore = gloamStrikes;
   while (s.stage === 'delve') {
-    // V4.0 (spec 29.2): the paralyzed sit the turn out.
-    for (const h of s.delve!.heroes.filter((x) => x.status === 'active' && !((x.paralyzed ?? 0) > 0))) {
+    // Every hero up takes a turn (V4.1: paralysis is gone).
+    for (const h of s.delve!.heroes.filter((x) => x.status === 'active')) {
       if (s.stage !== 'delve') break;
       s = heroTurn(s, h);
     }
@@ -882,7 +1205,7 @@ for (let i = 0; i < N; i++) {
     }
     if (TRACE === i + 1) {
       const d = s.delve!;
-      console.log(`r${d.round} light ${d.light}${d.lanternOpen ? '' : ' (shut)'}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}${h.grabbedBy ? ' held' : ''}${h.webbed ? ' web' : ''}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
+      console.log(`r${d.round} light ${lightLeft(d)}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}${h.grabbedBy ? ' held' : ''}${h.webbed ? ' web' : ''}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
       const near = d.monsters.filter((m) => !m.buried && d.heroes.some((h) => h.status === 'active' && h.at.level === m.at.level && Math.max(Math.abs(h.at.q - m.at.q), Math.abs(h.at.r - m.at.r), Math.abs(h.at.q + h.at.r - m.at.q - m.at.r)) <= 6));
       if (near.length) console.log('   near:', near.map((m) => `${m.id}:${m.kind}@${posKey(m.at)} hp${m.hp} ${m.awareness} ${m.intent?.kind ?? '-'}${m.intent?.targetId ? '>' + m.intent.targetId : ''}`).join(' '));
       if (d.rivals && (d.rivals as { entered?: boolean }).entered) console.log('   sisters:', d.rivals.stance, d.rivals.members.filter((r) => !r.goneOut && r.hp > 0).map((r) => `${r.cls}@${posKey(r.at)} hp${r.hp} ${r.intent?.kind ?? '-'}`).join(' '));
@@ -931,7 +1254,7 @@ for (let i = 0; i < N; i++) {
     gloamStrikes: gloamStrikes - strikesBefore,
     done: sum.contractDone,
     rounds: d.round,
-    light: d.light,
+    light: lightLeft(d),
     loot: sum.lootValue,
     bounty: sum.bounty,
     deaths: sum.dead.length,
@@ -940,6 +1263,16 @@ for (let i = 0; i < N; i++) {
     story: k.story ?? '',
     dragonDead: !d.monsters.some((m) => m.kind === 'dragon') && castle.spawns.some((sp) => sp.kind === 'dragon'),
     reachedL3: d.explored.some((k) => k.startsWith('3:')),
+    campaign: campaignNo,
+    cd: campDelve,
+    gold: setOut.gold,
+    wealth: setOut.wealth,
+    partyLv: setOut.lv.reduce((a, b) => a + b, 0) / Math.max(1, setOut.lv.length),
+    maxLv: Math.max(...setOut.lv),
+    rep: setOut.rep,
+    village: setOut.village,
+    captured: d.heroes.filter((h) => h.status === 'captured').length,
+    goldAfter: 0,
   });
   if (VERBOSE) for (const n of sum.notes) console.log('   ', n);
   const back = e.apply(s, { type: 'backToCamp' });
@@ -949,6 +1282,7 @@ for (let i = 0; i < N; i++) {
   } else {
     for (const ev of back.events) if (ev.type === 'villageUnlocked') unlocked.push(`delve ${i + 1}: ${ev.story}`);
     s = back.state;
+    rows[rows.length - 1]!.goldAfter = s.campaign.gold + stashValue(s);
   }
 }
 
@@ -972,7 +1306,8 @@ console.log(`  tolls paid ${crews.filter((r) => r.crew.includes('paid toll')).le
 console.log(`crew fights (spec 20.4): ${crewStats.fights} fights: won ${crewStats.won}, lost ${crewStats.lost}, fled ${crewStats.fled}; members killed ${crewStats.membersKilled}, heroes downed in crew fights ${crewStats.heroesDowned}, heroes dead in crew fights ${crewStats.heroesDead}, heroes captured ${crewStats.captured}; rescues tried ${crewStats.rescuesTried}, done ${crewStats.rescuesDone}; captives now ${s.campaign.captives?.length ?? 0}`);
 for (const f of fightLog) console.log(`  ${f}`);
 console.log(`crew parity (spec 28): members ${parity.members}, killed by monsters (no party fight) ${parity.killedByMonsters}, left with loot ${parity.leftWithLoot}, piles/chests looted ${parity.lootedPiles}; monster strikes on crew ${parity.monsterHits}, crew strikes on monsters ${parity.hitsOnMonsters}; picks ${parity.picks}, smashes ${parity.smashes}, traps spotted ${parity.trapsSpotted} / disarmed ${parity.disarms} / sprung in sight ${parity.trapsSprung}; sleepers woken by crews ${parity.woke}; crew fuses ${parity.fuses}; crew backstabs ${parity.backstabs}, sneak attacks ${parity.sneakAttacks}`);
-console.log(`venom (spec 29): hero doses ${venom.heroDoses} (venom traps ${venom.venomTraps}), heroes paralyzed ${venom.heroParalyzed}; cures: antidotes ${venom.antidotes}, Mend ${venom.mends}, worn off ${venom.worn}, drawn out leaving ${venom.out}; shouldered ${venom.shoulders}, carried out paralyzed ${venom.carriedOut}, lost paralyzed ${venom.lostParalyzed}; antidotes bought ${venom.bought}; venom darts thrown ${venom.darts}; monsters dosed ${venom.monsterDoses}, paralyzed ${venom.monsterParalyzed}, crew paralyzed ${venom.crewParalyzed}`);
+console.log(`poison (spec 31.4): hero doses ${venom.heroDoses} (poison traps ${venom.venomTraps}); cures: antipoisons ${venom.antidotes}, Mend ${venom.mends}, out ${venom.out}; antipoisons bought ${venom.bought}; poison darts thrown ${venom.darts}; monsters dosed ${venom.monsterDoses}, crew dosed ${venom.crewDoses}`);
+console.log(`downed and carry (spec 31.4): heroes up by potion ${venom.upByPotion}, by Mend ${venom.upByMend}; carries ${venom.carries}, carried out downed ${venom.carriedOut}; captives unshackled ${venom.unshackled}; crew members downed ${venom.crewDowned}, got up ${venom.crewUp}`);
 console.log('\nper level (spec 16: L1 easy, L2 real resistance, L3 deadly without light):');
 console.log('  level   n  done  deaths  dark rounds (L3)  Gloam strikes');
 for (const lv of [1, 2, 3]) {
@@ -1000,6 +1335,29 @@ console.log(`stealth (spec 20.1, 20.2): moves ${walkMoves} walked / ${sneakMoves
 console.log(`eyes front (spec 24): enemy strikes on heroes ${eyes.strikes}, from behind ${eyes.blindsided} (${eyes.blindHits} hit), unseen hits ${eyes.unseenHits}; backstabs ${eyes.backstabs} (${eyes.sleeperStabs} on sleepers, ${eyes.backstabHits} hit, ${eyes.backstabKills} kills); face commands ${eyes.faces}, turned to a foe ${eyes.turnedToFoe}`);
 console.log(`hearing (spec 24.8): sounds heard per delve`);
 for (const l of hearLog) console.log(`  ${l}`);
+// V4.1: the economy and progression curves (most useful with POLICY=v41).
+console.log('\neconomy (V4.1): per delve, wealth = camp gold + stash valuables as the party set out');
+console.log('  camp delve contract    done  party lv  rep vil  gold  wealth  loot bounty  dead taken');
+for (const r of rows) {
+  console.log(`  ${String(r.campaign).padStart(4)} ${String(r.cd).padStart(5)} ${r.contract.padEnd(12)} ${(r.done ? 'yes' : 'no').padEnd(5)} ${r.partyLv.toFixed(1).padStart(8)} ${String(r.rep).padStart(4)} ${String(r.village).padStart(3)} ${String(r.gold).padStart(5)} ${String(r.wealth).padStart(7)} ${String(r.loot).padStart(5)} ${String(r.bounty).padStart(6)} ${String(r.deaths).padStart(5)} ${String(r.captured).padStart(5)}`);
+}
+console.log(`  camp ledger (gold in + / out -): ${Object.entries(ledger).sort((a, b) => a[1] - b[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'nothing'}`);
+console.log(`  income: bounties ${rows.reduce((a, r) => a + r.bounty, 0)}, carried out ${rows.reduce((a, r) => a + r.loot, 0)} (loose gold and valuables, before selling)`);
+console.log('\ncontract success by party level (mean, rounded) and contract level:');
+console.log('  party lv   L1 done/n   L2 done/n   L3 done/n');
+for (const pl of [1, 2, 3, 4, 5, 6]) {
+  const rs = rows.filter((r) => Math.round(r.partyLv) === pl);
+  if (!rs.length) continue;
+  const cell = (lv: number) => { const x = rs.filter((r) => r.level === lv); return x.length ? `${x.filter((r) => r.done).length}/${x.length}` : '-'; };
+  console.log(`  ${String(pl).padStart(8)}   ${cell(1).padStart(9)}   ${cell(2).padStart(9)}   ${cell(3).padStart(9)}`);
+}
+console.log(`campaigns: ${campaignNo} (a new one starts when the heir falls or is taken); sapper throws ${throws.thrown}`);
+if (CSV) {
+  const head = 'campaign,delve,contract,level,story,done,rounds,partyLv,maxLv,rep,village,gold,wealth,loot,bounty,deaths,captured,wealthAfter,crew';
+  const lines = rows.map((r) => [r.campaign, r.cd, r.contract.split(' ')[0], r.level, r.story, r.done ? 1 : 0, r.rounds, r.partyLv.toFixed(2), r.maxLv, r.rep, r.village, r.gold, r.wealth, r.loot, r.bounty, r.deaths, r.captured, r.goldAfter, JSON.stringify(r.crew)].join(','));
+  writeFileSync(CSV, [head, ...lines].join('\n') + '\n');
+  console.log(`wrote ${CSV}`);
+}
 console.log(`campaign: stage ${s.stage}, gold ${s.campaign.gold}, rep ${s.campaign.reputation}, roster ${s.campaign.roster.length}, fallen ${s.campaign.fallen.length}; refused commands ${errors}`);
 if (errors) console.log('refusals:', refusals);
 if (process.env.EVENTS === '1') console.log(evCount);

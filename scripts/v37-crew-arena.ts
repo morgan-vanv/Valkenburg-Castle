@@ -105,9 +105,11 @@ function heroTurn(s: GameState, id: string): GameState {
         return;
       }
     }
-    const rev = option(s, id, 'revive');
-    if (rev && !option(s, id, 'attack')) {
-      s = run({ type: 'act', heroId: id, action: 'revive', target: rev.targets[0]!, focus: 0 });
+    // V4.1 (spec 31.4): Revive is gone: a potion on a downed friend next to you gets them up at 5.
+    const pot = option(s, id, 'potion');
+    const downed = pot?.targets.find((x) => x.id !== id && s.delve!.heroes.find((y) => y.heroId === x.id)?.status === 'downed');
+    if (downed && !option(s, id, 'attack')) {
+      s = run({ type: 'act', heroId: id, action: 'potion', target: downed, focus: 0 });
       return;
     }
     for (const a of ['fireball', 'firebolt', 'attack', 'dread', 'mend'] as ActionKind[]) {

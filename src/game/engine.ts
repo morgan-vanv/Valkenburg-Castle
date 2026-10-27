@@ -7,7 +7,10 @@ import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX } from './state';
 import { blastPreview, migrateSatchel } from './charges';
 import { calmReach } from './calm';
-import { brightnessOf, litSet, sightRangeAt, visibleSet, World } from './world';
+import { litSet, sightRangeAt, visibleSet, World } from './world';
+import { brightnessAt } from './common';
+import { lightsOf, migrateLight, siteUnlit } from './light'; // V4.1 (WS2)
+import { NIGHTSIGHT_REFUND } from './data';
 import { sightWash } from './stealth';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, fitClass, newGame, newVillage, partyProblem, shopOffers } from './camp';
@@ -44,9 +47,9 @@ export function createEngine(castle: CastleDef): Engine {
         refreshSight(c);
         computeIntents(c);
         updateCalm(c);
-        c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
         c.ev.push({ type: 'phase', phase: 'player', round: 1 });
-        c.ev.push({ type: 'say', text: `${c.d.contract.title}. The lantern is full.` });
+        // V4.1 (WS2): no free lantern; the party brings its own light, or none.
+        c.ev.push({ type: 'say', text: `${c.d.contract.title}.${c.d.heroes.some((h) => h.pack.some((i) => i.kind === 'torch' || i.kind === 'lantern')) ? '' : ' Nobody brought a light.'}` });
         return { state: s, events: [...r.events, ...ev] };
       }
       return { state: s, events: r.events };
@@ -97,7 +100,7 @@ export function createEngine(castle: CastleDef): Engine {
     if (s.stage === 'delve' && c.d.phase === 'player') {
       const lit = litSet(w, c.d);
       // V4.0 (spec 26.2): monsters that noticed a hero during the command re-plan (keeping their quarry), so the shown intent is right.
-      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried && !((m.paralyzed ?? 0) > 0) && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
+      for (const m of c.d.monsters) if (m.awareness !== 'asleep' && !m.buried  && (!m.intent || c.replan?.has(m.id))) m.intent = planMonster(c, m, lit).intent;
       c.replan = undefined;
       // V3.7 (spec 20.5): free movement on or off, with a `calm` event when it changes.
       updateCalm(c);
@@ -161,8 +164,16 @@ export function createEngine(castle: CastleDef): Engine {
     },
 
     brightness(state): Brightness {
-      return brightnessOf(state.delve?.light ?? 0);
+      // V4.1 (WS2): the light the party acts in, by the first active hero's own hex (no lantern stage any more).
+      const c = rctx(state);
+      const h = c?.d.heroes.find((x) => x.status === 'active');
+      return c && h ? brightnessAt(w, c, h.at) : 'bright';
     },
+    lights(state) {
+      const c = rctx(state);
+      return c ? lightsOf(c.d).map(({ at, radius, party, kind, holder, rounds, max }) => ({ at, radius, party, kind, ...(holder ? { holder } : {}), ...(rounds !== undefined ? { rounds, max } : {}) })) : [];
+    },
+    siteUnlit: (state, siteId) => siteUnlit(w, state, siteId),
 
     intents(state): Record<string, Intent> {
       const c = rctx(state);
@@ -269,6 +280,7 @@ export function createEngine(castle: CastleDef): Engine {
         for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
         // V3.5: saves without the village start with nothing won back.
         s.campaign.village ??= newVillage();
+        s.campaign.village.alchemist ??= false; // V4.1 (spec 31.3): saves from before Ilse
         // V4.0 (spec 25): a save without `opened` had every way in open, and keeps them (campaignOpen
         // reads the absent field as open). A delve saved mid-way gets its ways set up the same way.
         const d = s.delve as DelveX | null;
@@ -281,6 +293,17 @@ export function createEngine(castle: CastleDef): Engine {
           const def = s.campaign.roster.find((x) => x.id === dh.heroId);
           if (def?.cls === 'sapper' && dh.hp > def.maxHp) dh.hp = def.maxHp;
         }
+        // V4.1 (spec 31.4): venom and paralysis are gone: an envenomed or paralyzed figure loads as poisoned. A V4.0
+        // shouldered ally (paralyzed, active) is set down: Carry lifts only the downed and the shackled.
+        if (d) migratePoison(d);
+        // V4.1 (WS2): a delve saved with the old free lantern: it becomes a loaner Lantern in its bearer's pack.
+        migrateLight(s);
+        // V4.1 (WS2): the old night-eye draught is no longer sold (Night-eye Stout is an ale): stash copies go back for 15 each.
+        const flat = s.campaign.stash.filter((i) => i.kind === 'nightsight');
+        if (flat.length) {
+          s.campaign.stash = s.campaign.stash.filter((i) => i.kind !== 'nightsight');
+          s.campaign.gold += NIGHTSIGHT_REFUND * flat.length;
+        }
         if (d && !d.ways) {
           d.ways = startWays(w, s);
           applyOpenWays(w, d);
@@ -292,4 +315,23 @@ export function createEngine(castle: CastleDef): Engine {
     },
   };
   return engine;
+}
+
+/** V4.1 (spec 31.4): old `venom` / `paralyzed` fields become `poisoned`; a V4.0 shoulder carry of an active ally ends. */
+export function migratePoison(d: DelveX): void {
+  type Old = { venom?: number; paralyzed?: number; poisoned?: boolean };
+  const fix = (f: Old) => {
+    if ((f.venom ?? 0) > 0 || (f.paralyzed ?? 0) > 0) f.poisoned = true;
+    delete f.venom;
+    delete f.paralyzed;
+  };
+  for (const h of d.heroes) fix(h as Old);
+  for (const m of d.monsters) fix(m as Old);
+  for (const r of d.rivals?.members ?? []) fix(r as Old);
+  for (const h of d.heroes) {
+    if (!h.carrying) continue;
+    const x = d.heroes.find((o) => o.heroId === h.carrying);
+    const pr = d.prisoner?.id === h.carrying ? d.prisoner : undefined;
+    if (!(x && x.status === 'downed') && !(pr && !pr.freed)) h.carrying = undefined;
+  }
 }

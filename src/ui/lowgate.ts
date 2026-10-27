@@ -1,18 +1,21 @@
 // V4.0: Lowgate, the camp before a delve. One path of four steps along the top (Job, Party,
 // Outfit, Set out), each clickable at any time; the Lowgate ribbon (houses, Keven's cart, the
 // graves) and the step buttons along the bottom. Keven's cart and the graves are side pages.
-// The party, packs, entrance and shutter are UI state (a Loadout) until Delve sends startDelve.
+// The party, packs and entrance are UI state (a Loadout) until Delve sends startDelve.
 
 import type { Engine } from '../game/api';
-import type { AleKind, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
+import type { AleKind, AleOffer, Campaign, Captive, Command, Contract, GameState, Hero, Item, ShopOffer, StoryId, Village } from '../game/types';
 import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
+import { GIFTS } from '../game/data'; // V4.1 (spec 31.2)
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
 import {
-  ALE, ALE_SHORT, CLASS_ABILITIES, CLASS_PLAN, CLASS_ROLE, CREW, ENTRANCE_LINE, EPITAPH, ITEM_EFFECT, PARTY_CAN, PEDDLER_PATTER, STORY, V37, WARE, WARE_GROUP,
+  ALE, ALE_SHORT, CLASS_ABILITIES, CLASS_PLAN, CLASS_ROLE, CREW, ENTRANCE_LINE, EPITAPH, ITEM_EFFECT, PARTY_CAN, PEDDLER_PATTER, STORY, V37, WARE,
   classGlyph, className, itemBase, itemGlyph, itemLabel, type AbilityChip, type AnyClass,
 } from './names';
+// V4.1 WS4 (spec 31.6): the vendor catalog.
+import { CATALOG, PERKS, SHOW_LOCKED, VENDOR_IDS, VENDORS, perkStatus, rowStatus, tabOf, vendorGroups, vendorHome, vendorOfStory, type CatalogRow, type RowStatus, type VendorId } from './vendors';
 
 // ------------------------------------------------------------ types
 
@@ -27,7 +30,7 @@ export interface Loadout {
   /** Stash item ids per hero. */
   packs: Record<string, string[]>;
   entrance: number;
-  /** 16.2: shutter the lantern as the delve starts (Level 1 has daylight). */
+  /** 16.2: shutter the lantern as the delve starts. V4.1 (WS2): retired (an old remembered loadout may still have it; ignored). */
   startShuttered?: boolean;
 }
 
@@ -56,8 +59,8 @@ const STEP_NAME: Record<Step, string> = { job: 'Job', party: 'Party', outfit: 'O
 const STEP_WHAT: Record<Step, string> = {
   job: 'Pick a contract from the notice post.',
   party: 'Who goes in: hire, heal, take up to four.',
-  outfit: 'Fill the packs from the peddler and the cart.',
-  setout: 'Which way in, the lantern, and Delve.',
+  outfit: 'Buy from the vendors, pack from the cart.',
+  setout: 'Which way in, and Delve.',
 };
 
 // ------------------------------------------------------------ engine helpers (defensive: the engine agent adds these in parallel)
@@ -145,7 +148,7 @@ export function cleanLoadout(s: GameState, engine: Engine, l: Loadout | null): L
   }
   const ents = entrancesOf(engine, s);
   const entrance = selectable(ents, prev.entrance) ? prev.entrance : selectable(ents, 0) ? 0 : (ents.find((x) => x.known && x.state === 'open')?.index ?? 0);
-  return { contractId: contract?.id, heroIds, packs, entrance, startShuttered: !!prev.startShuttered };
+  return { contractId: contract?.id, heroIds, packs, entrance };
 }
 
 /** A new visit to Lowgate: the last party (still on the roster, Keven first), empty packs, the last way in. */
@@ -154,7 +157,7 @@ export function freshLoadout(s: GameState, engine: Engine, last: Loadout | null)
   let heroIds = (last?.heroIds ?? []).filter((id) => c.roster.some((x) => x.id === id));
   if (!heroIds.length) heroIds = [c.roster.find((x) => x.cls === 'heir')?.id ?? c.roster[0]?.id].filter((x): x is string => !!x);
   heroIds.sort((a, b) => Number(isHeir(c, b)) - Number(isHeir(c, a)));
-  return cleanLoadout(s, engine, { heroIds, packs: {}, entrance: last?.entrance ?? 0, startShuttered: last?.startShuttered });
+  return cleanLoadout(s, engine, { heroIds, packs: {}, entrance: last?.entrance ?? 0 });
 }
 
 /** "Same as last time": the remembered loadout, if its heroes are all still on the roster. */
@@ -169,8 +172,9 @@ const slotsUsed = (items: Item[]) => items.reduce((a, i) => a + i.slots, 0);
 function packedIds(l: Loadout): Set<string> {
   return new Set(Object.values(l.packs).flat());
 }
-function lanternBearer(l: Loadout): string | undefined {
-  return l.heroIds.includes('keven') ? 'keven' : l.heroIds[0];
+/** V4.1 (WS2): who packs a torch or a lantern (no free lantern any more). */
+function lightCarriers(c: Campaign, l: Loadout): string[] {
+  return l.heroIds.filter((id) => packItems(c, l, id).some((i) => i.kind === 'torch' || i.kind === 'lantern'));
 }
 
 // ------------------------------------------------------------ small pieces
@@ -310,10 +314,17 @@ export function installTips(root: HTMLElement): void {
 /** UI state that lives between renders (not worth a save). */
 const ui = {
   packFor: null as string | null,
-  outfitTab: 'peddler' as 'peddler' | 'cart',
-  alePick: null as string | null,
+  /** V4.1 (spec 31.6): the Vendors side's open tab. */
+  outfitTab: 'mott' as VendorId,
+  /** V4.1 (spec 31.6): what the last purchase did, shown once on its row (and the slot it went to glows). */
+  flash: null as Flash | null,
   lastStep: 'job' as Step,
 };
+interface Flash {
+  row: string;
+  itemId?: string;
+  text: string;
+}
 
 export function campScreen(el: HTMLElement, s: GameState, host: CampHost): void {
   // Keep the scroll position and the focused control across re-renders of the same page.
@@ -356,7 +367,6 @@ export function campScreen(el: HTMLElement, s: GameState, host: CampHost): void 
 }
 
 function goto(host: CampHost, p: CampPage): void {
-  ui.alePick = null;
   sfx.play('click');
   host.setPage(p);
 }
@@ -422,6 +432,8 @@ const HOUSES: House[] = [
   { id: 'chapel', story: 'surgeon', windows: [], name: "Brother Aldric's infirmary", place: 'chapel' },
   { id: 'flagon', story: 'innkeeper', windows: ['copper', 'caskbook'], name: 'The Gilded Flagon', place: 'Gilded Flagon' },
   { id: 'forge', story: 'smith', windows: [], name: "Gerda's forge", place: 'forge' },
+  // V4.1 (spec 31.3)
+  { id: 'bench', story: 'alchemist', windows: [], name: "Ilse's bench", place: 'dye-house' },
 ];
 
 function houseSvg(home: boolean, windows: boolean[] | null): SVGElement {
@@ -470,7 +482,7 @@ function ribbon(s: GameState, host: CampHost): HTMLElement {
             if (plea) {
               sfx.play('click');
               host.setDraft({ ...host.draft, contractId: plea.id }, 'job');
-            } else goto(host, STORY[hs.story].step);
+            } else (showVendor(hs.story), goto(host, STORY[hs.story].step));
           },
         },
         pic,
@@ -515,7 +527,7 @@ function sameButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
       data: { same: '1' },
       tip: `Same as last time · ${names}\nThe same party, the same packs where the cart still has them, the same way in. Takes the job you've chosen and goes straight to Set out.`,
       onclick: () => {
-        const next = cleanLoadout(s, host.engine, { contractId: l.contractId, heroIds: [...last.heroIds], packs: structuredClone(last.packs ?? {}), entrance: selectable(ents, last.entrance) ? last.entrance : 0, startShuttered: !!last.startShuttered });
+        const next = cleanLoadout(s, host.engine, { contractId: l.contractId, heroIds: [...last.heroIds], packs: structuredClone(last.packs ?? {}), entrance: selectable(ents, last.entrance) ? last.entrance : 0 });
         sfx.play('click');
         host.setDraft(next, 'setout');
       },
@@ -554,7 +566,7 @@ function delveButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
 
 // ------------------------------------------------------------ step 1: Job
 
-const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false };
+const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
 export function villageOf(s: GameState): Village {
   return s.campaign.village ?? NO_VILLAGE;
 }
@@ -588,6 +600,12 @@ function welcomeCard(host: CampHost): HTMLElement {
   );
 }
 
+/** V4.1 (spec 31.6): a villager's "Show me" (or their house) opens their vendor tab on the Outfit step. */
+function showVendor(id: StoryId): void {
+  const v = vendorOfStory(id);
+  if (v) ui.outfitTab = v;
+}
+
 function wonBackBanner(host: CampHost): HTMLElement {
   const ids = host.wonBack;
   const last = ids[ids.length - 1]!;
@@ -604,7 +622,7 @@ function wonBackBanner(host: CampHost): HTMLElement {
     h(
       'div',
       { class: 'lg-wonback-b' },
-      btn({ class: 'btn lg-btn lg-primary', k: 'wb-show', data: { wonback: 'show' }, tip: `Show me · ${STEP_NAME[STORY[last].step]}`, onclick: () => host.dismissWonBack(STORY[last].step) }, 'Show me'),
+      btn({ class: 'btn lg-btn lg-primary', k: 'wb-show', data: { wonback: 'show' }, tip: `Show me · ${STEP_NAME[STORY[last].step]}`, onclick: () => (showVendor(last), host.dismissWonBack(STORY[last].step)) }, 'Show me'),
       btn({ class: 'btn lg-ghost', k: 'wb-later', data: { wonback: 'later' }, onclick: () => host.dismissWonBack() }, 'Later'),
     ),
   );
@@ -643,7 +661,7 @@ function jobStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): v
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
 
 /** A contract's warnings as risk chips (without the ones that repeat the card's own lines). */
-function riskChips(k: Contract, engine: Engine, captive?: Captive): HTMLElement[] {
+function riskChips(k: Contract, engine: Engine, captive?: Captive, s?: GameState): HTMLElement[] {
   const crewNames = new Set(Object.values(CREW).map((x) => x.name));
   const storyUnlocks = k.story ? STORIES.find((x) => x.id === k.story)?.unlocks : undefined;
   const site = engine.castle().contractSites.find((x) => x.id === k.siteId);
@@ -668,14 +686,34 @@ function riskChips(k: Contract, engine: Engine, captive?: Captive): HTMLElement[
     }
     out.push(h('span', { class: 'lg-chip lg-risk', 'data-tip': w }, warnTri(), w));
   }
+  // V4.1 (WS2, C3): the site is in castle memory and no fixed light reaches it.
+  let unlit = false;
+  try {
+    unlit = !!s && !!engine.siteUnlit?.(s, k.siteId);
+  } catch {
+    unlit = false;
+  }
+  if (unlit) out.push(h('span', { class: 'lg-chip lg-risk lg-unlit', 'data-chip': 'unlit', 'data-tip': "Unlit · You'll want light." }, warnTri(), 'Unlit'));
   return out;
+}
+
+/**
+ * V4.1 (spec 31.2, pillar 18): the card's pay: gold for a regular job; a story job shows the villager's gift instead
+ * ("Gift: 2 potions", or "No pay" for the copper and the cask book); a "Bring back" job "No pay".
+ */
+function bountyTag(k: Contract): HTMLElement {
+  if (k.bounty > 0) return h('span', { class: 'lg-bounty' }, h('span', { class: 'num' }, `${k.bounty}`), h('span', { class: 'lg-bounty-w' }, ' gold'));
+  const gift = k.story ? GIFTS[k.story] : undefined;
+  const tip = gift ? `A gift, not gold · ${gift.short}, the first time they come home.
+Jobs that win something back for Lowgate pay no bounty.` : 'No pay · Jobs that win something back pay no bounty.';
+  return h('span', { class: 'lg-bounty lg-gift', tabindex: 0, 'data-tip': tip }, h('span', { class: 'lg-bounty-w' }, gift ? `Gift: ${gift.short.charAt(0).toLowerCase()}${gift.short.slice(1)}` : 'No pay'));
 }
 
 function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive): HTMLElement {
   const st = k.story ? STORY[k.story] : null;
   const crew = captive ? CREW[captive.crew] : null;
   const chosen = l.contractId === k.id;
-  const risks = riskChips(k, host.engine, captive);
+  const risks = riskChips(k, host.engine, captive, host.state() ?? undefined);
   const card = h(
     'button',
     {
@@ -694,7 +732,7 @@ function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive
     st ? h('span', { class: 'lg-seal lg-card-seal', 'aria-hidden': 'true' }, '✦') : '',
     captive ? h('span', { class: 'lg-seal lg-seal-cap lg-card-seal', 'aria-hidden': 'true' }, '⛓') : '',
     h('span', { class: `lg-kick ${st || captive ? '' : 'lg-kick-dim'}` }, st ? 'Pinned by the village' : captive ? `Taken by ${crew?.name ?? 'a crew'}` : 'Bounty'),
-    h('span', { class: 'lg-card-row' }, h('span', { class: 'lg-card-kind' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), h('span', { class: 'lg-bounty' }, h('span', { class: 'num' }, `${k.bounty}`), h('span', { class: 'lg-bounty-w' }, ' gold'))),
+    h('span', { class: 'lg-card-row' }, h('span', { class: 'lg-card-kind' }, `${KIND_WORD[k.kind]} · Level ${k.level}`), bountyTag(k)),
     h('span', { class: 'lg-card-title' }, k.title),
     h('span', { class: 'lg-card-brief' }, k.brief),
     st ? h('span', { class: 'lg-winsback', 'data-tip': `Wins back · ${st.unlocks}.\n${cap(st.who)} goes home to Lowgate, not ${k.kind === 'rescue' ? 'into your roster' : 'to the cart. It can\'t be sold'}.` }, h('span', { class: 'lg-kick' }, 'Wins back'), h('span', null, st.unlocks)) : '',
@@ -954,44 +992,371 @@ function recruitCard(hr: Hero, price: number, s: GameState, l: Loadout, host: Ca
 
 // ------------------------------------------------------------ step 3: Outfit
 
+// V4.1 WS4 (spec 31.6): two counters. Left, "Yours": the party's packs (the hero being packed for marked "Packing"),
+// then Keven's cart. Right, "Vendors": a tab per vendor (Mott, Gerda, Ilse, the Flagon) listing everything they will
+// ever sell (vendors.ts), live rows with a price and a Buy button, locked rows dimmed with an in-voice hint.
 function outfitStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): void {
   const c = s.campaign;
-  const v = villageOf(s);
+  const flash = ui.flash;
+  ui.flash = null;
   const wrap = h('div', { class: 'lg-outfit' });
-  const left = h('section', { class: 'lg-packs', 'aria-label': 'Packs' });
-  const extras = v.smith || (v.innkeeper && v.copper);
+  const left = h('section', { class: 'lg-packs lg-yours', 'aria-label': 'Yours', 'data-side': 'yours' });
   left.append(
     h(
       'div',
       { class: 'lg-sh-l' },
+      h('span', { class: 'lg-kick lg-kick-dim' }, 'Yours'),
       h('h2', { class: 'lg-h2' }, 'Pack for the castle'),
-      h('p', { class: 'lg-sub' }, extras ? `${[v.smith ? "Gerda's forge" : '', v.innkeeper && v.copper ? "Wim's taps" : ''].filter(Boolean).join(' and ')} ${v.smith && v.innkeeper && v.copper ? 'are' : 'is'} open: ${v.smith && v.innkeeper && v.copper ? 'gear and ales' : v.smith ? 'gear' : 'ales'} now live on each hero too.` : 'Four slots each. Pick a hero; what you buy goes in their pack.'),
+      h('p', { class: 'lg-sub' }, l.heroIds.length > 1 ? 'Four slots each. Click a hero to pack for them: what you buy or take off the cart goes in their pack.' : 'Four slots each. What you buy or take off the cart goes in the pack marked Packing.'),
     ),
   );
   if (!l.heroIds.length) left.append(h('p', { class: 'lg-empty' }, 'Nobody is going in yet. Pick a party first.'));
   for (const id of l.heroIds) {
     const hr = heroOf(c, id);
-    if (hr) left.append(loadoutCard(hr, s, l, host));
+    if (hr) left.append(loadoutCard(hr, s, l, host, flash?.itemId));
   }
   left.append(h('p', { class: 'lg-note' }, "Whatever you take in and don't bring out is lost. What you bring out goes on Keven's cart."));
-
-  const right = h('section', { class: 'lg-where', 'aria-label': 'Where to get gear' });
-  const cartN = c.stash.filter((i) => !packedIds(l).has(i.id)).length;
-  const tabs = h(
-    'div',
-    { class: 'lg-tabs', role: 'tablist' },
-    h('button', { type: 'button', role: 'tab', class: `lg-tab ${ui.outfitTab === 'peddler' ? 'on' : ''}`, 'aria-selected': ui.outfitTab === 'peddler' ? 'true' : 'false', 'data-tab': 'peddler', 'data-k': 'tab-peddler', onclick: () => ((ui.outfitTab = 'peddler'), host.setPage('outfit')) }, "The peddler's wagon"),
-    h('button', { type: 'button', role: 'tab', class: `lg-tab ${ui.outfitTab === 'cart' ? 'on' : ''}`, 'aria-selected': ui.outfitTab === 'cart' ? 'true' : 'false', 'data-tab': 'cart', 'data-k': 'tab-cart', onclick: () => ((ui.outfitTab = 'cart'), host.setPage('outfit')) }, "Keven's cart ", h('span', { class: 'lg-tab-n num' }, cartN ? `${cartN}` : 'empty')),
+  const cartN = c.stash.filter((i) => !packedIds(l).has(i.id) && !i.story && i.kind !== 'gold').length;
+  const cart = h(
+    'section',
+    { class: 'lg-cartbox', 'aria-label': "Keven's cart", 'data-cartbox': '1' },
+    h('div', { class: 'lg-cartbox-h' }, cartIcon(), h('h3', { class: 'lg-h3' }, "Keven's cart"), h('span', { class: 'lg-sub' }, cartN ? `${numWord(cartN)} thing${cartN === 1 ? '' : 's'} not packed` : 'Nothing waiting')),
   );
-  const body = h('div', { class: 'lg-tabbody', role: 'tabpanel' });
-  if (ui.outfitTab === 'peddler') peddler(body, s, l, host);
-  else cartBody(body, s, l, host, 'outfit');
-  right.append(tabs, body);
-  wrap.append(left, right);
+  const cartIn = h('div', { class: 'lg-cartbox-b' });
+  cartBody(cartIn, s, l, host, 'outfit');
+  cart.append(cartIn);
+  left.append(cart);
+  wrap.append(left, vendorsSide(s, l, host, flash));
   main.append(wrap);
 }
 
-function packSlots(c: Campaign, l: Loadout, hr: Hero, host: CampHost, page: CampPage): HTMLElement {
+/** The engine's lists, defensively (a missing helper means nothing sold, not a broken page). */
+function offersOf(s: GameState, host: CampHost): { shop: ShopOffer[]; ales: AleOffer[] } {
+  let shop: ShopOffer[] = [];
+  let ales: AleOffer[] = [];
+  try {
+    shop = host.engine.shop(s);
+  } catch {
+    shop = [];
+  }
+  try {
+    ales = host.engine.ales(s);
+  } catch {
+    ales = [];
+  }
+  return { shop, ales };
+}
+
+const lockIcon = (size = 14) => svg('svg', { width: size, height: size, viewBox: '0 0 14 14', 'aria-hidden': 'true' }, svg('path', { d: 'M4 6.5 V4.5 A3 3 0 0 1 10 4.5 V6.5', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3 }), svg('rect', { x: 2.5, y: 6.5, width: 9, height: 6.5, rx: 1, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3 }));
+const coinS = () => svg('svg', { width: 14, height: 14, viewBox: '0 0 18 18', 'aria-hidden': 'true', class: 'lg-coin' }, svg('circle', { cx: 9, cy: 9, r: 7.5, fill: 'none', stroke: '#d9a93a', 'stroke-width': 1.8 }), svg('circle', { cx: 9, cy: 9, r: 3.5, fill: 'none', stroke: '#d9a93a', 'stroke-width': 1.4 }));
+const priceTag = (n: number, label?: string) => h('span', { class: 'lg-vprice', 'data-price': `${n}` }, coinS(), h('span', { class: 'num' }, label ?? `${n}`));
+
+/** The selling counter: four vendor tabs, always all four. */
+function vendorsSide(s: GameState, l: Loadout, host: CampHost, flash: Flash | null): HTMLElement {
+  const c = s.campaign;
+  const v = villageOf(s);
+  const who = ui.packFor ? heroOf(c, ui.packFor) : undefined;
+  const { shop, ales } = offersOf(s, host);
+  const side = h('section', { class: 'lg-where lg-vendors', 'aria-label': 'Vendors', 'data-side': 'vendors' });
+  side.append(
+    h(
+      'div',
+      { class: 'lg-vend-top' },
+      h('span', { class: 'lg-kick' }, 'Vendors'),
+      who
+        ? h('span', { class: 'lg-buyfor', tabindex: 0, 'data-tip': `Buying for ${who.name} · Gear and ales are for them; wares go in their pack while it has room, else on Keven's cart.${l.heroIds.length > 1 ? '\nClick another hero on the left to buy for them.' : ''}` }, h('span', { class: 'lg-sub' }, 'Buying for'), hexBadge(who.cls, 'sm'), h('b', null, who.name))
+        : h('span', { class: 'lg-buyfor' }, h('span', { class: 'lg-sub' }, "Nobody to pack for: wares go on Keven's cart.")),
+    ),
+  );
+  const tabs = h('div', { class: 'lg-tabs lg-vtabs', role: 'tablist', 'aria-label': 'Vendors' });
+  for (const id of VENDOR_IDS) {
+    const vd = VENDORS[id];
+    const open = vendorHome(v, id);
+    const on = ui.outfitTab === id;
+    const n = CATALOG.filter((r) => r.vendor === id && rowStatus(r, v, shop, ales).state === 'live').length;
+    tabs.append(
+      h(
+        'button',
+        {
+          type: 'button',
+          role: 'tab',
+          id: `lg-vtab-${id}`,
+          class: `lg-tab lg-vtab ${on ? 'on' : ''} ${open ? '' : 'away'}`,
+          'aria-selected': on ? 'true' : 'false',
+          'aria-controls': 'lg-vpanel',
+          tabindex: on ? 0 : -1,
+          'data-tab': id,
+          'data-vendor-tab': id,
+          'data-k': `vtab-${id}`,
+          'data-tip': open ? `${vd.tab} · ${n ? `${numWord(n)} thing${n === 1 ? '' : 's'} for sale now` : 'nothing for sale yet'}` : `${vd.tab} · not home\n${vd.away} ${vd.awaySub}`,
+          onclick: () => {
+            if (ui.outfitTab === id) return;
+            sfx.play('click');
+            ui.outfitTab = id;
+            host.setPage('outfit');
+          },
+        },
+        open ? '' : h('span', { class: 'lg-vtab-lock' }, lockIcon(12)),
+        h('span', null, vd.tab),
+        open ? h('span', { class: 'lg-tab-n num' }, `${n}`) : '',
+      ),
+    );
+  }
+  // Arrow keys move between the tabs (the tablist pattern); Tab goes on into the panel.
+  tabs.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const i = VENDOR_IDS.indexOf(ui.outfitTab);
+    const n = VENDOR_IDS.length;
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : (i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+    ui.outfitTab = VENDOR_IDS[j]!;
+    sfx.play('click');
+    host.setPage('outfit');
+  });
+  const panel = h('div', { class: 'lg-tabbody lg-vpanel', role: 'tabpanel', id: 'lg-vpanel', 'aria-labelledby': `lg-vtab-${ui.outfitTab}`, 'data-vendor': ui.outfitTab });
+  vendorPanel(panel, ui.outfitTab, s, l, host, who, shop, ales, flash);
+  side.append(tabs, panel);
+  return side;
+}
+
+function vendorPanel(el: HTMLElement, id: VendorId, s: GameState, l: Loadout, host: CampHost, who: Hero | undefined, shop: ShopOffer[], ales: AleOffer[], flash: Flash | null): void {
+  const c = s.campaign;
+  const v = villageOf(s);
+  const vd = VENDORS[id];
+  const open = vendorHome(v, id);
+  const say = id === 'mott' ? PEDDLER_PATTER[c.delveCount % PEDDLER_PATTER.length]! : (vd.say[c.delveCount % Math.max(1, vd.say.length)] ?? '');
+  el.append(
+    h(
+      'div',
+      { class: `lg-mott lg-vhead ${open ? '' : 'away'}`, 'data-home': open ? 'yes' : 'no' },
+      h('div', { class: 'lg-mott-face', 'aria-hidden': 'true' }, vd.face),
+      h('div', { class: 'lg-mott-t' }, h('span', { class: 'lg-mott-n' }, vd.name), open ? h('span', { class: 'lg-mott-say' }, `"${say}"`) : h('span', { class: 'lg-mott-say' }, vd.awaySub)),
+      h('span', { class: `lg-chip lg-vhome ${open ? 'yes' : 'no'}` }, open ? 'Open' : [lockIcon(12), ` ${vd.away}`]),
+    ),
+  );
+  if (id === 'flagon' && open) el.append(h('p', { class: 'lg-vnote' }, who?.ale ? `${who.name} has ${ALE[who.ale].name} waiting: one ale a hero, drunk as they go in.` : 'One ale a hero, poured now and drunk as they go in. It lasts the delve.'));
+  const packed = packedIds(l);
+  const known = new Set(CATALOG.flatMap((r) => r.keys));
+  for (const g of vendorGroups(id)) {
+    const rows = g.rows.map((r) => ({ r, st: rowStatus(r, v, shop, ales) })).filter((x) => SHOW_LOCKED || x.st.state === 'live');
+    if (!rows.length) continue;
+    el.append(h('div', { class: 'lg-kick lg-kick-dim lg-wgroup' }, g.group), h('div', { class: 'lg-vrows', role: 'list' }, ...rows.map(({ r, st }) => vendorRow(r, st, s, l, host, who, packed, flash))));
+  }
+  // A ware the engine sells that the catalog doesn't know yet still shows, live, under its seller (a builder forgot vendors.ts).
+  if (id !== 'flagon') {
+    const extra = shop.filter((o) => !known.has(o.kind) && tabOf(o.vendor) === id && !o.locked);
+    if (extra.length) {
+      el.append(
+        h('div', { class: 'lg-kick lg-kick-dim lg-wgroup' }, 'Also'),
+        h('div', { class: 'lg-vrows', role: 'list' }, ...extra.map((o) => vendorRow({ id: o.kind, vendor: id, kind: 'ware', keys: [o.kind], name: o.name, group: 'Also', use: WARE[o.kind]?.short ?? o.text, price: o.price, gate: [], hint: '' }, { state: 'live', key: o.kind, price: o.price, name: o.name, text: o.text }, s, l, host, who, packed, flash))),
+      );
+    }
+  }
+  const perks = PERKS.filter((p) => p.vendor === id);
+  if (perks.length) {
+    el.append(
+      h('div', { class: 'lg-kick lg-kick-dim lg-wgroup' }, 'Lowgate looks after its own'),
+      h(
+        'div',
+        { class: 'lg-vrows', role: 'list' },
+        ...perks.map((p) => {
+          const st = perkStatus(p, v);
+          const live = st === 'live';
+          return h(
+            'div',
+            { class: `lg-vrow lg-perk ${live ? 'live' : 'locked'}`, role: 'listitem', tabindex: 0, 'data-perk': p.id, 'data-state': st, 'data-tip': live ? `${p.name} · the village's doing\n${p.live}\nNothing to buy: it just happens.` : `${p.name} · not yet\n${st === 'soon' ? 'Soon. They\'re working on it.' : p.hint}` },
+            h('span', { class: `lg-wg ${live ? '' : 'dashed'}`, 'aria-hidden': 'true' }, live ? '✦' : lockIcon(14)),
+            h('span', { class: 'lg-vrow-t' }, h('span', { class: 'lg-vrow-n' }, p.name), h('span', { class: 'lg-vrow-u' }, live ? p.live : st === 'soon' ? 'Not yet.' : 'Locked.')),
+            h('span', { class: 'lg-vrow-own' }, live ? h('span', { class: 'lg-badge on' }, 'Every delve') : ''),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+/** Badges for what the party already has of a ware: "2 packed", "1 on the cart" (never a price). */
+function ownedBadges(c: Campaign, keys: string[], packed: Set<string>): HTMLElement {
+  const mine = c.stash.filter((i) => keys.includes(i.kind));
+  const nPacked = mine.filter((i) => packed.has(i.id)).length;
+  const nCart = mine.length - nPacked;
+  // Always a cell, so the price and Buy columns line up row to row.
+  return h('span', { class: 'lg-badges-r' }, nPacked ? h('span', { class: 'lg-badge on', 'data-owned': 'packed' }, `${nPacked} packed`) : '', nCart ? h('span', { class: 'lg-badge', 'data-owned': 'cart' }, `${nCart} on the cart`) : '');
+}
+
+function tierPips(tier: number, of: string): HTMLElement {
+  return h('span', { class: 'lg-pips-s', 'aria-label': `${of}: tier ${tier} of 2` }, h('i', { class: `lg-pip ${tier >= 1 ? 'on' : ''}` }), h('i', { class: `lg-pip ${tier >= 2 ? 'on' : ''}` }));
+}
+
+function vendorRow(r: CatalogRow, st: RowStatus, s: GameState, l: Loadout, host: CampHost, who: Hero | undefined, packed: Set<string>, flash: Flash | null): HTMLElement {
+  const c = s.campaign;
+  const glyph = r.glyph ?? (r.kind === 'ale' ? ALE[r.keys[0] as AleKind]?.glyph : [st.key, ...r.keys].map((k) => (k ? itemGlyph(k) : '•')).find((g) => g !== '•')) ?? '•';
+  const use = r.kind === 'ale' ? (ALE_SHORT[r.keys[0] as AleKind] ?? r.use) : r.use;
+  const base = { class: `lg-vrow ${st.state}`, role: 'listitem', 'data-row': r.id, 'data-state': st.state, 'data-vendor': r.vendor, 'data-kind': r.kind };
+  const glyphEl = (dim = false) => h('span', { class: `lg-wg ${dim ? 'dashed' : ''}`, 'aria-hidden': 'true' }, glyph);
+  // Locked, or not sold yet: dimmed, a lock, no price, no Buy. The hover is the hint, in voice, never the rule.
+  if (st.state === 'locked' || st.state === 'soon') {
+    const awayHint = !vendorHome(villageOf(s), r.vendor) && VENDORS[r.vendor].awayHint;
+    return h(
+      'div',
+      { ...base, tabindex: 0, 'aria-label': `${st.name}, locked`, 'data-tip': `${st.name} · locked\n${awayHint || st.hint || ''}`, 'data-hint': awayHint || st.hint || '' },
+      glyphEl(true),
+      h('span', { class: 'lg-vrow-t' }, h('span', { class: 'lg-vrow-n' }, st.name), h('span', { class: 'lg-vrow-u' }, use)),
+      h('span', { class: 'lg-vrow-own' }),
+      h('span', { class: 'lg-vlock' }, lockIcon(14), h('span', null, st.state === 'soon' ? 'Not yet' : 'Locked')),
+    );
+  }
+  // Sold by someone else now (a pair makes it cheaper there): a pointer, no Buy.
+  if (st.state === 'moved') {
+    const to = VENDORS[st.movedTo!];
+    return h(
+      'div',
+      { ...base, 'data-tip': `${st.name} · at ${to.tab.replace(/^The /, 'the ')} now\nCheaper there, now the two of them work together.` },
+      glyphEl(true),
+      h('span', { class: 'lg-vrow-t' }, h('span', { class: 'lg-vrow-n' }, st.name), h('span', { class: 'lg-vrow-u' }, `${to.tab} sells these now.`)),
+      ownedBadges(c, r.keys, packed),
+      btn({ class: 'btn lg-ghost lg-btn-s lg-vgo', k: `go-${r.id}`, data: { goto: st.movedTo! }, tip: `Go to ${to.tab}`, onclick: () => ((ui.outfitTab = st.movedTo!), sfx.play('click'), host.setPage('outfit')) }, `${to.tab} `, h('span', { 'aria-hidden': 'true' }, '→')),
+    );
+  }
+  const note = flash?.row === r.id ? h('span', { class: 'lg-vflash', role: 'status' }, flash.text) : '';
+  const info = (tip: string, extra?: HTMLElement | '') => h('span', { class: 'lg-vrow-t', 'data-tip': tip }, h('span', { class: 'lg-vrow-n' }, st.name, extra ?? ''), h('span', { class: 'lg-vrow-u' }, use), note);
+  const nobody = 'Nobody to buy for. Pick a party first.';
+  if (r.kind === 'ware') {
+    const short = c.gold < st.price;
+    const fits = who ? slotsUsed(packItems(c, l, who.id)) + 1 <= PACK_SLOTS : false;
+    const where = who ? (fits ? `Goes in ${who.name}'s pack.` : `${who.name}'s pack is full: it goes on Keven's cart.`) : "Goes on Keven's cart.";
+    const rule = ITEM_EFFECT[itemBase(st.key!)] ?? st.text ?? '';
+    return h(
+      'div',
+      base,
+      glyphEl(),
+      info(`${st.name} · ${st.price} gold\n${rule}`),
+      ownedBadges(c, r.keys, packed),
+      priceTag(st.price),
+      btn(
+        {
+          class: 'btn lg-btn-s lg-primary lg-buy',
+          k: `buy-${r.id}`,
+          data: { buy: r.id, ware: st.key! },
+          off: short,
+          tip: short ? `Buy · ${st.price} gold\nYou have ${c.gold} gold.` : `Buy ${st.name} · ${st.price} gold\n${rule}\n${where}`,
+          onclick: async () => {
+            const before = new Set(c.stash.map((i) => i.id));
+            if (!(await host.send({ type: 'buy', kind: st.key as ShopOffer['kind'] }))) return;
+            sfx.play('coin');
+            const now = host.state();
+            const it = now?.campaign.stash.find((i) => !before.has(i.id));
+            if (it && who && slotsUsed(packItems(now!.campaign, l, who.id)) + it.slots <= PACK_SLOTS) {
+              ui.flash = { row: r.id, itemId: it.id, text: `Into ${who.name}'s pack.` };
+              const next = structuredClone(l);
+              (next.packs[who.id] ??= []).push(it.id);
+              host.setDraft(next, 'outfit');
+            } else {
+              ui.flash = { row: r.id, text: who ? `${who.name}'s pack is full: it's on Keven's cart.` : "It's on Keven's cart." };
+              host.setPage('outfit');
+            }
+          },
+        },
+        'Buy · ',
+        h('span', { class: 'num' }, `${st.price}`),
+      ),
+    );
+  }
+  if (r.kind === 'gear') {
+    const part = r.keys[0] as 'weapon' | 'armor';
+    const word = part === 'weapon' ? 'Blade' : 'Mail';
+    const what = part === 'weapon' ? 'Each tier adds +10% per slot to every weapon roll.' : 'Each tier soaks 1 more damage per hit.';
+    const tier = who ? (part === 'weapon' ? who.weaponTier : who.armorTier) : 0;
+    const price = tier >= 2 ? null : (part === 'weapon' ? WEAPON_PRICE : ARMOR_PRICE)[tier + 1]!;
+    const short = price !== null && c.gold < price;
+    const verb = tier === 0 ? 'Forge' : 'Hone';
+    const info2 = info(`${word} · ${who ? `${who.name}: tier ${tier} of 2` : 'for a hero'}\n${what}${price !== null ? `\nTier ${tier + 1}: ${price} gold.` : ''}`, who ? tierPips(tier, word) : '');
+    if (who && price === null) return h('div', base, glyphEl(), info2, h('span', { class: 'lg-vrow-own' }, h('span', { class: 'lg-badge on' }, `${who.name}: the best`)), h('span', { class: 'lg-vdone' }, 'The best Gerda makes'));
+    return h(
+      'div',
+      base,
+      glyphEl(),
+      info2,
+      h('span', { class: 'lg-vrow-own' }, who && tier > 0 ? h('span', { class: 'lg-badge on' }, `${who.name}: tier ${tier}`) : ''),
+      priceTag(price ?? 0),
+      btn(
+        {
+          class: 'btn lg-btn-s lg-primary lg-buy',
+          k: `buy-${r.id}`,
+          data: { buy: r.id, upgrade: part, hero: who?.id ?? '' },
+          off: !who || short,
+          tip: !who ? `${verb} · ${price} gold\n${nobody}` : short ? `${verb} for ${who.name} · ${price} gold\nYou have ${c.gold} gold.` : `${verb} for ${who.name} · ${price} gold\n${what} Tier ${tier} to ${tier + 1}.`,
+          onclick: async () => {
+            if (await host.send({ type: 'upgrade', heroId: who!.id, part })) sfx.play('smash', { pitch: 2, gain: 0.4 });
+          },
+        },
+        `${verb}${who ? ` for ${who.name}` : ''} · `,
+        h('span', { class: 'num' }, `${price}`),
+      ),
+    );
+  }
+  if (r.kind === 'shield') {
+    const free = (c.credits?.shield ?? 0) > 0; // V4.1 (spec 31.2): Gerda's gift
+    const price = free ? 0 : V37.shieldPrice;
+    const what = 'Ranged hits do 1 less; 2 less while braced. Not the Dragon\'s breath. Any class.';
+    const short = c.gold < price;
+    const info2 = info(`Shield · ${free ? 'free, Gerda\'s gift' : `${price} gold`}\n${what}`);
+    if (who?.shield) return h('div', base, glyphEl(), info2, h('span', { class: 'lg-vrow-own' }, h('span', { class: 'lg-badge on' }, `${who.name} carries one`)), h('span', { class: 'lg-vdone' }, 'Carried'));
+    return h(
+      'div',
+      { ...base, class: `${base.class} ${free ? 'gift' : ''}` },
+      glyphEl(),
+      info2,
+      h('span', { class: 'lg-vrow-own' }),
+      free ? h('span', { class: 'lg-vprice gift', 'data-price': '0' }, coinS(), h('span', null, 'Free')) : priceTag(price),
+      btn(
+        {
+          class: 'btn lg-btn-s lg-primary lg-buy',
+          k: `buy-${r.id}`,
+          data: { buy: r.id, shield: who?.id ?? '' },
+          off: !who || short,
+          tip: !who ? `Shield · ${nobody}` : short ? `Shield for ${who.name} · ${price} gold\nYou have ${c.gold} gold.` : free ? `Shield for ${who.name} · free\nGerda owes you one. ${what}` : `Shield for ${who.name} · ${price} gold\n${what}`,
+          onclick: async () => {
+            if (await host.send({ type: 'buyShield', heroId: who!.id })) sfx.play('smash', { pitch: 1.6, gain: 0.4 });
+          },
+        },
+        ...(free ? [`Free${who ? ` for ${who.name}` : ''} · a gift`] : [`Buy${who ? ` for ${who.name}` : ''} · `, h('span', { class: 'num' }, `${price}`)]),
+      ),
+    );
+  }
+  // An ale, poured for the hero being packed for.
+  const kind = st.key as AleKind;
+  const a = ALE[kind];
+  const short = c.gold < st.price;
+  const party = l.heroIds.map((id) => heroOf(c, id)).filter((x): x is Hero => !!x);
+  const drinkers = party.filter((x) => x.ale === kind).map((x) => x.name);
+  const has = who?.ale ? ALE[who.ale] : undefined;
+  const ruleTxt = a?.text ?? st.text ?? '';
+  return h(
+    'div',
+    base,
+    glyphEl(),
+    info(`${st.name} · ${st.price} gold\n${ruleTxt}`),
+    h('span', { class: 'lg-vrow-own' }, drinkers.length ? h('span', { class: 'lg-badge on', 'data-owned': 'poured' }, `Poured: ${drinkers.join(', ')}`) : ''),
+    priceTag(st.price),
+    btn(
+      {
+        class: 'btn lg-btn-s lg-primary lg-buy',
+        k: `buy-${r.id}`,
+        data: { buy: r.id, pour: kind, hero: who?.id ?? '' },
+        off: !who || short || !!has,
+        tip: !who ? `Pour · ${st.price} gold\n${nobody}` : has ? `${who.name} has an ale waiting · ${has.name}\nOne a delve, drunk as they go in.` : short ? `Pour for ${who.name} · ${st.price} gold\nYou have ${c.gold} gold.` : `Pour for ${who.name} · ${st.price} gold\n${ruleTxt}\nDrunk as ${who.name} starts the next delve.`,
+        onclick: async () => {
+          if (await host.send({ type: 'buyAle', heroId: who!.id, ale: kind })) sfx.play('coin', { pitch: 0.8 });
+        },
+      },
+      `Pour${who ? ` for ${who.name}` : ''} · `,
+      h('span', { class: 'num' }, `${st.price}`),
+    ),
+  );
+}
+
+function packSlots(c: Campaign, l: Loadout, hr: Hero, host: CampHost, page: CampPage, fresh?: string): HTMLElement {
   const items = packItems(c, l, hr.id);
   const row = h('div', { class: 'lg-sl-row', 'aria-label': `${hr.name}'s pack` });
   let used = 0;
@@ -1001,7 +1366,7 @@ function packSlots(c: Campaign, l: Loadout, hr: Hero, host: CampHost, page: Camp
     row.append(
       btn(
         {
-          class: `lg-sl full ${span > 1 ? 'two' : ''} ${isValuable(it) ? 'val' : ''}`,
+          class: `lg-sl full ${span > 1 ? 'two' : ''} ${isValuable(it) ? 'val' : ''} ${fresh === it.id ? 'new' : ''}`,
           k: `pk-${it.id}`,
           data: { packed: it.id, kind: it.kind },
           label: `${itemLabel(it)}, back to the cart`,
@@ -1037,11 +1402,21 @@ function kitLine(hr: Hero): HTMLElement | '' {
   );
 }
 
-function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLElement {
+/** What a hero already has from the forge and the Flagon: tier pips, the shield, the ale poured (never a price). */
+function haveLine(hr: Hero): HTMLElement | '' {
+  const chips: HTMLElement[] = [];
+  const gear = (word: string, tier: number, what: string) => chips.push(h('span', { class: 'lg-have', tabindex: 0, 'data-have': word.toLowerCase(), 'data-tip': `${word} · tier ${tier} of 2\n${what}` }, h('span', { class: 'lg-gl' }, word), tierPips(tier, word)));
+  if (hr.weaponTier > 0) gear('Blade', hr.weaponTier, 'From Gerda\'s forge. Each tier adds +10% per slot to every weapon roll.');
+  if (hr.armorTier > 0) gear('Mail', hr.armorTier, 'From Gerda\'s forge. Each tier soaks 1 more damage per hit.');
+  if (hr.shield) chips.push(h('span', { class: 'lg-have', tabindex: 0, 'data-have': 'shield', 'data-tip': `Shield · carried\nRanged hits on ${hr.name} do 1 less; 2 less while braced. Not the Dragon's breath.` }, h('span', { class: 'lg-g', 'aria-hidden': 'true' }, '⛨'), 'Shield'));
+  if (hr.ale) chips.push(h('span', { class: 'lg-have ale', tabindex: 0, 'data-have': 'ale', 'data-tip': `${ALE[hr.ale].name} · drunk when ${hr.name} starts the next delve\n${ALE[hr.ale].text}` }, h('span', { class: 'lg-g', 'aria-hidden': 'true' }, ALE[hr.ale].glyph), ALE[hr.ale].name));
+  return chips.length ? h('div', { class: 'lg-have-row' }, ...chips) : '';
+}
+
+function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost, fresh?: string): HTMLElement {
   const c = s.campaign;
-  const v = villageOf(s);
   const sel = ui.packFor === hr.id;
-  const bearer = lanternBearer(l) === hr.id;
+  const bearer = packItems(c, l, hr.id).some((i) => i.kind === 'lantern'); // V4.1 (WS2): Gerda's lantern, packed
   const pick = () => {
     if (ui.packFor === hr.id) return;
     ui.packFor = hr.id;
@@ -1058,197 +1433,15 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost): HTMLEl
       'div',
       { class: 'lg-hero-top' },
       hexBadge(hr.cls, 'md', statsTip(hr.cls, hr)),
-      h('span', { class: 'lg-hero-n' }, hr.name),
-      bearer ? h('span', { class: 'lg-lantern', tabindex: 0, 'data-tip': `Lantern · The lantern goes with ${hr.name}.\nIt is the party's clock: it burns down each round while open. Oil tops it up.` }, lanternIcon(), 'Lantern') : '',
-      sel ? h('span', { class: 'lg-kick lg-packing' }, 'Packing') : btn({ class: 'lg-pickpack', k: `pack-${hr.id}`, data: { packfor: hr.id }, tip: `${hr.name} · What you buy or take off the cart goes in this pack.`, onclick: pick }, 'Pick to pack'),
+      h('span', { class: 'lg-hero-n' }, hr.name, h('span', { class: 'lg-hero-c' }, classLine(hr))),
+      bearer ? h('span', { class: 'lg-lantern', tabindex: 0, 'data-tip': `Lantern · ${hr.name} carries Gerda's lantern: 20 rounds, refilled in camp.\nIt burns down each round while open; the shutter is free. Lost if ${hr.name} falls.` }, lanternIcon(), 'Lantern') : '',
+      sel ? h('span', { class: 'lg-kick lg-packing', 'data-tip': `Packing · What you buy or take off the cart goes in ${hr.name}'s pack; gear and ales are for ${hr.name}.`, tabindex: 0 }, 'Packing') : btn({ class: 'lg-pickpack', k: `pack-${hr.id}`, data: { packfor: hr.id }, tip: `${hr.name} · What you buy or take off the cart goes in this pack.`, onclick: pick }, 'Pack for them'),
     ),
-    packSlots(c, l, hr, host, 'outfit'),
+    packSlots(c, l, hr, host, 'outfit', fresh),
     kitLine(hr),
+    haveLine(hr),
   );
-  // The forge and the Flagon, once won back.
-  if (v.smith || (v.innkeeper && v.copper)) {
-    const gear = h('div', { class: 'lg-gear-row' });
-    if (v.smith) {
-      const part = (p: 'weapon' | 'armor') => {
-        const tier = p === 'weapon' ? hr.weaponTier : hr.armorTier;
-        const price = tier >= 2 ? null : (p === 'weapon' ? WEAPON_PRICE : ARMOR_PRICE)[tier + 1]!;
-        const word = p === 'weapon' ? 'Blade' : 'Mail';
-        const what = p === 'weapon' ? 'Each tier adds +10% per slot to every weapon roll.' : 'Each tier soaks 1 more damage per hit.';
-        const short = price !== null && c.gold < price;
-        return btn(
-          {
-            class: 'lg-gear',
-            k: `gear-${p}-${hr.id}`,
-            data: { upgrade: p, hero: hr.id },
-            off: price === null || short,
-            tip: price === null ? `${word} · tier 2 of 2\nThe best Gerda makes. ${what}` : `${word} · tier ${tier} of 2\n${what} Tier ${tier + 1}: ${price} gold.${short ? `\nYou have ${c.gold} gold.` : ''}`,
-            onclick: async () => {
-              if (await host.send({ type: 'upgrade', heroId: hr.id, part: p })) sfx.play('smash', { pitch: 2, gain: 0.4 });
-            },
-          },
-          h('span', { class: 'lg-gl' }, word, h('span', { class: 'lg-pips-s', 'aria-label': `tier ${tier} of 2` }, h('i', { class: `lg-pip ${tier >= 1 ? 'on' : ''}` }), h('i', { class: `lg-pip ${tier >= 2 ? 'on' : ''}` }))),
-          h('span', { class: `lg-gear-p ${price === null ? 'dim' : ''}` }, price === null ? 'The best' : [tier === 0 ? 'Forge · ' : 'Hone · ', h('span', { class: 'num' }, `${price}`)]),
-        );
-      };
-      gear.append(part('weapon'), part('armor'));
-      const shieldPrice = V37.shieldPrice;
-      gear.append(
-        hr.shield
-          ? h('div', { class: 'lg-gear have', tabindex: 0, 'data-tip': `Shield · carried\nRanged hits on ${hr.name} do 1 less; 2 less while braced. Not the Dragon's breath.` }, h('span', { class: 'lg-gl' }, 'Shield'), h('span', { class: 'lg-gear-p dim' }, 'Carried'))
-          : btn(
-              {
-                class: 'lg-gear',
-                k: `shield-${hr.id}`,
-                data: { shield: hr.id },
-                off: c.gold < shieldPrice,
-                tip: `Shield · ${shieldPrice} gold\nRanged hits do 1 less; 2 less while braced. Any class.${c.gold < shieldPrice ? `\nYou have ${c.gold} gold.` : ''}`,
-                onclick: async () => {
-                  if (await host.send({ type: 'buyShield', heroId: hr.id })) sfx.play('smash', { pitch: 1.6, gain: 0.4 });
-                },
-              },
-              h('span', { class: 'lg-gl' }, 'Shield'),
-              h('span', { class: 'lg-gear-p' }, 'Buy · ', h('span', { class: 'num' }, `${shieldPrice}`)),
-            ),
-      );
-    }
-    if (v.innkeeper && v.copper) {
-      const open = ui.alePick === hr.id;
-      gear.append(
-        hr.ale
-          ? h('div', { class: 'lg-gear have ale', tabindex: 0, 'data-tip': `${ALE[hr.ale].name} · drunk when ${hr.name} starts the next delve\n${ALE[hr.ale].text}` }, h('span', { class: 'lg-gl' }, 'Ale'), h('span', { class: 'lg-gear-p' }, ALE[hr.ale].name))
-          : btn(
-              {
-                class: `lg-gear ${open ? 'open' : ''}`,
-                k: `ale-${hr.id}`,
-                data: { ale: hr.id },
-                tip: `Ale · one per hero, drunk as they start the next delve. It lasts that delve.`,
-                onclick: () => {
-                  ui.alePick = open ? null : hr.id;
-                  host.setPage('outfit');
-                },
-              },
-              h('span', { class: 'lg-gl' }, 'Ale'),
-              h('span', { class: 'lg-gear-p' }, 'Pour one'),
-            ),
-      );
-      if (open && !hr.ale) {
-        const pk = alePicker(hr, s, host);
-        card.append(pk);
-        requestAnimationFrame(() => {
-          pk.scrollIntoView({ block: 'nearest' });
-          pk.querySelector<HTMLElement>('button:not(.is-off)')?.focus({ preventScroll: true });
-        });
-      }
-    }
-    card.append(gear);
-  }
   return card;
-}
-
-function alePicker(hr: Hero, s: GameState, host: CampHost): HTMLElement {
-  const c = s.campaign;
-  let offers: ReturnType<Engine['ales']> = [];
-  try {
-    offers = host.engine.ales(s).filter((o) => !o.locked);
-  } catch {
-    offers = [];
-  }
-  const close = () => {
-    ui.alePick = null;
-    host.setPage('outfit');
-  };
-  const box = h(
-    'div',
-    { class: 'lg-alepick', role: 'dialog', 'aria-label': `Pour an ale for ${hr.name}` },
-    h('span', { class: 'lg-alepick-h' }, h('b', null, `The Flagon's taps, for ${hr.name}`), h('span', { class: 'lg-sub' }, 'one per delve')),
-    ...offers.map((o) => {
-      const a = ALE[o.kind as AleKind];
-      const short = c.gold < o.price;
-      return btn(
-        {
-          class: 'lg-alerow',
-          k: `pour-${o.kind}`,
-          data: { pour: o.kind },
-          off: short,
-          tip: `${o.name || a.name} · ${o.price} gold\n${a.text}${short ? `\nYou have ${c.gold} gold.` : ''}`,
-          onclick: async () => {
-            ui.alePick = null;
-            if (await host.send({ type: 'buyAle', heroId: hr.id, ale: o.kind })) sfx.play('coin', { pitch: 0.8 });
-            else host.setPage('outfit');
-          },
-        },
-        h('span', { class: 'lg-alerow-t' }, h('span', { class: 'lg-alerow-n' }, `${a.glyph} ${o.name || a.name}`), h('span', { class: 'lg-alerow-e' }, ALE_SHORT[o.kind as AleKind] ?? a.text)),
-        h('span', { class: 'num lg-price' }, `${o.price}`),
-      );
-    }),
-    btn({ class: 'btn lg-ghost lg-btn-s', k: 'ale-close', onclick: close }, 'Not now'),
-  );
-  box.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') close();
-  });
-  return box;
-}
-
-function peddler(el: HTMLElement, s: GameState, l: Loadout, host: CampHost): void {
-  const c = s.campaign;
-  const v = villageOf(s);
-  const who = ui.packFor ? heroOf(c, ui.packFor) : undefined;
-  el.append(
-    h(
-      'div',
-      { class: 'lg-mott' },
-      h('div', { class: 'lg-mott-face', 'aria-hidden': 'true' }, 'M'),
-      h('div', { class: 'lg-mott-t' }, h('span', { class: 'lg-mott-n' }, 'Mott, by the gate'), h('span', { class: 'lg-mott-say' }, `"${PEDDLER_PATTER[c.delveCount % PEDDLER_PATTER.length]}"`)),
-    ),
-  );
-  const offers = host.engine.shop(s);
-  const packed = packedIds(l);
-  const metal = offers.filter((o) => o.needs === 'smith');
-  const order = ['torch', 'oil', 'potion', 'antidote', 'nightsight', 'rope', 'charge', 'hook', 'key', 'lockpicks', 'dart', 'venomdart', 'smoke', 'glue', 'firecracker', 'caltrops'];
-  const shown = offers.filter((o) => !o.locked).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
-  for (const g of ['light', 'around', 'quiet'] as const) {
-    const list = shown.filter((o) => (WARE[o.kind]?.group ?? 'around') === g);
-    const tiles: HTMLElement[] = list.map((o) => wareTile(o, s, l, host, who, packed));
-    if (g === 'around' && !v.smith && metal.length)
-      tiles.push(h('div', { class: 'lg-ware metal', tabindex: 0, 'data-ware': 'metalwork', 'data-tip': `Metalwork · ${metal.map((o) => o.name).join(', ')}.\nThey need a smith.` }, h('span', { class: 'lg-wtop' }, h('span', { class: 'lg-wg dashed', 'aria-hidden': 'true' }, '⚿'), h('span', { class: 'lg-wn' }, 'Metalwork')), h('span', { class: 'lg-we' }, 'Hooks, keys and picks need a smith. Nobody in Lowgate works steel any more.')));
-    if (!tiles.length) continue;
-    el.append(h('div', { class: 'lg-kick lg-kick-dim lg-wgroup' }, WARE_GROUP[g]), h('div', { class: 'lg-wares' }, ...tiles));
-  }
-}
-
-function wareTile(o: ShopOffer, s: GameState, l: Loadout, host: CampHost, who: Hero | undefined, packed: Set<string>): HTMLElement {
-  const c = s.campaign;
-  const mine = c.stash.filter((i) => i.kind === o.kind);
-  const nPacked = mine.filter((i) => packed.has(i.id)).length;
-  const nCart = mine.length - nPacked;
-  const short = c.gold < o.price;
-  const fits = who ? slotsUsed(packItems(c, l, who.id)) + 1 <= PACK_SLOTS : false;
-  const where = who ? (fits ? `Goes in ${who.name}'s pack.` : `${who.name}'s pack is full: it goes on the cart.`) : "Goes on Keven's cart.";
-  const rule = ITEM_EFFECT[itemBase(o.kind)] ?? o.text;
-  return btn(
-    {
-      class: `lg-ware ${short ? 'dear' : ''} ${nPacked ? 'has' : ''}`,
-      k: `ware-${o.kind}`,
-      data: { ware: o.kind },
-      off: short,
-      tip: `${o.name} · ${o.price} gold\n${rule}\n${short ? `You have ${c.gold} gold.` : where}`,
-      onclick: async () => {
-        const before = new Set(c.stash.map((i) => i.id));
-        if (!(await host.send({ type: 'buy', kind: o.kind }))) return;
-        sfx.play('coin');
-        const now = host.state();
-        const it = now?.campaign.stash.find((i) => !before.has(i.id));
-        if (it && who && slotsUsed(packItems(now!.campaign, l, who.id)) + it.slots <= PACK_SLOTS) {
-          const next = structuredClone(l);
-          (next.packs[who.id] ??= []).push(it.id);
-          host.setDraft(next, 'outfit');
-        }
-      },
-    },
-    h('span', { class: 'lg-wtop' }, h('span', { class: 'lg-wg', 'aria-hidden': 'true' }, itemGlyph(o.kind)), h('span', { class: 'lg-wn' }, o.name), h('span', { class: 'lg-wp num' }, `${o.price}`)),
-    h('span', { class: 'lg-we' }, WARE[o.kind]?.short ?? o.text),
-    nPacked || nCart ? h('span', { class: 'lg-badges' }, nPacked ? h('span', { class: 'lg-badge on' }, `${nPacked} packed`) : '', nCart ? h('span', { class: 'lg-badge' }, `${nCart} on the cart`) : '') : '',
-  );
 }
 
 // ------------------------------------------------------------ Keven's cart (Outfit tab and side page)
@@ -1279,7 +1472,7 @@ function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, pag
   };
   const gear = c.stash.filter((i) => !isValuable(i) && i.kind !== 'gold' && !i.story && !packed.has(i.id));
   el.append(h('div', { class: 'lg-cart-h' }, h('span', { class: 'lg-kick' }, 'Gear · goes in packs'), h('span', { class: 'lg-sub' }, who ? `Click to pack it for ${who.name}` : 'Pick a party to pack for')));
-  if (!gear.length) el.append(h('p', { class: 'lg-empty sm' }, packed.size ? 'Everything here is packed.' : "No gear on the cart. The peddler's wagon has some."));
+  if (!gear.length) el.append(h('p', { class: 'lg-empty sm' }, packed.size ? 'Everything here is packed.' : 'No gear on the cart. The vendors have some.'));
   else
     el.append(
       h(
@@ -1406,7 +1599,7 @@ function setOutStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
       if (d < best) ((best = d), (closest = e.index));
     }
   }
-  const left = h('section', { class: 'lg-setout-l', 'aria-label': 'Entrance and lantern' });
+  const left = h('section', { class: 'lg-setout-l', 'aria-label': 'Entrance' });
   const lvl1 = castle.levels.find((x) => x.level === 1)?.name ?? 'the castle';
   left.append(stepHead('How do you go in?', open.length > 1 ? `${numWord(open.length)} ways into ${lvl1.replace(/^The /, 'the ')} that you know of. Each one is also a way out.` : 'The main gate is the only way in anyone knows. It is also the way out.'));
   left.append(sketch(s, l, host, ents, mem, siteKnown ? site!.at : null));
@@ -1439,13 +1632,9 @@ function setOutStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
     );
   }
   left.append(group);
-  const box = h('input', { type: 'checkbox', class: 'lg-check', 'data-k': 'shutter', checked: !!l.startShuttered }) as HTMLInputElement;
-  box.addEventListener('change', () => host.setDraft({ ...l, startShuttered: box.checked }, 'setout'));
-  const shutter = h('label', { class: 'lg-shutter prep-shutter' }, box, h('span', { class: 'lg-shutter-t' }, h('span', { class: 'lg-shutter-n' }, 'Go in with the lantern shut'), h('span', { class: 'lg-sub' }, 'Level 1 has daylight. A shut lantern burns no oil; open it when it gets dark.')));
-  // V4.0 (spec 30.5): with a sketch, the lantern choice sits under the plan so the sketch gets the left column's height.
+  // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone (no free lantern; packed lights go in unlit).
   const hasSketch = !!left.querySelector('.lg-sketch:not(.none)');
-  if (!hasSketch) left.append(shutter);
-  main.append(h('div', { class: 'lg-setout' }, left, hasSketch ? h('div', { class: 'lg-setout-r' }, plan(s, l, host), shutter) : plan(s, l, host)));
+  main.append(h('div', { class: 'lg-setout' }, left, hasSketch ? h('div', { class: 'lg-setout-r' }, plan(s, l, host)) : plan(s, l, host)));
 }
 
 function sketch(s: GameState, l: Loadout, host: CampHost, ents: EntranceInfo[], mem: Map<number, Set<string>>, site: { level: number; q: number; r: number } | null): HTMLElement {
@@ -1543,11 +1732,10 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   const c = s.campaign;
   const k = c.board.find((x) => x.id === l.contractId);
   const st = k?.story ? STORY[k.story] : null;
-  const bearer = lanternBearer(l);
   const box = h('aside', { class: 'lg-plan', 'aria-label': 'The plan' }, h('div', { class: 'lg-kick' }, 'The plan'));
   box.append(
     k
-      ? h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-t' }, k.title), h('span', { class: 'lg-plan-s' }, h('span', { class: 'num lg-goldtxt' }, `${k.bounty}`), ` gold${st ? ` · wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}` : ''}`), h('span', { class: 'lg-plan-s' }, k.brief))
+      ? h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-t' }, k.title), h('span', { class: 'lg-plan-s' }, k.bounty ? h('span', { class: 'num lg-goldtxt' }, `${k.bounty}`) : '', k.bounty ? ` gold${st ? ` · wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}` : ''}` : st ? `Wins back ${st.unlocks.charAt(0).toLowerCase()}${st.unlocks.slice(1)}${k.story && GIFTS[k.story] ? ` · gift: ${GIFTS[k.story]!.short.charAt(0).toLowerCase()}${GIFTS[k.story]!.short.slice(1)}` : ''}` : 'No pay: bring them home'), h('span', { class: 'lg-plan-s' }, k.brief))
       : h('div', { class: 'lg-plan-job' }, h('span', { class: 'lg-plan-s' }, 'No job chosen.')),
   );
   const who = h('div', { class: 'lg-plan-who' });
@@ -1555,7 +1743,7 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
   for (const id of l.heroIds) {
     const hr = heroOf(c, id);
     if (!hr) continue;
-    const carry = [...(bearer === id ? ['Lantern'] : []), ...packItems(c, l, id).map((i) => (i.kind === 'gem' || i.kind === 'jewelry' ? i.name : itemLabel(i)))];
+    const carry = [...packItems(c, l, id).map((i) => (i.kind === 'gem' || i.kind === 'jewelry' ? i.name : itemLabel(i)))];
     who.append(h('div', { class: 'lg-plan-hero', 'data-hero': id }, hexBadge(hr.cls, 'sm'), h('span', { class: 'lg-plan-n' }, hr.name), h('span', { class: 'lg-plan-c' }, carry.length ? carry.join(' · ') : 'Nothing packed')));
   }
   box.append(who);
@@ -1571,6 +1759,8 @@ function plan(s: GameState, l: Loadout, host: CampHost): HTMLElement {
     problem = null;
   }
   if (problem) box.append(h('div', { class: 'lg-plan-warn' }, warnTri('#ff8a8f', 16), h('span', null, problem)));
+  // V4.1 (WS2): nobody packs a torch or a lantern.
+  if (l.heroIds.length && !lightCarriers(c, l).length) box.append(h('div', { class: 'lg-plan-warn warn-light', 'data-warn': 'nolight' }, warnTri('#e8a33d', 16), h('span', null, "No light packed. Level 1's daylight will do; deeper, you'll want a torch.")));
   box.append(h('span', { class: 'lg-plan-s dim' }, 'Every step stays open: click one along the top to change it.'));
   return box;
 }

@@ -2,8 +2,10 @@
 // `member`/`rivalStats`) and use their packs with the heroes' own item rules, showing each use as
 // an intent the round before. The crew picks one target a round (focus fire), paths to hexes with
 // a line to it and out of the other heroes' sight. V4.0 (spec 28.8, owner): it carries off only a hero left helpless
-// (downed, dozing from a sleep dart, or V4.0 spec 29 paralyzed) and alone; a downed hero with friends near is finished instead.
+// (downed or dozing from a sleep dart) and alone; a downed hero with friends near is finished instead. V4.1 (spec 31.4):
+// members go down at 0 HP like heroes; crewmates potion them up, mend them up, or carry them out.
 
+import { brightestHero } from './light'; // V4.1 (WS2)
 import { distance, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Intent, Item, ItemKind, RivalClass } from './types';
 import {
@@ -21,8 +23,11 @@ import { blastArea, fuseAt, setFuse } from './charges';
 import { pusherFor, smokeOut } from './delve';
 import { faceToward, inRearHalf } from './stealth';
 import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals';
-import { cureVenom, envenom, isParalyzed, venomTakes } from './venom';
+import { curePoison, isPoisoned, poison, poisonTakes } from './poison';
+import { bringCarried, carrierOf, downedCrew } from './common'; // V4.1 (spec 31.4)
+import { MEND_UP_HP, POTION_HEAL } from './data'; // V4.1 (spec 31.4)
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- the pack
 
@@ -114,7 +119,8 @@ function inReach(r: RivalX, t: Target): boolean {
 }
 
 /**
- * Spec 20.4: one target a round for the whole crew: the lantern bearer when a member can reach them,
+ * Spec 20.4: one target a round for the whole crew: V4.1 (WS2) the hero carrying the most light (the biggest burning
+ * torch or lantern; was the lantern bearer) when a member can reach them,
  * else the lowest-HP hero a member can reach, else the hero nearest the crew on foot.
  */
 export function crewTarget(c: Ctx): Target | null {
@@ -122,7 +128,8 @@ export function crewTarget(c: Ctx): Target | null {
   const ms = rivalsOnMap(c);
   if (!ts.length || !ms.length) return null;
   const reach = (t: Target) => ms.some((r) => inReach(r, t));
-  const bearer = ts.find((t) => t.id === c.d.lanternBearer);
+  const brightest = brightestHero(c.d, ts.map((t) => t.id));
+  const bearer = brightest ? ts.find((t) => t.id === brightest) : undefined;
   if (bearer && reach(bearer)) return bearer;
   const near = ts.filter(reach).sort((a, b) => a.hero!.hp - b.hero!.hp || (a.id < b.id ? -1 : 1));
   if (near.length) return near[0]!;
@@ -255,24 +262,22 @@ function smokeIntent(c: Ctx, r: RivalX): Intent | null {
   return { kind: 'smoke', item: 'smoke', targetId: m.id, to: { ...m.at } };
 }
 
-/** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the lantern bearer, else the nearest hero in range 5 and sight. */
+/** Sleep dart: a hero alone first (spec 28.8: one the crew could carry off), else the hero carrying the most light (V4.1), else the nearest hero in range 5 and sight. */
 function dartIntent(c: Ctx, r: RivalX): Intent | null {
   if (!hasKit(r, 'dart')) return null;
-  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing && !isParalyzed(t.hero));
-  const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === c.d.lanternBearer) ?? seen[0];
+  const seen = heroesInSight(c, r, THROW_RANGE.dart).filter((t) => !(t.hero as HeroX | undefined)?.dozing);
+  const t = seen.find((x) => alone(c, x.hero as HeroX)) ?? seen.find((x) => x.id === brightestHero(c.d, seen.map((y) => y.id))) ?? seen[0];
   return t ? { kind: 'dart', item: 'dart', targetId: t.id } : null;
 }
 
 /**
- * V4.0 (spec 29.3, pillar 17): a venom dart at a hero in range 5 and sight the venom can take (not paralyzed already,
- * not envenomed: one dose is enough to count down): a hero alone first (spec 28.8's `alone`: nobody up within 4 to carry
- * them out, and paralyzed and alone the crew can carry them off), else the crew's target, else the nearest.
+ * V4.0 (spec 29.3, pillar 17), V4.1 (spec 31.4): a poison dart at a hero in range 5 and sight the poison can take (not
+ * poisoned yet, no Spider-milk Stout): a hero alone first (spec 28.8's `alone`), else the crew's target, else the nearest.
  */
 function venomIntent(c: Ctx, r: RivalX, t: Target | null): Intent | null {
   if (!hasKit(r, 'venomdart')) return null;
-  const seen = heroesInSight(c, r, THROW_RANGE.venomdart).filter((x) => x.hero && !(x.hero.venom ?? 0) && venomTakes(c, x.id));
+  const seen = heroesInSight(c, r, THROW_RANGE.venomdart).filter((x) => x.hero && poisonTakes(c, x.id));
   if (!seen.length) return null;
-  // Spec 28.8's "alone" (no other hero who is up within CAPTURE_ALONE): paralyzed and alone, the crew can carry them off.
   const lone = seen.find((x) => alone(c, x.hero as HeroX));
   const pick = lone ?? (t && seen.find((x) => x.id === t.id)) ?? seen[0]!;
   return { kind: 'venomdart', item: 'venomdart', targetId: pick.id };
@@ -476,8 +481,8 @@ function shadowIntent(c: Ctx, r: RivalX): Intent | null {
 function witchIntent(c: Ctx, r: RivalX): Intent | null {
   const mana = manaOf(r);
   if (mana < 1) return null;
-  // V4.0 (spec 29.6): Mend draws out venom too: a paralyzed or envenomed member first.
-  const sick = rivalsOnMap(c).filter((m) => ((m.venom ?? 0) > 0 || isParalyzed(m)) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)) || (a.id < b.id ? -1 : 1))[0];
+  // V4.1 (spec 31.4): Mend cures poison too: a poisoned member below full first.
+  const sick = rivalsOnMap(c).filter((m) => isPoisoned(m) && m.hp < m.maxHp && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => a.hp - b.hp || (a.id < b.id ? -1 : 1))[0];
   if (sick) return { kind: 'mend', targetId: sick.id };
   const hurt = rivalsOnMap(c).filter((m) => belowHalf(m) && within(m.at, r.at, SPELL_RANGE)).sort((a, b) => a.hp - b.hp || (a.id < b.id ? -1 : 1))[0];
   if (hurt) return { kind: 'mend', targetId: hurt.id };
@@ -636,16 +641,16 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       return true;
     }
     case 'venomdart': {
-      // V4.0 (spec 29.3): the heroes' venom dart turned on them: 1 Finesse slot, a hit envenoms.
+      // V4.1 (spec 31.4): the heroes' poison dart turned on them: 1 Finesse slot, a hit poisons.
       if (!hasKit(r, 'venomdart') || !t?.hero || !within(t.at, r.at, THROW_RANGE.venomdart) || !los(c.w, c.d, r.at, t.at)) return false;
       faceToward(r, t.at);
       spendKit(r, 'venomdart');
       c.ev.push({ type: 'thrown', by: r.id, kind: 'venomdart', from: { ...r.at }, to: { ...t.at } });
-      const rr = roll(c, r.id, 'Venom dart', 1, dartChance(r));
+      const rr = roll(c, r.id, 'Poison dart', 1, dartChance(r));
       c.ev.push({ type: 'cast', by: r.id, spell: 'venomdart', targetId: t.id, at: { ...t.at } });
       if (rr.hits) {
         c.ev.push({ type: 'hit', attacker: r.id, target: t.id, damage: 0, crit: false });
-        envenom(c, t.id, r.id);
+        poison(c, t.id, r.id);
       } else c.ev.push({ type: 'miss', attacker: r.id, target: t.id });
       return true;
     }
@@ -690,14 +695,15 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       const ids: string[] = [];
       for (const h of c.d.heroes) if ((h.status === 'active' || h.status === 'downed') && hexes.some((p) => samePos(p, h.at))) ids.push(h.heroId);
       for (const m of onMap(c)) if (m.kind !== 'gloam' && hexes.some((p) => samePos(p, m.at))) ids.push(m.id);
-      for (const m of rivalsOnMap(c)) if (hexes.some((p) => samePos(p, m.at))) ids.push(m.id);
+      for (const m of [...rivalsOnMap(c), ...downedCrew(c)]) if (hexes.some((p) => samePos(p, m.at))) ids.push(m.id);
       for (const id of ids) {
         const h = hd(c, id);
         if (h) {
           // The heroes' fireball rule (spec 15.3): 2 per hit less armor (min 1), less the ward.
           const def = c.s.campaign.roster.find((x) => x.id === id)!;
           const per = Math.max(0, Math.max(1, 2 - (CLASSES[def.cls].armor + def.armorTier)) - (h.ward > 0 ? 1 : 0));
-          hurtHero(c, h, rr.hits * per + (rr.perfect ? 1 : 0), r.id, rr.perfect);
+          const fd = fireWard(c, id, rr.hits * per + (rr.perfect ? 1 : 0)); // V4.1 (spec 31.3): Dragonfire Porter
+          if (fd > 0) hurtHero(c, h, fd, r.id, rr.perfect);
         } else {
           const m = c.d.monsters.find((x) => x.id === id);
           const armor = m ? monsterArmor(c, m) : 0;
@@ -755,8 +761,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       const before = member.hp;
       member.hp = Math.min(member.maxHp, member.hp + 4);
       c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: member.id });
-      const drawn = cureVenom(c, member.id, 'mend', r.id);
-      say(c, `${r.name} mends ${member.name} (+${member.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
+      const drawn = curePoison(c, member.id, 'mend', r.id);
+      say(c, `${r.name} mends ${member.name} (+${member.hp - before})${drawn ? ' and draws out the poison' : ''}.`);
       return true;
     }
     case 'ward': {
@@ -806,14 +812,14 @@ export function draggedBy(c: Ctx, heroId: string): RivalX | undefined {
   return rivalsOnMap(c).find((m) => m.dragging === heroId);
 }
 
-/** Spec 28.8: heroes who are up: active, awake (not dozing), not paralyzed (spec 29) and not in a crew member's hands. */
+/** Spec 28.8: heroes who are up: active, awake (not dozing) and not in a crew member's hands. */
 function upHeroes(c: Ctx): HeroX[] {
-  return (activeHeroes(c) as HeroX[]).filter((h) => !h.dozing && !isParalyzed(h) && !draggedBy(c, h.heroId));
+  return (activeHeroes(c) as HeroX[]).filter((h) => !h.dozing && !draggedBy(c, h.heroId));
 }
 
-/** Spec 28.8: downed, or dozing from a sleep dart; V4.0 (spec 29): or paralyzed. */
+/** Spec 28.8, V4.1 (spec 31.4): downed, or dozing from a sleep dart (paralysis is gone). */
 export function helpless(h: HeroX): boolean {
-  return h.status === 'downed' || (h.status === 'active' && (!!h.dozing || isParalyzed(h)));
+  return h.status === 'downed' || (h.status === 'active' && !!h.dozing);
 }
 
 /** Spec 28.8: no other hero who is up within `CAPTURE_ALONE` hexes (straight-line, same level). */
@@ -828,7 +834,7 @@ export function alone(c: Ctx, h: HeroX): boolean {
 function seizable(c: Ctx, r: RivalX): { h: HeroX; path: Pos[] } | undefined {
   const move = rivalStats(r).move;
   const cands = (c.d.heroes as HeroX[])
-    .filter((h) => helpless(h) && h.at.level === r.at.level && distance(h.at, r.at) <= move + 1 && !draggedBy(c, h.heroId) && alone(c, h))
+    .filter((h) => helpless(h) && h.at.level === r.at.level && distance(h.at, r.at) <= move + 1 && !carrierOf(c, h.heroId) && alone(c, h))
     .sort((a, b) => distance(a.at, r.at) - distance(b.at, r.at) || (a.heroId < b.heroId ? -1 : 1));
   for (const h of cands) {
     if (adjacentTo(h.at, r.at)) return { h, path: [] };
@@ -845,7 +851,7 @@ function seizable(c: Ctx, r: RivalX): { h: HeroX; path: Pos[] } | undefined {
  */
 function finishable(c: Ctx, r: RivalX): HeroX | undefined {
   if (upHeroes(c).some((h) => adjacentTo(h.at, r.at))) return undefined;
-  return (c.d.heroes as HeroX[]).find((h) => h.status === 'downed' && adjacentTo(h.at, r.at) && !draggedBy(c, h.heroId));
+  return (c.d.heroes as HeroX[]).find((h) => h.status === 'downed' && adjacentTo(h.at, r.at) && !carrierOf(c, h.heroId));
 }
 
 /**
@@ -861,10 +867,11 @@ export function rob(c: Ctx, r: RivalX, h: HeroX): void {
   r.dragging = h.heroId;
   if (h.status === 'active') h.grabbedBy = r.id;
   faceToward(r, h.at);
+  bringCarried(c, r.id); // V4.1 (spec 31.4): Carry: the hero shares the member's hex
   c.ev.push({ type: 'robbed', hero: h.heroId, by: r.id, items });
   const name = heroName(c, h.heroId);
-  const how = h.status !== 'active' ? `finds ${name} down and alone` : isParalyzed(h) ? `finds ${name} paralyzed and alone` : `finds ${name} drugged and alone`;
-  say(c, items.length ? `${r.name} ${how}, empties their purse and takes hold of them.` : `${r.name} ${how} and takes hold of them.`);
+  const how = h.status !== 'active' ? `finds ${name} down and alone` : `finds ${name} drugged and alone`;
+  say(c, items.length ? `${r.name} ${how}, empties their purse and hoists them up.` : `${r.name} ${how} and hoists them up.`);
 }
 
 /** Spec 28.8: the finishing blow on a downed hero next to the member (a roll; any hit kills). */
@@ -880,7 +887,7 @@ function dragExit(c: Ctx, r: RivalX): Pos | undefined {
   return exitsBy(c, r.at)[0];
 }
 
-/** The dragger's plan: three hexes toward the exit, the hero behind. */
+/** The dragger's plan: three hexes toward the exit (V4.1, spec 31.4: Carry, the hero on the member's hex). */
 function dragPlan(c: Ctx, r: RivalX): Plan {
   const ex = dragExit(c, r);
   if (!ex) return { intent: { kind: 'wait' }, path: [] };
@@ -900,14 +907,11 @@ export function dragAct(c: Ctx, r: RivalX): void {
   }
   const plan = dragPlan(c, r);
   if (plan.path.length) {
-    const start = { ...r.at };
     const stopped = crewWalk(c, r, plan.path);
     if (!rivalsOnMap(c).includes(r)) return; // a free swing killed it: dropped
-    const walked = plan.path.findIndex((p) => samePos(p, r.at));
-    // The hero trails one hex behind (the view hauls the figure along on the member's `moved`).
-    const trail = walked <= 0 ? start : plan.path[walked - 1]!;
-    if (!samePos(trail, h.at)) h.at = { ...trail };
-    if (!stopped) say(c, `${r.name} hauls ${heroName(c, h.heroId)} toward the way out.`);
+    // V4.1 (spec 31.4): Carry: the hero shares the member's hex (crewWalk brings them along).
+    bringCarried(c, r.id);
+    if (!stopped) say(c, `${r.name} carries ${heroName(c, h.heroId)} toward the way out.`);
   }
   if (kindAt(c.w, c.d, r.at) === 'exit') capture(c, r, h);
 }
@@ -927,11 +931,7 @@ export function capture(c: Ctx, r: RivalX, h: HeroX): void {
   c.ev.push({ type: 'captured', hero: h.heroId, by: r.id });
   c.ev.push({ type: 'out', id: r.id });
   const name = heroName(c, h.heroId);
-  say(c, `${r.name} drags ${name} out of the castle. ${name} is taken.`);
-  if (c.d.lanternBearer === h.heroId) {
-    const cands = activeHeroes(c);
-    if (cands.length) c.d.lanternBearer = cands[0]!.heroId;
-  }
+  say(c, `${r.name} carries ${name} out of the castle. ${name} is taken.`);
 }
 
 // ---------------------------------------------------------------- the hostile member's round
@@ -1040,10 +1040,10 @@ export function hiredKit(c: Ctx, r: RivalX): Intent | null {
   const potion = potionIntent(c, r);
   if (potion) return potion;
   if (r.cls === 'hedgewitch' && manaOf(r) >= 1) {
-    // V4.0 (spec 29.6): a hero with venom in them first (paralyzed before envenomed), then the most hurt below half.
-    const sick = activeHeroes(c)
-      .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && ((h.venom ?? 0) > 0 || isParalyzed(h)))
-      .sort((a, b) => Number(isParalyzed(b)) - Number(isParalyzed(a)))[0];
+    // V4.1 (spec 31.4): a downed hero within 3 first (up at 2), then a poisoned one, then the most hurt below half.
+    const down = c.d.heroes.find((h) => h.status === 'downed' && h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE));
+    if (down) return { kind: 'mend', targetId: down.heroId };
+    const sick = activeHeroes(c).find((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && isPoisoned(h));
     if (sick) return { kind: 'mend', targetId: sick.heroId };
     const hurt = activeHeroes(c)
       .filter((h) => h.at.level === r.at.level && within(h.at, r.at, SPELL_RANGE) && h.hp * 2 < (c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? 0))
@@ -1058,16 +1058,119 @@ export function hiredUse(c: Ctx, r: RivalX, it: Intent): boolean {
   if (it.kind === 'potion' || it.kind === 'veil') return useKit(c, r, it);
   if (it.kind === 'mend') {
     const h = it.targetId ? hd(c, it.targetId) : undefined;
-    if (!h || h.status !== 'active' || manaOf(r) < 1 || !within(h.at, r.at, SPELL_RANGE)) return false;
+    if (!h || (h.status !== 'active' && h.status !== 'downed') || manaOf(r) < 1 || !within(h.at, r.at, SPELL_RANGE)) return false;
     spendMana(r, 1);
     const max = c.s.campaign.roster.find((x) => x.id === h.heroId)?.maxHp ?? h.hp;
     const before = h.hp;
-    h.hp = Math.min(max, h.hp + 4);
     c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: h.heroId });
-    const drawn = cureVenom(c, h.heroId, 'mend', r.id);
-    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before})${drawn ? ' and draws out the venom' : ''}.`);
+    if (h.status === 'downed') {
+      // V4.1 (spec 31.4): Mend on a downed hero: up at 2.
+      h.status = 'active';
+      h.hp = MEND_UP_HP;
+      h.bleed = 0;
+      c.ev.push({ type: 'revived', id: h.heroId });
+      for (const o of c.d.heroes) if (o.carrying === h.heroId) o.carrying = undefined;
+    } else h.hp = Math.min(max, h.hp + 4);
+    const drawn = curePoison(c, h.heroId, 'mend', r.id);
+    say(c, `${r.name} mends ${heroName(c, h.heroId)} (+${h.hp - before})${drawn ? ' and draws out the poison' : ''}.`);
     return true;
   }
   return false;
 }
 
+
+// ---------------------------------------------------------------- V4.1 (WS3, spec 31.4): a crewmate down
+
+/**
+ * V4.1 (spec 31.4, pillar 17): what a member does for a downed crewmate, by the party's rules: carrying one already, walk it
+ * out (3 a round, toward the nearest open exit; on the exit both go out); else a potion on a downed crewmate next to it (up
+ * at the potion's heal); else a Hedgewitch's Mend on one within 3 (up at 2); else, when nobody else in the crew can save
+ * them, lift one next to it (Carry) while no hero who is up stands at its side. Null: nothing to do for anyone.
+ */
+export function rescuePlan(c: Ctx, r: RivalX): Plan | null {
+  if (r.carrying) {
+    const ex = dragExit(c, r);
+    if (!ex) return { intent: { kind: 'wait' }, path: [] };
+    const path = approach(c, r.id, r.at, [ex], DRAG_MOVE, true) ?? [];
+    return { intent: { kind: 'flee', to: path[path.length - 1] ?? { ...r.at }, targetId: r.carrying }, path };
+  }
+  if (r.dragging) return null;
+  const down = downedCrew(c).filter((m) => m.at.level === r.at.level && !carrierOf(c, m.id));
+  if (!down.length) return null;
+  const pot = r.pack?.find((i) => i.kind === 'potion' || i.kind === 'greaterpotion');
+  const next = down.find((m) => adjacentTo(m.at, r.at));
+  if (pot && next) return { intent: { kind: 'potion', item: pot.kind, targetId: next.id, to: { ...r.at } }, path: [] };
+  if (r.cls === 'hedgewitch' && manaOf(r) >= 1) {
+    const m = down.find((x) => within(x.at, r.at, SPELL_RANGE));
+    if (m) return { intent: { kind: 'mend', targetId: m.id }, path: [] };
+  }
+  if (!next) return null;
+  // Someone else in the crew can save them (a potion, a witch's mana): leave it to them.
+  const saver = rivalsOnMap(c).some((o) => o !== r && ((o.pack ?? []).some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') || (o.cls === 'hedgewitch' && manaOf(o) >= 1)));
+  if (saver) return null;
+  if (upHeroes(c).some((h) => adjacentTo(h.at, r.at))) return null;
+  return { intent: { kind: 'carry', targetId: next.id, to: { ...r.at } }, path: [] };
+}
+
+/** V4.1 (spec 31.4): carry out the rescue shown (or the walk out with a crewmate). Returns true if it used the member's turn. */
+export function rescueAct(c: Ctx, r: RivalX): boolean {
+  if (r.carrying) {
+    const plan = rescuePlan(c, r)!;
+    if (plan.path.length) {
+      crewWalk(c, r, plan.path);
+      if (!rivalsOnMap(c).includes(r)) return true;
+      bringCarried(c, r.id);
+    }
+    const body = c.d.rivals?.members.find((m) => m.id === r.carrying);
+    if (body && kindAt(c.w, c.d, r.at) === 'exit') {
+      r.goneOut = true;
+      body.goneOut = true;
+      r.carrying = undefined;
+      c.ev.push({ type: 'out', id: r.id });
+      c.ev.push({ type: 'out', id: body.id });
+      tell(c, r, `${r.name} carries ${body.name} out of the castle.`, r.at);
+    } else if (body && plan.path.length) tell(c, r, `${r.name} carries ${body.name} toward the way out.`, r.at);
+    return true;
+  }
+  const it = r.intent;
+  if (!it || !it.targetId) return false;
+  const m = downedCrew(c).find((x) => x.id === it.targetId);
+  if (!m || carrierOf(c, m.id)) return false;
+  if (it.kind === 'potion' && it.targetId !== r.id) {
+    const i = r.pack?.findIndex((x) => x.kind === 'potion' || x.kind === 'greaterpotion') ?? -1;
+    if (i < 0 || !adjacentTo(m.at, r.at)) return false;
+    const pot = r.pack!.splice(i, 1)[0]!;
+    getUp(c, m, POTION_HEAL[pot.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']);
+    c.ev.push({ type: 'cast', by: r.id, spell: 'potion', targetId: m.id });
+    tell(c, r, `${r.name} pours a potion into ${m.name}. ${m.name} is back up.`, m.at);
+    return true;
+  }
+  if (it.kind === 'mend') {
+    if (manaOf(r) < 1 || !within(m.at, r.at, SPELL_RANGE)) return false;
+    spendMana(r, 1);
+    getUp(c, m, MEND_UP_HP);
+    curePoison(c, m.id, 'mend', r.id);
+    c.ev.push({ type: 'cast', by: r.id, spell: 'mend', targetId: m.id });
+    tell(c, r, `${r.name}'s mending gets ${m.name} back on their feet.`, m.at);
+    return true;
+  }
+  if (it.kind === 'carry') {
+    if (!adjacentTo(m.at, r.at) || r.dragging) return false;
+    r.carrying = m.id;
+    bringCarried(c, r.id);
+    c.ev.push({ type: 'carried', by: r.id, id: m.id });
+    c.ev.push({ type: 'moved', id: m.id, path: [{ ...r.at }] });
+    tell(c, r, `${r.name} hoists ${m.name} onto their shoulders.`, r.at);
+    return true;
+  }
+  return false;
+}
+
+/** V4.1 (spec 31.4): a downed member back up at `hp`. */
+function getUp(c: Ctx, m: RivalX, hp: number): void {
+  m.downed = undefined;
+  m.bleed = undefined;
+  m.hp = Math.min(m.maxHp, hp);
+  m.intent = { kind: 'wait' };
+  c.ev.push({ type: 'revived', id: m.id });
+}

@@ -12,6 +12,7 @@ import { say, type Ctx, type DelveX, type GameStateX, type MonsterX } from './st
 import { armorOf, hd, heroDef, heroName, hurtHero, hurtPrisoner, makeItem, makeNoise, occupant } from './common';
 import { blocksSight, canEnter, dijkstra, kindAt, los, pathTo, standable, type World } from './world';
 import { push } from './falls';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 export type DragonX = MonsterX;
 
@@ -132,7 +133,8 @@ export function dragonSpecial(c: Ctx, m: DragonX, it: Intent): boolean {
     say(c, `${m.name} breathes fire.`);
     const keys = new Set(hexes.map(posKey));
     for (const h of c.d.heroes) {
-      if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at))) hurtHero(c, h, BREATH_DMG, m.id);
+      // V4.1 (spec 31.3): Dragonfire Porter's drinker takes 2 less (to 0: no hit).
+      if ((h.status === 'active' || h.status === 'downed') && keys.has(posKey(h.at)) && fireWard(c, h.heroId, BREATH_DMG) > 0) hurtHero(c, h, fireWard(c, h.heroId, BREATH_DMG), m.id);
     }
     const pr = c.d.prisoner;
     if (pr && !pr.dead && !pr.out && keys.has(posKey(pr.at))) hurtPrisoner(c, BREATH_DMG, m.id);

@@ -2,6 +2,7 @@
 // whom, the wake rolls a passing hero provokes, attacks of opportunity both ways, and the
 // move preview's risks. Pure rules: no DOM, all dice through the seeded RNG.
 
+import { emitsLight } from './world'; // V4.1 (WS2)
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Awareness, HeroInDelve } from './types';
 import type { MoveRisks } from './api';
@@ -333,13 +334,13 @@ export function wakeRolls(c: Ctx, h: HeroInDelve, p: Pos, last: boolean, sneak: 
 export function monsterCanSwing(m: MonsterX, heroId: string): boolean {
   if (m.buried || m.awareness !== 'hunting') return false;
   if (m.kind === 'dragon' || m.kind === 'gloam') return false;
-  if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0 || (m.paralyzed ?? 0) > 0) return false;
+  if ((m.stuck ?? 0) > 0 || m.holding || (m.feared ?? 0) > 0) return false;
   return hasNoticed(m, heroId);
 }
 
 export function rivalCanSwing(c: Ctx, r: RivalX): boolean {
   if (c.d.rivals?.stance !== 'hostile') return false;
-  if (r.goneOut || r.hp <= 0 || (r.feared ?? 0) > 0 || (r.paralyzed ?? 0) > 0) return false;
+  if (r.goneOut || r.hp <= 0 || (r.feared ?? 0) > 0) return false;
   return true;
 }
 
@@ -398,7 +399,7 @@ function heroSwingTarget(c: Ctx, id: string): { at: Pos; armor: number; name: st
 
 /** Can this hero swing now: active, free to act, action still ready. */
 export function heroCanSwing(h: HeroInDelve): boolean {
-  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing && !((h.paralyzed ?? 0) > 0);
+  return h.status === 'active' && !h.acted && !h.webbed && !h.grabbedBy && !(h as HeroX).dozing;
 }
 
 /**
@@ -506,7 +507,7 @@ export function moveRisks(c: Ctx, h: HeroInDelve, path: Pos[], sneak: boolean, l
     shadows.push({ m, at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])], patrol: m.awareness === 'patrol', shouted: !!m.shouted });
   }
   // The mover's own light moves with them; doors open as the path passes.
-  const emits = (c.d.lanternBearer === h.heroId && c.d.lanternOpen !== false) || h.torch > 0 || h.ale === 'glowworm';
+  const emits = emitsLight(h); // V4.1 (WS2): a lit torch, an open lantern, Glowworm
   let doors = c.d.doors;
   let cc: Ctx = c;
   const others = sightedHeroes(c).filter((x) => x.id !== h.heroId);

@@ -1,6 +1,8 @@
 # Current rules (V4.0, with V4.1 changes as they ship)
 
-Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`) and V4.0's play-test fixes (spec 26: Walk/Sneak per hero, noticing during moves, when monsters turn), and V4.0's venom (spec 29, section 8.6), and V4.0's play-test fixes 2 (spec 30: the Sapper without Brace, class kit by level). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
+V4.1 so far: spec 31.1 (crew entrances), 31.2–31.3 (gold, gifts, Ilse and the pairs), 31.5 (light: torches are the clock, section 7).
+
+Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`) and V4.0's play-test fixes (spec 26: Walk/Sneak per hero, noticing during moves, when monsters turn), and V4.0's venom (spec 29; replaced by V4.1's poison, spec 31.4, section 8.6), and V4.0's play-test fixes 2 (spec 30: the Sapper without Brace, class kit by level). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
 
 Scope: the rules engine (src/game) and castle data (src/data/castle) as they stand on `main` at V3.9.4 (commit bc3f1fd). Presentation is mentioned only where it carries a rule. Every number below was read from the code. Section 18 lists where the spec disagrees.
 
@@ -22,7 +24,8 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 
 ### 2.1 Start
 
-- Gold 90 (`START_GOLD`). Reputation 0. Roster: Keven alone. Village: nothing won back.
+- Gold 120 (`START_GOLD`; V4.1, was 90): one level 1 hire and 60 to try the shop. Reputation 0. Roster: Keven alone. Village: nothing won back.
+- V4.1 (spec 31.2, B1): on the campaign's first delve (`campaign.delveCount` 0 at `startDelve`), spawns marked `firstDelveAsleep` start asleep: in the castle, only the orc posted in the chapel by Brother Aldric (L1 (35, 24)). Later delves place it awake as usual.
 - Keven may delve alone; the camp does not force a hire.
 - Entrances: only the main gate is open (`campaign.opened = {}`); the sally port and the east breach are shut until opened in play (section 3.1). Castle memory empty (`campaign.explored = {}`).
 
@@ -32,10 +35,12 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 | --- | --- | --- | --- |
 | Notice post | Up to 3 regular contracts, plus every available story contract, plus every "Bring back" contract | always | |
 | Hiring | Campfire: 3 level-1 recruits | Old Wim (`innkeeper`) | Gilded Flagon: 4 recruits, 35% level 2. With `caskbook`: 25% level 2, 10% level 3 |
-| Peddler | Everything but metalwork and night-eye | Gerda (`smith`): metalwork; Wim: night-eye draught | |
+| Peddler (Mott) | Torch, potion, antipoison, rope, firecracker, blasting charge (45) | Gerda (`smith`): metalwork | |
+| Ilse's bench (V4.1) | Locked | Ilse the alchemist (`alchemist`) | Sleep dart, poison dart, smoke, glue, oil |
 | Forge | Cold | Gerda (`smith`) | Weapon/armor tiers, shield |
 | Infirmary | Only `drink` (a stash potion: +5 HP) | Brother Aldric (`surgeon`) | `heal`: 3 gold per HP, up to full or what the gold covers |
-| Ales | Locked | Brewing copper (`copper`) home, and Wim | 4 ales; 3 more with the cask book |
+| Ales | Locked | Brewing copper (`copper`) home, and Wim | 4 ales; 3 more with the cask book; V4.1: 3 more with Wim and Ilse (no copper needed) |
+| Pairs (V4.1) | | Both villagers home (`pairHome`) | Section 2.12 |
 
 Refusal texts name the fix (`LOCKED` in camp.ts).
 
@@ -43,15 +48,17 @@ Refusal texts name the fix (`LOCKED` in camp.ts).
 
 Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board shows story status itself); only "Level N" and the copper's "Heavy" line.
 
-| Story | Kind | Site | On the board when | Bounty | Unlocks |
+| Story | Kind | Site | On the board when | Gift (first time home) | Unlocks |
 | --- | --- | --- | --- | --- | --- |
-| surgeon | rescue Brother Aldric | l1-story-chapel (L1 Chapel) | from the start | 40 | infirmary |
-| innkeeper | rescue Old Wim | l1-story-kitchens (L1 Kitchens) | reputation ≥ 1 | 40 | Gilded Flagon, night-eye draught |
-| smith | rescue Gerda the smith | l2-story-forge (L2 Forge) | reputation ≥ 1 | 75 | forge, shield, metalwork |
-| copper | recover the brewing copper | l2-story-barracks (L2 Barracks) | Wim home | 90 | the first four ales |
-| caskbook | recover Wim's cask book | l3-recover-drain (L3 the Drain) | copper home and reputation ≥ 2 | 130 | three strong ales, better recruits |
+| surgeon | rescue Brother Aldric | l1-story-chapel (L1 Chapel) | from the start | 2 potions to the cart | infirmary |
+| innkeeper | rescue Old Wim | l1-story-kitchens (L1 Kitchens) | reputation ≥ 1 | a free Hobart's Reserve for every hero on the roster | Gilded Flagon |
+| smith | rescue Gerda the smith | l2-story-forge (L2 Forge) | reputation ≥ 1 | the next shield free (`campaign.credits.shield`) | forge, shield, metalwork |
+| alchemist (V4.1) | rescue Ilse the alchemist | l2-story-archive (L2 Archive, (6, 11), next to the spider) | Aldric home and reputation ≥ 1 | 2 antipoisons to the cart | Ilse's bench |
+| copper | recover the brewing copper | l2-story-barracks (L2 Barracks) | Wim home | none | the first four ales |
+| caskbook | recover Wim's cask book | l3-recover-drain (L3 the Drain) | copper home and reputation ≥ 2 | none | three strong ales, better recruits |
 
-- Story bounty = half the regular bounty for kind and level, rounded down to 5. Reputation +1 as usual.
+- V4.1 (spec 31.2, pillar 18): story contracts pay 0 gold (`STORY_PAY`; was half the regular bounty). Reputation +1 and XP as usual. The card shows the gift instead of a bounty ("Gift: 2 potions"; "No pay" for the copper and the cask book).
+- Gifts (`GIFTS`, `giveGift` in camp.ts) are given in `backToCamp` the first time the villager comes home, after the roster is settled, with a `say` line. Wim's round: every hero on the roster without an ale waiting gets `ale = 'reserve'`, drunk at their next `startDelve` (Focus 4, max 4), even before the copper is home. Gerda's shield: `buyShield` with `credits.shield` > 0 costs 0 and takes one credit ("On the house.").
 - A rescued villager does not join the roster; the village flag is set on return and a `villageUnlocked` event fires.
 - The copper takes 2 pack slots and is `heavy` (carrier moves 3 at most, dash too). The cask book takes 1 slot. Both are worth 0, never sold, never handed over in parley, and go to the village, not the stash.
 
@@ -60,7 +67,7 @@ Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board show
 - Up to 3 regular contracts, rebuilt (seeded) every time camp refreshes (after every delve).
 - Levels open by reputation (`REP_FOR_LEVEL`): Level 1 always, Level 2 at 1, Level 3 at 2. The slay contract appears at reputation 3 (`REP_FOR_SLAY`) and is always one of the three once unlocked. At least one Level 1 contract is on the board.
 - Story sites and crew hideouts are never used by the regular board.
-- Bounties (`BOUNTY`): rescue 80 / 150 / 220 (L1/L2/L3), recover 100 / 180 / 260, slay 500. Paid only if the contract is done.
+- Bounties (`BOUNTY`, V4.1 spec 31.2): rescue 110 / 200 / 280 (L1/L2/L3), recover 140 / 250 / 340 (plus the heirloom, 60 / 120 / 180), slay 600. Paid only if the contract is done.
 - Done: rescue = the prisoner got out; recover = a hero got out with the contract item in their pack; slay = the Dragon died and at least one hero got out.
 - Reputation +1 per contract done.
 - A rescued regular prisoner joins the roster free as a level 1 hero of a random recruitable class.
@@ -74,22 +81,27 @@ Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board show
 
 | Item | Price | Needs | Effect (details in section 9) |
 | --- | --- | --- | --- |
-| Torch | 10 | | 12 rounds of radius-2 light |
-| Potion | 20 | | Heal 5, or get a downed hero up at 5 HP |
-| Rope | 15 | | Anchor at a pit edge to climb down and back |
-| Blasting charge | 30 | | Set with fuse 1 on an adjacent lock or breakable wall |
-| Smoke bomb | 20 | | Throw 4: smoke on the hex and neighbours, 2 rounds |
-| Glue bomb | 25 | | Throw 4: monsters within 1 stuck 2 rounds |
-| Sleep dart | 25 | | Throw 5: 1 Finesse slot, a hit puts a monster to sleep |
-| Venom dart (V4.0) | 30 | | Throw 5: 1 Finesse slot, a hit envenoms a monster or crew member (section 8.6) |
-| Oil flask | 15 | | +8 lantern light |
-| Antidote (V4.0) | 20 | | Essential, always sold: cures venom and paralysis, self or an adjacent ally (section 8.6) |
-| Firecracker | 10 | | Throw 6: noise 6 there |
-| Caltrops | 15 | smith | Adjacent hex: first monster across takes 2 and stops |
-| Grappling hook | 40 | smith | Reusable: climb from a pit landing up a level |
-| Skeleton key | 30 | smith | One use: opens a lock silently, anyone |
-| Lockpicks | 25 | smith | Permanent picks: Burglar 3 slots, others 2 |
-| Night-eye draught | 30 | innkeeper | Drink: 8 rounds of full sight, no dark penalty |
+| Item | Price | Needs (vendor) | Effect (details in section 9) |
+| --- | --- | --- | --- |
+| Torch | 10 | (Mott) | Light it: radius 3 for 15 rounds; snuff it to save the rest (V4.1, section 7.1) |
+| Potion | 20 | (Mott) | Heal 5, or get a downed hero up at 5 HP |
+| Rope | 15 | (Mott) | Anchor at a pit edge to climb down and back |
+| Blasting charge | 45 (V4.1, was 30); 30 at Gerda with Gerda and Ilse home | (Mott) | Set with fuse 1 on an adjacent lock or breakable wall |
+| Smoke bomb | 20 | alchemist (Ilse) | Throw 4: smoke on the hex and neighbours, 2 rounds |
+| Glue bomb | 25 | alchemist (Ilse) | Throw 4: monsters within 1 stuck 2 rounds |
+| Sleep dart | 25 | alchemist (Ilse) | Throw 5: 1 Finesse slot, a hit puts a monster to sleep |
+| Poison dart (V4.0 venom dart; V4.1 poison) | 30 | alchemist (Ilse) | Throw 5: 1 Finesse slot, a hit poisons a monster or crew member (section 8.6) |
+| Oil flask | 15 | alchemist (Ilse) | +10 to a lantern (V4.1) |
+| Antipoison (V4.0 antidote) | 20; 12 from Aldric with Aldric and Ilse home | (Mott) | Essential, always sold: cures poison, self or an adjacent ally up or downed (section 8.6) |
+| Firecracker | 10 | (Mott) | Throw 6: noise 6 there |
+| Caltrops | 15 | smith (Gerda) | Adjacent hex: first monster across takes 2 and stops |
+| Grappling hook | 40 | smith (Gerda) | Reusable: climb from a pit landing up a level |
+| Skeleton key | 30 | smith (Gerda) | One use: opens a lock silently, anyone |
+| Lockpicks | 25 | smith (Gerda) | Permanent picks: Burglar 3 slots, others 2 |
+| Lantern (V4.1) | 120 | smith (Gerda) | Reusable: 20 rounds, refilled free in camp; radius 4 (3 below 7); free shutter (section 7.1) |
+| Greater potion (V4.1) | 35 | surgeon and alchemist (Ilse) | Heal 8, or get a downed hero up at 8 HP |
+
+- V4.1 (spec 31.3): the night-eye draught is no longer sold (it becomes Night-eye Stout, an ale). V4.1 (spec 31.5): copies already owned do nothing; stash copies are bought back for 15 each when a save loads. `shopOffers` fills in `vendor` (`mott`, `gerda`, `ilse`, `aldric`) and the pair price (`PAIR_PRICES`, the cheapest that applies); a ware whose villagers are away is `locked` with a line naming them ("Ilse's work: rescue Ilse the alchemist (Level 2, the archive).", "Needs Brother Aldric and Ilse the alchemist together. Still away: ..."). `ShopOffer.needs` is a story id or a list of them.
 
 Bought items go to the stash. `sellAll` sells every gem, jewelry, heirloom and hoard piece in the stash for its value (story items excluded).
 
@@ -112,6 +124,11 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 | Smuggler's Mead | 20 | caskbook | Sneak moves 4 (silent as always) |
 | Fireside Porter | 25 | caskbook | Heal 3 each time the drinker changes level (stairs, lift, fall, rope, hook), after fall damage |
 | Black Cask | 10 | caskbook | At delve start (seeded): 70% one of the six above; 30% hiccups (noise 1 at the drinker every world phase) or heavy head (Focus starts at 1) |
+| Night-eye Stout (V4.1) | 25 | Wim and Ilse | The drinker sees as if lit by party light (8/7/6), no dark penalty, for the delve; stays unlit to monsters and the Gloam and lights nothing for others (section 7.1) |
+| Spider-milk Stout (V4.1) | 20 | Wim and Ilse | Poison can't take hold of the drinker (effect built with the poison rules, WS3; today: the ale only) |
+| Dragonfire Porter (V4.1) | 25 | Wim and Ilse | Fire, burning, the Dragon's breath and blasts do 2 less to the drinker (to 0; section 2.12) |
+
+V4.1: Wim and Ilse's three brews need Wim and Ilse home, not the copper (`AleOffer.needs` 'alchemist'). The Black Cask never turns into one of them.
 
 ### 2.9 Heroes between delves
 
@@ -127,21 +144,31 @@ One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's n
 ### 2.10 Captives
 
 - A hero carried out by a crew leaves the roster for `campaign.captives` at HP 1 (gold, gems and jewelry already taken by the robbing; the rest of their pack is lost; level, tiers and shield stay with the hero record).
-- A "Bring back <name>" rescue contract is pinned at the top of the board for each captive. Site: the crew's hideout. Bounty: the full regular rescue bounty for the hideout's level. The prisoner is the hero at HP 1. Freed and extracted, they rejoin the roster with the HP they came out with. If they die there, they go to the fallen.
+- A "Bring back <name>" rescue contract is pinned at the top of the board for each captive. Site: the crew's hideout. V4.1 (spec 31.2): it pays 0 gold (`CAPTIVE_PAY`; was the full regular rescue bounty); getting your hero back is the prize. The prisoner is the hero at HP 1, shackled (V4.1). Unshackled or carried, and extracted, they rejoin the roster with the HP they came out with. If they die there, they go to the fallen.
 
-| Crew | Hideout | Level | Bounty |
-| --- | --- | --- | --- |
-| Lantern Sisters | officers' quarters | 2 | 150 |
-| Ferrymen | the Drain | 3 | 220 |
-| Gallows Choir | the Tunnels | 3 | 220 |
-| The Wake | the Bone Pile | 3 | 220 |
+| Crew | Hideout | Level |
+| --- | --- | --- |
+| Lantern Sisters | officers' quarters | 2 |
+| Ferrymen | the Drain | 3 |
+| Gallows Choir | the Tunnels | 3 |
+| The Wake | the Bone Pile | 3 |
 
 ### 2.11 Campaign end
 
 - Keven dead: stage 'over', "The heir has fallen. Valkenburg stays dark."
 - Keven captured: stage 'over', "The heir is taken. Valkenburg stays dark."
 
-Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `captiveBoard`, `shopOffers`, `aleOffers`, `healQuote`, `backToCamp`); data.ts (`START_GOLD`, `BOUNTY`, `HEIRLOOM_VALUE`, `REP_FOR_LEVEL`, `REP_FOR_SLAY`, `SHOP`, `ALES`, `STORIES`, `RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`, `CAMPFIRE_SIZE`, `FLAGON_SIZE`, `FLAGON_L2`, `CASKBOOK_L2`, `CASKBOOK_L3`, `HEAL_PER_HP`, `DRINK_HEAL`, `WEAPON_PRICE`, `ARMOR_PRICE`, `SHIELD_PRICE`, `LEVEL_XP`, `MAX_LEVEL`, `SLAY_XP`).
+### 2.12 The village pairs (V4.1, spec 31.3)
+
+When two villagers are both home (`pairHome(village, a, b)` in data.ts), they make something together:
+
+- **Wim + Ilse:** Night-eye Stout, Spider-milk Stout, Dragonfire Porter at the Flagon (section 2.8). **Dragonfire Porter**: fire (fireball, a crew fireball, being thrown into the forge, fire vents), burning hexes, the Dragon's breath and blasts do 2 less to the drinker (`DRAGONFIRE_WARD`, `fireWard` in village.ts), to 0 at least; at 0 there is no hit at all (so a downed drinker isn't killed by it).
+- **Gerda + Ilse:** blasting charges at Gerda for 30 (Mott's stay 45). **The tripwire:** a Sapper (with charges) may Set tripwire (action) on a free floor hex next to them: a charge with fuse 2 (`TRIPWIRE_FUSE`) marked `tripwire`; it goes off with its fuse as any charge, or at once when a monster (not the Gloam) or crew member steps onto a hex within 1 of it (`springTripwires`; the mover's walk ends there). Heroes never set it off. Same blast, shield and noise as a charge.
+- **Aldric + Ilse:** the greater potion (35): through Potion, heals 8 (`POTION_HEAL`), or gets a downed hero up at 8; in camp, `drink` uses one (heals 8) when no plain potion is on the cart. The antipoison costs 12 (sold by Aldric).
+- **Aldric + Wim:** the hot supper: every hero who gets out heals 2 HP on return (`SUPPER_HEAL`, in `backToCamp`, up to max), with a line naming them.
+- **Gerda + Aldric:** splints: downed heroes crawl (WS3, built with the downed rules; `pairHome(v, 'smith', 'surgeon')`).
+
+Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `captiveBoard`, `shopOffers`, `aleOffers`, `healQuote`, `backToCamp`, V4.1 `giveGift`); village.ts (V4.1 `fireWard`, `canTripwire`, `tripwireNear`, `springTripwires`); data.ts (V4.1 `STORY_PAY`, `CAPTIVE_PAY`, `GIFTS`, `pairHome`, `PAIR_PRICES`, `POTION_HEAL`, `DRAGONFIRE_WARD`, `SUPPER_HEAL`, `TRIPWIRE_FUSE`; `START_GOLD`, `BOUNTY`, `HEIRLOOM_VALUE`, `REP_FOR_LEVEL`, `REP_FOR_SLAY`, `SHOP`, `ALES`, `STORIES`, `RECRUIT_PRICE`, `RECRUIT_PRICE_PER_LEVEL`, `CAMPFIRE_SIZE`, `FLAGON_SIZE`, `FLAGON_L2`, `CASKBOOK_L2`, `CASKBOOK_L3`, `HEAL_PER_HP`, `DRINK_HEAL`, `WEAPON_PRICE`, `ARMOR_PRICE`, `SHIELD_PRICE`, `LEVEL_XP`, `MAX_LEVEL`, `SLAY_XP`).
 
 ---
 
@@ -151,7 +178,7 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 - Packs: up to 4 slots per hero from the stash; each item in one pack only.
 - Entrances (`castle.entrances`, index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21). Only an open one may be used (section 3.1); `startDelve` refuses a shut one: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate." Heroes are placed on the entrance and the nearest free hexes.
 - Ways already opened this campaign stand open (the gate open and unlocked, the rubble in `blown`). While the sally port is shut, its key lies in the library at L1 (3, 1).
-- Lantern: full (20), open; the bearer is Keven if he goes, else the first hero.
+- No party light (V4.1, spec 31.5): no free lantern; packed torches and lanterns go in unlit.
 - Each hero: Focus 3 (4 with Reserve, 1 with heavy head), mana 3 for the three mage classes. Class kit, one a hero level (spec 30.2, `classKit`): the Sapper gets improvised explosives (one slotless item, kind `improvised-charge`, `amount` = level); every Burglar gets improvised picks (one slotless item, kind `improvised`, `amount` = level).
 - Every hero faces "into the castle": toward the centroid of floor hexes within 6.
 - Objective placed: a recover item at the site (heirloom value 60 / 120 / 180 by level, or the story item), or a shackled prisoner (5 HP; a captive hero 1 HP). The slay target is the Dragon spawn.
@@ -185,21 +212,22 @@ Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.
 - Player phase: each active hero may move once and act once, in either order.
   - **Dash**: a hero who has moved and not acted may spend the action on a second move (same allowance, walk or sneak). A hero who acted first gets a normal move afterwards.
   - Whole-turn actions (need both move and action unused): jump, climb, grapple.
-  - Free actions (no action used, any number): open/close a door, take, drop, give, leave, shutter, parley (deals are a separate free command, one per crew per round). Opening a chest is free for a Burglar; for anyone else it uses the action.
+  - Free actions (no action used, any number): open/close a door, take, drop, give, leave, shutter, parley (deals are a separate free command, one per crew per round), V4.1 set down. Opening a chest is free for a Burglar; for anyone else it uses the action.
+  - V4.1 (spec 31.4): a hero carrying a body (Carry) takes free actions only (doors, take, drop, give, leave, parley, set down), no chest, and moves 3 at most. With the splints, a downed hero may crawl 1 hex (no dash) and Leave on an exit; nothing else.
   - Walk/Sneak (`setMoveMode`, V4.0): free, any number, any active hero; changes only that hero's setting (section 5.1).
 - **End turn** runs the world phase:
   1. Sight refreshed; `heard` cleared; unseen-attacker reveals that expired are dropped.
-  2. Lantern burns 1 if open. Burning hexes deal 1 to everyone on them. Hiccups noise. Torches −1. Roots on heroes −1. Downed heroes bleed −1 (die at 0), except a hero being dragged by a crew. V4.0: venom counts down and paralysis wears off (section 8.6), heroes, monsters and crew members alike.
+  2. Every lit torch and open lantern burns 1 (carried or on the floor; a torch at 0 is gone). Burning hexes deal 1 to everyone on them. Hiccups noise. Roots on heroes −1. Downed heroes bleed −1 (die at 0), except a carried one (a friend's Carry, or a crew carrying them off). V4.1: downed crew members bleed the same way (not while a crewmate carries them). Then poison: every poisoned figure that is up takes 1, never below 1 HP (section 8.6), heroes, monsters and crew members alike.
   3. Monsters act in id order (the Gloam separately).
   4. The rival crew acts (enters, notices, tolls, then each member).
   5. The Gloam acts (rises, hunts, or fades).
   6. Fuses count down; charges at 0 go off.
   7. Reset: moved, acted, dashed, overwatch, guard and brace cleared on heroes; Rally cooldown, veil, ward, night-eye tick down; heroes webbed or dozing since the last world phase are freed. Monster `stuck`, shout cooldown and fear tick down; crew fear and roots tick down. Smoke, glue, burning tick down.
   8. Round +1, player phase, new intents for every awake monster and crew member.
-- The delve ends when no hero is active. At the end, downed heroes still inside die (a downed hero being dragged, or a seized hero held by a crew member, is captured instead). V4.0: a paralyzed hero doesn't count as active for this (nobody left who can stir ends the delve), and a paralyzed hero still inside at the end dies like a downed one, unless carried out (section 8.6) or held by a crew member (captured).
+- The delve ends when no hero is active (V4.1: or crawling, with the splints). At the end, downed heroes still inside die (a downed hero being carried off, or a seized hero held by a crew member, is captured instead). A downed hero carried out by a friend lives (section 8.5).
 - `abandon`: heroes on an exit leave; everyone else still inside dies.
 
-Code: world-phase.ts `worldPhase`, `computeIntents`; delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`), `checkDelveEnd`, `endDelve`, `abandon`.
+Code: world-phase.ts `worldPhase`, `computeIntents`; delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`, V4.1 `CARRY_OK`), `canCrawl`, `checkDelveEnd`, `endDelve`, `abandon`.
 
 ---
 
@@ -287,7 +315,7 @@ The **front ranges** (line of sight; smoke on either hex hides beyond 1):
 - **Blowing cover (cascade):** a monster that notices one or more heroes at once turns to the first of them if it wasn't hunting (the moving hero when among them, else the nearest, ties in party order), goes hunting, and looks again at every hero with its new facing and hunting sight, until nobody new: one careless hero gives away friends near them. One already hunting doesn't turn (spec 26.3).
 
 When (V4.0, spec 26.2, 27): monsters look whenever anything moves.
-- **In the player phase,** at every hex of any hero's walk, and where a blink, fall, jump, climb, grapple, gust or shove lands a hero, every awake monster (not asleep, not the Gloam, not the Dragon, not buried) looks at **every** active, unveiled hero on its level it hasn't noticed, where they stand and in the light as it is at that moment (a lantern carried past can light a sneaking friend). An action that changes the lit hexes (a torch, the lantern opened, shuttered or passed, kindle, oil, fire) makes them look again. They all look at the same moment; then each acts on what it saw, in map order. Deterministic: no rolls. The look comes after the step (the hero faces it) and before that step's noise and wake rolls: a sleeper woken by a step looks from the next step on; one woken by the last step (or a landing), or a monster turned by a bellow, looks at the next look or in the world phase.
+- **In the player phase,** at every hex of any hero's walk, and where a blink, fall, jump, climb, grapple, gust or shove lands a hero, every awake monster (not asleep, not the Gloam, not the Dragon, not buried) looks at **every** active, unveiled hero on its level it hasn't noticed, where they stand and in the light as it is at that moment (a torch or lantern carried past can light a sneaking friend). An action that changes the lit hexes (a torch lit, snuffed or dropped, a lantern opened or shuttered, kindle, oil, fire) makes them look again. They all look at the same moment; then each acts on what it saw, in map order. Deterministic: no rolls. The look comes after the step (the hero faces it) and before that step's noise and wake rolls: a sleeper woken by a step looks from the next step on; one woken by the last step (or a landing), or a monster turned by a bellow, looks at the next look or in the world phase.
 - Effects, the same as in the world phase: remembered (`noticedIds`), a `noticed` event per hero (`at`: that hero's hex; `faced`: true only for the hero it turned to), hunting with focus on that hero's hex, the orc's first-sight bellow (noise 5, `BELLOW_NOISE`: it can set off a waiting cutthroat crew's toll and sends other monsters searching by the noise rules). The hero finishes the move. The monster re-plans its intent when the command ends (`Ctx.replan`, in `engine.apply`), keeping its quarry. A walk's `moved` event is split at the hex of the first notice so the view plays the "!" there.
 - A waiting cutthroat crew checks the moving hero the same way at every hex (`crewNotice(c, heroId)`), and demands its toll then; it still checks every hero after every command (`refreshSight`).
 - **In the world phase:** each monster still looks round as it acts (`perceive`): it notices every hero it makes out, faces and hunts its quarry, then looks again with hunting sight (the cascade).
@@ -313,7 +341,7 @@ When (V4.0, spec 26.2, 27): monsters look whenever anything moves.
 
 ### 5.6 Move preview (`Reach.risks`)
 
-The preview plays the move through the eyes of every monster the party has seen (V4.0, spec 27), hex by hex as the move does: wake rolls along the path for seen sleepers, with chance; `notice`: each (watcher, hero) pair that would happen, in order, for watchers visible now, `at` the mover's hex then and `hero` the hero seen (the mover, or a friend whose cover the move blows: a cascade, or the lantern carried past); free swings leaving provokes from seen enemies (including one that noticed the mover earlier on the path), with damage range (blindside slot included). It follows what can be known: doors opened on the way, a swing turning its swinger, walking noise and an orc's bellow turning heads and sending monsters searching, sleepers woken for sure (100%). Dice can't be previewed: a sleeper that may wake is taken as asleep, a hero who may be downed by a swing walks on. A waiting crew is checked for the mover within 6. Unseen enemies still roll and act; they are just not previewed. The HUD (V4.0) says it in the move card beside the hex: "The orc will see you, then Fenna".
+The preview plays the move through the eyes of every monster the party has seen (V4.0, spec 27), hex by hex as the move does: wake rolls along the path for seen sleepers, with chance; `notice`: each (watcher, hero) pair that would happen, in order, for watchers visible now, `at` the mover's hex then and `hero` the hero seen (the mover, or a friend whose cover the move blows: a cascade, or a light carried past); free swings leaving provokes from seen enemies (including one that noticed the mover earlier on the path), with damage range (blindside slot included). It follows what can be known: doors opened on the way, a swing turning its swinger, walking noise and an orc's bellow turning heads and sending monsters searching, sleepers woken for sure (100%). Dice can't be previewed: a sleeper that may wake is taken as asleep, a hero who may be downed by a swing walks on. A waiting crew is checked for the mover within 6. Unseen enemies still roll and act; they are just not previewed. The HUD (V4.0) says it in the move card beside the hex: "The orc will see you, then Fenna".
 
 Code: delve.ts `doMove`, `afterHeroMove`, `reachable`, `moveBudget`, `sneakSetting`, `doSetMoveMode`, `blocksHero`, `smokeOut`, `doAct` (`veil`); camp.ts `startDelve` (`moveMode`); engine.ts `apply` (`setMoveMode`, the look after an `act` that changed the light, the `replan` pass); stealth.ts `wouldNotice`, `bearingOf`, `moodOf`, `isSearching`, `lookRound`, `sightedHeroes` (heroes, then crew members), `perceivable`, `isSneaking`, `noticeHero`, `noticeFigure`, `wakeChance`, `wakeRolls`, `stepNoise`, `moveRisks`; common.ts `makeNoise`, `goAlert`, `goHunting`, `loseQuarry`, `wakeAdjacent`; world.ts `noiseField`, `monsterSees`; world-phase.ts `perceive`, `lookAll` (`anyPhase` for crew steps), `chooseTarget` (`foes`), `noticeOnMove`, `firstSightBellow`, `searchTick`, `patrolPlan`; rivals.ts `crewNotice`; calm.ts `stepTo`; data.ts `STEP_NOISE`, `RUBBLE_STEP_NOISE`, `WAKE_RANGE`, `WAKE_WALK`, `WAKE_SNEAK`, `WAKE_END_SNEAK`, `WAKE_SNEAK_QUIET`, `WAKE_END_SNEAK_QUIET`, `NOTICE`, `NOTICE_QUIET`, `SIDE_NOTICE_WALK`, `SIDE_NOTICE_ADJACENT`, `BURGLAR_SIDE_QUIET`, `BELLOW_NOISE`, `MONSTER_SIGHT`, `MONSTER_DARK_SIGHT`, `SEARCH_ROUNDS`, `SMUGGLER_SNEAK`, `WALK_MOVE`, `BURGLAR_WALK`, `HEAVY_MOVE`.
 
@@ -364,57 +392,63 @@ Code: world.ts `dirIndex`, `inFrontHalf`, `blindCone`, `seesHex`, `visibleSet`, 
 
 ---
 
-## 7. Light, lantern, sight, dark, the Gloam
+## 7. Light, sight, dark, the Gloam (V4.1, spec 31.5: torches are the clock)
 
-### 7.1 The lantern
+There is no free party lantern (since V4.1; `FREE_LANTERN.enabled = false`). A delve starts with no party light: the party brings torches or Gerda's lantern, or goes by daylight and castle lights.
 
-- Holds 20 (`LIGHT_MAX`); a delve starts full. Burns 1 per world phase while open, on every level.
-- Stages: bright 13–20, dim 7–12, dark 1–6, pitch 0.
-- Lantern light radius around the bearer: bright 4, dim 3, dark 2, pitch 0.
-- **Shutter** (free, bearer only, any time in the player phase): toggles `lanternOpen`. Shuttered: no burn, no lantern light. Passing keeps the state.
-- **Pass lantern** (action): to an adjacent active hero. If the bearer is downed, dies, leaves or is captured, the nearest active hero takes it.
-- Refuel: Kindle +6, oil flask +8, lighting a brazier +4. Capped at 20.
+### 7.1 Torches and the lantern
+
+Both are pack items with rounds of light left (`Item.rounds`; absent = full) and `lit` (burning, or the lantern's shutter open). They go in unlit. Each lit one burns 1 every world phase (step 2), wherever it is: in the pack of a hero inside (up or downed) or lying on the floor.
+
+| | Torch (Mott, 10, 1 slot) | Lantern (Gerda, 120, 1 slot, needs the smith) |
+| --- | --- | --- |
+| Holds | 15 rounds (`TORCH_ROUNDS`) | 20 (`LANTERN_MAX`), refilled free in camp |
+| Radius round its carrier | 3 (`TORCH_RADIUS`) | 4 at 7+ rounds, 3 below (`LANTERN_LOW_AT`, `LANTERN_RADIUS_FULL`, `LANTERN_RADIUS_LOW`) |
+| Turn on | **Light** (an action; relights a snuffed one with what it had) | **Shutter** (free, any time in the player phase) opens it |
+| Turn off | **Snuff** (free): dark, keeps its rounds | **Shutter** (free): no light, no burn |
+| At 0 | gone | dark, stays in the pack |
+| Drop it lit | **Drop torch** (free): it stays burning on the hero's hex, lights it and burns there; Take picks it up still lit | Drop or a fallen bearer's pack: it lies there burning |
+| Carried out | back to the cart, put out, with its rounds | back to the cart, refilled and shut |
+
+- One lit torch a hero at a time (a second waits); several heroes may each carry one. A lantern and a torch on one hero light the larger radius.
+- Lost with a fallen hero: it drops with the pack, still burning, and is lost gear as usual.
+- **Oil** (Ilse, 15): an action, +10 (`OIL_LIGHT`) to a lantern in the hero's pack, 20 at most.
+- **Kindle** (Pyromancer, 1 mana, silent): a torch or lantern held by a hero within 3 (`KINDLE_RANGE`), the caster's own too: lights or relights it (an empty lantern lights with 6), or adds 6 (`KINDLE_LIGHT`) to one that burns, to its most. The ally's action is not spent.
+- **Glowworm Pale**: the drinker sheds party light radius 1.
+- **Night-eye Stout** (ale effect `nighteye`, the Flagon with Wim and Ilse): for the whole delve the drinker sees as if lit by party light (8/7/6) and rolls with no dark penalty ("Night-eye: no dark penalty"), but stays unlit to monsters and the Gloam and lights nothing for anyone else. The old night-eye draught (`nightsight`) does nothing now and is no longer offered as an action; a save's stash copies are bought back for 15 each on load; a hero mid-delve with draught rounds (`nightEyes`) keeps them until they run out.
+- Old saves (a delve in progress from before V4.1): the free lantern becomes a slotless loaner Lantern in its bearer's pack (rounds = the old oil, open as it was), a lit torch a slotless lit torch; loaners never reach the cart or lost gear and can't be stolen.
 
 ### 7.2 Lit hexes
 
-A hex is lit if in line of light (smoke doesn't block light) of: the open lantern (stage radius); a hero's lit torch (radius 2, 12 rounds); a Glowworm drinker (radius 1); a lit brazier (radius 3); a fixed castle light; a burning hex (itself).
+A hex is lit if in line of light (smoke doesn't block light) of: a burning torch or lantern (carried by a hero on the map or lying on the floor; its radius above); a Glowworm drinker (radius 1); **a crew member** (each carries its own light, radius 2, `CREW_LIGHT_RADIUS`; lit for everyone: heroes see them coming, monsters see them, the Gloam never hunts one); a lit brazier (radius 3); a fixed castle light; a burning hex (itself).
 
-Fixed lights (`castle.lights`, radius): sconce 2, daylight 3, fungus 2, glow 2, fire 3 by default; the Lair's two fires are radius 2 and its three fire vents radius 1.
+Fixed lights (`castle.lights`, radius): sconce 2, daylight 3, fungus 2, glow 2, fire 3 by default; the Lair's two fires are radius 2 and its three fire vents radius 1. V4.1: Level 1's library, tower stair and armory have none (section 14.1).
 
-### 7.3 Sight range (per hero, `sightRangeAt`)
+### 7.3 Darkness by the hero's own hex: sight and rolls
 
-| Hero's hex | Level 1 | Level 2 | Level 3 |
-| --- | --- | --- | --- |
-| Night-eye draught active | 8 | 7 | 6 |
-| Unlit | 4 | 2 | 1 |
-| Lit by party light (open lantern, torch, Glowworm): bright | 8 | 7 | 6 |
-| … dim | 6 | 5 | 4 |
-| … dark | 4 | 3 | 2 |
-| … pitch | 2 | 2 | 2 |
-| Lit by daylight only | 8 | – | – |
-| Lit by another castle light only (sconce, fire, brazier, fungus, glow, burning) | 4 | 3 | 2 |
+`world.lightTierAt` reads what lights the hero's own hex:
 
-- Never below 2 when lit. The layout glimpse (exploring) uses the same range, in the hero's field of view, from every hex they step on.
-- **Far lights**: beyond sight range, up to 14 (`LIT_SIGHT`) in line of sight, only light sources show: a non-daylight fixed light's own hex, a lit brazier, a burning hex, the open lantern's bearer, a torch-bearer or Glowworm drinker. Daylight shows its whole lit patch. Walls are not revealed around far lights.
-- Walls, pillars, tall props, braziers and props next to seen floor are revealed (no holes in rooms). Line of sight is permissive: clear to the target's centre or any of its six corners pulled 10% in. Pits don't block sight; closed doors, walls, pillars, cracked walls, tall props, the sealed stair and smoke do.
-
-### 7.4 Brightness penalty to rolls
-
-| | Bright | Dim | Dark | Pitch |
+| Hero's hex | Rolls | Sight L1 | L2 | L3 |
 | --- | --- | --- | --- | --- |
-| Penalty | 0 | −10 | −20 | −30 |
+| Lit by party light (a torch, a lantern, Glowworm, a torch or lantern lying lit) or daylight | 0 | 8 | 7 | 6 |
+| Lit only by a castle light (sconce, fire, brazier, fungus, glow, burning hex, a crew member's light) | −10 ("Dim") | 4 | 3 | 2 |
+| Unlit | −20 ("Dark") | 4 | 2 | 1 |
+| Night-eye Stout | 0 | 8 | 7 | 6 |
 
-The stage is the lantern's, whatever lights the hero's hex. A hero on a lit hex rolls at the lantern stage (pitch counts as dark). A hero on an unlit hex rolls at dark (pitch if the lantern is at 0). Night-eye removes the penalty.
+- Never below the table. The layout glimpse (exploring) uses the same range, in the hero's field of view, from every hex they step on.
+- **Far lights**: beyond sight range, up to 14 (`LIT_SIGHT`) in line of sight, only light sources show: a non-daylight fixed light's own hex, a lit brazier, a burning hex, a hero carrying a burning torch or lantern, a lit torch or lantern on the floor, a Glowworm drinker, a crew member. Daylight shows its whole lit patch. Walls are not revealed around far lights.
+- Walls, pillars, tall props, braziers and props next to seen floor are revealed (no holes in rooms). Line of sight is permissive: clear to the target's centre or any of its six corners pulled 10% in. Pits don't block sight; closed doors, walls, pillars, cracked walls, tall props, the sealed stair and smoke do.
+- Monsters' noticing (5.4) reads lit or unlit from the same lit hexes: a hero is lit when any light reaches them (their own, a friend's, a crew's, the castle's).
 
-### 7.5 The Gloam
+### 7.4 The Gloam
 
-- Present when the lantern is at 0 (any level), or when an active hero stands on an unlit hex on Level 3.
-- Rises (if absent) on a dark, free floor hex out of the party's sight if possible: 8 to 10 from the lantern bearer for the pitch case ("Something moves in the dark."); 4 to 6 from the first unlit hero on Level 3 ("The dark here is awake."). It acts at once.
-- Moves 3 per world phase through dark hexes only (uses stairs, passes locked doors); targets only heroes on unlit hexes, nearest by walking distance through the dark; strikes an adjacent unlit hero for 4, no roll, ignoring armor (Ward −1). If light reaches it, it recoils to the nearest dark hex.
+- Present only on Level 3, only when an active hero stands on an unlit hex there (V4.1: the "lantern at 0 anywhere" trigger is gone).
+- Rises (if absent) on a dark, free floor hex out of the party's sight if possible, 4 to 6 from the first unlit hero ("The dark here is awake."). It acts at once.
+- Moves 3 per world phase through dark hexes only (uses stairs, passes locked doors); targets only heroes on unlit hexes, nearest by walking distance through the dark; strikes an adjacent unlit hero for 4, no roll, ignoring armor (Ward −1). If light reaches it, it recoils to the nearest dark hex. It never hunts a crew member (they carry light).
 - Can't be harmed, shoved, slept, dreaded, rooted or made to fall. No sound.
-- Fades: when the lantern rises above 0 and nobody is unlit on Level 3; or after 2 consecutive world phases with neither condition.
+- Fades after 2 consecutive world phases with nobody unlit on Level 3.
 
-Code: world.ts `brightnessOf`, `litSet`, `fixedLit`, `farLit`, `farLitTest`, `sightRangeAt`, `partyLights`, `LANTERN_RADIUS`, `SIGHT_BY_STAGE`, `LIT_SIGHT`; common.ts `brightnessAt`, `LIGHT_PENALTY`, `lightPenaltyFor`; delve.ts `setLight`, `unlitOnL3`; world-phase.ts `gloamPhase`, `planGloam`; data.ts `LIGHT_MAX`, `LIGHT_BRIGHT`, `LIGHT_DIM`, `TORCH_ROUNDS`, `DARK_SIGHT`, `FIXED_LIGHT_SIGHT`, `KINDLE_LIGHT`, `OIL_LIGHT`, `BRAZIER_LIGHT`, `NIGHTSIGHT_ROUNDS`, `GLOAM_*`; data/castle/build.ts `light`, `sconce`.
+Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLight`, `restLight`, `siteUnlit`, `brightestHero`); world.ts `roundsOf`, `lightRadius`, `lightSources`, `litSet`, `fixedLit`, `farLit`, `farLitTest`, `lightTierAt`, `sightRangeAt`, `partyLights`, `nightEyedHero`, `fixedLightReaches`, `LIT_SIGHT`; common.ts `brightnessAt`, `LIGHT_PENALTY`, `lightPenaltyFor`; delve.ts `unlitOnL3`; world-phase.ts `gloamPhase`, `planGloam`; data.ts V4.1 (WS2) block (`FREE_LANTERN`, `TORCH_RADIUS`, `LANTERN_*`, `KINDLE_RANGE`, `CREW_LIGHT_RADIUS`, `NIGHTEYE_ALE`, `DARK_PENALTY`, `NIGHTSIGHT_REFUND`), `TORCH_ROUNDS`, `OIL_LIGHT`, `KINDLE_LIGHT`, `DARK_SIGHT`, `FIXED_LIGHT_SIGHT`, `GLOAM_*`; data/castle/build.ts `light`, `sconce`.
 
 ---
 
@@ -433,7 +467,7 @@ Code: world.ts `brightnessOf`, `litSet`, `fixedLit`, `farLit`, `farLitTest`, `si
 | Brightness | 0 / −10 / −20 / −30 | every hero roll |
 | Weapon tier | +10 per tier | weapon attacks, knockback, hamstring, free swings, overwatch |
 | Target asleep | +20 | attack, knockback, firebolt, dart, overwatch |
-| Raised floor (ranged) | +10 | bow attack, firebolt, fireball (no raised hexes exist in the current castle) |
+| Raised floor (ranged) | +10 | bow attack, firebolt, fireball (V4.1: the two archer perches on Level 2 are raised) |
 | Flanked | +1 slot | melee: an active ally on the hex directly across the target |
 | Sneak attack | +1 slot | weapon `attack` on an enemy that hasn't noticed this hero (asleep, or not in its `noticedIds`; crew: not hostile or demanding) |
 | Backstab (Burglar) | +1 slot, weapon damage ×2 per hit before armor | melee from outside the target's front (a monster's sides or straight behind it; straight behind a crew member), target unaware of the Burglar; monsters and crew members, not the Dragon or the Gloam. Stacks with sneak attack |
@@ -457,27 +491,27 @@ Damage to a monster or crew member per hit: max(1, weapon damage − armor), min
 - V4.0 (spec 28.2): a crew member stepping out of the reach of a hunting monster that has noticed it gets the same swing (one slot fewer), hired or not.
 - Heroes swing too: an enemy (monster, or a hostile crew member) stepping out of reach of an active hero whose action is unspent gets a swing: weapon slots − 1 (min 1), a bow 1 slot, a braced hero full slots. The action is not spent. A swing can kill the enemy mid-walk.
 
-### 8.5 Downed, bleeding, death
+### 8.5 Downed, bleeding, death (V4.1, spec 31.4)
 
-- At 0 HP an active hero is downed with bleed 2; each world phase bleed −1; at 0 they die (they die in the second world phase after going down). Any damage to a downed hero kills them.
+- At 0 HP an active hero is downed with bleed `BLEED_START` 3; each world phase bleed −1; at 0 they die (the third world phase after going down). Any damage to a downed hero kills them. The bleed-out count shows on their tag (✚ 3) and party card ("Down · 3").
 - Monsters ignore downed heroes as targets (area damage still hits them).
-- Revive (action, adjacent downed hero): back up at 3 HP; the revived hero has used their move and action this round.
-- Potion on an adjacent downed hero: back up at 5 HP (move and action not spent).
-- A dead hero's pack drops on their hex (not their class kit); if they carried the lantern, the nearest active hero takes it.
-- Crew members have no downed state: at 0 HP they die and drop loot and pack.
+- **Revive is gone.** A **potion** (an action) on an adjacent downed hero, or one on your hex (carried): up at 5 HP (`POTION_HEAL.potion`), a greater potion at 8; move and action not spent. **Mend** (Hedgewitch, 1 mana) on a downed hero within 3: up at `MEND_UP_HP` 2 (and the poison drawn out).
+- **Carry** (section 9.2): a carried downed hero doesn't bleed; carried out by an exit they come out alive at `CARRIED_OUT_HP` 1.
+- **Splints** (Gerda and Aldric home, `pairHome(village, 'smith', 'surgeon')`): a downed hero nobody carries or holds may crawl `CRAWL_MOVE` 1 hex a turn on their own (walking noise; a trap bites and kills), no dash, no action but Leave on an exit (out at 1 HP). They still bleed.
+- A dead hero's pack drops on their hex (not their class kit); a lit torch or open lantern in it keeps burning there (V4.1). A downed carrier drops the body they carried on their hex.
+- **Crew members** (V4.1, pillar 17): at 0 HP a member goes down (`Rival.downed`, `bleed` 3) instead of dying; what it held or carried is dropped where it lies; the kill and XP go to the hero who downed it. Any damage to a downed member kills it; then its loot and pack drop (spec 20.4). It bleeds out by the hero rule (not while a crewmate carries it). Crewmates get it up (section 12.3). Heroes may strike a downed member next to them (a Ranger in sight within 6).
 
-### 8.6 Venom and paralysis (V4.0, spec 29)
+### 8.6 Poison (V4.1, spec 31.4; replaces V4.0's venom and paralysis)
 
-- **Envenomed:** a hero (active or downed), a monster (not the Dragon or the Gloam) or a crew member takes a dose: a countdown of `VENOM_ROUNDS` 3. At step 2 of each world phase it drops by 1; at 0 the figure is paralyzed. A second dose while envenomed takes 1 off the countdown (to 1 at least); a paralyzed figure takes no more.
-- **Paralyzed** for `PARALYSIS_ROUNDS` 6 world phases (it runs down at step 2, before monsters act; the figure is paralyzed through six of its turns): no move, no action, free actions included (no Leave, no Parley); no free swings; it doesn't bleed and isn't downed; damage hurts as usual (HP; at 0 a hero goes down by 8.5 and the paralysis keeps running underneath). Monsters still target a paralyzed hero (unlike a downed one). A paralyzed bearer drops the lantern (the nearest able hero takes it), an escort lets go of the prisoner, guard, brace and overwatch end. A paralyzed monster shows no intent, doesn't look round, doesn't turn to noise and lets go of a hold; a paralyzed crew member waits and drops a dragged hero. When it wears off: back with HP as it is.
-- **Sources:** a spider's bite that hits (its attacks and free swings, every level; heroes and crew members); a venom dart that hits (section 9.5; heroes and crews); a venom trap (section 13.4).
-- **Cures:** the antidote (section 9.5); the Hedgewitch's Mend (a hero envenomed or paralyzed within 3 is a target even at full HP: heal 4 and the venom is drawn out; a crew Hedgewitch mends a paralyzed or envenomed member first, and a hired one a hero); leaving the castle (the venom is drawn out: a summary note says so).
-- **Shoulder** (action, an able hero next to a paralyzed active ally nobody carries; `HeroInDelve.carrying`): the carried ally is set on a free hex next to the carrier after each of the carrier's moves (as the escorted prisoner: not doors but the open sally port gate, traps, vents or fire), the carrier moves `CARRY_MOVE` 3 at most (dash too). **Set down** is free. Carrying ends when the carrier is downed, paralyzed or gone, when the carried one recovers, goes down or dies, and on a jump, climb, grapple or blink. A carrier who Leaves takes the carried ally out too (out, venom drawn out).
-- **End of delve:** the delve ends when no hero can stir (active and not paralyzed). A paralyzed hero still inside dies ("left behind"); `abandon` takes out only able heroes on exits (and whoever they carry).
-- Determinism: no new dice: bites and darts use their existing hit rolls.
-- Events: `envenomed` (`venom`, `dose`), `paralyzed`, `cured` (`how`: antidote, mend, worn, out), `shouldered`, `setDown`; `trap` and `trapSpotted` carry `venom`.
+- **Poisoned** (`poisoned`): a hero (up or downed), a monster (not the Dragon or the Gloam) or a crew member takes a dose. At step 2 of every world phase each poisoned figure that is up takes `POISON_DMG` 1, never below `POISON_FLOOR` 1 HP: poison never downs anyone, and doesn't tick on a downed hero. It lasts until cured. A second dose changes nothing. It is a slow hurt, not an attack: no roll, no noise, no turning.
+- **Sources:** a spider's bite that hits (its attacks and free swings, every level; heroes and crew members); the **poison dart** (internal `venomdart`, Ilse's, 30; section 9.5; heroes and crews: the Gallows Choir's Little Mags); the two Level 2 **poison traps** (1 damage and a dose, section 13.4).
+- **Cures:** the **antipoison** (internal `antidote`; an action, on yourself or an adjacent poisoned ally, up or downed); the Hedgewitch's **Mend** (a poisoned hero within 3 is a target even at full HP; crew Hedgewitches mend a poisoned member below full); **leaving the castle** (a summary note: "Fenna came out poisoned; the open air drew it out.").
+- **Spider-milk Stout** (ale `spidermilk`, Wim and Ilse): poison can't take hold of the drinker this delve.
+- Paralysis, Shoulder and the "nobody can stir" end-of-delve rule are gone. Old saves: an envenomed or paralyzed figure loads as poisoned; a V4.0 shoulder carry ends (`migratePoison`).
+- Presentation: a green drop on the party card, the figure's tag and enemy cards; hover "Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out."
+- Events: `poisoned` (`by`), `cured` (`how`: antidote, mend, out); the tick is a `hit` with attacker `'poison'`; `trap` and `trapSpotted` carry `venom` (a poison trap).
 
-Code: venom.ts (`isParalyzed`, `isEnvenomed`, `canStir`, `venomTakes`, `envenom`, `cureVenom`, `venomTick`, `trapDamage`, `carrierOf`, `shoulderable`, `endCarry`, `checkCarries`, `carryFollow`); delve.ts (`moveKind`, `moveBudget`, `canDo`, `targetsFor`/`spec`/`doAct` for `venomdart`, `antidote`, `shoulder`, `setDown`, `mend`; `springTrap`, `leaveCastle`, `abandon`, `checkDelveEnd`); world-phase.ts (`worldPhase` step 2, `planMonster`, `monsterAct`, `computeIntents`, `lookAll`); ai.ts `strikeDetailed`/`strikeCrew` (`spiderBite`); stealth.ts `monsterCanSwing`, `rivalCanSwing`, `heroCanSwing`; common.ts `makeNoise`, `passLanternIfNeeded`; rivals.ts `planRival`, `rivalsAct`; crewai.ts (`venomIntent`, `useKit` `venomdart`, `witchIntent`, `hiredKit`, `hiredUse`); crewmove.ts `springCrewTrap`, `crewDisarm`; parley.ts `parleyTargets`; data.ts `VENOM_ROUNDS`, `PARALYSIS_ROUNDS`, `TRAP_DMG`, `VENOM_TRAP_DMG`, `CARRY_MOVE`, `THROW_RANGE.venomdart`.
+Code: poison.ts (`isPoisoned`, `poisonTakes`, `poison`, `curePoison`, `poisonTick`, `trapDamage`, `carryable`, `startCarry`, `endCarry`, `checkCarries`, `carryOut`); common.ts (`occupant`, `bodiesOn`, `carrierOf`, `syncCarried`, `bringCarried`, `setDownNear`, `downedCrew`, `downMember`, `killMember`, `hurtHero`, `killHero`); delve.ts (`moveKind`, `moveBudget`, `canCrawl`, `doCrawl`, `canDo`, `targetsFor`/`spec`/`doAct` for `venomdart`, `antidote`, `carry`, `unshackle`, `setDown`, `potion`, `mend`; `springTrap`, `leaveCastle`, `unshackle`, `checkDelveEnd`); world-phase.ts (`worldPhase` step 2); ai.ts `strikeDetailed`/`strikeCrew` (`spiderBite`), `targets`; falls.ts (`setPos`, `fall`, `push`); crewai.ts (`rescuePlan`, `rescueAct`, `helpless`, `rob`, `dragAct`); rivals.ts `planRival`, `rivalsAct`; engine.ts `migratePoison`; data.ts V4.1 (WS3) block (`POISON_DMG`, `POISON_FLOOR`, `MEND_UP_HP`, `CARRIED_OUT_HP`, `CRAWL_MOVE`, `UNSHACKLE_*`), `BLEED_START`, `CARRY_MOVE`, `TRAP_DMG`, `VENOM_TRAP_DMG`.
 
 Code: common.ts `roll`, `clampChance`, `hurtHero`, `hurtAny`, `turnOnHit`, `killHero`, `killMonster`, `monsterArmor`, `shieldWalled`, `guardMods`, `rangedLabel`; delve.ts `spec` (attack, knockback, firebolt...), `doAct`, `canBackstab`, `unnoticedBy`; ai.ts `strike`, `strikeDetailed`, `guardFor`, `wardOf`; stealth.ts `swingersFor`, `provokeSwings`, `enemySwing`, `heroSwings`, `monsterCanSwing`; data.ts `FOCUS_MAX`, `MANA_MAX`, `BLEED_START`, `SNEAK_ATTACK_SLOTS`, `BACKSTAB_SLOTS`, `BACKSTAB_DMG_MULT`, `SWING_SLOT_PENALTY`, `SWING_BOW_SLOTS`, `BRACE_DMG`, `BRACE_CHANCE`, `SHIELD_DMG`, `SHIELD_BRACED_DMG`.
 
@@ -517,17 +551,17 @@ V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Mig
 | Drop, Give (free) | Drop on own hex; give to an adjacent active hero with room |
 | Disarm | Spotted trap on or next to the hero: 2 Finesse slots; any hit removes it; 0 sets it off on the disarmer (3 damage, noise 2) |
 | Light brazier | Adjacent unlit brazier: +4 light, lit for the campaign |
-| Torch, Potion, Oil, Night-eye, thrown items | Section 9.5 |
-| Revive | Section 8.5 |
+| Light torch (an action), Snuff, Drop torch (free) | Section 7.1 |
+| Potion, Oil, thrown items | Section 9.5 |
 | Jump | Whole turn; from a hex next to a pit, into it (section 13.1). Preview confirms for drops over 1 level |
 | Rope, Climb, Grapple | Section 13.1 |
 | Winch | Next to the winch, if the lift isn't running: lift works for the delve; noise 6 |
-| Free | Adjacent prisoner: frees them (first time) and makes this hero the escort; another adjacent hero can take over the escort |
-| Shoulder | V4.0: an adjacent paralyzed ally: carry them (section 8.6); moves 3 at most |
-| Set down (free) | V4.0: put the carried ally down |
+| Carry | V4.1 (spec 31.4): an action, next to a downed hero or the shackled captive nobody carries. The body shares the carrier's hex (it doesn't block; the carrier counts) and moves with them, through falls, shoves and blinks too. The carrier moves `CARRY_MOVE` 3 at most (dash too) and takes free actions only: no jump, climb, grapple or blink, no chest, no attack. A carried downed hero doesn't bleed. Area effects on the hex (fireball, burning, blasts, breath, a fall) hit both, and any damage kills a downed body; single strikes pick one (monsters still ignore a downed hero; they may strike a carried captive). Carrying ends when the carrier is downed or killed (the body lies there) |
+| Set down (free) | V4.1: put the carried body on a free hex next to you (none free: on your hex) |
+| Unshackle | V4.1 (spec 31.4): an action, the shackled captive next to you (or on your back): lockpicks (sure, silent), the skeleton key (used up, silent), an improvised pick (one used up, sure, noise 2), or Smash (2 Might slots, 1 hit frees, noise 4 either way). Unshackled, they follow you (section 15) |
 | Escape | Grabbed (by a ghoul, or V4.0 spec 28.8 held by a crew member carrying you off): 2 Might slots, 1 hit frees; noise 1 |
-| Pass lantern, Shutter | Section 7.1 |
-| Leave (free) | On an exit hex whose way is open (section 3.1): the hero is out; the prisoner goes out too if this hero escorts them and they are adjacent |
+| Shutter (free, a lantern in the pack) | Section 7.1 (Pass lantern is gone: Give hands one over) |
+| Leave (free) | On an exit hex whose way is open (section 3.1): the hero is out; the captive who follows them goes out too if adjacent (or on the hex); V4.1: a carried body comes out too (a downed hero alive at 1 HP, the captive rescued) |
 | Parley (free) | Opens the deal card (section 12.4) |
 
 ### 9.3 Class abilities
@@ -545,18 +579,19 @@ V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Mig
 | Ranger | Knockback shot | 2 Finesse slots at range ≤ 5 in sight, not the Dragon; 2 hits push the target 1 hex away from the Ranger with all shove outcomes; noise 1 |
 | Ranger (any bow) | Hamstring | 1 Finesse slot at −20, range ≤ 5 in sight, awake target, not the Dragon; a hit roots it 2 rounds (heroes: no move or dash; monsters and crew: stuck in place); noise 1 |
 | Sapper | Set charge | Action, 1 charge: an adjacent floor-like hex, cracked wall or breakable wall with no fuse; fuse 1 or 2 |
+| Sapper | Set tripwire (V4.1) | Action, 1 charge, Gerda and Ilse home: an adjacent free floor hex with no fuse; fuse 2, and it goes off when a monster or crew member steps within 1 (section 2.12) |
 | Sapper | Throw charge | Action, 1 charge: a hex within 3 the party can see; fuse 1 |
 | Sapper (and Mole's Brown) | Dig | Action: adjacent rubble or cracked wall becomes floor; noise 4; no roll |
 | Sapper | Improvised explosives | One a hero level each delve (`kitPerDelve`: level 1 brings 1, level 6 brings 6; was 3 at any level), one slotless item, "Improvised explosives" ("Improvised explosive" with 1 left); the same blast, fuse, set and throw rules as a bought blasting charge; bought charges add to them; the improvised ones are spent first |
 | Pyromancer | Firebolt (1 mana) | 3 Wits slots, range 5, visible enemy in line of sight; 2 per hit minus armor; noise 3 |
 | Pyromancer | Fireball (2 mana) | A floor or pit hex within 5 the party can see: 3 Wits slots; every figure within 1 (allies too) takes hits × max(1, 2 − armor) (monster or hero armor; crew armor and ward are ignored), Perfect +1; floor hexes burn 2 world phases (1 damage per phase to whoever stands there; lit; monsters won't path into fire); noise 6 |
-| Pyromancer | Kindle (1 mana) | +6 light (only below 20); silent |
+| Pyromancer | Kindle (1 mana) | A torch or lantern held by a hero within 3: light it, or +6 rounds to one that burns (section 7.1); silent |
 | Shadowmancer | Veil (1 mana) | An active ally within 3 (or self): 2 rounds unseen by monsters and crews (not a target); hunting monsters that see no unveiled hero go alert. Broken by any attack, knockback, hamstring, damaging spell (firebolt, fireball, night thorn, briar), shove, gust, smash (lock or crate) or action of noise ≥ 4 the hero makes. Sleep, darts and Dread don't break it |
 | Shadowmancer | Sleep (1 mana) | 2 Wits slots, range 5, an awake visible monster (not the Dragon, not crew): 1+ hits puts it to sleep (forgets everyone); silent |
 | Shadowmancer | Blink (1 mana) | Teleport up to 4 to a free standable hex the party can see on the same level (across pits); ends any escort; silent |
 | Shadowmancer | Dread (1 mana) | 2 Wits slots, range 5, a visible monster or crew member (not the Dragon): 1+ hits feared 2 world phases: it runs its full move away from the caster, attacks nothing, drops any grab or dragged hero, provokes free swings. On a crew member it turns the crew hostile. Silent |
 | Shadowmancer | Night thorn (1 mana) | 2 Wits slots, range 5: 1 damage per hit ignoring armor, Perfect +1; silent |
-| Hedgewitch | Mend (1 mana) | Heal 4 on a hurt active hero within 3 (or self); no roll. V4.0: also draws out venom and paralysis (a hero envenomed or paralyzed is a target at full HP) |
+| Hedgewitch | Mend (1 mana) | Heal 4 on a hurt active hero within 3 (or self); no roll. V4.1: also cures poison (a poisoned hero is a target at full HP); a downed hero within 3 gets up at 2 |
 | Hedgewitch | Ward (1 mana) | An active ally within 3: 2 rounds of 1 less per hit (min 0) from monster, crew and Gloam strikes |
 | Hedgewitch | Gust (1 mana) | A floor or pit hex within 4 the party can see: every figure within 1 of it (not on it) is pushed 1 hex away from it with all shove outcomes, heroes too; noise 2 |
 | Hedgewitch | Briar (1 mana) | 2 Wits slots, range 4, not the Dragon: 1 damage per hit (Perfect 3), roots 1 round, 2 on a Perfect; noise 1 |
@@ -584,15 +619,15 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 ### 9.5 Items
 
 - Pack: 4 slots. Most items 1 slot; heirlooms and hoard pieces 2; the copper 2 and heavy; class kit (improvised explosives, improvised pick) 0. Gold stacks to 100 per slot.
-- Torch: action; 12 rounds of radius-2 light round the carrier.
-- Potion: action; heal 5 on self or an adjacent hurt active hero, or get an adjacent downed hero up at 5 HP.
-- Oil flask: action; +8 light.
-- Night-eye draught: action, silent; 8 rounds (ticks each world phase): sight range 8/7/6 by level whatever the light, no brightness penalty. Still unlit for monsters' noticing and for the Gloam.
+- Torch, lantern: section 7.1.
+- Potion: action; heal 5 on self or an adjacent hurt active hero, or get an adjacent downed hero up at 5 HP. V4.1: the greater potion (1 slot) is used the same way (one set of targets per kind carried): heal 8, or up at 8 (`POTION_HEAL`).
+- Oil flask: action; +10 to a lantern in the pack (section 7.1).
+- Night-eye draught: retired (V4.1, spec 31.5): no action; Night-eye Stout replaces it (section 7.1).
 - Smoke bomb: throw 4 at a hex the party can see: that hex and neighbours smoked 2 rounds. Smoke blocks sight both ways beyond 1 (light passes). Hunting monsters inside go alert and forget who they noticed.
 - Glue bomb: throw 4: monsters (not the Dragon or the Gloam) within 1 stuck 2 rounds (can't move).
 - Sleep dart: throw 5 at an awake visible monster (not the Dragon, not crew): 1 Finesse slot; a hit puts it to sleep. Silent.
-- Venom dart (V4.0, 1 slot): throw 5 at a visible monster (not the Dragon or the Gloam) or crew member, not paralyzed already, in line of sight: 1 Finesse slot (+20 asleep, light penalty); a hit envenoms it (section 8.6). Silent; a hit doesn't make a monster hunt (as the sleep dart); thrown at a crew member it makes the crew hostile.
-- Antidote (V4.0, 1 slot): action: on yourself while envenomed, or on an adjacent hero (up or downed) envenomed or paralyzed: the venom and paralysis are gone.
+- Poison dart (V4.0's venom dart, 1 slot; V4.1 sold by Ilse): throw 5 at a visible monster (not the Dragon or the Gloam) or crew member, not poisoned already, in line of sight: 1 Finesse slot (+20 asleep, light penalty); a hit poisons it (section 8.6). Silent; a hit doesn't make a monster hunt (as the sleep dart); thrown at a crew member it makes the crew hostile.
+- Antipoison (V4.0's antidote, 1 slot): action: on yourself while poisoned, or on an adjacent poisoned hero (up or downed): the poison is gone.
 - Caltrops: an adjacent free floor hex: the first monster stepping there takes 2 and stops. Lasts the delve. The party's own caltrops never catch heroes.
 - Firecracker: throw 6: noise 6 at the hex.
 - Skeleton key, lockpicks: section 9.4.
@@ -601,7 +636,7 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 - Blasting charge (bought, 1 slot): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw, after their improvised explosives.
 - Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised picks are the hero's own, one a hero level each delve (spec 30.2; crew members by crew level: the Ferrymen's Brecht 3 explosives plus 2 bought charges, the Wake's Spade 4 plus 3). No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives.
 
-Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `KIT_PER_LEVEL`, `kitPerDelve`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `pickName`, `classKit`, `spendPick`, `migrateSatchel`; camp.ts `fitClass`; crewmove.ts `crewWorkLock`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`; V4.0 venom.ts (`envenom`, `cureVenom`, `venomTakes`).
+Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `KIT_PER_LEVEL`, `kitPerDelve`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `pickName`, `classKit`, `spendPick`, `migrateSatchel`; camp.ts `fitClass`; crewmove.ts `crewWorkLock`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`; V4.1 poison.ts (`poison`, `curePoison`, `poisonTakes`).
 
 ---
 
@@ -643,7 +678,7 @@ Every special ability shows as the monster's intent the round before it goes off
 
 - **Rats**: at 1 HP they flee (move away from heroes).
 - **Orc**: the first time it notices a hero it bellows (noise 5), whenever that happens (V4.0: mid-move in the player phase too). Edge shove: if a hero it could hit has an unrailed pit straight behind them, the intent is `shove`; 60% to push them 1 hex (they fall).
-- **Spider**: not adjacent, a hero within 3 in plain sight: web (no damage, the hero can't move next turn) at most every 2 rounds. Next round, a webbed hero within 3 and not adjacent: `drag` 1 hex toward the spider with shove outcomes. V4.0: its bite is venomous: a strike (or free swing) that hits a hero or crew member envenoms them (section 8.6); the intent reads "bites X (venom)".
+- **Spider**: not adjacent, a hero within 3 in plain sight: web (no damage, the hero can't move next turn) at most every 2 rounds. Next round, a webbed hero within 3 and not adjacent: `drag` 1 hex toward the spider with shove outcomes. V4.1: its bite is poisonous: a strike (or free swing) that hits a hero or crew member poisons them (section 8.6); the intent reads "bites X (poison)".
 - **Cutpurse**: its strike is `steal`: on a hit it takes a random pack item (not an heirloom, story items count as heirlooms; not the sally port key or class kit) instead of damage (damage if nothing to take), then flees toward the farthest exit; on an exit it leaves with it; killed, it drops it.
 - **Berserker**: always hunting once awake; goes for heroes within 10 even unseen. Moving 2+ hexes then hitting knocks the target back 1 hex.
 - **Orc archer**: shoots at range 2–4 in line of sight, preferring 3, backing off when adjacent (shoots point-blank if it can't). `hamstring` a non-rooted hero within 3. Edge knockback shot like the orc's shove (60%).
@@ -660,8 +695,8 @@ Code: data.ts `MONSTERS`, `TIERS`, `ARCHER_RANGE`, `ARCHER_KEEP`, `CAPTAIN_SHOUT
 
 | Level | Spawns |
 | --- | --- |
-| 1 Ruined Keep | 2 sleeping rats (kitchens), sleeping spider (library), cutpurse (courtyard), 5 orcs at posts (hall ×2, tower stair, courtyard, chapel), 1 patrolling orc (round the hall's pit mouth) |
-| 2 Crossing | Sleeping barracks squad (4 orcs, the captain), Grub the Jailer (orc, cellblock), spider (archive), Ugluk Red-Hand (berserker, forge), rats (south rim), 2 orcs patrolling the arcade loop, orc patrolling guard post ↔ barracks, orc patrolling the east ledge, 2 archers (arcade, east ledge), orc (winch room), cutpurse (archive) |
+| 1 Ruined Keep | 2 sleeping rats (kitchens), sleeping spider (library), cutpurse (courtyard), 6 orcs at posts (hall ×2, the west one on the pit's unrailed lip; tower stair ×2; courtyard; chapel, asleep on a campaign's first delve), 1 patrolling orc (round the hall's pit mouth) (V4.1, spec 31.7) |
+| 2 Crossing | Sleeping barracks squad (4 orcs, the captain), Grub the Jailer (orc, the cellblock passage's winch-room end, within the winch's noise; V4.1), spider (archive), Ugluk Red-Hand (berserker, asleep at the forge; V4.1), rats (south rim), 2 orcs patrolling the arcade loop, orc patrolling guard post ↔ barracks, orc patrolling the east ledge, 2 archers (arcade, east ledge), orc (winch room), cutpurse (archive) |
 | 3 Hollow | Rats (Bone Pile), 3 buried ghouls (Bone Pile), 2 spiders (Spider Nest), 2 orcs (lift base), berserker (the Drain), the Dragon asleep (the Lair) |
 
 Code: src/data/castle/index.ts `castle.spawns`.
@@ -690,19 +725,20 @@ Built as heroes of their class at the crew level: HP = class HP + 2 × (level �
 | --- | --- | --- | --- |
 | Lantern Sisters | 2 | weapon 1, armor 1 | Ranger (2 caltrops, potion): 10 HP, 90%, armor 1. Shadowmancer (smoke, firecracker): 8 HP, spells 80%. Burglar (2 darts, smoke, lockpicks, 2 improvised picks): 9 HP, 90%, darts 80% |
 | The Ferrymen | 3 | weapon 1, armor 1 | Sellsword (potion, glue): 14 HP, 90%, armor 2. Ranger (2 caltrops, potion): 12 HP, 95%. Sapper (3 improvised explosives, 2 charges, glue): 13 HP, 80%, armor 1 (spec 30.1) |
-| The Gallows Choir | 3 | weapon 1, armor 1 | Sellsword (potion, glue). Burglar (sleep dart, venom dart (V4.0), smoke, lockpicks, 3 improvised picks): 11 HP, 95%. Pyromancer (potion, oil): 10 HP, spells 85% |
+| The Gallows Choir | 3 | weapon 1, armor 1 | Sellsword (potion, glue). Burglar (sleep dart, poison dart (V4.0 venom dart), smoke, lockpicks, 3 improvised picks): 11 HP, 95%. Pyromancer (potion, oil): 10 HP, spells 85% |
 | The Wake | 4 | weapon 2, armor 1 | Sellsword (2 potions): 16 HP, 95%, armor 2. Hedgewitch (2 potions): 13 HP, spells 85%. Shadowmancer (smoke, firecracker): 12 HP, spells 90%. Sapper (4 improvised explosives, 3 charges): 15 HP, 95%, armor 1 (spec 30.1) |
 
 Cutthroat members each carry a purse: 30 gold (level 2–3), 50 (the Wake). The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
 
 ### 12.3 Stances and behaviour
 
-- **Prospectors (neutral)**: walk to the nearest unopened, unjammed chest or ground pile (not one a hero stands on; piles at opened chests only for the Burglar sister, or if it holds an heirloom) and take everything. Goal becomes `leave` after 3 pickups, when the lantern is at 9 or less, or when nothing is left; then they walk to the nearest open exit and go (never one behind a shut gate or rubble; the same for a crew dragging a hero and a fleeing cutpurse). On first being spotted, the Shadowmancer veils the crew's striker (or herself).
+- **Prospectors (neutral)**: walk to the nearest unopened, unjammed chest or ground pile (not one a hero stands on; piles at opened chests only for the Burglar sister, or if it holds an heirloom) and take everything. Goal becomes `leave` after 3 pickups, at round 18 (`SISTERS_LEAVE_ROUND`, V4.1; was the party's lantern at 9 or less), or when nothing is left; then they walk to the nearest open exit and go (never one behind a shut gate or rubble; the same for a crew dragging a hero and a fleeing cutpurse). On first being spotted, the Shadowmancer veils the crew's striker (or herself).
 - They turn **hostile** if a hero damages, gusts or dreads any member, or if they are spotted, neutral, and blocked from moving toward their goal 2 rounds running.
 - **Cutthroats (waiting)**: stand at their post. Noticing a hero (section 5.4, within 6) or hearing noise ≥ 4 in the player phase: stance `demanding`, toll = max(50, half the party's carried value rounded to 5). They don't attack that world phase. At the next world phase, still demanding → hostile.
-- **Hostile crews**: pick one target a round for the whole crew (the lantern bearer if any member can reach them, else the lowest-HP hero in reach, else the nearest hero on foot); path to hexes with a line to the target and least exposure to other heroes. Each member first checks its kit (below), else attacks.
-- Kit by class (shown as intents first): any member below half HP with a potion steps back and drinks (+5). Burglar: V4.0 (spec 29) a venom dart (intent `venomdart`) at a hero in range 5 and sight with no venom in them, a hero alone first (no other able hero within 4), else the crew's target; then the sleep dart (V4.0 spec 28.8: a hero alone first, then the lantern bearer; a hit means the hero loses their next move and action, and dozing they are helpless: see Captives), smoke when a member below half has two heroes with a line on them. Ranger: knockback shot on a hero at an unrailed edge, hamstring a hero within 3, caltrops on the nearest hero's way in (these catch heroes: 2 damage, walk ends), overwatch when no hero is in bow reach (front field of view only). Sellsword: edge shove (60%), glue on two adjacent heroes (they can't move next turn) when nobody is at his blade; guards the caster when adjacent. Sapper: charge with fuse 1 (behind a hero at an edge, at a hero 2–3 away, or set on the way in toward a hero 3–5 away). Pyromancer: fireball where 3 heroes stand within 1 of a hex, else firebolt (3 slots, 2 dmg, range 5, noise 3). Shadowmancer: blink away below half, veil the striker, firecracker at a hero's feet near 2+ non-hunting monsters, smoke. Hedgewitch: mend a paralyzed or envenomed member (V4.0 spec 29: draws the venom out), else a member below half (+4), gust a hero at an edge, ward the striker.
-- **Captives** (V4.0 spec 28.8, owner: capture is the surprise, not the default): a hostile crew takes a hero only when they are **helpless and alone**. Helpless: downed, dozing from a crew sleep dart, or (spec 29) paralyzed. Alone: no other hero who is up (active, not dozing, not paralyzed, not in a crew member's hands) within `CAPTURE_ALONE` (4) hexes, straight-line, on the same level. A member that can stand next to such a hero with its walk shows `rob` and seizes them (or seizes a lone hero it has just downed): gold, gems and jewelry go to its loot and it takes hold ("Ferryman Joost finds Brann down and alone, empties their purse and takes hold of them."). It drags them 3 hexes a round toward the nearest exit, the hero trailing behind (it may haul an awake captive past itself); a dragged hero doesn't bleed, and the crew no longer targets them. A seized dozing or paralyzed hero is held (`grabbedBy` the member): a dozing one wakes at their next turn in its grip (a paralyzed one when it wears off or is cured), can't move, and may Escape (2 Might slots, 1 hit: free where they stand) or fight it. Killing or fearing the dragger drops the hero where they lie (a held hero is free). A dropped hero may be seized again if still helpless and alone. If the dragger reaches an exit, the hero is `captured` and the member leaves with them; a hero being dragged when the delve ends is captured too. A lone Keven is fair game: taken, the campaign ends.
+- **Hostile crews**: pick one target a round for the whole crew (V4.1: the hero carrying the most light, the biggest burning torch or lantern, if any member can reach them (was the lantern bearer), else the lowest-HP hero in reach, else the nearest hero on foot); path to hexes with a line to the target and least exposure to other heroes. Each member first checks its kit (below), else attacks.
+- Kit by class (shown as intents first): any member below half HP with a potion steps back and drinks (+5). Burglar: a poison dart (V4.1; intent `venomdart`) at a hero in range 5 and sight the poison can take, a hero alone first (no other able hero within 4), else the crew's target; then the sleep dart (V4.0 spec 28.8: a hero alone first, then the hero carrying the most light; a hit means the hero loses their next move and action, and dozing they are helpless: see Captives), smoke when a member below half has two heroes with a line on them. Ranger: knockback shot on a hero at an unrailed edge, hamstring a hero within 3, caltrops on the nearest hero's way in (these catch heroes: 2 damage, walk ends), overwatch when no hero is in bow reach (front field of view only). Sellsword: edge shove (60%), glue on two adjacent heroes (they can't move next turn) when nobody is at his blade; guards the caster when adjacent. Sapper: charge with fuse 1 (behind a hero at an edge, at a hero 2–3 away, or set on the way in toward a hero 3–5 away). Pyromancer: fireball where 3 heroes stand within 1 of a hex, else firebolt (3 slots, 2 dmg, range 5, noise 3). Shadowmancer: blink away below half, veil the striker, firecracker at a hero's feet near 2+ non-hunting monsters, smoke. Hedgewitch: mend a poisoned member below full (V4.1: cures it), else a member below half (+4), gust a hero at an edge, ward the striker.
+- **A crewmate down** (V4.1, spec 31.4, pillar 17), before anything else, in any stance: a member carrying a downed crewmate walks it 3 a round to the nearest open exit and both go out; else a potion on a downed crewmate next to it (up at 5, or 8); else a crew Hedgewitch's Mend on one within 3 (up at 2); else, when nobody else in the crew has a potion or the mana to save it and no hero who is up stands next to it, it lifts one next to it (Carry, intent `carry`: the body on its hex; not bleeding). Killing or downing the carrier drops the body.
+- **Captives** (V4.0 spec 28.8, owner: capture is the surprise, not the default): a hostile crew takes a hero only when they are **helpless and alone**. Helpless: downed or dozing from a crew sleep dart (V4.1: paralysis is gone; a poisoned hero isn't helpless). Alone: no other hero who is up (active, not dozing, not in a crew member's hands) within `CAPTURE_ALONE` (4) hexes, straight-line, on the same level. A member that can stand next to such a hero with its walk shows `rob` and seizes them (or seizes a lone hero it has just downed): gold, gems and jewelry go to its loot and it takes hold ("Ferryman Joost finds Brann down and alone, empties their purse and takes hold of them."). V4.1 (spec 31.4): it carries them by the Carry rule, the hero on its hex, 3 hexes a round toward the nearest exit (`DRAG_MOVE`); a carried hero doesn't bleed, and the crew no longer targets them. A seized dozing hero is held (`grabbedBy` the member): they wake at their next turn in its grip, can't move, and may Escape (2 Might slots, 1 hit: free where they stand) or fight it. Killing, downing or fearing the carrier drops the hero where they lie (a held hero is free and stands beside it). A dropped hero may be seized again if still helpless and alone. If the dragger reaches an exit, the hero is `captured` and the member leaves with them; a hero being dragged when the delve ends is captured too. A lone Keven is fair game: taken, the campaign ends.
 - **Finishing** (spec 28.8): a downed hero who is not alone is not carried off. A hostile member next to a downed hero (not being dragged) finishes them when no hero who is up stands next to the member: an attack (its weapon slots and chance, intent `attack` on the downed hero, "... stands over Brann and strikes." when seen); any damage to a downed hero kills. With a hero at its blade it fights the living instead (kit, then the crew's target).
 - Heroes never free-swing at neutral, truce, bribed or hired crew walking past. Crew members path with stairs (and a working lift) allowed.
 - **V4.0, crews play by the party's rules (spec 28, design pillar 17):**
@@ -730,7 +766,7 @@ Any active hero within 4 of a visible, unveiled member in line of sight may deal
 - Payment from the active heroes' packs: gold first, then gems and jewelry smallest first, no change. Heirlooms, hoard and story items are never handed over. Short: blocked with "You carry X; they want Y."
 - Any attack on a bribed, truce or hired crew makes it hostile; they keep what they were paid.
 
-Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `makeEntrance`, `lootGoals`, `lootAct`, `jobAct`, `defendTarget`, `defendAct`, `hitMonster`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); crewmove.ts (V4.0 spec 28: `crewBudget`, `wantSneak`, `crewApproach`, `crewWalk`, `crewGo`, `routeIntent`, `noteSeenBy`, `forgetSeenBy`, `heroNoticed`, `crewWorkLock`, `crewPicker`, `crewOpenChest`, `springCrewTrap`, `crewSpotTraps`, `sapperWay`, `crewDoWay`, `crewCharges`, `spendCrewCharge`, `tell`); ai.ts `exitsBy`, `exitOpen`, `foes`, `crewTargets`, `strikeCrew`; crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `attackPlan`, `hostilePlan`, `hostileAct`, spec 28.8 `draggedBy`, `helpless`, `alone`, `seizable`, `finishable`, `finish`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`, `lockFor`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`, `releaseCrewHold`, `checkHolds` (a crew hold); delve.ts `escape` (a crew member's grip too); ai.ts `ApproachOpts.through`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_LIGHT`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `CREW_CAUTION`, `CREW_PARTY_CAUTION`, `CREW_STALK_RANGE`, `CREW_LOOKOUT`, `SAPPER_SHORTCUT`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `CAPTURE_ALONE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
+Code: rivals.ts (`makeCrew`, `postCrew`, `member`, `rivalStats`, `rivalEnter`, `makeEntrance`, `lootGoals`, `lootAct`, `jobAct`, `defendTarget`, `defendAct`, `hitMonster`, `crewNotice`, `crewAim`, `planRival`, `rivalsAct`, `hireEnds`, `rivalOverwatchFire`); crewmove.ts (V4.0 spec 28: `crewBudget`, `wantSneak`, `crewApproach`, `crewWalk`, `crewGo`, `routeIntent`, `noteSeenBy`, `forgetSeenBy`, `heroNoticed`, `crewWorkLock`, `crewPicker`, `crewOpenChest`, `springCrewTrap`, `crewSpotTraps`, `sapperWay`, `crewDoWay`, `crewCharges`, `spendCrewCharge`, `tell`); ai.ts `exitsBy`, `exitOpen`, `foes`, `crewTargets`, `strikeCrew`; crewai.ts (`crewTarget`, `kitIntent`, `useKit`, `attackPlan`, `hostilePlan`, `hostileAct`, spec 28.8 `draggedBy`, `helpless`, `alone`, `seizable`, `finishable`, `finish`, `rob`, `dragAct`, `capture`, `rivalCaltropsStep`, `hiredKit`); parley.ts (`parleyTargets`, `deals`, `doDeal`, `lockFor`); common.ts `crewDemand`, `makeHostile`, `partyValue`, `rivalGuard`, `dropCaptive`, `releaseCrewHold`, `checkHolds` (a crew hold); delve.ts `escape` (a crew member's grip too); ai.ts `ApproachOpts.through`; data.ts `CREWS`, `CUTTHROAT_POOL`, `CREW_PURSE`, `PROSPECTOR_CHANCE`, `CUTTHROAT_CHANCE`, `WAKE_CHANCE`, `PROSPECTOR_ENTERS`, `PROSPECTOR_KEEP_OFF`, `SISTERS_LEAVE_ROUND`, `CUTTHROAT_SIGHT`, `CUTTHROAT_HEAR`, `TOLL_MIN`, `RIVAL_MOVE`, `CREW_CAUTION`, `CREW_PARTY_CAUTION`, `CREW_STALK_RANGE`, `CREW_LOOKOUT`, `SAPPER_SHORTCUT`, `RIVAL_POTION_HEAL`, `DRAG_MOVE`, `CAPTURE_ALONE`, `DEAL_RANGE`, `DEAL_PRICE`, `TRUCE_HOSTILE`, `DEEP_PRICE`, `HIRE_ROUNDS`, `HIRE_KEEP`, `BETRAY_LOOT`, `BETRAY_CHANCE`, `SCOUT_RANGE`, `SELLSWORD_SHOVE_CHANCE`.
 
 ---
 
@@ -775,11 +811,13 @@ The Dragon and the Gloam can't be pushed.
 
 - Hidden. A hero ending any move (including landings, blinks, climbs) within 1 of an unspotted trap rolls 1 Wits slot (brightness penalty applies): a hit spots it.
 - Stepping onto a trap, spotted or not: 3 damage, trap gone, noise 2; the walk continues if the hero is still up.
-- V4.0 (spec 29.5): **venom traps** (`TrapDef.venom`, `Delve.traps[k].venom`): 1 damage (`VENOM_TRAP_DMG`) and venom instead of 3 (stepped on, or set off by a failed Disarm; crews too). Hidden, spotted and disarmed like any trap; spotted, drawn with a green ring and needles ("Venom trap spotted"); the move preview warns in words when a spotted one lies on the path. Two on Level 2 (section 14.2).
+- V4.0 (spec 29.5), V4.1 (spec 31.4): **poison traps** (internal `TrapDef.venom`, `Delve.traps[k].venom`): 1 damage (`VENOM_TRAP_DMG`) and a dose of poison instead of 3 (stepped on, or set off by a failed Disarm; crews too). Hidden, spotted and disarmed like any trap; spotted, drawn with a green ring and needles; the move preview warns in words when a spotted one lies on the path. Two on Level 2 (section 14.2).
 - Disarm: section 9.2.
 - V4.0 (spec 28.4): crew members spring traps the same way (3 damage, noise 2), spot them ending a walk (1 Wits slot), walk round the ones they know, and a crew Burglar disarms one on her way (2 Finesse slots).
 
 ### 13.5 Fire vents, the forge, burning
+
+V4.1: a hero who drank Dragonfire Porter takes 2 less from all of these, from fireballs and from blasts (section 2.12).
 
 - Fire vents: walkable hexes with a radius-1 `fire` light (the three in the Lair). Ending a move there or being pushed onto one: 3 damage.
 - The forge (L2): a solid tall prop that burns; being pushed into it: 3 damage.
@@ -802,13 +840,14 @@ The Dragon and the Gloam can't be pushed.
 ### 13.8 Charges and blasts
 
 - A charge is a fuse on a hex (`Delve.fuses`). At the end of each world phase fuses count down; at 0 it goes off. Fuse 1 = the end of the coming world phase. A fuse lit during a world phase (a crew's) skips that phase's countdown.
+- V4.1 (spec 31.3): a tripwire (`Fuse.tripwire`, the Sapper's Set tripwire with Gerda and Ilse home, fuse 2) also goes off the moment a monster (not the Gloam) or crew member steps within 1 of it; that walk ends on the step. Section 2.12.
 - Blast at hex X: 4 damage to every figure within 1 (X included), 2 within 2, no armor; the setter takes 0; if a hero set it, other heroes take half (rounded down); if a crew member set it, crewmates take half; the prisoner takes full. Figures in the ring around X (not on X) still standing are pushed 1 hex away (all push outcomes). Kills credit a hero setter.
 - Within 1: locked or closed doors are opened and unlocked (they can be closed again); unopened chests open (loot rolled); cracked walls break; breakable walls become rubble.
 - Floor within 1 on Levels 1 and 2: floor next to a pit hex collapses into the pit column (`collapsed`; anything on it falls; loot on it drops to the landing; ropes and fuses on it go). Other floor becomes rubble. On Level 3 floor only rubbles. Never affected: stairs, lift, exits, doors, braziers, props and tall props, chest hexes, hoard hexes, the sealed stair, `unbreakable` hexes (around the tower stair and lift ends).
 - Collapse and rubble are decided from the map before the blast (no chain collapse).
 - Noise 8, also heard on the levels above and below.
 
-Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; venom.ts `trapDamage` (V4.0); charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast` (calls ways.ts `checkWays`), `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `kitPerDelve`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
+Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeNear`, `pitsNextTo`, `standable`; falls.ts `fall`, `fallInfo`, `push`, `pushOutcome`, `railed`, `edgeRiskAt`, `ventCheck`; delve.ts `grappleTop`, `springTrap`, `afterHeroMove`, `smashable`; poison.ts `trapDamage` (V4.1); charges.ts `breakableWall`, `blastableWall`, `setFuse`, `tickFuses`, `blast` (calls ways.ts `checkWays`), `blastPreview`, `shielded`; common.ts `chestLoot`; data.ts `VENT_DMG`, `WINCH_NOISE`, `BLAST_INNER_DMG`, `BLAST_OUTER_DMG`, `BLAST_NOISE`, `kitPerDelve`, `THROW_CHARGE_RANGE`, `DIG_NOISE`; data/castle/build.ts `unbreakableAround`, `protectAround`, `railing`.
 
 ---
 
@@ -818,7 +857,7 @@ Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeN
 
 - Rooms: Great Hall (with the pit mouth and the High Table dais), Gatehouse, Gate passage, Courtyard, Kitchens, Servants' passage, Library, Tower stair, Armory, Chapel, East breach, Sally port.
 - Exits (also the party's entrances): main gate (24, 31), sally port (1, 14), east breach (44, 21). Tower stair down to Level 2. V4.0: the sally port is shut by a barred gate at (2, 14) and the east breach by rubble at (42, 21) and (43, 21) until opened (section 3.1); the sally port key lies in the library at (3, 1) while its gate is shut. The daylight that lit the two passages now sits on the exit hexes (1, 14) and (44, 21).
-- Light: abundant daylight (courtyard, gatehouse, round the hall's pit mouth, open corridors, the chapel's nave and south aisle, the kitchens' chimney, the tower top), sconces in library, kitchens, hall, tower, armory. Library and armory stay dim.
+- Light: abundant daylight (courtyard, gatehouse, round the hall's pit mouth, open corridors, the chapel's nave and south aisle, the kitchens' chimney), sconces in kitchens and hall. V4.1 (spec 31.5): **the dark rooms**: the library stacks, the tower stair (its top roofed again) and the armory have no light at all, so the tower and armory chests (tier 2) and the library chest sit in the dark.
 - Locked: the armory door (36, 12), the armory chest. Cracked wall (40, 16). Brazier in the chapel. Traps: servants' passage, gate passage. Railing: a few hexes on the pit mouth.
 - Chests: library, kitchens, chapel (tier 1); tower, armory (tier 2). Coins 10, 15, 20.
 - Contract sites: l1-rescue-library, l1-recover-armory, l1-recover-chapel; story: chapel (Aldric), kitchens (Wim).
@@ -828,7 +867,7 @@ Code: world.ts `kindAt`, `canEnter`, `steps`, `fallColumn`, `fallDamage`, `freeN
 - Rooms: the Crossing and its bridges over the pit, Arcade, East ledge, South rim, Guard post, Barracks, Officers' quarters, Archive, Cellblock, Winch room, Forge.
 - No exits. Up by the tower stair; down by the lift (after the winch), the pit, or the cellblock's collapsed floor into the Drain.
 - Light: sparse: sconces in barracks, arcade, cellblock, winch room; the forge's fire; the pit glow at the Crossing. Braziers: guard post, archive.
-- Locked: the officers' corridor door (13, 3), the officers' strongbox. Cracked wall officers' quarters → archive (9, 7). Traps: officers' corridor, archive → cellblock. V4.0 venom traps: the east ledge corridor (34, 13), on the way down to the forge, and the cellblock's east passage (15, 23), by the door to the winch room. Railing: the arcade's pit side, broken at two gaps.
+- Locked: the officers' corridor door (13, 3), the officers' strongbox. Cracked wall officers' quarters → archive (9, 7). Traps: officers' corridor, archive → cellblock. Poison traps (V4.0 venom traps): the east ledge corridor (34, 13), on the way down to the forge, and the cellblock's east passage (15, 23), by the door to the winch room. Railing: the arcade's pit side, broken at two gaps.
 - Chests: barracks, guard post, forge (tier 2); officers' strongbox, archive (tier 3). Coins 25, 30, 30, 25.
 - Contract sites: l2-rescue-cell-west, l2-rescue-cell-east, l2-recover-archive, l2-recover-forge; story: forge (Gerda), barracks (copper); the Sisters' hideout in the officers' quarters.
 
@@ -847,19 +886,19 @@ Code: src/data/castle/index.ts (`castle`: links, entrances, entranceNames, shutW
 
 ## 15. Win, lose and extraction
 
-- Extraction: a hero on an exit hex uses Leave (free). Exits: three on Level 1 (V4.0: only those whose way is open), the cave mouth on Level 3. Leaving with the escorted prisoner adjacent takes the prisoner out. V4.0: leaving with a shouldered ally adjacent takes them out too (section 8.6).
-- Prisoner: 5 HP (a captive hero 1). Freed (action, adjacent), they follow their escort to a free adjacent hex after each of the escort's moves (not onto doors or traps). Monsters target a freed prisoner. If they die, the contract fails.
+- Extraction: a hero on an exit hex uses Leave (free). Exits: three on Level 1 (V4.0: only those whose way is open), the cave mouth on Level 3. Leaving with the following captive adjacent (or on the hex) takes them out. V4.1 (spec 31.4): leaving while carrying a body takes it out: a downed hero alive at 1 HP, the captive rescued.
+- Prisoner (V4.1, spec 31.4): 5 HP (a captive hero 1); rescue prisoners and captive heroes start **shackled** (`Prisoner.freed` false): they can't move on their own and monsters don't target them. **Carry** them (an action, adjacent: they share the carrier's hex; carried, a strike may pick them), or **Unshackle** them (section 9.2). Unshackled, they **follow** the hero who freed them at walk 4 without slowing them (placed on a free hex next to that hero after each of their moves, not onto doors but the open sally port gate, nor traps); the next hero to stand next to a captive whose hero is gone picks them up. Monsters target an unshackled captive. If they die, the contract fails. "Free" is gone.
 - Delve over when no hero is active; summary: contract done, bounty, value carried out, survivors, survivors below full HP (`wounded`), dead, XP, level-ups, notes.
 - Campaign over: section 2.11. No victory condition exists.
 
-Code: delve.ts `leaveCastle`, `canLeaveAt`, `afterHeroMove`; camp.ts `contractDone`, `buildSummary`, `backToCamp`.
+Code: delve.ts `leaveCastle`, `canLeaveAt`, `afterHeroMove`, `unshackle`; poison.ts `carryOut`; camp.ts `contractDone`, `buildSummary`, `backToCamp`.
 
 ---
 
 ## 16. Determinism and saves
 
 - All randomness from `state.rng` (mulberry32, src/game/rng.ts). Same seed and commands give the same game.
-- `serialize`/`deserialize`: the whole state as JSON, `version` 3. Older saves without campaign HP get full HP; without a village, a fresh one. V4.0: saves without `campaign.opened` keep every entrance open (the field absent means open); without `campaign.explored`, an empty memory; a delve saved without `Delve.ways` gets it from the campaign. No save-key bump.
+- `serialize`/`deserialize`: the whole state as JSON, `version` 3. Older saves without campaign HP get full HP; without a village, a fresh one. V4.0: saves without `campaign.opened` keep every entrance open (the field absent means open); without `campaign.explored`, an empty memory; a delve saved without `Delve.ways` gets it from the campaign. V4.1 (spec 31.4): a delve's envenomed or paralyzed figures load as poisoned, and a V4.0 shoulder carry of an active ally ends (`migratePoison`). No save-key bump.
 - Browser storage keys: save `vc.save.v39` (src/ui/app.ts `SAVE_KEY`); loadout `vc.loadout.v33`; settings `vc.settings`; mute `vc.muted`; light meter scale `vc.lightmax.v3`.
 
 ---
@@ -876,7 +915,7 @@ Code: delve.ts `leaveCastle`, `canLeaveAt`, `afterHeroMove`; camp.ts `contractDo
 | `bribe` action | dead | Replaced by parley deals; always returns no targets |
 | `Hero.wounded`, `HeroInDelve.revived` | vestigial | Always 0 / unused by rules |
 | Legacy crew numbers (`RIVAL_CLASSES`, `SISTER`, `CUTTHROAT_TIER`, `SISTER_DART_CHANCE`, `PYRO_BOLT_CHANCE`) | old saves only | Members without `level` |
-| Raised floor (`TileDef.raised`) | rule live, no data | +10 for ranged from raised floor; no raised hex in the castle |
+| Raised floor (`TileDef.raised`) | live (V4.1) | +10 for ranged from raised floor; the two archer perches on Level 2 |
 | Later ideas | not built | docs/ideas-later.md: arrows as ammunition, tripwire charges, ceiling collapse, Nerve checks, companions, endless descent past the Sealed Stair |
 
 ---
@@ -906,7 +945,7 @@ Each entry: what docs/v3-spec.md (latest applicable section) says, what the code
 19. **Named elites.** Not in the spec: a named spawn (Grub the Jailer, Ugluk Red-Hand) gets +2 HP (camp.ts:593).
 20. **Burning damage.** Spec 15.3 says fireball hexes burn 2 rounds but gives no damage. Code: 1 damage per world phase to anyone on a burning hex, armor ignored (data.ts:405 `BURN_DMG`, world-phase.ts:660-674); burning hexes also block monster paths (ai.ts:64) and are lit (world.ts:320).
 21. **Dread on a crew member makes the crew hostile.** Code (delve.ts:1493); not in spec 20.2.
-22. **Revive spends the revived hero's turn; potion revive doesn't.** Code: revive sets the revived hero's moved and acted (delve.ts:1780-1781); a potion revive leaves them free to act (delve.ts:1766-1770). Not in the spec.
+22. *(Resolved V4.1, spec 31.4: Revive is gone.)* **Revive spent the revived hero's turn; potion revive didn't.** Code: revive sets the revived hero's moved and acted (delve.ts:1780-1781); a potion revive leaves them free to act (delve.ts:1766-1770). Not in the spec.
 23. **Downed timing.** The spec never gives the bleed start. Code: `BLEED_START` 2 (data.ts:14): a downed hero dies in the second world phase; any damage to a downed hero kills them (common.ts:280-283).
 24. **Dragon and sneaking.** Spec 14.4: wakes when a hero enters the Lair room. Code: only a walking hero entering wakes it; ending adjacent wakes it unless a sneaking Burglar (dragon.ts:41-50).
 25. ~~Burglar ability text~~: fixed in V3.9.4 (data.ts `ROLES.burglar` now reads "Opens chests without using the action."; Take is free for everyone).

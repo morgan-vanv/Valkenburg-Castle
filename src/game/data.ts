@@ -1,6 +1,6 @@
 // Numbers from docs/v3-spec.md.
 
-import type { AleEffect, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, RivalClass, ShopOffer, Stat, Stats, StoryId } from './types';
+import type { AleEffect, AleKind, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, RivalClass, ShopKind, ShopOffer, Stat, Stats, StoryId, Vendor, Village } from './types';
 import type { ClassInfo } from './api';
 
 /** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
@@ -10,8 +10,8 @@ export const LIGHT_DIM = 7; // this..LIGHT_BRIGHT = dim
 export const PACK_SLOTS = 4;
 export const FOCUS_MAX = 3;
 export const MANA_MAX = 3;
-export const TORCH_ROUNDS = 12;
-export const BLEED_START = 2;
+export const TORCH_ROUNDS = 15; // V4.1 (WS2): was 12
+export const BLEED_START = 3; // V4.1 (spec 31.4): was 2
 
 export interface Weapon {
   name: string;
@@ -236,6 +236,33 @@ export const GLOAM_RISE_MAX = 6;
 export const GLOAM_CALM_FADE = 2;
 export const BRAZIER_LIGHT = 4;
 export const KINDLE_LIGHT = 6;
+// ---------------------------------------------------------------- V4.1 (WS2): light, torches are the clock
+
+/**
+ * V4.1 (WS2): the free party lantern of V3.3–V4.0 is retired: a delve starts with no party light. Switched on, every
+ * delve hands the first hero (Keven if he goes) a slotless lantern (the old free lantern as an item; spec 31.5).
+ */
+export const FREE_LANTERN = { enabled: false };
+/** A lit torch lights this far round whoever holds it (or the hex it lies on). Rounds: TORCH_ROUNDS. */
+export const TORCH_RADIUS = 3;
+/** The lantern (Gerda's): holds this many rounds, refilled free in camp; radius 4 at LANTERN_LOW_AT and above, 3 below. */
+export const LANTERN_MAX = 20;
+export const LANTERN_LOW_AT = 7;
+export const LANTERN_RADIUS_FULL = 4;
+export const LANTERN_RADIUS_LOW = 3;
+/** Kindle (Pyromancer): lights or relights a torch or lantern held by a hero within this, or adds KINDLE_LIGHT rounds to one. */
+export const KINDLE_RANGE = 3;
+/** Every crew member carries a light of its own: this radius round it (part of the lit set for everyone). */
+export const CREW_LIGHT_RADIUS = 2;
+/** Neutral Lantern Sisters head out at this round at the latest (was: the party's lantern at 9 or less). */
+export const SISTERS_LEAVE_ROUND = 18;
+/** The ale effect that is Night-eye Stout (the ALES entry is the village's): sees as if lit, stays unlit to others. */
+export const NIGHTEYE_ALE = 'nighteye';
+/** Darkness by the hero's own hex: party light (a torch, a lantern, Glowworm) or daylight, a castle light only, unlit. */
+export const DARK_PENALTY = { party: 0, castle: -10, unlit: -20 } as const;
+/** An old save's night-eye draughts in the stash are bought back for this each on load (the draught is retired). */
+export const NIGHTSIGHT_REFUND = 15;
+
 // ---------------------------------------------------------------- V3.7 stealth and swings (spec 20.1, 20.2)
 
 /** Walking noise per hex passed (2 on rubble); sneaking is silent. */
@@ -336,8 +363,6 @@ export const SISTER_CLASSES: ('ranger' | 'shadowmancer' | 'burglar')[] = ['range
 export const SISTER_DARTS = 2;
 export const SISTER_DART_CHANCE = 65;
 export const SISTER_SMOKE = 1;
-/** Neutral sisters head out when the lantern gets this low (was 18 of 40). */
-export const SISTERS_LEAVE_LIGHT = 9;
 
 export const SISTER = { hp: 7, slots: 3, chance: 55, dmg: 2, move: 4 };
 export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
@@ -346,7 +371,8 @@ export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
 export const LEVEL_XP = [0, 0, 5, 12, 20, 30, 45];
 export const MAX_LEVEL = 6;
 
-export const BOUNTY = { rescue: [0, 80, 150, 220], recover: [0, 100, 180, 260], slay: [0, 500, 500, 500] } as const;
+/** V4.1 (spec 31.2): regular bounties about 40% up (were rescue 80/150/220, recover 100/180/260, slay 500). */
+export const BOUNTY = { rescue: [0, 110, 200, 280], recover: [0, 140, 250, 340], slay: [0, 600, 600, 600] } as const;
 export const HEIRLOOM_VALUE = [0, 60, 120, 180];
 
 // Section 14 numbers.
@@ -367,26 +393,33 @@ export const ORC_SHOVE_CHANCE = 60;
 export const DRAGON_WAKE_NOISE = 4;
 
 export const SHOP: ShopOffer[] = [
-  { kind: 'torch', name: 'Torch', price: 10, text: '12 rounds of light around the bearer.' },
+  { kind: 'torch', name: 'Torch', price: 10, text: 'Light it (an action): radius 3 for 15 rounds. Snuff it free and it keeps what is left.' },
   { kind: 'potion', name: 'Potion', price: 20, text: 'Heals 5. Gets a downed hero up.' },
   { kind: 'rope', name: 'Rope', price: 15, text: 'Anchor at the pit edge to climb down and back.' },
-  { kind: 'charge', name: 'Blasting charge', price: 30, text: 'Set it with a fuse: opens locks, breaks walls on Levels 1 and 2. Very loud.' },
-  { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.' },
-  { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.' },
-  { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.' },
-  // V4.0 (spec 29.3): Mott sells venom darts from the start.
-  { kind: 'venomdart', name: 'Venom dart', price: 30, text: 'Throw 5: a Finesse hit envenoms a monster or crew member: paralyzed in 3 turns, for 6. Silent.' },
+  // V4.1 (spec 31.3): Mott's charge costs 45 (was 30); Gerda sells it for 30 once Ilse is home too (PAIR_PRICES).
+  { kind: 'charge', name: 'Blasting charge', price: 45, text: 'Set it with a fuse: opens locks, breaks walls on Levels 1 and 2. Very loud.' },
+  // V4.1 (spec 31.3): smoke, glue, the darts and oil are Ilse's now (`needs: 'alchemist'`).
+  { kind: 'smoke', name: 'Smoke bomb', price: 20, text: 'Throw 4: smoke blocks sight there for 2 rounds.', needs: 'alchemist' },
+  { kind: 'glue', name: 'Glue bomb', price: 25, text: 'Throw 4: monsters within 1 are stuck for 2 rounds.', needs: 'alchemist' },
+  { kind: 'dart', name: 'Sleep dart', price: 25, text: 'Throw 5: a Finesse hit puts a monster to sleep. Silent.', needs: 'alchemist' },
+  // V4.0 (spec 29.3): Mott sold venom darts from the start; V4.1: Ilse does.
+  // V4.1 (spec 31.4): the poison dart (internal kind `venomdart` kept).
+  { kind: 'venomdart', name: 'Poison dart', price: 30, text: 'Throw 5: a Finesse hit poisons a monster or crew member: 1 damage a turn, never below 1. Silent.', needs: 'alchemist' },
   { kind: 'caltrops', name: 'Caltrops', price: 15, text: 'Scatter next to you: the first monster across takes 2 and stops.', needs: 'smith' },
   { kind: 'hook', name: 'Grappling hook', price: 40, text: 'Climb from a pit landing back up a level. Reusable.', needs: 'smith' },
   { kind: 'key', name: 'Skeleton key', price: 30, text: 'Opens one locked door or chest, silently. One use.', needs: 'smith' },
-  { kind: 'oil', name: 'Oil flask', price: 15, text: '+8 lantern light.' },
+  { kind: 'oil', name: 'Oil flask', price: 15, text: '+10 to a lantern (an action, or Kindle\'s cousin).', needs: 'alchemist' },
   // V4.0 (spec 29.6): an essential: always sold.
-  { kind: 'antidote', name: 'Antidote', price: 20, text: 'Drink, or give to a hero next to you (an action): draws out venom, even from the paralyzed.' },
+  // V4.1 (spec 31.4): the antipoison (internal kind `antidote` kept).
+  { kind: 'antidote', name: 'Antipoison', price: 20, text: 'Drink, or give to a hero next to you, up or down (an action): cures poison.' },
   { kind: 'firecracker', name: 'Firecracker', price: 10, text: 'Throw 6: noise 6 there. Lures monsters away.' },
   // V3.6 (spec 19.2, 19.3).
   { kind: 'lockpicks', name: 'Lockpicks', price: 25, text: 'Proper picks, never used up. A Burglar picks at 3 Finesse slots, anyone else at 2.', needs: 'smith' },
-  // V3.7.1 (spec 21.3): Wim brews it; sold once he is home.
-  { kind: 'nightsight', name: 'Night-eye draught', price: 30, text: 'Drink (an action): 8 rounds of full sight and no dark penalty to rolls. The dark still hunts.', needs: 'innkeeper' },
+  // V3.7.1 (spec 21.3) the night-eye draught was sold here once Wim was home; V4.1 (spec 31.3): gone (Night-eye Stout, an ale).
+  // V4.1 (spec 31.3): Aldric and Ilse together.
+  { kind: 'greaterpotion', name: 'Greater potion', price: 35, text: 'Heals 8. Gets a downed hero up.', needs: ['surgeon', 'alchemist'] },
+  // V4.1 (spec 31.5, WS2): Gerda's lantern: reusable, refilled free in camp.
+  { kind: 'lantern', name: 'Lantern', price: 120, text: 'Holds 20 rounds of light, refilled free in camp: radius 4 (3 when low). The shutter is free. Oil tops it up.', needs: 'smith', vendor: 'gerda' },
 ];
 
 // V3.6 (spec 19.2, 19.3).
@@ -398,8 +431,8 @@ export const BURGLAR_PICK_SLOTS = 3;
 export const NIGHTSIGHT_ROUNDS = 8;
 
 // Section 15 numbers.
-/** V3.7.1 (spec 21.2): one level-1 hire (60) and an item or two. */
-export const START_GOLD = 90;
+/** V3.7.1 (spec 21.2): one level-1 hire (60) and an item or two. V4.1 (spec 31.2): 120 (was 90): a hire and 60 to try the shop. */
+export const START_GOLD = 120;
 /** Spec 17.1: a recruit costs RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL × (level − 1). */
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
@@ -435,20 +468,33 @@ export const WARD_ROUNDS = 2;
 export const VEIL_BREAK_NOISE = 4;
 export const THROW_RANGE: Record<'smoke' | 'glue' | 'dart' | 'firecracker' | 'venomdart', number> = { smoke: 4, glue: 4, dart: 5, firecracker: 6, venomdart: 5 };
 
-// V4.0 (spec 29): venom and paralysis.
-/** World phases from the first dose to paralysis; a second dose while envenomed takes 1 off (to 1 at least). */
-export const VENOM_ROUNDS = 3;
-/** World phases a paralyzed figure stays paralyzed before it wears off (owner: a long time). */
-export const PARALYSIS_ROUNDS = 6;
-/** A trap's bite (spec 13.4) and a venom trap's (1 and venom instead). */
+// V4.0 (spec 29): venom and paralysis. V4.1 (spec 31.4): poison replaces both (VENOM_ROUNDS, PARALYSIS_ROUNDS gone).
+/** A trap's bite (spec 13.4) and a poison trap's (1 and a dose instead; internal name kept). */
 export const TRAP_DMG = 3;
 export const VENOM_TRAP_DMG = 1;
-/** A hero shouldering a paralyzed ally moves this far at most (dash too), like HEAVY_MOVE. */
+/** V4.1 (spec 31.4): a hero (or crew member) carrying a body moves this far at most (dash too), like HEAVY_MOVE. */
 export const CARRY_MOVE = 3;
+
+// V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
+/** Poison: damage at step 2 of every world phase, and the HP it never takes a figure below. */
+export const POISON_DMG = 1;
+export const POISON_FLOOR = 1;
+/** Mend on a downed hero (or crew member) within 3 gets them up at this HP. */
+export const MEND_UP_HP = 2;
+/** A downed hero carried out of the castle comes out at this HP. */
+export const CARRIED_OUT_HP = 1;
+/** Splints (Gerda and Aldric home): a downed hero crawls this many hexes a turn. */
+export const CRAWL_MOVE = 1;
+/** Unshackle by Smash: Might slots, hits needed, noise either way (as smashing a chest). */
+export const UNSHACKLE_SMASH_SLOTS = 2;
+export const UNSHACKLE_SMASH_HITS = 1;
+export const UNSHACKLE_SMASH_NOISE = 4;
+/** Unshackle with an improvised pick: sure, but not silent. */
+export const UNSHACKLE_IMPROVISED_NOISE = 2;
 export const SMOKE_ROUNDS = 2;
 export const GLUE_ROUNDS = 2;
 export const CALTROPS_DMG = 2;
-export const OIL_LIGHT = 8;
+export const OIL_LIGHT = 10; // V4.1 (WS2): +10 to a lantern (was +8 to the party lantern)
 export const FIRECRACKER_NOISE = 6;
 
 /** Spec 17.2: the infirmary heals for this much gold per HP. Nothing heals for free between delves. */
@@ -530,6 +576,13 @@ export const STORIES: StoryDef[] = [
     brief: 'Wim\'s cask book was lost in the Drain when the cellars flooded.', unlocks: 'The strong ales and seasoned recruits',
     line: 'Wim pores over his cask book by the fire. The strong ales are back.', slots: 1,
   },
+  // V4.1 (spec 31.3): Ilse the alchemist, among the archive's shelves next to the spider she milks.
+  {
+    id: 'alchemist', kind: 'rescue', siteId: 'l2-story-archive', subject: 'Ilse the alchemist', who: 'Ilse the alchemist',
+    brief: 'Ilse brewed for Lord Hobart. When the castle fell she barricaded herself among the archive\'s shelves, and lives on the venom she milks from its spider and sells to the orcs. Brother Aldric asks you to fetch her.',
+    unlocks: 'Unlocks Ilse\'s bench',
+    line: 'Ilse unpacks her alembics in the old dye-house. Ilse\'s bench is open: darts, smoke, glue and oil.',
+  },
 ];
 
 export const ALES: AleOffer[] = [
@@ -540,6 +593,11 @@ export const ALES: AleOffer[] = [
   { kind: 'smuggler', name: 'Smuggler\'s Mead', price: 20, needs: 'caskbook', text: 'Sneak moves 4, silently.' },
   { kind: 'fireside', name: 'Fireside Porter', price: 25, needs: 'caskbook', text: 'Heal 3 each time the drinker changes level (after any fall damage).' },
   { kind: 'blackcask', name: 'Black Cask', price: 10, needs: 'caskbook', text: '70%: one of the six ales above at random. 30%: hiccups (noise 1 every world phase) or a heavy head (Focus starts at 1).' },
+  // V4.1 (spec 31.3): Wim and Ilse's brews (`needs: 'alchemist'`: both home; the copper isn't needed).
+  // Night-eye's effect is the light rules' (WS2), Spider-milk's the poison rules' (WS3); Dragonfire's is in common.ts `fireWard`.
+  { kind: 'nighteye', name: 'Night-eye Stout', price: 25, needs: 'alchemist', text: 'All delve, the drinker sees as if lit by party light: no dark penalty. Still unlit to monsters and the dark; lights nothing for anyone else.' },
+  { kind: 'spidermilk', name: 'Spider-milk Stout', price: 20, needs: 'alchemist', text: 'Poison can\'t take hold of the drinker this delve.' },
+  { kind: 'dragonfire', name: 'Dragonfire Porter', price: 25, needs: 'alchemist', text: 'Fire, burning, the Dragon\'s breath and blasts do 2 less to the drinker (to 0 at least).' },
 ];
 /** The six real ales the Black Cask can turn into. */
 export const CASK_GOOD: AleEffect[] = ['glowworm', 'featherfoot', 'mole', 'reserve', 'smuggler', 'fireside'];
@@ -554,6 +612,54 @@ export const BURGLAR_WALK = 5;
 export const FIRESIDE_HEAL = 3;
 export const HICCUP_NOISE = 1;
 export const HEAVY_MOVE = 3;
+
+// ---------------------------------------------------------------- V4.1 (WS1/WS5): gold, gifts, Ilse and the village pairs (spec 31.2, 31.3)
+
+/** Spec 31.2 (pillar 18): a contract that wins something back pays this: every story contract and every "Bring back". */
+export const STORY_PAY = 0;
+export const CAPTIVE_PAY = 0;
+
+/** Spec 31.2: what a villager gives the first time they come home (instead of gold). `line` is said on return. */
+export interface Gift {
+  /** Items to Keven's cart. */
+  items?: [ItemKind, number][];
+  /** An ale for every hero on the roster, drunk on their next delve (a hero with one waiting keeps theirs). */
+  ale?: AleKind;
+  /** Free shields at the forge (`campaign.credits.shield`). */
+  shields?: number;
+  /** Short, for the contract card ("2 potions"). */
+  short: string;
+  line: string;
+}
+export const GIFTS: Partial<Record<StoryId, Gift>> = {
+  surgeon: { items: [['potion', 2]], short: '2 potions', line: 'Brother Aldric presses two potions on you for the road. They\'re on Keven\'s cart.' },
+  innkeeper: { ale: 'reserve', short: 'A round of Hobart\'s Reserve', line: 'Old Wim broaches his last cask of Hobart\'s Reserve: a round for everyone on the roster, drunk as they next go in.' },
+  smith: { shields: 1, short: 'A shield', line: 'Gerda owes you a shield. The next one at the forge is free.' },
+  alchemist: { items: [['antidote', 2]], short: '2 antidotes', line: 'Ilse gives you two antidotes from her own stock. They\'re on Keven\'s cart.' },
+};
+
+/** Spec 31.3: a pair of villagers is home (both flags set). For pair rules anywhere in the engine; old saves lack `alchemist`. */
+export function pairHome(v: Partial<Village> | undefined | null, a: StoryId, b: StoryId): boolean {
+  return !!v?.[a] && !!v?.[b];
+}
+
+/** Spec 31.3: cheaper prices when a pair is home: Gerda's blasting charge, Aldric's antidote. The cheapest that applies wins. */
+export const PAIR_PRICES: { kind: ShopKind; needs: [StoryId, StoryId]; price: number; vendor: Vendor }[] = [
+  { kind: 'charge', needs: ['smith', 'alchemist'], price: 30, vendor: 'gerda' },
+  { kind: 'antidote', needs: ['surgeon', 'alchemist'], price: 12, vendor: 'aldric' },
+];
+
+/** Spec 31.3: what a potion heals in the castle (and the HP a downed hero gets up at). */
+export const POTION_HEAL: Record<'potion' | 'greaterpotion', number> = { potion: 5, greaterpotion: 8 };
+
+/** Spec 31.3: Dragonfire Porter: fire, burning, breath and blast damage to the drinker this much less (to 0 at least). */
+export const DRAGONFIRE_WARD = 2;
+
+/** Spec 31.3: Aldric and Wim's hot supper: every hero who gets out heals this much on return. */
+export const SUPPER_HEAL = 2;
+
+/** Spec 31.3: the Sapper's tripwire (Gerda and Ilse home): the fuse it's set with; it also goes off when an enemy steps within 1. */
+export const TRIPWIRE_FUSE = 2;
 
 // ---------------------------------------------------------------- V3.5 crews (spec 18.5), reworked in V3.7 (spec 20.4)
 

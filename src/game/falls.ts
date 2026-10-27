@@ -7,7 +7,9 @@ import type { HeroInDelve } from './types';
 import { VENT_DMG } from './data';
 import { say, type Ctx, type MonsterX } from './state';
 import { hd, heroName, levelHeal, hurtAny, hurtHero, hurtPrisoner, killHero, killMonster, nameOf, occupant, rivalsOnMap, wakeAdjacent } from './common';
+import { bringCarried, isCarried } from './common'; // V4.1 (spec 31.4)
 import { canEnter, doorAt, fallColumn, fallDamage, freeNear, kindAt, pitsNextTo, standable } from './world';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- figures
 
@@ -44,6 +46,11 @@ function setPos(c: Ctx, f: Figure, p: Pos): void {
   else if (f.kind === 'monster') f.m.at = at;
   else if (f.kind === 'rival') f.r.at = at;
   else c.d.prisoner!.at = at;
+  // V4.1 (spec 31.4): a carried body goes where its carrier goes (shoves, blasts, falls).
+  if (f.kind === 'hero' || f.kind === 'rival') {
+    const id = bringCarried(c, f.id);
+    if (id) c.ev.push({ type: 'moved', id, path: [{ ...at }] });
+  }
 }
 
 /** Damage that ignores armor (falls, fire, slams). `by` gets kill credit if it's a hero. */
@@ -98,6 +105,8 @@ export function edgeRiskAt(c: Ctx, at: Pos, self?: string): FallInfo | null {
 export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   const f = figure(c, id);
   if (!f) return;
+  // V4.1 (spec 31.4): a carried body falls with its carrier; the fall hurts it too (any damage kills a downed hero).
+  const load = f.kind === 'hero' ? f.h.carrying : f.kind === 'rival' ? ((f.r as { carrying?: string; dragging?: string }).carrying ?? (f.r as { dragging?: string }).dragging) : undefined;
   if (f.kind === 'monster' && (f.m.kind === 'dragon' || f.m.kind === 'gloam')) return;
   const info = fallInfo(c, pit, id);
   const name = nameOf(c, id);
@@ -108,6 +117,7 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
     if (f.kind === 'hero') killHero(c, f.h);
     else if (f.kind === 'monster') killMonster(c, f.m, by);
     else hurtRaw(c, f, 99, by);
+    if (load) loadFalls(c, load, 99, by);
     return;
   }
   const from = posOf(c, f);
@@ -144,9 +154,18 @@ export function fall(c: Ctx, id: string, pit: Pos, by: string | null): void {
   }
   if (damage === 0 && f.kind === 'hero') say(c, `${name} lands light as a feather.`);
   hurtRaw(c, f, damage, by);
+  if (load) loadFalls(c, load, info.damage, by);
   if (f.kind === 'hero' && from.level !== info.to.level) levelHeal(c, f.h);
   if (f.kind === 'hero' && f.h.status === 'active') wakeAdjacent(c, f.h.at);
   afterLanding?.(c, f.kind === 'hero' ? f.h : null);
+}
+
+/** V4.1 (spec 31.4): the body a falling carrier had: it falls too, and takes the fall's damage (Featherfoot is the drinker's own). */
+function loadFalls(c: Ctx, id: string, dmg: number, by: string | null): void {
+  const g = figure(c, id);
+  if (!g) return;
+  c.ev.push({ type: 'fell', id, from: posOf(c, g), to: posOf(c, g), levels: 0, damage: dmg });
+  hurtRaw(c, g, dmg, by);
 }
 
 /**
@@ -219,6 +238,8 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
   const f = figure(c, id);
   if (!f) return null;
   if (f.kind === 'monster' && (f.m.kind === 'dragon' || f.m.kind === 'gloam')) return null;
+  // V4.1 (spec 31.4): a carried body isn't pushed on its own: it goes where its carrier is pushed.
+  if (isCarried(c, id)) return null;
   const at = posOf(c, f);
   const o = pushOutcome(c, from, at, id);
   switch (o.kind) {
@@ -233,7 +254,7 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
       break;
     case 'fire':
       say(c, `${nameOf(c, id)} is thrown into the fire.`);
-      hurtRaw(c, f, 3, by);
+      hurtRaw(c, f, f.kind === 'hero' ? fireWard(c, f.h.heroId, 3) : 3, by); // V4.1 (spec 31.3): Dragonfire Porter
       break;
     case 'figure': {
       const other = figure(c, o.other!);
@@ -254,7 +275,7 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
       setPos(c, f, o.dest);
       if (o.kind === 'vent') {
         say(c, `${nameOf(c, id)} lands on a fire vent.`);
-        hurtRaw(c, f, VENT_DMG, by);
+        hurtRaw(c, f, f.kind === 'hero' ? fireWard(c, f.h.heroId, VENT_DMG) : VENT_DMG, by); // V4.1 (spec 31.3): Dragonfire Porter
       }
       if (f.kind === 'hero' && alive(c, f)) afterLanding?.(c, f.h);
       break;
@@ -267,7 +288,8 @@ export function push(c: Ctx, id: string, from: Pos, by: string | null, evType: '
 export function ventCheck(c: Ctx, h: HeroInDelve): void {
   if (h.status !== 'active' || !c.w.vents.has(posKey(h.at))) return;
   say(c, `${heroName(c, h.heroId)} steps on a fire vent.`);
-  hurtHero(c, h, VENT_DMG, 'vent');
+  const dmg = fireWard(c, h.heroId, VENT_DMG); // V4.1 (spec 31.3): Dragonfire Porter
+  if (dmg) hurtHero(c, h, dmg, 'vent');
 }
 
 export function samePlace(a: Pos, b: Pos): boolean {

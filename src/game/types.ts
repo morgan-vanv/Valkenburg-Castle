@@ -120,6 +120,8 @@ export interface SpawnDef {
   buried?: boolean;
   /** V3.7 (spec 20.1): the direction the monster faces when placed (0..5, hex.ts DIRS). Default 0. */
   facing?: number;
+  /** V4.1 (spec 31.2, B1): asleep on a campaign's first delve (`campaign.delveCount` 0), as placed otherwise. */
+  firstDelveAsleep?: boolean;
 }
 
 export interface ChestDef {
@@ -137,7 +139,7 @@ export interface CoinDef {
 
 export interface TrapDef {
   at: Pos;
-  /** V4.0 (spec 29.5): a venom trap: 1 damage and venom instead of 3 damage. */
+  /** V4.0 (spec 29.5): a venom trap; V4.1 (spec 31.4): a poison trap: 1 damage and a dose of poison instead of 3 damage. */
   venom?: boolean;
 }
 
@@ -268,8 +270,12 @@ export type ItemKind =
   // V4.0 (spec 25.2)
   | 'gatekey' // the sally port key: opens the barred gate (unbar); carried out, the gate is open for good. Worth 0, never sold, handed over or stolen.
   // V4.0 (spec 29): venom
-  | 'antidote' // drink or give to an adjacent ally (an action): cures venom and paralysis
-  | 'venomdart'; // throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
+  | 'antidote' // V4.1 (spec 31.4): "Antipoison" to players: drink or give to an adjacent ally (an action): cures poison
+  // V4.1 (spec 31.5, WS2)
+  | 'lantern' // Gerda's lantern: reusable, holds 20 (`rounds`), refilled free in camp; `lit` = open
+  | 'venomdart' // V4.1 (spec 31.4): "Poison dart" to players: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
+  // V4.1 (spec 31.3): Aldric and Ilse together
+  | 'greaterpotion'; // heals 8 (POTION_HEAL), or gets a downed hero up at 8
 
 export interface Item {
   id: string;
@@ -285,6 +291,12 @@ export interface Item {
   heavy?: boolean;
   /** V3.5: a story item goes to the village when carried out (not to the stash, never sold). */
   story?: StoryId;
+  /** V4.1 (spec 31.5): a torch or lantern burning (a lit torch, an open lantern); burns 1 a world phase wherever it is. */
+  lit?: boolean;
+  /** V4.1 (spec 31.5): rounds of light left in a torch or lantern (absent = full: torch 15, lantern 20). */
+  rounds?: number;
+  /** V4.1 (spec 31.5): the old free party lantern (a save from before, or FREE_LANTERN): never reaches the cart or lost gear. */
+  loaner?: boolean;
 }
 
 export interface Hero {
@@ -332,7 +344,7 @@ export interface Contract {
 // ---------------------------------------------------------------- V3.5: the village (spec 18)
 
 /** Story contracts and the villagers or things they bring home to Lowgate. */
-export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook';
+export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook' | 'alchemist';
 
 /** What Lowgate has won back. All false at the start. */
 export interface Village {
@@ -346,9 +358,13 @@ export interface Village {
   copper: boolean;
   /** Wim's cask book is home: the rest of the ales and level 3 recruits. */
   caskbook: boolean;
+  /** V4.1 (spec 31.3): Ilse the alchemist is home: her bench (darts, smoke, glue, oil) and the pairs with her. Absent in older saves (= false). */
+  alchemist: boolean;
 }
 
-export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask';
+export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask'
+  // V4.1 (spec 31.3): Wim and Ilse's brews
+  | 'nighteye' | 'spidermilk' | 'dragonfire';
 /** What an ale does once drunk: the Black Cask turns into another ale or a drawback. */
 export type AleEffect = Exclude<AleKind, 'blackcask'> | 'hiccups' | 'heavyhead';
 
@@ -357,8 +373,8 @@ export interface AleOffer {
   name: string;
   price: number;
   text: string;
-  /** What has to be home before it's poured. */
-  needs: 'copper' | 'caskbook';
+  /** What has to be home before it's poured (V4.1: 'alchemist' = Wim and Ilse both home; the copper isn't needed). */
+  needs: 'copper' | 'caskbook' | 'alchemist';
   /** Why it can't be bought now (not brewed yet), if so. */
   locked?: string;
 }
@@ -367,16 +383,24 @@ export type ShopKind =
   | 'torch' | 'potion' | 'rope' | 'charge'
   | 'smoke' | 'glue' | 'dart' | 'caltrops' | 'hook' | 'key' | 'oil' | 'firecracker'
   | 'lockpicks' | 'nightsight'
+  | 'lantern' // V4.1 (spec 31.5): Gerda's
   // V4.0 (spec 29): Mott's essentials and his quiet work
-  | 'antidote' | 'venomdart';
+  | 'antidote' | 'venomdart'
+  // V4.1 (spec 31.3)
+  | 'greaterpotion';
+
+/** V4.1 (spec 31.3): who sells a ware (for the vendor tabs, WS4). */
+export type Vendor = 'mott' | 'gerda' | 'ilse' | 'aldric';
 
 export interface ShopOffer {
   kind: ShopKind;
   name: string;
   price: number;
   text: string;
-  /** V3.5 (spec 18.2): metalwork needs the smith home; V3.7.1 (spec 21.3): the night-eye draught needs the innkeeper. */
-  needs?: 'smith' | 'innkeeper';
+  /** V3.5 (spec 18.2): metalwork needs the smith home. V4.1 (spec 31.3): Ilse's wares 'alchemist'; a pair's wares both of them. */
+  needs?: StoryId | StoryId[];
+  /** V4.1 (spec 31.3): who sells it now (shopOffers fills it in: Mott unless the ware needs someone, or a pair sells it cheaper). */
+  vendor?: Vendor;
   /** Why it can't be bought now, if so ("Needs a smith: rescue Gerda"). */
   locked?: string;
 }
@@ -415,6 +439,8 @@ export interface Campaign {
   village: Village;
   /** V3.7 (spec 20.4): heroes a crew carried off; each has a rescue contract on the board until freed or given up. */
   captives: Captive[];
+  /** V4.1 (spec 31.2): free things owed by the village. `shield`: shields the forge gives free (Gerda's gift). */
+  credits?: { shield?: number };
   /**
    * V4.0 (spec 25): the shut ways in (CastleDef.shutWays) opened for good. A new campaign starts with
    * `{}` (all shut); a save without the field had every entrance open, so the field absent = all open.
@@ -459,9 +485,9 @@ export interface HeroInDelve {
   rooted?: number;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
-  /** Downed only: world phases left before death (starts at 2). */
+  /** Downed only: world phases left before death (V4.1, spec 31.4: starts at 3; doesn't run while carried). */
   bleed: number;
-  /** Rounds of torchlight left on this hero's own torch (0 = none lit). */
+  /** Rounds of torchlight left on this hero's own torch (0 = none lit). V4.1 (spec 31.5): legacy, saves from before only (torches are pack items now). */
   torch: number;
   moved: boolean;
   acted: boolean;
@@ -473,9 +499,9 @@ export interface HeroInDelve {
   rallyCooldown: number;
   /** Sellsword only: id of the ally guarded until the next player phase. */
   guarding?: string;
-  /** Escorted prisoner follows this hero. */
+  /** V4.1 (spec 31.4): the unshackled captive (prisoner id) follows this hero (the old escort; internal name kept). */
   escorting?: string;
-  /** Was revived this delve: leaves Wounded. */
+  /** Was revived this delve (V3; Revive is gone in V4.1, so always false now). */
   revived: boolean;
   /** Moved a second time this turn (a dash, spec 15.2); the action is spent. */
   dashed: boolean;
@@ -492,11 +518,15 @@ export interface HeroInDelve {
    * else on 'walk'; absent = walk). A `move` without `sneak` uses it; the `setMoveMode` command changes it.
    */
   moveMode?: 'walk' | 'sneak';
-  /** V4.0 (spec 29.1): envenomed: world phases left before paralysis (absent or 0 = no venom). */
-  venom?: number;
-  /** V4.0 (spec 29.2): paralyzed: world phases left (absent or 0 = not). Can't move or act; not downed. */
-  paralyzed?: number;
-  /** V4.0 (spec 29.4): the paralyzed ally (hero id) this hero has on their shoulders: they follow every move. */
+  /**
+   * V4.1 (spec 31.4): poisoned: 1 damage at step 2 of every world phase, never below 1 HP, until cured (an antipoison,
+   * Mend, leaving). Replaces V4.0's `venom` and `paralyzed` (old saves load either as poisoned).
+   */
+  poisoned?: boolean;
+  /**
+   * V4.1 (spec 31.4): Carry: the body this hero carries (a downed hero's id, or the shackled prisoner's). It shares the
+   * carrier's hex and moves with them; the carrier moves 3 at most and takes free actions only.
+   */
   carrying?: string;
 }
 
@@ -514,8 +544,10 @@ export interface Intent {
   kind: 'attack' | 'move' | 'web' | 'steal' | 'flee' | 'wait' | 'shove' | 'breath' | 'sweep' | 'shout' | 'drag' | 'grab' | 'overwatch' | 'smoke' | 'veil' | 'dart' | 'toll' | 'firebolt' | 'charge' | 'fuse' | 'rob' | 'potion' | 'item' | 'fireball' | 'mend' | 'gust' | 'ward' | 'glue' | 'caltrops' | 'firecracker' | 'blink' | 'hamstring'
     /** V4.0 (spec 28, pillar 17): crews play by the party's rules: pick or smash a lock, disarm a trap, dig through (a Sapper). */
     | 'pick' | 'smash' | 'disarm' | 'dig'
-    /** V4.0 (spec 29.3): a crew member throws a venom dart at a hero. */
-    | 'venomdart';
+    /** V4.0 (spec 29.3): a crew member throws a venom dart (V4.1: the poison dart) at a hero. */
+    | 'venomdart'
+    /** V4.1 (spec 31.4): a crew member lifts a downed crewmate (`targetId`) and carries them out. */
+    | 'carry';
   /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
   sneak?: boolean;
   /** V3.7 `item` intents: which item. */
@@ -563,9 +595,8 @@ export interface Monster {
   /** V3.7 (spec 20.2): rounds of fear left: it flees from `fearOf` instead of acting. */
   feared?: number;
   fearOf?: string;
-  /** V4.0 (spec 29): envenomed (world phases to paralysis) and paralyzed (world phases left): can't move or act. */
-  venom?: number;
-  paralyzed?: number;
+  /** V4.1 (spec 31.4): poisoned: 1 damage a world phase, never below 1 HP (not the Dragon or the Gloam). */
+  poisoned?: boolean;
 }
 
 /** V3.5 (spec 18.5): the Sisters on Level 1; cutthroat crews on Level 2, from a pool. */
@@ -629,9 +660,13 @@ export interface Rival {
   stuck?: number;
   /** V4.0 (spec 28.1, pillar 17): the member's last move was a sneak (monsters notice by it; the view draws it crouched). */
   sneaked?: boolean;
-  /** V4.0 (spec 29, pillar 17): envenomed and paralyzed, as a hero. */
-  venom?: number;
-  paralyzed?: number;
+  /** V4.1 (spec 31.4, pillar 17): poisoned, as a hero. */
+  poisoned?: boolean;
+  /** V4.1 (spec 31.4): down at 0 HP (hp 0), bleeding out in `bleed` world phases; any damage kills. Dead: hp 0, not downed. */
+  downed?: boolean;
+  bleed?: number;
+  /** V4.1 (spec 31.4): the downed crewmate (member id) this member carries out (`dragging` is a hero it carries off). */
+  carrying?: string;
 }
 
 export interface RivalCrew {
@@ -679,6 +714,8 @@ export interface Fuse {
   rounds: number;
   /** Who set it (hero or rival id), for kills and the blast shield. */
   by: string;
+  /** V4.1 (spec 31.3): a Sapper's tripwire: also goes off when a monster or crew member steps within 1 of it. */
+  tripwire?: boolean;
 }
 
 export interface DoorState {
@@ -707,8 +744,9 @@ export interface Prisoner {
   name: string;
   at: Pos;
   hp: number;
+  /** V4.1 (spec 31.4): unshackled (false = shackled: can't move on their own; Carry them or Unshackle them). */
   freed: boolean;
-  /** Hero id escorting, if any. */
+  /** The hero the unshackled captive follows (walk 4, placed next to them after each of their moves). */
   escortedBy?: string;
   out: boolean;
   dead: boolean;
@@ -721,10 +759,10 @@ export interface Delve {
   heroes: HeroInDelve[];
   monsters: Monster[];
   rivals: RivalCrew | null;
-  /** Lantern oil, 0..LIGHT_MAX. */
-  light: number;
-  /** Hero carrying the lantern. */
-  lanternBearer: string;
+  /** Lantern oil, 0..LIGHT_MAX. V4.1 (spec 31.5): retired (no free lantern); only in saves from before, turned into a Lantern item on load. */
+  light?: number;
+  /** Hero carrying the lantern. V4.1: retired, as `light`. */
+  lanternBearer?: string;
   doors: Record<string, DoorState>; // by posKey
   chests: ChestState[];
   ground: GroundLoot[];
@@ -753,8 +791,8 @@ export interface Delve {
   ropes: string[];
   /** The winch has been worked: the lift runs between its two ends. */
   liftWorking: boolean;
-  /** Lantern shutter (spec 16.2): open burns oil and lights; shuttered does neither. */
-  lanternOpen: boolean;
+  /** Lantern shutter (spec 16.2): open burns oil and lights; shuttered does neither. V4.1: retired, as `light` (a Lantern item's `lit`). */
+  lanternOpen?: boolean;
   /** Patrollers whose route a hero has watched (monster ids). */
   knownRoutes: string[];
   /** Level 3 Gloam: world phases in a row with every hero lit (fades at 2). */
@@ -825,15 +863,15 @@ export type ActionKind =
   | 'give' // hand an item to an adjacent hero
   | 'disarm' // a spotted trap
   | 'light' // light an adjacent brazier
-  | 'torch' // light a torch from the pack
+  | 'torch' // light (or relight) a torch from the pack. V4.1 (spec 31.5): target.itemId = the torch; an action
+  | 'snuff' // V4.1 (spec 31.5): free: put out a lit torch in the pack; it keeps its rounds
+  | 'dropTorch' // V4.1 (spec 31.5): free: drop a lit torch on your hex, still burning
   | 'potion' // drink, or give to an adjacent downed/hurt hero
-  | 'revive' // an adjacent downed hero
   | 'charge' // place a blasting charge on an adjacent door, chest or cracked wall
   | 'rope' // anchor a rope at a pit edge
   | 'climb' // climb a rope between levels (whole turn)
   | 'jump' // jump into the pit (wounds)
   | 'shove' // push an adjacent enemy 1 hex (into the pit = it falls)
-  | 'free' // free an adjacent prisoner
   | 'bribe' // pay a rival crew to leave
   | 'nightsight' // V3.6: drink the night-eye draught (action)
   // V3.7 (spec 20.5)
@@ -843,16 +881,17 @@ export type ActionKind =
   | 'briar' // Hedgewitch [enemy]: 1 mana, 2 Wits slots at range 4, 1 dmg per hit; any hit roots 1 round (perfect: 2); noise 1
   | 'smashProp' // [adjacent crate or barrel]: action, noise 4; may drop gold or a small item
   | 'setCharge' // V3.7 Sapper [hex adjacent, floor or breakable wall]: set a charge with a fuse (target.fuse 1 or 2)
+  | 'setTripwire' // V4.1 (spec 31.3) Sapper, Gerda and Ilse home: as setCharge, and it also goes off when an enemy steps within 1
   | 'dread' // V3.7 Shadowmancer [enemy]: 1 mana, 2 Wits slots at range 5, 1+ hits = feared 2 rounds
   | 'parley' // V3.5: open the deal card with a crew in sight within 4 (free; the deal is a 'deal' command)
   | 'rally' // the heir: +1 Focus to allies within 3, cooldown 3
   | 'guard' // Sellsword: guard an adjacent ally
   | 'firebolt' // Mage spell
-  | 'kindle' // Mage spell: +12 light
+  | 'kindle' // Mage spell. V4.1 (spec 31.5): target.id = a hero within 3, itemId = their torch or lantern: light it, or +6 rounds
   | 'mend' // Mage spell: heal 4 on an ally within 3
   | 'passLantern' // give the lantern to an adjacent hero
   | 'winch' // next to the winch: work it so the lift runs (loud)
-  | 'shutter' // lantern bearer: open or shutter the lantern (free)
+  | 'shutter' // lantern bearer: open or shutter the lantern (free). V4.1 (spec 31.5): target.itemId = a Lantern in the pack
   | 'escape' // held by a ghoul: 2 Might slots, 1 hit frees
   | 'leave' // on an exit: leave the castle
   // ---- V3.2 class abilities (target kind in brackets: self / ally id / enemy id / hex at)
@@ -876,10 +915,11 @@ export type ActionKind =
   | 'unbar' // V4.0 [hex] the sally port key on the adjacent barred gate: opens it for good, silent
   | 'oil' // [self] +10 light
   | 'grapple' // [hex on the level above] uses move and action; the hook is kept
-  // ---- V4.0 (spec 29): venom
-  | 'venomdart' // [enemy] throw 5, 1 Finesse slot: a hit envenoms a monster or crew member
-  | 'antidote' // [self or adjacent ally id] cures venom and paralysis
-  | 'shoulder' // [adjacent paralyzed ally id] carry them: they follow every move; the carrier moves 3 at most
+  // ---- V4.0 (spec 29): venom; V4.1 (spec 31.4): poison, Carry and Unshackle (Revive, Free and Shoulder are gone)
+  | 'venomdart' // [enemy] the poison dart: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
+  | 'antidote' // [self or adjacent ally id] the antipoison: cures poison
+  | 'carry' // [adjacent downed hero or shackled captive id] it shares your hex and moves with you; you move 3 at most, free actions only
+  | 'unshackle' // [adjacent shackled captive id, itemId = the tool, none = Smash] unshackled, they follow you
   | 'setDown'; // [self] free: put the carried ally down
 
 export interface ActionTarget {
@@ -978,7 +1018,7 @@ export type GameEvent =
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }
   | { type: 'rooted'; id: string; by: string; rounds: number }
   | { type: 'braced'; id: string }
-  | { type: 'freed'; prisonerId: string }
+  | { type: 'freed'; prisonerId: string; /** V4.1 (spec 31.4): who unshackled them and how */ by?: string; how?: 'lockpicks' | 'improvised' | 'key' | 'smash' }
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }
   | { type: 'delveOver'; summary: DelveSummary }
@@ -1003,12 +1043,12 @@ export type GameEvent =
   | { type: 'shutter'; open: boolean }
   | { type: 'routeKnown'; id: string; route: Pos[] }
   | { type: 'say'; text: string }
-  // V4.0 (spec 29): venom. `venom`: world phases to paralysis now; `dose` 2 for a second dose.
-  | { type: 'envenomed'; id: string; by: string; venom: number; dose: number }
-  | { type: 'paralyzed'; id: string; rounds: number }
-  /** Venom and paralysis gone: `how` 'antidote' | 'mend' | 'worn' (paralysis wore off) | 'out' (left the castle). */
-  | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'worn' | 'out' }
-  | { type: 'shouldered'; by: string; id: string }
+  // V4.1 (spec 31.4): poison (replaces V4.0's envenomed / paralyzed). `by`: who or what dosed them.
+  | { type: 'poisoned'; id: string; by: string }
+  /** Poison gone: `how` 'antidote' | 'mend' | 'out' (left the castle). */
+  | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'out' }
+  /** V4.1 (spec 31.4): `by` lifts `id` (a downed hero or crew member, or the shackled captive); it shares their hex now. */
+  | { type: 'carried'; by: string; id: string }
   | { type: 'setDown'; by: string; id: string };
 
 export interface ApplyResult {

@@ -6,7 +6,7 @@
 import type { Engine } from '../game/api';
 import { hexKey, parsePosKey, type Pos } from '../game/hex';
 import type { GameState, Hero, Item } from '../game/types';
-import { CLASSES, LEVEL_XP, MAX_LEVEL, REP_FOR_LEVEL, REP_FOR_SLAY } from '../game/data';
+import { CLASSES, GIFTS, LEVEL_XP, MAX_LEVEL, REP_FOR_LEVEL, REP_FOR_SLAY } from '../game/data';
 import { isKit } from '../game/charges';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -205,7 +205,9 @@ export function returnScreen(el: HTMLElement, s: GameState, host: ReturnHost): v
   for (const w of waysFound(engine, s)) castleBox.append(h('span', { class: 'dl-rt-way' }, h('span', { class: 'dl-rt-way-ic', 'aria-hidden': 'true', html: '<svg width="22" height="22" viewBox="0 0 40 40"><path d="M6 34 V16 L20 6 L34 16 V34 Z" fill="none" stroke="#e8a33d" stroke-width="2"/><path d="M14 34 V22 H26 V34 M14 26 H26 M14 30 H26" fill="none" stroke="#e8a33d" stroke-width="1.6"/></svg>' }), h('span', { class: 'dl-rt-way-t' }, h('span', null, w.title), w.hint ? h('span', { class: 'dim small' }, w.hint) : '')));
   if (rooms.length) castleBox.append(h('span', { class: 'dl-rt-note' }, "The Set out map now shows what you've seen."));
 
-  const story = k.story && sm.contractDone ? h('p', { class: 'dl-rt-story' }, `${cap(STORY[k.story].who)} ${k.kind === 'rescue' ? 'is' : 'goes'} on the way home to Lowgate. Wins back: ${STORY[k.story].unlocks.toLowerCase()}.`) : '';
+  // V4.1 (spec 31.2): and the gift they bring, the first time.
+  const gift = k.story && !C.village?.[k.story] ? GIFTS[k.story] : undefined;
+  const story = k.story && sm.contractDone ? h('p', { class: 'dl-rt-story' }, `${cap(STORY[k.story].who)} ${k.kind === 'rescue' ? 'is' : 'goes'} on the way home to Lowgate. Wins back: ${STORY[k.story].unlocks.toLowerCase()}.${gift ? ` A gift for you: ${gift.short.charAt(0).toLowerCase()}${gift.short.slice(1)}.` : ''}`) : '';
   const warn = heirDead || heirTaken ? h('p', { class: 'dl-rt-warn' }, heirTaken ? 'The heir is taken. Valkenburg stays dark.' : 'Keven did not come back. Valkenburg stays dark.') : '';
   const root = h(
     'div',

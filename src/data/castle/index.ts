@@ -66,11 +66,14 @@ export const castle: CastleDef = {
     { at: L1(5, 16), kind: 'rats', asleep: true }, // kitchens
     { at: L1(7, 3), kind: 'spider', asleep: true }, // library
     { at: L1(8, 24), kind: 'cutpurse' }, // courtyard
-    { at: L1(21, 13), kind: 'orc' }, // hall, west of the pit
+    { at: L1(22, 13), kind: 'orc' }, // hall, west of the pit: V4.1 (WS8 L1-5) on the unrailed lip, so a shove, knockback or gust drops it
     { at: L1(31, 17), kind: 'orc' }, // hall, east of the pit
     { at: L1(36, 4), kind: 'orc' }, // tower stair
+    // V4.1 (WS8 L1-3): a second post on the way down; a firecracker in the tower passage (33, 8) sends both searching.
+    { at: L1(35, 5), kind: 'orc' }, // tower stair
     { at: L1(17, 25), kind: 'orc' }, // courtyard, by the gatehouse
-    { at: L1(35, 24), kind: 'orc' }, // chapel, by the chest
+    // V4.1 (spec 31.2, B1): Aldric's guard dozes on a campaign's first delve.
+    { at: L1(35, 24), kind: 'orc', firstDelveAsleep: true }, // chapel, by the chest
     // The hall patrol: clockwise round the pit mouth, floor only, no doors.
     { at: L1(19, 10), kind: 'orc', patrol: route(1, [[19, 10], [27, 10], [32, 12], [32, 18], [25, 20], [18, 17]]) },
     // Level 2: the Crossing. The barracks squad sleeps with its captain; everything else is up.
@@ -79,9 +82,11 @@ export const castle: CastleDef = {
     { at: L2(26, 3), kind: 'orc', asleep: true },
     { at: L2(29, 2), kind: 'orc', asleep: true },
     { at: L2(23, 3), kind: 'captain', asleep: true }, // with the squad
-    { at: L2(11, 23), kind: 'orc', name: 'Grub the Jailer' }, // cellblock
+    // V4.1 (WS8 L2-3): Grub keeps the cellblock's way from the winch room side, within the winch's noise.
+    { at: L2(21, 23), kind: 'orc', name: 'Grub the Jailer' }, // cellblock passage, winch room end
     { at: L2(7, 12), kind: 'spider' }, // archive
-    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand' }, // forge
+    // V4.1 (WS8 L2-1): Ugluk sleeps by the forge fire: Gerda's rescue is a stealth test, not a slugfest.
+    { at: L2(34, 27), kind: 'berserker', name: 'Ugluk Red-Hand', asleep: true }, // forge
     { at: L2(28, 21), kind: 'rats' }, // south rim
     // The arcade patrol: two orcs on one loop, the second a hex behind the first.
     { at: L2(24, 6), kind: 'orc', patrol: route(2, [[24, 6], ...ARCADE_LOOP]) },
@@ -169,6 +174,9 @@ export const castle: CastleDef = {
     { id: 'l1-story-kitchens', kind: 'rescue', at: L1(9, 14), where: 'the kitchens', story: 'innkeeper' },
     { id: 'l2-story-forge', kind: 'rescue', at: L2(38, 26), where: 'the forge', story: 'smith' },
     { id: 'l2-story-barracks', kind: 'recover', at: L2(28, 3), where: 'the barracks', story: 'copper' },
+    // V4.1 (spec 31.3): Ilse among the archive's shelves, a step from the spider she milks (it's awake: no sneaking up
+    // on her unseen), across the room from the archive's regular site and chest.
+    { id: 'l2-story-archive', kind: 'rescue', at: L2(6, 11), where: 'the archive', story: 'alchemist' },
     // V3.7 (spec 20.4): crew hideouts, used only by "Bring back <name>" contracts for that crew's
     // captives: the Sisters camp in the officers' quarters (behind the locked door), the Ferrymen
     // by the Drain's water, the Choir in the east tunnels, the Wake in the Bone Pile's north-east corner.

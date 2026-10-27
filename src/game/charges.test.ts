@@ -3,6 +3,7 @@
 // engine.test.ts so the stealth and sapper workstreams don't edit one file.
 
 import { describe, it, expect } from 'vitest';
+import { setLantern } from './test/light'; // V4.1 (WS2)
 import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { hexKey, posKey, samePos, type Pos } from './hex';
@@ -33,7 +34,7 @@ function delve(opts: { heroes?: string[]; castle?: CastleDef } = {}): GameState 
   s.delve!.monsters = [];
   s.delve!.rivals = null;
   s.delve!.traps = {};
-  s.delve!.light = 20;
+  setLantern(s, { rounds: 20, bearer: s.delve!.heroes.find((h) => h.heroId !== 'sam')?.heroId ?? 'sam' });
   return s;
 }
 
@@ -272,6 +273,7 @@ describe('V3.7 sapper', () => {
       const s = delve({ heroes: ['sam', 'brann'] });
       put(s, 'sam', at(2, 13, 3));
       put(s, 'brann', at(2, 11, 3)); // the railed bridge end, over the column
+      setLantern(s, { bearer: 'sam' }); // V4.1: Sam carries the old lantern, as he did
       const hp = hero(s, 'brann').hp;
       const pv = e.preview(s, 'sam', 'setCharge', { at: at(2, 12, 3), fuse: 1 });
       expect(pv.modifiers).toContain('Floor collapses into the pit: 2 hexes'); // (11,3) and the railed (12,4), both beside the column

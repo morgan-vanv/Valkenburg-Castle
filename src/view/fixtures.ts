@@ -41,7 +41,7 @@ export function fixtureCampaign(): GameState['campaign'] {
     fallen: [{ name: 'Sten', cls: 'sellsword', level: 2, where: 'Level 1, the pit hall', delve: 1 }],
     litBraziers: [],
     lostGear: [],
-    village: { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false },
+    village: { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false },
     captives: [],
   };
 }
@@ -58,11 +58,11 @@ export function fixtureCaptive(c: GameState['campaign'], heroId = 'pim', crew: C
 
 /** V3.5 (18.3): the story contracts the fixture pins, by what is home. */
 const STORY_CONTRACTS: { story: StoryId; kind: 'rescue' | 'recover'; title: string; brief: string; siteId: string; level: number; bounty: number; needs: (v: GameState['campaign']['village'], rep: number) => boolean }[] = [
-  { story: 'surgeon', kind: 'rescue', title: 'Rescue Brother Aldric', brief: 'Brother Aldric slipped back into the castle to pick herbs from the physic garden and was taken. The orcs keep him in the chapel to patch up their wounded.', siteId: 'l1-story-chapel', level: 1, bounty: 50, needs: () => true },
-  { story: 'innkeeper', kind: 'rescue', title: 'Rescue Old Wim', brief: 'Old Wim never got out. The orcs keep him at the spit in the kitchens, cooking for the warband.', siteId: 'l1-story-kitchens', level: 1, bounty: 50, needs: (_v, rep) => rep >= 1 },
-  { story: 'smith', kind: 'rescue', title: 'Rescue Gerda the smith', brief: 'Gerda barred the forge door the night the castle fell and has held it since, trading mended blades for food.', siteId: 'l2-story-forge', level: 2, bounty: 75, needs: (_v, rep) => rep >= 1 },
-  { story: 'copper', kind: 'recover', title: 'Recover the brewing copper', brief: "The orcs dragged Wim's brewing copper to the barracks to brew their own swill. It sits among the sleeping squad.", siteId: 'l2-story-barracks', level: 2, bounty: 75, needs: (v) => v.innkeeper },
-  { story: 'caskbook', kind: 'recover', title: "Recover Wim's cask book", brief: "Wim's cask book was lost in the Drain when the cellars flooded.", siteId: 'l3-recover-drain', level: 3, bounty: 100, needs: (v) => v.copper },
+  { story: 'surgeon', kind: 'rescue', title: 'Rescue Brother Aldric', brief: 'Brother Aldric slipped back into the castle to pick herbs from the physic garden and was taken. The orcs keep him in the chapel to patch up their wounded.', siteId: 'l1-story-chapel', level: 1, bounty: 0, needs: () => true },
+  { story: 'innkeeper', kind: 'rescue', title: 'Rescue Old Wim', brief: 'Old Wim never got out. The orcs keep him at the spit in the kitchens, cooking for the warband.', siteId: 'l1-story-kitchens', level: 1, bounty: 0, needs: (_v, rep) => rep >= 1 },
+  { story: 'smith', kind: 'rescue', title: 'Rescue Gerda the smith', brief: 'Gerda barred the forge door the night the castle fell and has held it since, trading mended blades for food.', siteId: 'l2-story-forge', level: 2, bounty: 0, needs: (_v, rep) => rep >= 1 },
+  { story: 'copper', kind: 'recover', title: 'Recover the brewing copper', brief: "The orcs dragged Wim's brewing copper to the barracks to brew their own swill. It sits among the sleeping squad.", siteId: 'l2-story-barracks', level: 2, bounty: 0, needs: (v) => v.innkeeper },
+  { story: 'caskbook', kind: 'recover', title: "Recover Wim's cask book", brief: "Wim's cask book was lost in the Drain when the cellars flooded.", siteId: 'l3-recover-drain', level: 3, bounty: 0, needs: (v) => v.copper },
 ];
 
 /** Pin the story contracts whose prerequisites are met and that aren't done. */
@@ -423,7 +423,8 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     const d = s.delve!;
     const out = new Set<string>();
     const b = d.heroes.find((h) => h.heroId === d.lanternBearer)!;
-    const r = d.lanternOpen === false ? 0 : d.light > 36 ? 4 : d.light >= 19 ? 3 : d.light >= 1 ? 2 : 0;
+    const L = d.light ?? 0; // V4.1: the fixture keeps the old party lantern as its own fiction
+    const r = d.lanternOpen === false ? 0 : L > 36 ? 4 : L >= 19 ? 3 : L >= 1 ? 2 : 0;
     if (r > 0) for (const h of range(b.at, r)) out.add(posKey({ level: b.at.level, ...h }));
     for (const h of d.heroes) if (h.torch > 0) for (const x of range(h.at, 2)) out.add(posKey({ level: h.at.level, ...x }));
     for (const k of d.lit) {
@@ -712,7 +713,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
               f.at = spot;
             });
             d.round++;
-            d.light = Math.max(0, d.light - 1);
+            d.light = Math.max(0, (d.light ?? 0) - 1);
             ev.push({ type: 'phase', phase: 'world', round: d.round - 1 }, { type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
           }
         }
@@ -877,7 +878,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         }
         d.fuses = left;
         d.round++;
-        d.light = Math.max(0, d.light - 1);
+        d.light = Math.max(0, (d.light ?? 0) - 1);
         const wasCalm = calmOf(state).calm;
         for (const h of d.heroes) {
           h.moved = h.acted = h.dashed = false;
