@@ -483,6 +483,8 @@ export interface HeroInDelve {
   braced?: boolean;
   /** V3.7 (spec 20.5): rounds rooted by a hamstring or briar: can't move or dash, can act. */
   rooted?: number;
+  /** V4.1 (WS7, spec 31.9): Dread from a crew Shadowmancer: in the player phase of this round the hero takes no action (moving is fine). */
+  dreaded?: number;
   /** 'active' on the map, 'downed' bleeding out, 'out' left the castle, 'dead', 'captured' (spec 20.4: taken by a crew). */
   status: 'active' | 'downed' | 'out' | 'dead' | 'captured';
   /** Downed only: world phases left before death (V4.1, spec 31.4: starts at 3; doesn't run while carried). */
@@ -547,7 +549,9 @@ export interface Intent {
     /** V4.0 (spec 29.3): a crew member throws a venom dart (V4.1: the poison dart) at a hero. */
     | 'venomdart'
     /** V4.1 (spec 31.4): a crew member lifts a downed crewmate (`targetId`) and carries them out. */
-    | 'carry';
+    | 'carry'
+    /** V4.1 (WS7, spec 31.9): crews as an equal power: a Sellsword's brace, the missing spells, an antipoison. */
+    | 'brace' | 'sleep' | 'dread' | 'nightthorn' | 'briar' | 'antidote' | 'kindle';
   /** V4.0 (spec 28.1): a crew member's move is a sneak (silent, slower). */
   sneak?: boolean;
   /** V3.7 `item` intents: which item. */
@@ -667,6 +671,10 @@ export interface Rival {
   bleed?: number;
   /** V4.1 (spec 31.4): the downed crewmate (member id) this member carries out (`dragging` is a hero it carries off). */
   carrying?: string;
+  /** V4.1 (WS7, spec 31.9): Focus left (FOCUS_MAX at the start), spent on key rolls. */
+  focus?: number;
+  /** V4.1 (WS7, spec 31.9): braced (a Sellsword with two heroes at its blade) until its next turn: hits do 1 less, heroes −15%. */
+  braced?: boolean;
 }
 
 export interface RivalCrew {
@@ -692,6 +700,13 @@ export interface RivalCrew {
   /** A job paid for and not yet done. */
   job?: { kind: JobKind; at?: Pos; /** V4.0 (spec 28.3): what was paid and by whom (spec 28.8: kept by the crew, named in the log; no refund) */ price?: number; by?: string };
   spotted: boolean;
+  /** V4.1 (WS7, spec 31.9): the round a hostile crew that was losing called the fight off (falling back; parley is free). */
+  retreat?: number;
+  /** V4.1 (WS7, spec 31.9): a crew at peace that has said it keeps its distance from a stronger party. */
+  wary?: boolean;
+  /** V4.1 (WS7, spec 31.9): rounds a hostile crew held at the edge of the party's reach (`holding`: the last such round). */
+  held?: number;
+  holding?: number;
   /** Round they enter; they're off the map before it. */
   entersRound: number;
   members: Rival[];

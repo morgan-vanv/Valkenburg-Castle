@@ -3578,13 +3578,16 @@ describe('V3.7 crews', () => {
     const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven', 'pim']);
     put(s, 'keven', at(2, 15, 2)); // the bearer, nearest
     put(s, 'brann', at(2, 14, 2));
-    hero(s, 'brann').hp = 2;
+    hero(s, 'brann').hp = 10; // V4.1 (WS7, spec 31.9): at 2 he'd be a likely kill, and a likely kill comes first
     put(s, 'pim', at(2, 2, 1)); // far off, behind the wall
     expect(crewTarget(ctx(s))!.id).toBe('keven');
     computeIntentsOf(ctx(s));
     const fighters = members(s).filter((r) => r.intent?.kind === 'attack' || r.intent?.kind === 'move' || r.intent?.kind === 'fuse');
     expect(fighters.length).toBeGreaterThan(0);
     for (const r of fighters) expect(r.intent?.targetId, r.cls).toBe('keven');
+    // V4.1 (WS7): a hero the crew can likely down this round comes before the bearer.
+    hero(s, 'brann').hp = 2;
+    expect(crewTarget(ctx(s))!.id).toBe('brann');
     // The bearer out of reach: the lowest-HP hero in reach.
     put(s, 'keven', at(2, 2, 2));
     s.delve!.rivals!.members.forEach((r) => (r.intent = undefined));
@@ -3735,6 +3738,7 @@ describe('V3.7 crews', () => {
     const s = crewDelve('gallows-choir', [at(2, 17, 8), at(2, 18, 8), at(2, 16, 4)], 'hostile', ['brann', 'keven', 'pim']);
     member(s, 0).hp = 0;
     member(s, 1).hp = 0;
+    s.delve!.rivals!.retreat = 0; // V4.1 (WS7, spec 31.9): it called a fight off once already: it fights on
     put(s, 'brann', at(2, 13, 1));
     put(s, 'keven', at(2, 14, 1));
     put(s, 'pim', at(2, 13, 2));

@@ -29,6 +29,8 @@ import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, rescueAct, rescuePlan, spellChance, useKit } from './crewai';
 import { blast } from './charges';
 import { checkWays, wayAtEntrance, wayOpen } from './ways';
+import { CREW_FOCUS } from './data'; // V4.1 (WS7)
+import { POWER_KIT, heldRound, crewRetreat, crewWary, nearHero, noteWary, powerPlan, waryStep } from './crewpower'; // V4.1 (WS7, spec 31.9)
 
 // ---------------------------------------------------------------- making a crew
 
@@ -67,6 +69,7 @@ function member(s: GameStateX, id: string, def: CrewDef, m: CrewDef['members'][n
     ...(m.cls === 'ranger' ? { overwatch: false } : {}),
     ...(cls.mana ? { charges: cls.mana } : {}),
     ...(m.cls === 'shadowmancer' ? { veil: 0 } : {}),
+    focus: CREW_FOCUS, // V4.1 (WS7, spec 31.9): Focus for key rolls, as a hero's
   };
   // V4.0 (spec 28.6, 30.2): class kit like a hero's, a use a crew level: a crew Sapper's improvised explosives (spent
   // before its bought charges), a crew Burglar's improvised picks (used when she has no lockpicks). Slotless, its own.
@@ -524,6 +527,9 @@ export function planRival(c: Ctx, r: RivalX): Intent {
   // V4.1 (spec 31.4, pillar 17): a crewmate down: carry them out, a potion, Mend, or lift them.
   const rescue = rescuePlan(c, r);
   if (rescue) return rescue.intent;
+  // V4.1 (WS7, spec 31.9): at peace or hired: an antipoison, a Shadowmancer's Sleep on a monster, a hired Pyromancer's Kindle.
+  const power = powerPlan(c, r);
+  if (power) return power;
   const foe = defendTarget(c, r);
   if (foe) return { kind: 'attack', targetId: foe.id, to: { ...r.at } };
   if (cr.stance === 'hostile') return hostilePlan(c, r).intent;
@@ -553,6 +559,9 @@ export function planRival(c: Ctx, r: RivalX): Intent {
     if (!r.post || samePos(r.post, r.at)) return { kind: 'wait' };
     return routeIntent(c, crewApproach(c, r, [r.post], { dash: true }));
   }
+  // V4.1 (WS7, spec 31.9): a crew at peace that sees a stronger party keeps its distance.
+  const wary = waryStep(c, r);
+  if (wary) return { kind: 'flee', to: wary.to };
   const g = bestLoot(c, r);
   if (!g) return { kind: 'wait' };
   if (within(r.at, g.at, 1)) return lockIntent(c, r, g.chestId) ?? { kind: 'steal', to: { ...r.at } };
@@ -704,6 +713,16 @@ function lootAct(c: Ctx, r: RivalX): void {
     const spots = [g.at, ...posNeighbors(g.at)].filter((p) => canEnter(c.w, c.d, p) && !blocked(c, p, r.id));
     const before = r.at;
     const route = crewApproach(c, r, spots, { dash: true });
+    // V4.1 (WS7, spec 31.9): a wary crew doesn't walk up to a stronger party for loot: it stops 4 hexes off.
+    if (crewWary(c)) {
+      const cut = route.path.findIndex((p) => nearHero(c, p));
+      if (cut >= 0) {
+        route.path = route.path.slice(0, cut);
+        route.dash = false;
+        route.way = undefined;
+        noteWary(c);
+      }
+    }
     crewGo(c, r, route);
     if (r.hp <= 0 || r.goneOut) return;
     if (samePos(before, r.at) && !within(r.at, g.at, 1)) {
@@ -786,6 +805,8 @@ export function rivalsAct(c: Ctx): void {
     say(c, `${cr.name}: "Blood, then."`);
     for (const r of rivalsOnMap(c)) r.intent = undefined;
   }
+  crewRetreat(c); // V4.1 (WS7, spec 31.9): a hostile crew losing badly calls the fight off
+  for (const r of cr.members) r.braced = undefined; // V4.1 (WS7): a brace lasts until the member's next turn
   if (cr.temperament === 'prospector' && (cr.stance === 'neutral' || cr.stance === 'truce') && cr.goal !== 'leave'
     && ((cr.pickups ?? 0) >= 3 || c.d.round >= SISTERS_LEAVE_ROUND)) cr.goal = 'leave'; // V4.1 (WS2): was the party's lantern at 9
   // Veils and wards from earlier rounds fade (the one cast this phase lasts its full two rounds).
@@ -809,6 +830,11 @@ export function rivalsAct(c: Ctx): void {
     if ((r.feared ?? 0) > 0) {
       r.overwatch = false;
       fleeAct(c, r);
+      continue;
+    }
+    // V4.1 (WS7, spec 31.9): at peace, the new verbs as shown (an antipoison, Sleep on a monster, Kindle for the hirer).
+    if (cr.stance !== 'hostile' && r.intent && POWER_KIT.includes(r.intent.kind) && useKit(c, r, r.intent)) {
+      r.intent = undefined;
       continue;
     }
     // V4.0 (spec 28.2): a member a monster attacked (or, at peace, one a hunting monster stands over) fights it.
@@ -846,6 +872,13 @@ export function rivalsAct(c: Ctx): void {
       postAct(c, r);
       continue;
     }
+    // V4.1 (WS7, spec 31.9): wary of a stronger party: step back out of its reach first.
+    const wary = waryStep(c, r);
+    if (wary) {
+      noteWary(c);
+      crewWalk(c, r, wary.path, true);
+      continue;
+    }
     lootAct(c, r);
   }
   if (cr.stance === 'hired' && cr.hiredRounds !== undefined) {
@@ -853,6 +886,7 @@ export function rivalsAct(c: Ctx): void {
     if (cr.hiredRounds <= 0) hireEnds(c);
   }
   for (const r of cr.members) r.attackedBy = undefined;
+  heldRound(c); // V4.1 (WS7): a round the crew held at the edge of the party's reach
   // Gone?
   for (const r of cr.members) if (r.goneOut && r.loot.length) {
     noteOnce(c, `${cr.name} left with ${valueOf(r.loot)} gold in loot.`);

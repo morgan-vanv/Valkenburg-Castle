@@ -739,6 +739,24 @@ export const PYRO_BOLT_DMG = 2;
 export const PYRO_BOLT_NOISE = 3;
 export const SELLSWORD_SHOVE_CHANCE = 60;
 
+// ---------------------------------------------------------------- V4.1 (WS7, spec 31.9): crews as an equal power
+/** A member's Focus for the delve, as a hero's (FOCUS_MAX), spent on key rolls: a likely kill, an edge shot, a lone hero's dart. */
+export const CREW_FOCUS = 3;
+/** A crew Sellsword braces (an action, the heroes' Brace) when this many heroes who are up stand at its blade. */
+export const CREW_BRACE_HEROES = 2;
+/** Retreat: a hostile crew with at least this share of its members down, dead or gone, facing a stronger party, calls the fight off. */
+export const CREW_LOSING_SHARE = 0.5;
+/** A crew at peace that sees a stronger party (strength × this) keeps at least CREW_WARY_GAP hexes from every hero. */
+export const CREW_WARY_RATIO = 1.25;
+export const CREW_WARY_GAP = 3;
+/** Strength, for retreat and wariness: per figure who is up, HP + this × level; + this per potion carried. */
+export const STRENGTH_PER_LEVEL = 4;
+export const STRENGTH_PER_POTION = 3;
+/** A member that can't strike this round holds at the edge of the party's reach (two heroes) for up to this many rounds of a fight. */
+export const CREW_HOLD_ROUNDS = 2;
+/** A crew Ranger on a raised hex shoots at +10, as a hero (spec 31.7's perches). */
+export const CREW_RAISED_BONUS = 10;
+
 export interface CrewMemberDef {
   name: string;
   cls: RivalClass;

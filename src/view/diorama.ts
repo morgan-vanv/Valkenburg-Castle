@@ -3831,6 +3831,7 @@ const INTENT_GLYPH: Record<Intent['kind'], string> = {
   hamstring: '➴',
   venomdart: '➶', // V4.0 (spec 29)
   carry: '⛟', // V4.1 (spec 31.4)
+  brace: '⛨', sleep: '☾', dread: '☠', nightthorn: '✶', briar: '❦', antidote: '⚗', kindle: '🔥', // V4.1 (WS7, spec 31.9)
   pick: '🔓', smash: '🔨', disarm: '✂', dig: '⛏', // V4.0 (spec 28): crews play by the party's rules
 };
 const INTENT_WORDS: Record<Intent['kind'], string> = {
@@ -3868,6 +3869,7 @@ const INTENT_WORDS: Record<Intent['kind'], string> = {
   hamstring: 'shoots the legs of',
   venomdart: 'throws a poison dart at', // V4.1 (spec 31.4)
   carry: 'lifts', // V4.1 (spec 31.4)
+  brace: 'braces', sleep: 'casts Sleep on', dread: 'casts Dread on', nightthorn: 'looses a night thorn at', briar: 'calls briars on', antidote: 'gives an antipoison to', kindle: 'kindles the light of', // V4.1 (WS7)
   pick: 'picks the lock at', smash: 'smashes the lock at', disarm: 'disarms the trap at', dig: 'digs through', // V4.0 (spec 28)
 };
 

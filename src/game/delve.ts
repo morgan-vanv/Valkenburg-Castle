@@ -49,6 +49,7 @@ import { bodiesOn, bringCarried, carrierOf, downedCrew, setDownNear } from './co
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
 import { POTION_HEAL, TRIPWIRE_FUSE } from './data'; // V4.1 (spec 31.3)
 import { doLight, lightSpecText, lightTargets } from './light'; // V4.1 (spec 31.5, WS2)
+import { crewBraceMods } from './crewpower'; // V4.1 (WS7)
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -1036,6 +1037,7 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
   const def = heroDef(c, heroId);
   for (const a of ORDER) {
     if (!canDo(h, a)) continue;
+    if (h.dreaded && !FREE.includes(a)) continue; // V4.1 (WS7, spec 31.9): a crew Shadowmancer's Dread
     const t = targetsFor(c, h, a);
     if (!t.length) {
       // Spec 21.4: a locked thing in reach, and no pick to work it: the option says what would.
@@ -1147,12 +1149,18 @@ function sign(n: number): string {
 
 /** A monster's armor against this hit, with the plain-words modifiers (armor, the captain's shield wall). */
 /** V3.7 (spec 20.4): a crew member's armor (class plus tier) and the Hedgewitch's ward, as modifiers. */
-function rivalArmorMods(r: RivalX, mods: string[]): { armor: number; ward: number } {
+function rivalArmorMods(r: RivalX, mods: string[]): { armor: number; ward: number; chance: number } {
   const armor = rivalStats(r).armor;
   if (armor) mods.push(`Armor −${armor}`);
-  const ward = (r.ward ?? 0) > 0 ? 1 : 0;
+  let ward = (r.ward ?? 0) > 0 ? 1 : 0;
   if (ward) mods.push('Warded −1');
-  return { armor, ward };
+  // V4.1 (WS7, spec 31.9): a braced crew Sellsword, by the heroes' Brace: 1 less a hit, −15% to hit it.
+  const bm = crewBraceMods(r);
+  if (bm.dmg) {
+    ward += bm.dmg;
+    mods.push(`Braced −${bm.dmg} dmg, ${bm.chance}%`);
+  }
+  return { armor, ward, chance: bm.chance };
 }
 
 function armorMods(c: Ctx, m: MonsterX, mods: string[]): number {
@@ -1195,6 +1203,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   if (h.status !== 'active' && !crawler) return no(`${heroName(c, heroId)} can't act.`);
   if (c.d.phase !== 'player') return no('Wait for your turn.');
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
+  if (h.dreaded && !FREE.includes(action)) return no(`${heroName(c, heroId)} is gripped by dread this turn: they can move, but not act.`); // V4.1 (WS7)
   if (h.carrying && !CARRY_OK.includes(action)) return no(`${heroName(c, heroId)} is carrying ${bodyName(c, h.carrying)}: free actions only. Set them down first.`);
   if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
@@ -1235,6 +1244,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
       if (adjacent(h.at, f.at) && c.d.heroes.some((o) => o !== h && o.status === 'active' && samePos(o.at, across))) { slots += 1; mods.push('Flanked +1 slot'); }
       const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      p += rd?.chance ?? 0; // V4.1 (WS7)
       const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
       const dmg = Math.max(0, Math.max(1, cls.weapon.dmg * (stab ? BACKSTAB_DMG_MULT : 1) - armor) - (rd?.ward ?? 0));
       const outcomes = [];
@@ -1362,6 +1372,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       const rd = f.rival ? rivalArmorMods(f.rival, mods) : undefined;
+      p += rd?.chance ?? 0; // V4.1 (WS7)
       const armor = f.monster ? armorMods(c, f.monster, mods) : (rd?.armor ?? 0);
       const bd = Math.max(0, Math.max(1, 2 - armor) - (rd?.ward ?? 0));
       const outcomes = [];
