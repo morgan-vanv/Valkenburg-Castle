@@ -2,6 +2,7 @@
 // by level (one improvised explosive or pick a level each delve), for heroes and crew members, and old saves.
 
 import { describe, it, expect } from 'vitest';
+import { setLantern } from './test/light'; // V4.1 (WS2)
 import { createEngine } from './engine';
 import { at, testCastle } from './test/testCastle';
 import { posKey } from './hex';
@@ -31,7 +32,7 @@ function delve(heroes: [string, HeroClass, number][], seed = 1): GameState {
   t.delve!.monsters = [];
   t.delve!.rivals = null;
   t.delve!.traps = {};
-  t.delve!.light = 20;
+  setLantern(t, { rounds: 20 });
   return t;
 }
 

@@ -3,7 +3,7 @@ import { distance, hexKey, posKey, posNeighbors, samePos, type Pos } from '../..
 import type { LevelDef, TileDef } from '../../game/types';
 import { castle } from './index';
 import { STORIES } from '../../game/data';
-import { World } from '../../game/world';
+import { World, fixedLightReaches } from '../../game/world';
 import { breakableWall } from '../../game/charges';
 
 function level(n: number): LevelDef {
@@ -574,14 +574,15 @@ describe('castle V3.3: light by depth', () => {
   it('floods Level 1 with daylight', () => {
     const k = kinds(1);
     expect(k.daylight ?? 0).toBeGreaterThanOrEqual(15);
-    expect(lights(1).length).toBeGreaterThanOrEqual(25);
+    expect(lights(1).length).toBeGreaterThanOrEqual(20); // V4.1: 5 sconces and the tower's daylight gone (was ≥ 25)
     // The great hall's collapsed roof: several daylights on hall floor round the pit.
     const hallDay = lights(1).filter((L) => L.kind === 'daylight' && tile(L.at)?.room === 'hall');
     expect(hallDay.length).toBeGreaterThanOrEqual(5);
     // Most of the level is within reach of a fixed light (distance only; walls ignored).
     const floor = allTiles().filter(([p, t]) => p.level === 1 && STAND.includes(t.kind));
     const lit = floor.filter(([p]) => lights(1).some((L) => distance(L.at, p) <= L.radius));
-    expect(lit.length / floor.length).toBeGreaterThan(0.75);
+    // V4.1 (spec 31.5): the library, armory and tower went dark (was > 0.75; now about 0.73).
+    expect(lit.length / floor.length).toBeGreaterThan(0.7);
     // The courtyard and gatehouse stay as they were.
     for (const r of ['court', 'gate']) expect(lights(1).some((L) => L.kind === 'daylight' && tile(L.at)?.room === r), r).toBe(true);
   });
@@ -622,6 +623,22 @@ describe('castle V3.3: light by depth', () => {
   it('gets darker with depth', () => {
     expect(lights(1).length).toBeGreaterThan(lights(2).length);
     expect(lights(2).length).toBeLessThanOrEqual(lights(3).length + 2);
+  });
+
+  // V4.1 (spec 31.5, WS2): Level 1's dark rooms. The library stacks, the armory and the tower top have no fixed light,
+  // so the tower and armory chests (tier 2, the richest on the level) sit in the dark.
+  it('V4.1: the library, the armory and the tower are dark; their chests sit unlit', () => {
+    const w = new World(castle);
+    for (const L of lights(1)) {
+      const rooms = [tile(L.at)?.room, ...posNeighbors(L.at).map((n) => tile(n)?.room)];
+      for (const r of ['library', 'armory', 'tower']) expect(L.kind === 'sconce' && rooms.includes(r), `${L.kind} at ${show(L.at)} lights the ${r}`).toBe(false);
+    }
+    for (const id of ['l1-tower-chest', 'l1-armory-chest', 'l1-library-chest']) {
+      const ch = castle.chests.find((x) => x.id === id)!;
+      expect(fixedLightReaches(w, ch.at), id).toBe(false);
+    }
+    // Daylight elsewhere is unchanged: the courtyard, the gatehouse and the hall are lit.
+    expect(fixedLightReaches(w, castle.entrances[0]!)).toBe(true);
   });
 });
 

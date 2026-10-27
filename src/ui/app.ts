@@ -400,11 +400,7 @@ export class App {
     } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
-    // 16.2: "Go in with the lantern shut" (Set out): shutter is free, so send it right after the delve starts.
-    if (cmd.type === 'startDelve' && this.loadout?.startShuttered && this.state?.delve && this.state.delve.lanternOpen !== false) {
-      const bearer = this.state.delve.lanternBearer;
-      void this.send({ type: 'act', heroId: bearer, action: 'shutter', target: {}, focus: 0 });
-    }
+    // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
   }
 
@@ -576,7 +572,7 @@ export class App {
           const prev = this.state?.delve ? this.engine.brightness(before) : 'bright';
           this.hud.updateLight(e.light, e.brightness);
           this.hud.setDark(e.brightness);
-          if (e.brightness !== prev && this.state?.delve?.lanternOpen !== false) {
+          if (e.brightness !== prev) {
             this.hud.log(`The lantern gutters: ${e.brightness === 'pitch' ? 'pitch black' : e.brightness}.`, 'log-enemy');
             this.hud.pulse('dark');
           }
@@ -616,8 +612,9 @@ export class App {
         case 'shutter':
           sfx.play('click', { pitch: e.open ? 1.2 : 0.7, gain: 0.8 });
           this.hud.log(e.open ? 'The lantern is open: it lights, and burns.' : 'The lantern is shuttered: no light, no burn.');
+          this.hud.updateLight();
           await this.dio.playEvent(e);
-          if (this.state?.delve) this.hud.updateLight(this.state.delve.light, this.engine.brightness(this.state));
+          if (this.state?.delve) this.hud.updateLight();
           continue;
         case 'routeKnown':
           sfx.play('flip', { pitch: 1.1 });

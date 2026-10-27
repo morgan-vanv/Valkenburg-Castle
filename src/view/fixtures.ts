@@ -423,7 +423,8 @@ export function fixtureEngine(castle0: CastleDef): Engine {
     const d = s.delve!;
     const out = new Set<string>();
     const b = d.heroes.find((h) => h.heroId === d.lanternBearer)!;
-    const r = d.lanternOpen === false ? 0 : d.light > 36 ? 4 : d.light >= 19 ? 3 : d.light >= 1 ? 2 : 0;
+    const L = d.light ?? 0; // V4.1: the fixture keeps the old party lantern as its own fiction
+    const r = d.lanternOpen === false ? 0 : L > 36 ? 4 : L >= 19 ? 3 : L >= 1 ? 2 : 0;
     if (r > 0) for (const h of range(b.at, r)) out.add(posKey({ level: b.at.level, ...h }));
     for (const h of d.heroes) if (h.torch > 0) for (const x of range(h.at, 2)) out.add(posKey({ level: h.at.level, ...x }));
     for (const k of d.lit) {
@@ -712,7 +713,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
               f.at = spot;
             });
             d.round++;
-            d.light = Math.max(0, d.light - 1);
+            d.light = Math.max(0, (d.light ?? 0) - 1);
             ev.push({ type: 'phase', phase: 'world', round: d.round - 1 }, { type: 'light', light: d.light, brightness: eng.brightness(s) }, { type: 'phase', phase: 'player', round: d.round });
           }
         }
@@ -877,7 +878,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         }
         d.fuses = left;
         d.round++;
-        d.light = Math.max(0, d.light - 1);
+        d.light = Math.max(0, (d.light ?? 0) - 1);
         const wasCalm = calmOf(state).calm;
         for (const h of d.heroes) {
           h.moved = h.acted = h.dashed = false;

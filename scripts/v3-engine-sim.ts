@@ -53,7 +53,7 @@ import { createEngine } from '../src/game/engine';
 import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
 import { posKey, samePos, type Pos } from '../src/game/hex';
-import type { ActionKind, ActionTarget, Command, GameState, HeroInDelve } from '../src/game/types';
+import type { ActionKind, ActionTarget, Command, Delve, GameState, HeroInDelve } from '../src/game/types';
 import { World, dirIndex, distField, fallColumn, fixedLit, kindAt, litSet } from '../src/game/world';
 import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
@@ -70,9 +70,29 @@ const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
 const e = createEngine(castle);
 const w = new World(castle);
 const ROUND_CAP = 80;
-/** The bot heads out when the lantern gets this low (it holds 20 since V3.3). */
-const LOW_LIGHT = 5;
-/** Heroes keep within this many hexes of the lantern bearer (a careless player still stays in the light). */
+/**
+ * V4.1 (WS2): no free lantern. The bot heads out on Level 2 or 3 when the party is out of light: no burning torch or
+ * lantern and nothing left to light (was LOW_LIGHT: the lantern at 5).
+ */
+function outOfLight(s: GameState): boolean {
+  const d = s.delve!;
+  const up = d.heroes.filter((h) => h.status === 'active');
+  if (!up.some((h) => h.at.level >= 2)) return false;
+  return lightLeft(d) <= 0;
+}
+/** V4.1 (WS2): rounds of light the party still carries (burning or not; lanterns count their oil). */
+function lightLeft(d: Delve): number {
+  let n = 0;
+  for (const h of d.heroes) if (h.status === 'active') for (const i of h.pack) if (i.kind === 'torch' || i.kind === 'lantern') n += i.rounds ?? (i.kind === 'lantern' ? 20 : 15);
+  return n;
+}
+/** V4.1 (WS2): the hero the others follow: whoever carries the most light (lit first), else the first one up. Was the lantern bearer. */
+function leadOf(d: Delve): HeroInDelve | undefined {
+  const up = d.heroes.filter((h) => h.status === 'active' && !((h.paralyzed ?? 0) > 0));
+  const glow = (h: HeroInDelve) => h.pack.reduce((n, i) => n + ((i.kind === 'torch' || i.kind === 'lantern') ? (i.lit ? 100 : 1) : 0), 0);
+  return [...up].sort((a, b) => glow(b) - glow(a))[0];
+}
+/** Heroes keep within this many hexes of the lead (the hero carrying the light). */
 const COHESION = 3;
 const TRACE = Number(process.env.TRACE ?? 0);
 const DRAGON = process.env.DRAGON === '1';
@@ -291,7 +311,7 @@ function openExits(s: GameState): Pos[] {
 
 function goalFor(s: GameState): Pos[] {
   const d = s.delve!;
-  const leaving = objectiveDone(s) || objectiveFailed(s) || d.light < LOW_LIGHT || d.round > 50;
+  const leaving = objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || d.round > 50;
   // V4.1 (POLICY=v41): a careful player sweeps what it knows of on the way, while it's quiet and there's time.
   if (V41) {
     const loot = lootGoals(s);
@@ -317,9 +337,9 @@ const VALUABLE = new Set(['gold', 'gem', 'jewelry', 'heirloom', 'hoard']);
  */
 function lootGoals(s: GameState): Pos[] {
   const d = s.delve as DelveX;
-  if (d.light < 10 || d.round > 35) return [];
+  if ((lightLeft(d) < 10 && d.heroes.some((h) => h.status === 'active' && h.at.level >= 2)) || d.round > 35) return [];
   const active = d.heroes.filter((h) => h.status === 'active' && !((h.paralyzed ?? 0) > 0));
-  const lead = active.find((h) => h.heroId === d.lanternBearer) ?? active[0];
+  const lead = leadOf(d) ?? active[0];
   if (!lead) return [];
   if (!active.some((h) => slotsUsed(h) < 4)) return [];
   const vis = e.visibility(s).visible;
@@ -380,20 +400,53 @@ function routeFor(s: GameState, at: Pos): { goals: Pos[]; jump: Pos[]; winch: bo
 }
 
 /**
- * Lantern discipline (spec 16.2): on Level 1 shutter while the bearer stands in fixed light
- * (daylight and sconces light most of the level), open otherwise; always open on Levels 2 and 3.
+ * V4.1 (WS2) light discipline: the lead keeps one light burning on Levels 2 and 3 when standing unlit (a lantern
+ * first, else a torch), and snuffs or shutters it on Level 1 in daylight or another castle light (saving the rounds).
+ * Light is a free shutter or an action (a torch): the bot lights a torch before it acts.
  */
-function lanternCheck(s: GameState, id: string): GameState {
+function lightCheck(s: GameState, id: string): GameState {
   const d = s.delve as DelveX;
-  if (d.lanternBearer !== id) return s;
   const me = d.heroes.find((x) => x.heroId === id)!;
+  if (me.status !== 'active') return s;
+  const lead = leadOf(d);
+  const burning = me.pack.find((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit);
   const fixed = fixedLit(w, d);
-  const wantOpen = me.at.level !== 1 || !fixed.has(posKey(me.at));
-  if (wantOpen !== d.lanternOpen) {
-    const o = option(s, id, 'shutter');
-    if (o) s = act(s, id, 'shutter', o.targets[0]!);
+  const inCastleLight = fixed.has(posKey(me.at));
+  if (me.at.level === 1) {
+    if (burning && inCastleLight) {
+      if (burning.kind === 'lantern') s = act(s, id, 'shutter', { itemId: burning.id });
+      else s = act(s, id, 'snuff', { itemId: burning.id });
+    }
+    return s;
   }
+  if (burning || (lead && lead.heroId !== id)) return s;
+  // Somebody else already lights this hex? Leave it.
+  if (litSet(w, d).has(posKey(me.at))) return s;
+  const sh = option(s, id, 'shutter');
+  if (sh) return act(s, id, 'shutter', sh.targets[0]!);
+  const t = option(s, id, 'torch');
+  if (t) return act(s, id, 'torch', t.targets[0]!);
   return s;
+}
+
+/** V4.1 (WS2): torches the bot packs for a contract level: 1 for Level 2, 3 for Level 3 (one more when rich); Level 1 none. */
+function torchesFor(level: number, gold: number): number {
+  const base = level >= 3 ? 3 : level === 2 ? 1 : 0;
+  return base + (base && gold >= 300 ? 1 : 0);
+}
+
+/** V4.1 (WS2): buy the torches the level wants (Mott, 10 each) and, once, Gerda's lantern when 120 plus a reserve can be spared. */
+function buyLight(st: GameState, level: number): GameState {
+  const has = (k: string) => st.campaign.stash.filter((i) => i.kind === k).length;
+  const want = torchesFor(level, st.campaign.gold);
+  while (has('torch') < want && st.campaign.gold >= 10) {
+    const before = st;
+    st = run(st, { type: 'buy', kind: 'torch' });
+    if (st === before) break;
+  }
+  const lantern = e.shop(st).find((o) => o.kind === 'lantern');
+  if (lantern && !lantern.locked && !has('lantern') && st.campaign.gold >= lantern.price + RESERVE + 40) st = run(st, { type: 'buy', kind: 'lantern' });
+  return st;
 }
 
 /** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. V3.7: on every third crew delve, fight on purpose. */
@@ -606,7 +659,7 @@ function faceParty(s: GameState): GameState {
     const group = act.filter((o) => o.at.level === h.at.level && hexDistance(o.at, h.at) <= 2);
     if (group.length < 2 || !FACING.faceCommand) continue;
     for (const g of group) done.add(g.heroId);
-    const lead = group.find((g) => g.heroId === d.lanternBearer) ?? group[0]!;
+    const lead = group.find((g) => g.heroId === leadOf(d)?.heroId) ?? group[0]!;
     const fwd = lead.facing ?? 0;
     const back = group.filter((g) => g !== lead).at(-1)!;
     for (const g of group) {
@@ -693,7 +746,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         const hpOf = (tid: string) => s.delve!.monsters.find((m) => m.id === tid)?.hp ?? s.delve!.rivals?.members.find((r) => r.id === tid)?.hp ?? 99;
         o.targets.sort((x, y) => hpOf(x.id!) - hpOf(y.id!));
       }
-      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || s.delve!.light < LOW_LIGHT || s.delve!.round > 50)) continue;
+      if (a === 'leave' && !(objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || s.delve!.round > 50)) continue;
       // V4.0 (spec 29.6): venom first: the paralyzed, then the envenomed; else the badly hurt.
       const sick = (t: ActionTarget) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return !!x && ((x.paralyzed ?? 0) > 0 || (x.venom ?? 0) > 0); };
       if (a === 'antidote') {
@@ -712,8 +765,13 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       // Shoulder a paralyzed friend only when nobody near has a cure for them.
       if (a === 'shoulder' && s.delve!.heroes.some((x) => x.status === 'active' && !((x.paralyzed ?? 0) > 0) && (x.pack.some((i) => i.kind === 'antidote') || (e.heroById(s, x.heroId)?.cls === 'hedgewitch' && x.mana > 0)))) continue;
       if (a === 'mend' && !o.targets.some((t) => { const x = s.delve!.heroes.find((y) => y.heroId === t.id); return x && x.hp <= 3; })) continue;
-      if (a === 'kindle' && (s.delve!.light > 14 || !s.delve!.lanternOpen)) continue;
-      if (a === 'oil' && (s.delve!.light > 12 || !s.delve!.lanternOpen)) continue;
+      // V4.1 (WS2): kindle a burning light running low (or an unlit one when nothing burns, below Level 1); oil a lantern at 10 or less.
+      if (a === 'kindle') {
+        const kt = o.targets.find((t) => { const it = s.delve!.heroes.find((x) => x.heroId === t.id)?.pack.find((i) => i.id === t.itemId); return !!it && it.lit && (it.rounds ?? 20) <= 6; });
+        if (!kt) continue;
+        o.targets = [kt];
+      }
+      if (a === 'oil' && (me.pack.find((i) => i.kind === 'lantern')?.rounds ?? 20) > 10) continue;
       if (a === 'free' && s.delve!.prisoner?.escortedBy) continue;
       if (a === 'open' && !o.targets.some((t) => t.id)) continue;
       if (a === 'take' && (V41 ? slotsUsed(me) >= 4 : me.pack.length >= 4)) continue;
@@ -737,7 +795,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   let calmMoved = false;
   if (!me.webbed && s.delve!.calm && !option(s, id, 'attack')) {
     const d = s.delve as DelveX;
-    const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+    const bearer = leadOf(d);
     const isBearer = !bearer || bearer.heroId === id;
     const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
     const behind = !isBearer && bearer && (bearer.at.level !== me.at.level || hexDist(me.at, bearer.at) > COHESION);
@@ -784,7 +842,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const sneak = wantSneak(s, me);
       const reach = e.reachable(s, id, sneak);
       // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
-      const bearer = d.heroes.find((h) => h.heroId === d.lanternBearer && h.status === 'active');
+      const bearer = leadOf(d);
       const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
       const isBearer = !bearer || bearer.heroId === id;
       const stragglers = isBearer
@@ -826,7 +884,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       }
     }
   }
-  if (alive()) s = lanternCheck(s, id);
+  if (alive()) s = lightCheck(s, id);
   tryAct();
   // Dash (spec 15.2): nothing to do with the action, so move again toward the goal.
   if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
@@ -837,7 +895,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     let best: ReturnType<typeof e.reachable>[0] | undefined;
     let bestD = here;
     const d2 = s.delve as DelveX;
-    const bearer2 = d2.heroes.find((h) => h.heroId === d2.lanternBearer && h.status === 'active');
+    const bearer2 = leadOf(d2);
     for (const r of e.reachable(s, id, false)) {
       if (!r.dash || inBlast(d2, r.to)) continue;
       if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
@@ -944,12 +1002,7 @@ function campSpend(st: GameState, ids: string[], level: number): GameState {
     st = run(st, { type: 'buy', kind: 'potion' });
     if (st === before) break;
   }
-  const torches = level >= 3 ? 2 : level === 2 ? 1 : 0;
-  while (st.campaign.stash.filter((i) => i.kind === 'torch').length < torches && gold() >= 10) {
-    const before = st;
-    st = run(st, { type: 'buy', kind: 'torch' });
-    if (st === before) break;
-  }
+  // V4.1 (WS2): torches bought in the main camp step (buyLight).
   if (st.campaign.village.smith) {
     const heroes = () => ids.map((id) => st.campaign.roster.find((h) => h.id === id)!).filter(Boolean)
       .sort((a, b) => Number(FRONT_CLS.has(b.cls)) - Number(FRONT_CLS.has(a.cls)));
@@ -1043,6 +1096,9 @@ for (let i = 0; i < N; i++) {
     ?? rescue ?? story ?? regular[i % Math.max(1, regular.length)] ?? s.campaign.board[0]!;
   if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
+  // V4.1 (WS2): light. Torches: 1 per Level 2 contract, 3 per Level 3 (one more when rich); the lantern once Gerda sells
+  // it and the bot can afford it plus a reserve.
+  s = buyLight(s, k.level);
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
   // V4.1 (spec 31.3): oil is Ilse's; only when her bench sells it.
   if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
@@ -1066,13 +1122,23 @@ for (let i = 0; i < N; i++) {
   const picks = s.campaign.stash.find((it) => it.kind === 'lockpicks');
   const picker = fit.find((id) => e.heroById(s, id)?.cls !== 'burglar');
   if (picks && picker) (packs[picker] ??= []).push(picks.id);
+  // V4.1 (WS2): lights first: the lantern (if any) and the torches the level wants, on the first heroes.
+  const lights = [
+    ...s.campaign.stash.filter((it) => it.kind === 'lantern').slice(0, 1),
+    ...s.campaign.stash.filter((it) => it.kind === 'torch').slice(0, torchesFor(k.level, s.campaign.gold) + (k.level === 1 ? 1 : 0)),
+  ];
+  lights.forEach((it, j) => {
+    (packs[fit[j % fit.length]!] ??= []).push(it.id);
+  });
   const carry = [
     ...(k.level >= 3 ? s.campaign.stash.filter((it) => it.kind === 'oil').slice(0, 1) : []),
-    ...s.campaign.stash.filter((it) => it.kind === 'potion' || it.kind === 'torch').slice(0, DRAGON ? 4 : 2),
+    ...s.campaign.stash.filter((it) => it.kind === 'potion').slice(0, DRAGON ? 4 : 2),
     ...(k.level >= 2 ? s.campaign.stash.filter((it) => it.kind === 'antidote').slice(0, 1) : []),
   ];
   carry.forEach((it, j) => {
-    (packs[fit[j % fit.length]!] ??= []).push(it.id);
+    const room = (id: string) => (packs[id] ?? []).length < 4;
+    const who = [...fit.slice(j % fit.length), ...fit].find(room);
+    if (who) (packs[who] ??= []).push(it.id);
   });
   // V4.0 (spec 25): only the open ways in (a new campaign has the main gate alone); rotate through them.
   const ways = e.entrances(s).filter((x) => x.state === 'open');
@@ -1107,7 +1173,7 @@ for (let i = 0; i < N; i++) {
     }
     if (TRACE === i + 1) {
       const d = s.delve!;
-      console.log(`r${d.round} light ${d.light}${d.lanternOpen ? '' : ' (shut)'}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}${h.grabbedBy ? ' held' : ''}${h.webbed ? ' web' : ''}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
+      console.log(`r${d.round} light ${lightLeft(d)}`, d.heroes.map((h) => `${h.heroId}:${h.status}@${posKey(h.at)} hp${h.hp}${h.grabbedBy ? ' held' : ''}${h.webbed ? ' web' : ''}`).join(' '), d.prisoner ? `pris@${posKey(d.prisoner.at)} esc=${d.prisoner.escortedBy}` : '');
       const near = d.monsters.filter((m) => !m.buried && d.heroes.some((h) => h.status === 'active' && h.at.level === m.at.level && Math.max(Math.abs(h.at.q - m.at.q), Math.abs(h.at.r - m.at.r), Math.abs(h.at.q + h.at.r - m.at.q - m.at.r)) <= 6));
       if (near.length) console.log('   near:', near.map((m) => `${m.id}:${m.kind}@${posKey(m.at)} hp${m.hp} ${m.awareness} ${m.intent?.kind ?? '-'}${m.intent?.targetId ? '>' + m.intent.targetId : ''}`).join(' '));
       if (d.rivals && (d.rivals as { entered?: boolean }).entered) console.log('   sisters:', d.rivals.stance, d.rivals.members.filter((r) => !r.goneOut && r.hp > 0).map((r) => `${r.cls}@${posKey(r.at)} hp${r.hp} ${r.intent?.kind ?? '-'}`).join(' '));
@@ -1156,7 +1222,7 @@ for (let i = 0; i < N; i++) {
     gloamStrikes: gloamStrikes - strikesBefore,
     done: sum.contractDone,
     rounds: d.round,
-    light: d.light,
+    light: lightLeft(d),
     loot: sum.lootValue,
     bounty: sum.bounty,
     deaths: sum.dead.length,
