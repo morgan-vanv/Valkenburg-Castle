@@ -966,7 +966,7 @@ export type ActionKind =
   | 'venomdart' // [enemy] the poison dart: throw 5, 1 Finesse slot: a hit poisons a monster or crew member
   | 'antidote' // [self or adjacent ally id] the antipoison: cures poison
   | 'carry' // [adjacent downed hero or shackled captive id] it shares your hex and moves with you; you move 3 at most, free actions only
-  | 'unshackle' // [adjacent shackled captive id, itemId = the tool, none = Smash] unshackled, they follow you
+  | 'unshackle' // [adjacent shackled captive id, itemId = the lock tool (spec 31.11: no Smash)] unshackled, they follow you
   | 'setDown' // [self] free: put the carried ally down
   // ---- V4.1 (WS6, spec 31.8): arrows
   | 'shoot'; // Ranger [hex, itemId = a whistling, glow, blast or rope arrow bundle]: a specialty arrow at a hex in sight (no roll)
@@ -1069,7 +1069,7 @@ export type GameEvent =
   | { type: 'propSmashed'; at: Pos; by: string; items: Item[] }
   | { type: 'rooted'; id: string; by: string; rounds: number }
   | { type: 'braced'; id: string }
-  | { type: 'freed'; prisonerId: string; /** V4.1 (spec 31.4): who unshackled them and how */ by?: string; how?: 'lockpicks' | 'improvised' | 'key' | 'smash' }
+  | { type: 'freed'; prisonerId: string; /** V4.1 (spec 31.4): who unshackled them and how */ by?: string; how?: 'lockpicks' | 'improvised' | 'key' }
   | { type: 'out'; id: string }
   | { type: 'phase'; phase: Delve['phase']; round: number }
   | { type: 'delveOver'; summary: DelveSummary }

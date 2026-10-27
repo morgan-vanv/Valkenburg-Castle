@@ -122,10 +122,35 @@ const VALUABLE = new Set(['gem', 'jewelry', 'heirloom', 'hoard']);
 const isValuable = (i: Item) => VALUABLE.has(i.kind) && !i.story;
 const isHeir = (c: Campaign, id: string) => id === 'keven' || c.roster.find((x) => x.id === id)?.cls === 'heir';
 
-/** Contracts in the order they are shown: village pleas, bounties, then "Bring back" jobs. */
+/** V4.1 (spec 31.11, owner): at most this many cards in each row of the board (village pins; work for hire). */
+export const BOARD_ROW_MAX = 3;
+
+/**
+ * V4.1 (spec 31.11, owner): the board in two rows. "Pinned by the village": "Bring back" jobs first (urgent: they always
+ * show and count toward the 3), then the village's pleas in board order, at most 3 shown (`more`: how many wait behind
+ * them). "Work for hire": the regular bounties, at most 3. The chosen job always shows (a house's plea seal can pick one
+ * that waits): it takes the last plea's place.
+ */
+export function boardRows(c: Campaign, chosenId?: string): { pins: Contract[]; hire: Contract[]; more: number } {
+  const cap = (k: Contract) => !k.story && !!contractCaptive(c, k);
+  const captives = c.board.filter(cap);
+  const pleas = c.board.filter((k) => k.story);
+  const all = [...captives, ...pleas];
+  const pins = all.slice(0, Math.max(BOARD_ROW_MAX, captives.length));
+  const chosen = all.find((k) => k.id === chosenId);
+  if (chosen && !pins.includes(chosen)) {
+    const last = pins.map((k) => !!k.story).lastIndexOf(true);
+    if (last >= 0) pins[last] = chosen;
+    else pins.push(chosen);
+  }
+  const hire = c.board.filter((k) => !k.story && !cap(k)).slice(0, BOARD_ROW_MAX);
+  return { pins, hire, more: all.length - pins.length };
+}
+
+/** Contracts in the order they are shown: the village row (captives, then pleas), then work for hire. */
 export function boardOrder(c: Campaign): Contract[] {
-  const cap = (k: Contract) => !!contractCaptive(c, k);
-  return [...c.board.filter((k) => k.story), ...c.board.filter((k) => !k.story && !cap(k)), ...c.board.filter((k) => !k.story && cap(k))];
+  const { pins, hire } = boardRows(c);
+  return [...pins, ...hire];
 }
 
 /** The loadout checked against the state: heroes on the roster, items on the cart, a selectable entrance. */
@@ -648,16 +673,27 @@ function jobStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): v
     main.append(h('p', { class: 'lg-empty' }, 'Nothing on the notice post. Come back after the next delve.'));
     return;
   }
-  const rescues = c.board.filter((k) => !k.story && contractCaptive(c, k));
-  const grid = h('div', { class: 'lg-cards', role: 'group', 'aria-label': 'Jobs' });
-  for (const k of [...c.board.filter((x) => x.story), ...c.board.filter((x) => !x.story && !rescues.includes(x))]) grid.append(contractCard(k, l, host));
-  main.append(grid);
-  if (rescues.length) {
-    main.append(h('h3', { class: 'lg-h3 lg-captive-h', 'data-tip': "Taken by a crew · A crew dragged one of yours out. The hideout is theirs; the prisoner is your own hero, at 1 HP. Freed and brought out, they rejoin with their level and gear.", tabindex: 0 }, h('span', { class: 'lg-seal lg-seal-cap lg-seal-sm', 'aria-hidden': 'true' }, '⛓'), ' Taken by a crew'));
-    const rg = h('div', { class: 'lg-cards', role: 'group', 'aria-label': 'Bring back' });
-    for (const k of rescues) rg.append(contractCard(k, l, host, contractCaptive(c, k)));
-    main.append(rg);
+  // V4.1 (spec 31.11, owner): two labelled rows, at most 3 cards each: what the village pinned, then work for hire.
+  const { pins, hire, more } = boardRows(c, l.contractId);
+  const row = (id: string, label: string, tip: string, ks: Contract[], extra?: HTMLElement) => {
+    const grid = h('div', { class: 'lg-cards', role: 'group', 'aria-label': label });
+    for (const k of ks) {
+      const cp = k.story ? undefined : contractCaptive(c, k);
+      grid.append(contractCard(k, l, host, cp));
+    }
+    main.append(h('section', { class: `lg-board-row lg-board-${id}`, 'data-row': id }, h('h3', { class: 'lg-h3 lg-board-h', tabindex: 0, 'data-tip': tip }, label), grid, extra ?? ''));
+  };
+  if (pins.length) {
+    const hasCaptive = pins.some((k) => !k.story);
+    row(
+      'village',
+      'Pinned by the village',
+      `Pinned by the village · Pleas from Lowgate's people${hasCaptive ? ', and your own heroes a crew carried off' : ''}. They pay in gifts, not gold, and win people back: a house lit again, a hero home.`,
+      pins,
+      more > 0 ? h('p', { class: 'lg-note lg-board-more' }, `+${more} more once you've seen to these`) : undefined,
+    );
   }
+  if (hire.length) row('hire', 'Work for hire', 'Work for hire · Bounties from whoever is paying. They pay gold, if the prize comes out with you.', hire);
 }
 
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };

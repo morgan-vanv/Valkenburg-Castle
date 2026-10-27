@@ -2164,7 +2164,12 @@ input.seed {
 .lg-card-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: 16px; color: var(--parch-dim); }
 .lg-card-foot.on { color: var(--lg-cream); }
 .lg-card .lg-card-foot { padding-top: 2px; }
-.lg-captive-h { margin-top: 10px; color: #ffb4ac; font-size: 22px; display: flex; align-items: center; gap: 8px; }
+/* V4.1 (spec 31.11): the board's two rows, labelled */
+.lg-board-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lg-board-row + .lg-board-row { margin-top: 22px; }
+.lg-board-h { font-size: 22px; color: var(--lg-ink-3); align-self: flex-start; cursor: help; }
+.lg-board-village .lg-board-h { color: var(--ember); }
+.lg-board-more { margin-top: 6px; font-style: italic; }
 
 /* step 2: party */
 .lg-hex, .cbadge.lg-hex { clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); display: flex; align-items: center; justify-content: center; font-family: var(--display); color: #120e0a; flex: none; }

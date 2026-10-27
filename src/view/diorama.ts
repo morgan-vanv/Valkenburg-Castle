@@ -1353,7 +1353,7 @@ export class Diorama {
       if (!carriers.has(p.id)) v.lieDown(false);
       place(v, p.at);
       // V4.1 (spec 31.4): shackled until Unshackled (or carried); the shackles on the tag, and on the figure (see setShackles).
-      this.setTag(p.id, pipsHtml(p.hp, 5, 'ally') + (p.freed ? '' : `<b class="tag-shackled" title="Shackled: can't move. Carry them, or Unshackle them (lockpicks, key, an improvised pick, or Smash)">⛓ shackled</b>`));
+      this.setTag(p.id, pipsHtml(p.hp, 5, 'ally') + (p.freed ? '' : `<b class="tag-shackled" title="Shackled: can't move. Carry them, or Unshackle them (lockpicks, an improvised pick or a key)">⛓ shackled</b>`));
       this.setShackles(v, !p.freed);
     }
     for (const id of [...this.units.keys()]) if (!keep.has(id)) this.removeUnit(id);
@@ -1890,7 +1890,7 @@ export class Diorama {
       if (it.kind === 'mend' || it.kind === 'ward') el.title = `${name}: ${INTENT_WORDS[it.kind]} ${target || 'a friend'} next turn${it.kind === 'mend' ? ' (heals 4)' : ' (1 less damage per hit)'}.`;
       if (it.kind === 'caltrops' || it.kind === 'firecracker' || it.kind === 'blink') el.title = `${name}: ${INTENT_WORDS[it.kind]} the marked hex next turn${it.kind === 'firecracker' ? ' (noise 6: monsters come running)' : it.kind === 'caltrops' ? ' (the first across takes 2 and stops)' : ''}.`;
       if (it.kind === 'flee') {
-        el.title = `${name}: feared: runs its full move away${target ? ` from ${target}` : ''}, attacks nobody. Every hero it leaves gets a free swing.`;
+        el.title = `${name}: feared: runs its full move away${target ? ` from ${target}` : ''}, attacks nobody. Every hero it moves away from gets a free swing.`;
       }
       // 18.5: the Sapper's charge: the blast hexes, 3 damage to everyone within 1 of the mark.
       if (it.kind === 'charge') {
@@ -2197,7 +2197,7 @@ export class Diorama {
       seers.set(n.id, l);
     }
     for (const [id, who] of seers) mk(id, 'risk-notice', `<span class="risk-icon">${iconSvg('eye', 13)}</span>`, `${this.nameOf(id)} would see ${who.join(', then ')} on this move (the walk goes on).`, COLORS.danger);
-    for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">${iconSvg('sword', 13)}</span>`, `${this.nameOf(sw.id)} gets a free swing as you leave its reach: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
+    for (const sw of risks.swings) mk(sw.id, 'risk-swing', `<span class="risk-icon">${iconSvg('sword', 13)}</span>`, `${this.nameOf(sw.id)} gets a free swing as you move from its side: ${sw.damage[0]}–${sw.damage[1]} damage.`, COLORS.danger);
   }
 
   private nameOf(id: string): string {

@@ -687,13 +687,14 @@ describe('contracts and summary', () => {
     expect(s.campaign.delveCount).toBe(1);
   });
 
-  it('rescue (V4.1, spec 31.4): Unshackle (Smash), the captive follows at walk 4, leave with them adjacent', () => {
+  it('rescue (V4.1, spec 31.4, 31.11): Unshackle (lockpicks), the captive follows at walk 4, leave with them adjacent', () => {
     let s = delve({ kind: 'rescue', heroes: ['brann'] });
     const pr = s.delve!.prisoner!;
     expect(pr.at).toEqual(at(1, 16, 8));
     expect(pr.freed).toBe(false);
     put(s, 'brann', at(1, 15, 8));
-    s = until(s, { type: 'act', heroId: 'brann', action: 'unshackle', target: { id: pr.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'freed')).state;
+    const picks = give(s, 'brann', 'lockpicks');
+    s = act(s, 'brann', 'unshackle', { id: pr.id, itemId: picks }).state;
     expect(s.delve!.prisoner).toMatchObject({ freed: true, escortedBy: 'brann' });
     expect(Math.max(...e.reachable(s, 'brann', false).map((r) => r.cost))).toBe(4);
     // Teleport both to the exit for the test.
@@ -1511,6 +1512,8 @@ describe('15.3 classes', () => {
     // Sha veils herself too, then the world phase: nobody gets attacked (both veiled).
     hero(veiled, 'sha').acted = false;
     const both = act(veiled, 'sha', 'veil', { id: 'sha' }).state;
+    // Spec 31.11: the searching orc steps round Brann; his action spent, he takes no free swing (that would show him).
+    hero(both, 'brann').acted = true;
     const wp = ok(both, { type: 'endTurn' });
     expect(wp.events.some((x) => x.type === 'hit' && (x.target === 'brann' || x.target === 'sha'))).toBe(false);
     expect(wp.state.delve!.monsters[0]!.awareness).toBe('alert'); // lost them both
@@ -3364,7 +3367,7 @@ describe('V3.7 stealth and swings', () => {
   });
 
   describe('20.2 free swings', () => {
-    it('a hero leaving a hunting enemy that noticed them takes one swing at a slot fewer, no Focus; alert, glued and feared enemies do not swing', () => {
+    it('a hero moving from the side of a hunting enemy that noticed them takes one swing at a slot fewer, no Focus; alert, glued and feared enemies do not swing', () => {
       const s = delve();
       put(s, 'brann', GATE);
       const m = monster(s, 'orc', at(1, 5, 7), 'hunting');
@@ -3376,8 +3379,8 @@ describe('V3.7 stealth and swings', () => {
       const roll = rolls(r.events).find((x) => x.slots === 1)!;
       expect(roll.focus).toBe(0);
       expect(hero(r.state, 'brann').moved).toBe(true);
-      // Staying adjacent provokes nothing.
-      expect(ok(s, { type: 'move', heroId: 'brann', path: [at(1, 5, 8)], sneak: false }).events.some((x) => x.type === 'swing')).toBe(false);
+      // V4.1 (spec 31.11): staying adjacent (circling round it) provokes too.
+      expect(ok(s, { type: 'move', heroId: 'brann', path: [at(1, 5, 8)], sneak: false }).events.filter((x) => x.type === 'swing')).toHaveLength(1);
       // Exclusions.
       const alert = delve();
       put(alert, 'brann', GATE);
@@ -3394,7 +3397,7 @@ describe('V3.7 stealth and swings', () => {
       // The preview says so: Reach.risks.swings with the damage range (orc 2 dmg, Brann armor 1: 0–2 on 1 slot).
       const reach = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(1, 2, 7)))!;
       expect(reach.risks?.swings).toEqual([{ id: m.id, damage: [0, 2] }]);
-      expect(e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(1, 5, 8)))!.risks?.swings).toEqual([]);
+      expect(e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(1, 5, 8)))!.risks?.swings).toEqual([{ id: m.id, damage: [0, 2] }]);
     });
 
     it('jumping into a pit from an enemy\'s side provokes; the preview warns', () => {
