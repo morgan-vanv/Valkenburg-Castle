@@ -2,7 +2,7 @@
 // specs and effects), leave/abandon, the end of the delve.
 
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
+import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, ReactionKind, ReactionSetting, Stat } from './types';
 import type { ActionOption } from './api';
 import {
   HEAVY_MOVE, SMUGGLER_SNEAK, BURGLAR_WALK, WALK_MOVE, BLINK_RANGE, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
@@ -178,6 +178,21 @@ export function moveBudget(c: Ctx, h: HeroInDelve, sneak: boolean): number {
 /** V4.0 (spec 26.1): the hero's own Walk/Sneak setting (absent = walk). */
 export function sneakSetting(c: Ctx, heroId: string): boolean {
   return hd(c, heroId)?.moveMode === 'sneak';
+}
+
+/**
+ * V4.1 (spec 31.13): the `setReaction` command: free, any active hero, player phase: how this hero answers one kind
+ * of reaction (ask, always, never). `setAmbush` is the old hidden-swing toggle (on = always, off = never).
+ */
+export function doSetReaction(c: Ctx, heroId: string, kind: ReactionKind, setting: ReactionSetting): string | undefined {
+  const h = hd(c, heroId);
+  if (!h) return 'No such hero.';
+  if (h.status !== 'active') return `${heroName(c, heroId)} isn't in a state to react to anything.`;
+  if (kind !== 'hiddenSwing' && kind !== 'overwatch') return 'No such reaction.';
+  if (setting !== 'ask' && setting !== 'always' && setting !== 'never') return 'Ask, always or never.';
+  (h.reactions ??= {})[kind] = setting;
+  delete (h as HeroInDelve & { ambush?: boolean }).ambush; // the WIP flag (spec 31.13) is folded into the setting
+  return undefined;
 }
 
 /** V4.0 (spec 26.1): the `setMoveMode` command: free, any active hero, player phase. Changes nothing else. */

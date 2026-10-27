@@ -1,10 +1,17 @@
 // createEngine(castle): the V3 rules engine behind the Engine interface.
 
 import { posKey, type Pos } from './hex';
-import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Command, GameEvent, GameState, Intent } from './types';
+import type { ActionKind, ActionTarget, ApplyResult, Brightness, CastleDef, Command, GameEvent, GameState, Intent, ReactionChoice } from './types';
+
+/** What a run leaves behind when it pauses: the events so far and the world as it stood (spec 31.13). */
+interface Box {
+  ev: GameEvent[];
+  s?: GameState;
+}
 import type { Engine, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
-import type { Ctx, DelveX, GameStateX } from './state';
+import type { Ctx, DelveX, GameStateX, ReactionPolicy } from './state';
+import { Pause } from './react'; // V4.1 (spec 31.13)
 import { blastPreview, migrateSatchel } from './charges';
 import { calmReach } from './calm';
 import { litSet, sightRangeAt, visibleSet, World } from './world';
@@ -17,7 +24,7 @@ import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, fitClass, newGame, newVillage, partyProblem, shopOffers } from './camp';
 import { deals, doDeal } from './parley';
 import { hd, rivalsOnMap, valueOf } from './common';
-import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
+import { abandon, actions, checkDelveEnd, doAct, doFace, doMove, doSetMoveMode, doSetReaction, moveNoise, reachable, refreshSight, seenSet, sneakSetting, spec } from './delve';
 import { computeIntents, lookAll, planMonster, worldPhase } from './world-phase';
 import { calmReason, updateCalm } from './calm';
 import { applyOpenWays, castleMemory, entranceList, startWays } from './ways';
@@ -27,12 +34,49 @@ function ctx(w: World, s: GameStateX, ev: GameEvent[] = []): Ctx | null {
   return { w, s, d: s.delve as DelveX, ev };
 }
 
-export function createEngine(castle: CastleDef): Engine {
+/** V4.1 (spec 31.13): engine options. `react`: answer every reaction by this policy and never pause (bots, the arena). */
+export interface EngineOptions {
+  react?: ReactionPolicy;
+}
+
+export function createEngine(castle: CastleDef, opts: EngineOptions = {}): Engine {
   const w = new World(castle);
 
+  /**
+   * V4.1 (spec 31.13): every command runs through here. While a question is pending only `react` is taken: the
+   * paused command runs again from the state before it, with the answers so far plus this one.
+   */
   function apply(state: GameState, command: Command): ApplyResult {
+    const pend = state.delve?.pending;
+    if (pend) {
+      if (command.type !== 'react') return { state, events: [], error: `Answer first: ${pend.question.text}` };
+      if (command.choice !== 'yes' && command.choice !== 'no') return { state, events: [], error: 'Answer yes or no.' };
+      const base = structuredClone(state);
+      delete base.delve!.pending;
+      return run(base, pend.command, [...pend.answers, command.choice], pend.played);
+    }
+    if (command.type === 'react') return { state, events: [], error: 'Nothing to answer.' };
+    return run(state, command, []);
+  }
+
+  /** Runs `command` with these answers; a `Pause` becomes the pre-command state with `pending`, the events so far and the question. */
+  function run(state: GameState, command: Command, answers: ReactionChoice[], played?: number): ApplyResult {
+    const box: Box = { ev: [] };
+    try {
+      const r = exec(state, command, answers, box);
+      return played === undefined || r.error ? r : { ...r, played };
+    } catch (e) {
+      if (!(e instanceof Pause)) throw e;
+      const keep = structuredClone(state);
+      keep.delve!.pending = { command, question: e.question, answers, played: box.ev.length };
+      return { state: keep, events: [...box.ev, { type: 'react', question: e.question }], ...(played !== undefined ? { played } : {}), ...(box.s ? { view: box.s } : {}) };
+    }
+  }
+
+  function exec(state: GameState, command: Command, answers: ReactionChoice[], box: Box): ApplyResult {
     const s = structuredClone(state) as GameStateX;
-    const ev: GameEvent[] = [];
+    const ev: GameEvent[] = box.ev;
+    box.s = s;
     const refuse = (error: string): ApplyResult => ({ state, events: [], error });
     if (command.type === 'newCampaign') return { state: newGame(w, command.seed), events: [] };
     if (command.type === 'backToCamp') {
@@ -57,6 +101,8 @@ export function createEngine(castle: CastleDef): Engine {
     }
     if (s.stage !== 'delve') return refuse('Not now.');
     const c = ctx(w, s, ev)!;
+    c.answers = answers; // V4.1 (spec 31.13): reactions can pause this command
+    if (opts.react) c.policy = opts.react;
     if (c.d.phase !== 'player') return refuse('Wait for your turn.');
     let err: string | undefined;
     switch (command.type) {
@@ -65,6 +111,12 @@ export function createEngine(castle: CastleDef): Engine {
         break;
       case 'setMoveMode':
         err = doSetMoveMode(c, command.heroId, command.sneak);
+        break;
+      case 'setReaction':
+        err = doSetReaction(c, command.heroId, command.kind, command.setting);
+        break;
+      case 'setAmbush':
+        err = doSetReaction(c, command.heroId, 'hiddenSwing', command.on ? 'always' : 'never');
         break;
       case 'act': {
         // V4.0 (spec 27): an action that changes the light (a torch, the lantern opened, shuttered or passed, kindle, oil)
@@ -118,6 +170,14 @@ export function createEngine(castle: CastleDef): Engine {
     castle: () => castle,
     newGame: (seed) => newGame(w, seed),
     apply,
+    resume(state) {
+      // V4.1 (spec 31.13): the paused command run again with the answers given so far: it stops at the same question.
+      const pend = state.delve?.pending;
+      if (!pend) return null;
+      const base = structuredClone(state);
+      delete base.delve!.pending;
+      return run(base, pend.command, pend.answers, 0);
+    },
 
     reachable(state, heroId, sneak): Reach[] {
       // Queries never mutate: occupancy and dijkstra are read-only.
@@ -298,6 +358,12 @@ export function createEngine(castle: CastleDef): Engine {
         // V4.1 (spec 31.4): venom and paralysis are gone: an envenomed or paralyzed figure loads as poisoned. A V4.0
         // shouldered ally (paralyzed, active) is set down: Carry lifts only the downed and the shackled.
         if (d) migratePoison(d);
+        // V4.1 (spec 31.13): the WIP build's "strike from hiding" flag is the hidden-swing reaction set to always.
+        for (const h of d?.heroes ?? []) {
+          const x = h as typeof h & { ambush?: boolean };
+          if (x.ambush) (h.reactions ??= {}).hiddenSwing ??= 'always';
+          delete x.ambush;
+        }
         // V4.1 (WS2): a delve saved with the old free lantern: it becomes a loaner Lantern in its bearer's pack.
         migrateLight(s);
         // V4.1 (WS6, spec 31.8): a delve saved before arrows: Rangers (heroes and crew) get their quiver.

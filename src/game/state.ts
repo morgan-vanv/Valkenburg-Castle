@@ -2,7 +2,7 @@
 // the same JSON (they survive structuredClone and serialize); the view ignores them.
 
 import type { Pos } from './hex';
-import type { Delve, GameEvent, GameState, HeroInDelve, Monster, Rival, RivalCrew } from './types';
+import type { Delve, GameEvent, GameState, HeroInDelve, Monster, ReactionChoice, ReactionQuestion, Rival, RivalCrew } from './types';
 import type { World } from './world';
 
 export interface MonsterX extends Monster {
@@ -126,7 +126,20 @@ export interface Ctx {
   hearVis?: { sig: string; set: Set<string> };
   /** V4.0 (spec 26.2): monsters that noticed a hero during this player-phase command: re-planned when it ends. */
   replan?: Set<string>;
+  /**
+   * V4.1 (spec 31.13): reactions. `answers`: the player's answers so far to this command's questions, in order (set by
+   * `apply`; absent = nobody to ask: the `REACTION_FALLBACK` answer). `asked`: questions asked so far this run (the n-th
+   * takes answers[n]; past the end, `ask` throws a `Pause`). `reacted`: answers by round, kind, hero and enemy, so
+   * each is asked once a castle's turn. `policy`: a bot's answers instead of pausing (sim, arena).
+   */
+  answers?: ReactionChoice[];
+  asked?: number;
+  reacted?: Map<string, ReactionChoice>;
+  policy?: ReactionPolicy;
 }
+
+/** V4.1 (spec 31.13): answers a question without pausing (bots); gets the question and the state as it stands. */
+export type ReactionPolicy = (q: ReactionQuestion, s: GameState) => ReactionChoice;
 
 export function newItemId(s: GameStateX): string {
   s.nextId = (s.nextId ?? 1) + 1;

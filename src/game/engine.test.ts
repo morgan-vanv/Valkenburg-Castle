@@ -1368,6 +1368,7 @@ describe('15.3 classes', () => {
     const ow = act(s, 'rae', 'overwatch', {}).state;
     expect(hero(ow, 'rae').overwatch).toBe(true);
     expect(option(ow, 'rae', 'overwatch')).toBeUndefined();
+    hero(ow, 'rae').reactions = { overwatch: 'always' }; // V4.1 (spec 31.13): shoot without asking
     const r = until(ow, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'cast' && x.spell === 'overwatch') && ev.some((x) => x.type === 'hit' && x.attacker === 'rae'));
     expect(r.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBeLessThan(20);
     expect(hero(r.state, 'rae').overwatch).toBe(false);
@@ -1879,6 +1880,8 @@ describe('16.1 awareness and patrols', () => {
     put(s, 'keven', at(1, 14, 8));
     hero(s, 'brann').veil = 5;
     hero(s, 'keven').veil = 5;
+    // V4.1 (spec 31.13): veiled, they let the patrol pass without being asked.
+    for (const id of ['brann', 'keven']) hero(s, id).reactions = { hiddenSwing: 'never' };
     const r = ok(s, { type: 'endTurn' });
     s = r.state;
     expect(s.delve!.knownRoutes).toContain(pat.id);

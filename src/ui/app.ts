@@ -5,7 +5,7 @@
 import type { Engine } from '../game/api';
 import { heardLines } from '../view/sounds';
 import { posKey, type Pos } from '../game/hex';
-import type { Command, GameEvent, GameState, Heard } from '../game/types';
+import type { ApplyResult, Command, GameEvent, GameState, Heard, ReactionQuestion } from '../game/types';
 import { sfx } from '../audio/sfx';
 import { Diorama } from '../view/diorama';
 import { wasBackstab } from '../view/stealth';
@@ -322,6 +322,8 @@ export class App {
       this.dio.sync(s, vis, this.engine.brightness(s));
       this.hud.setState(s, vis);
       this.hud.setDark(this.engine.brightness(s));
+      // V4.1 (spec 31.13): a question waiting (a reloaded save, or an answer that didn't go through): ask it again.
+      if (s.delve.pending && !this.busy) queueMicrotask(() => void this.resumePending());
       sfx.setDrone(s.delve.monsters.some((m) => m.kind === 'gloam'));
       if (snapCamera || stageChanged) {
         const sel = s.delve.heroes.find((x) => x.heroId === this.hud.selectedId) ?? s.delve.heroes.find((x) => x.status === 'active');
@@ -373,21 +375,7 @@ export class App {
     }
     const inDelve = before.stage === 'delve' && !!before.delve;
     if (inDelve && res.events.length) {
-      this.busy = true;
-      this.hud.setBusy(true);
-      const nextVis = res.state.delve ? this.visibilityOf(res.state) : { visible: new Set<string>(), explored: new Set<string>(), lit: new Set<string>() };
-      this.dio.beginPlayback(res.state, nextVis);
-      try {
-        await this.playEvents(res.events, before);
-      } catch (e) {
-        console.error('Event playback failed:', e);
-      } finally {
-        this.dio.clock.flush();
-        this.dio.endPlayback();
-        this.busy = false;
-        this.hud.setBusy(false);
-        this.hud.hideRoll();
-      }
+      await this.playResult(res, before);
     } else if (cmd.type === 'startDelve') {
       sfx.play('horn', { pitch: 0.7, gain: 0.6 });
     }
@@ -402,6 +390,66 @@ export class App {
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
     // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
+  }
+
+  /** Plays a command's events while input is blocked; the diorama heads for the result (V4.1: for its `view` when it paused). */
+  private async playResult(res: ApplyResult, before: GameState): Promise<void> {
+    this.busy = true;
+    this.hud.setBusy(true);
+    this.retarget(res);
+    try {
+      await this.playEvents(res.events, before, res.played ?? 0);
+    } catch (e) {
+      console.error('Event playback failed:', e);
+    } finally {
+      this.dio.clock.flush();
+      this.dio.endPlayback();
+      this.busy = false;
+      this.hud.setBusy(false);
+      this.hud.hideRoll();
+    }
+  }
+
+  private retarget(res: ApplyResult): void {
+    const next = res.view ?? res.state;
+    const nextVis = next.delve ? this.visibilityOf(next) : { visible: new Set<string>(), explored: new Set<string>(), lit: new Set<string>() };
+    this.dio.beginPlayback(next, nextVis);
+  }
+
+  /**
+   * V4.1 (spec 31.13): a `react` event: the castle's turn waits. The camera goes to the enemy, the reaction card asks,
+   * the answer goes to the engine, and the playback carries on with its result (the caller skips `played` events).
+   */
+  private async answerReaction(q: ReactionQuestion): Promise<ApplyResult | null> {
+    if (this.settings.speed !== 0 || this.hurry) await this.dio.panTo(q.at);
+    const choice = await this.hud.askReaction(q);
+    const s = this.state;
+    if (!s?.delve?.pending) return null;
+    const res = this.engine.apply(s, { type: 'react', choice });
+    if (res.error) {
+      this.hud.toast(res.error);
+      return null;
+    }
+    this.state = res.state;
+    this.save();
+    this.retarget(res);
+    return res;
+  }
+
+  /** V4.1 (spec 31.13): a save loaded with a question waiting: the castle's turn plays again up to it, and asks. */
+  private resuming = false;
+  private async resumePending(): Promise<void> {
+    const s = this.state;
+    if (this.busy || this.resuming || !s?.delve?.pending) return;
+    const res = this.engine.resume(s);
+    if (!res) return;
+    this.resuming = true;
+    try {
+      await this.playResult(res, s);
+    } finally {
+      this.resuming = false;
+    }
+    this.render();
   }
 
   private screenToast(text: string): void {
@@ -423,12 +471,13 @@ export class App {
     return !!this.state?.campaign.roster.some((x) => x.id === id);
   }
 
-  private async playEvents(events: GameEvent[], before: GameState): Promise<void> {
+  private async playEvents(first: GameEvent[], before: GameState, from = 0): Promise<void> {
+    /** V4.1 (spec 31.13): the list being played; an answered reaction swaps in its result's (the same events first). */
+    let events = first;
     const clock = this.dio.clock;
     const wait = (s: number) => clock.wait(s);
     const instant = () => this.settings.speed === 0 && !this.hurry;
     void before;
-    let world = false;
     let panned = false;
     /** 18.6: a deal already says what the crew now does; skip the stance line that follows it. */
     let dealt = false;
@@ -444,7 +493,11 @@ export class App {
       for (const text of heardLines(heard, ears, d?.doors ?? {}, 2)) this.hud.log(text, 'log-heard');
       heard = [];
     };
-    for (const [ei, e] of events.entries()) {
+    // V4.1 (spec 31.13): resuming a paused turn (a reload), the castle's turn was already under way before `from`.
+    let world = false;
+    for (const x of first.slice(0, from)) if (x.type === 'phase') world = x.phase === 'world';
+    for (let ei = from; ei < events.length; ei++) {
+      const e = events[ei]!;
       if (!this.root.isConnected) return;
       // 15.5: in the world phase, take the camera to each visible enemy action or attack on a hero.
       if (world) {
@@ -479,6 +532,14 @@ export class App {
       }
       if (e.type === 'moved' && world && !this.isHero(e.id) && !instant() && this.enemyFocus(e)) this.dio.setFollow(e.id);
       switch (e.type) {
+        case 'react': {
+          // V4.1 (spec 31.13): the castle's turn waits for the player's answer, then plays on from where it stopped.
+          const next = await this.answerReaction(e.question);
+          if (!next) return;
+          events = next.events;
+          ei = (next.played ?? 0) - 1;
+          continue;
+        }
         case 'say':
           // A deal's own line (the engine says it before the `deal` event) is replaced by dealLine below.
           if (events[events.indexOf(e) + 1]?.type === 'deal') continue;
