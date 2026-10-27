@@ -1202,9 +1202,18 @@ Plan: docs/v41-plan.md WS7 (the owner's notes replace pitch L1). Owner: crews ar
 | Gallows Choir (L3) vs 3 × L3 | won 100% | won 100% | won 20%, lost 80% | won 25%, lost 75% |
 | The Wake (L4) vs 4 × L4 | won 100% | won 100% | won 15%, lost 70% | won 90%, lost 10% |
 
-(This first pass used the crew's own level and tiers for the parity party: the Sisters' at level 2 with W1 A1. The final cells use the owner's party sizes and level gear above; with WS7's verbs at the old levels, after merging WS6 arrows, par was won 75% / 75% / 100% / 85%.)
+(This first measurement built the parity party from the crew's own level and tiers, e.g. the Sisters' at level 2 with W1 A1. The final cells use the owner's party sizes and the gear by level above; with WS7's verbs at the old crew levels and WS6 merged, par was won 75% / 75% / 100% / 85%: the verbs alone made crews sharper (short and worn already lost 85–95%) but not even.)
 
-**After** (40 fights a cell, final levels; full table in the report): see the table at the end of this section.
+**After** (final, after merging WS6 arrows; 40 fights a cell, `SEED=1 TALLY=1 npx tsx scripts/v37-crew-arena.ts 40`; crew levels 4/4/5/6). Won includes "fell back" (the crew called the fight off); the rest of a row to 100% is fights still going at round 30:
+
+| Crew | par | par4 (4 × L2) | lvl-1 | short | worn |
+| --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (L4) vs 3 × L2 | won 50%, lost 48% | | won 23%, lost 78% | lost 100% | lost 100% |
+| Ferrymen (L4) vs 3 × L3 | won 53%, lost 48% | won 53%, lost 48% | lost 100% | lost 100% | lost 100% |
+| Gallows Choir (L5) vs 3 × L3 | won 53%, lost 25% (22% stalled) | won 100% | won 3%, lost 98% | lost 100% | lost 100% |
+| The Wake (L6) vs 4 × L4 | won 48%, lost 48% | | won 35%, lost 60% | won 0%, lost 90% | lost 100% |
+
+Against the targets: parity 48–53% party wins for every crew (target 45–55); a level below or one short, the party loses 60–100% (target ≥ 65: met except the Wake a level below, 60%); battle-worn, the party loses every fight (fresh, it loses 25–48%). The older cells moved too (e.g. the Sisters vs l1x4 won 23% (was 100%); the Wake vs l3x4 won 33% (was 70%)); a level 2 party of four beats the Choir every time (par4) but only half the Ferrymen: the Choir, with two casters and no front-liner, is the softer Level 2 crew to a big party and the harder one to a small party. Verbs counted in the 40-a-cell run (all cells): Focus 2,663, flank 1,407, Night thorn 452, Dread 286, Briar 318, brace 175, Mend-up 61, potion-up 17, called off 525.
 
 **New crew verbs** (each named in the log when seen; intents shown the round before):
 
