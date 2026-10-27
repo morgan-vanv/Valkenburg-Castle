@@ -49,7 +49,7 @@ for (const s of ['setout', 'outfit', 'party', 'job']) {
   check(`step "${s}" is clickable out of order`, (await page()) === s);
 }
 const head = await p.$eval('.lg-head', (e) => e.innerText);
-check('header: Delve 1, Lowgate, gold', /Delve 1/i.test(head) && /Lowgate/.test(head) && /120\s*gold/.test(head), head.replace(/\n/g, ' | ').slice(0, 120));
+check('header: Delve 1, Lowgate, gold', /Delve 1/i.test(head) && /Lowgate/.test(head) && /70\s*gold/.test(head), head.replace(/\n/g, ' | ').slice(0, 120));
 check('step summaries: the job, "Keven alone", "Packs empty", "Main gate"', /Rescue Brother Aldric|Recover|Rescue/.test(head) && /Keven alone/.test(head) && /Packs empty/.test(head) && /Main gate/.test(head));
 check('primary action bottom-right: "Next: Party"', /Next: Party/.test(await p.$eval('.lg-foot-r', (e) => e.innerText)));
 check('no "Same as last time" without a last loadout', !(await p.$('[data-same]')));
@@ -110,7 +110,7 @@ const r0 = await p.$eval('.lg-rc', (e) => e.dataset.recruit);
 await p.click(`.lg-rc[data-recruit="${r0}"] [data-hire]`);
 await p.waitForTimeout(120);
 let s = await st();
-check('hiring costs the price (120 → 60)', s.campaign.gold === 60, `${s.campaign.gold}`);
+check('hiring costs the price (70 → 10; V4.1 squads)', s.campaign.gold === 10, `${s.campaign.gold}`);
 check('the hire goes straight into the party slot', (await p.$$('.lg-slot.hero')).length === 2 && !!(await p.$(`.lg-slot.hero[data-hero="${r0}"]`)));
 check('the step summary lists the party', (await p.$eval('.lg-step[data-step="party"]', (e) => e.innerText)).includes(s.campaign.roster[1].name));
 await p.click(`[data-out="${r0}"]`);
@@ -119,6 +119,28 @@ check('a hero can leave the party, and waits on the roster bench', (await p.$$('
 await p.click(`[data-bench="${r0}"]`);
 await p.waitForTimeout(80);
 check('...and come back from the bench', (await p.$$('.lg-slot.hero')).length === 2);
+// V4.1 (squads, spec 31.12): three slots on a new campaign; the fourth is locked with Wim's hint until the muster roll is home.
+{
+  const lock = await p.$eval('.lg-slot.locked', (e) => ({ slot: e.dataset.slot, text: e.innerText, tip: e.dataset.tip ?? '' })).catch(() => null);
+  check('squads: the fourth slot is locked, with Wim\'s hint about the muster roll', !!lock && lock.slot === '3' && /Wim says the old muster roll is in the officers' quarters\. With it, a fourth could sign on\./.test(lock.text), JSON.stringify(lock));
+  check('squads: "Up to three for now."', /Up to three for now\./.test(await text()));
+  await edit(`const mk = (id, name) => ({ id, name, cls: 'sellsword', level: 1, xp: 0, maxHp: 10, hp: 10, stats: { might: 65, finesse: 40, wits: 30, nerve: 50 }, weaponTier: 0, armorTier: 0, wounded: 0, kills: 0, delves: 0 }); s.campaign.roster.push(mk('sq-a', 'Sq Ada'), mk('sq-b', 'Sq Bors'));`);
+  await p.click('[data-bench="sq-a"]');
+  await p.waitForTimeout(80);
+  const full = await p.$eval('[data-bench="sq-b"]', (e) => ({ off: e.getAttribute('aria-disabled'), tip: e.dataset.tip ?? '' }));
+  check('squads: with three in, the bench is full ("The party is full")', (await p.$$('.lg-slot.hero')).length === 3 && full.off === 'true' && /The party is full/.test(full.tip), JSON.stringify(full));
+  await edit(`s.campaign.squadSlots = 4; s.campaign.village.muster = true;`);
+  check('squads: with the muster roll home, the fourth slot opens', !(await p.$('.lg-slot.locked')) && (await p.$$('.lg-slot')).length === 4 && /Up to four\./.test(await text()));
+  await p.click('[data-bench="sq-b"]');
+  await p.waitForTimeout(80);
+  check('squads: ...and a fourth hero goes in', (await p.$$('.lg-slot.hero')).length === 4);
+  await p.click('[data-out="sq-a"]');
+  await p.waitForTimeout(60);
+  await p.click('[data-out="sq-b"]');
+  await p.waitForTimeout(60);
+  await edit(`s.campaign.roster = s.campaign.roster.filter((h) => !/^sq-/.test(h.id)); s.campaign.squadSlots = 3; s.campaign.village.muster = false;`);
+  check('squads: back to the party of two', (await p.$$('.lg-slot.hero')).length === 2);
+}
 // healing: no surgeon, a potion on the cart
 await edit(`s.campaign.roster[1].hp = s.campaign.roster[1].maxHp - 3; s.campaign.stash.push({ id: 'pot-x', kind: 'potion', name: 'Potion', amount: 1, slots: 1 });`);
 check('a wounded hero shows an HP bar', !!(await p.$(`.lg-slot.hero[data-hero="${r0}"] .lg-hpbar`)));

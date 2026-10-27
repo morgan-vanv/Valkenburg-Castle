@@ -354,7 +354,7 @@ export interface Contract {
 // ---------------------------------------------------------------- V3.5: the village (spec 18)
 
 /** Story contracts and the villagers or things they bring home to Lowgate. */
-export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook' | 'alchemist';
+export type StoryId = 'surgeon' | 'innkeeper' | 'smith' | 'copper' | 'caskbook' | 'alchemist' | 'muster'; // V4.1 (squads): + the muster roll
 
 /** What Lowgate has won back. All false at the start. */
 export interface Village {
@@ -370,6 +370,8 @@ export interface Village {
   caskbook: boolean;
   /** V4.1 (spec 31.3): Ilse the alchemist is home: her bench (darts, smoke, glue, oil) and the pairs with her. Absent in older saves (= false). */
   alchemist: boolean;
+  /** V4.1 (squads, spec 31.12): the muster roll is home: a fourth party slot. Absent in older saves (loaded as false). */
+  muster: boolean;
 }
 
 export type AleKind = 'glowworm' | 'featherfoot' | 'mole' | 'reserve' | 'smuggler' | 'fireside' | 'blackcask'
@@ -460,6 +462,11 @@ export interface Campaign {
   opened?: Partial<Record<WayId, boolean>>;
   /** V4.0 (spec 25.5): every hex the campaign's delves have seen, as hex keys "q,r" by level. Merged in at backToCamp. */
   explored?: Record<number, string[]>;
+  /**
+   * V4.1 (squads, spec 31.12): how many heroes may go in. A new campaign starts with 3; the muster roll brought home
+   * makes it 4. Saves from before have no field and load with 4 (`squadSlots` in data.ts), so no party breaks.
+   */
+  squadSlots?: number;
 }
 
 export interface Captive {

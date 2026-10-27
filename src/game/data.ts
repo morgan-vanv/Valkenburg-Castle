@@ -376,7 +376,7 @@ export const SISTER_DART_CHANCE = 65;
 export const SISTER_SMOKE = 1;
 
 export const SISTER = { hp: 7, slots: 3, chance: 55, dmg: 2, move: 4 };
-export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk'];
+export const SISTER_NAMES = ['Sister Wenna', 'Sister Odile', 'Sister Brisk', 'Sister Maud']; // V4.1 (squads): + Maud
 
 /** Total XP needed for each level (index = level). */
 export const LEVEL_XP = [0, 0, 5, 12, 20, 30, 45];
@@ -451,8 +451,11 @@ export const BURGLAR_PICK_SLOTS = 3;
 export const NIGHTSIGHT_ROUNDS = 8;
 
 // Section 15 numbers.
-/** V3.7.1 (spec 21.2): one level-1 hire (60) and an item or two. V4.1 (spec 31.2): 120 (was 90): a hire and 60 to try the shop. */
-export const START_GOLD = 120;
+/**
+ * V3.7.1 (spec 21.2): one level-1 hire (60) and an item or two. V4.1 (spec 31.2): 120 (was 90): a hire and 60 to try the shop.
+ * V4.1 (squads, spec 31.12): 70: one hire (60) and a torch, or items for Keven alone.
+ */
+export const START_GOLD = 70;
 /** Spec 17.1: a recruit costs RECRUIT_PRICE + RECRUIT_PRICE_PER_LEVEL × (level − 1). */
 export const RECRUIT_PRICE = 60;
 export const RECRUIT_PRICE_PER_LEVEL = 40;
@@ -598,6 +601,13 @@ export const STORIES: StoryDef[] = [
     brief: 'Ilse brewed for Lord Hobart. When the castle fell she barricaded herself among the archive\'s shelves, and lives on the venom she milks from its spider and sells to the orcs. Brother Aldric asks you to fetch her.',
     unlocks: 'Unlocks Ilse\'s bench',
     line: 'Ilse unpacks her alembics in the old dye-house. Ilse\'s bench is open: darts, smoke, glue and oil.',
+  },  // V4.1 (squads, spec 31.12): the garrison's muster roll, on the officers' table behind the locked door (the Sisters'
+  // hideout is in the same room). No gold, no gift (pillar 18): brought home, a fourth hero may go in.
+  {
+    id: 'muster', kind: 'recover', siteId: 'l2-story-officers', subject: 'the muster roll', who: 'the muster roll',
+    brief: 'The garrison\'s muster roll still lies on the officers\' table, behind the locked door where the Lantern Sisters camp. Old Wim says that with it pinned up at the Flagon, a fourth could sign on.',
+    unlocks: 'A fourth hero in the party',
+    line: 'Wim pins the muster roll by the Flagon\'s door. A fourth can go in with you now.', slots: 1,
   },
 ];
 
@@ -832,6 +842,10 @@ export interface CrewDef {
   hideout: { siteId: string; where: string };
   /** V4.1 (WS7): each member's purse (cutthroats), fixed per crew now that crew levels moved (was CREW_PURSE by level). */
   purse?: number;
+  // V4.1 (squads, spec 31.12): the crew fields as many members as the party brings, clamped to `size` ([min, max]);
+  // a smaller crew leaves out members in `drop` order (names, first left out first), keeping its signature members.
+  size?: [number, number];
+  drop?: string[];
 }
 
 export const CREWS: Record<CrewId, CrewDef> = {
@@ -842,7 +856,11 @@ export const CREWS: Record<CrewId, CrewDef> = {
       { name: SISTER_NAMES[0]!, cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
       { name: SISTER_NAMES[1]!, cls: 'shadowmancer', pack: ['smoke', 'firecracker', 'antidote'] }, // V4.1 (WS7): + antipoison (Level 1's spider)
       { name: SISTER_NAMES[2]!, cls: 'burglar', pack: ['dart', 'dart', 'smoke', 'lockpicks'] },
+      // V4.1 (squads, spec 31.12): a fourth sister for a party of four.
+      { name: SISTER_NAMES[3]!, cls: 'hedgewitch', pack: ['smoke', 'antidote'] },
     ],
+    // V4.1 (squads): 2–4; the Burglar sister (locks, the sally port key) and the Ranger (the striker, glow arrows) stay.
+    size: [2, 4], drop: [SISTER_NAMES[3]!, SISTER_NAMES[1]!],
     hideout: { siteId: 'lantern-sisters-hideout', where: "the officers' quarters" },
   },
   ferrymen: {
@@ -852,7 +870,10 @@ export const CREWS: Record<CrewId, CrewDef> = {
       { name: 'Ferryman Joost', cls: 'sellsword', pack: ['potion', 'glue'] },
       { name: 'Ferryman Sil', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] },
       { name: 'Ferryman Brecht', cls: 'sapper', pack: ['charge', 'charge', 'glue'] },
+      { name: 'Ferryman Kees', cls: 'burglar', pack: ['dart', 'venomdart', 'potion', 'lockpicks'] }, // V4.1 (squads, spec 31.12)
     ],
+    // V4.1 (squads): 2–4; Joost and the Sapper Brecht stay.
+    size: [2, 4], drop: ['Ferryman Kees', 'Ferryman Sil'],
     hideout: { siteId: 'ferrymen-hideout', where: 'the Drain' },
   },
   'gallows-choir': {
@@ -863,7 +884,10 @@ export const CREWS: Record<CrewId, CrewDef> = {
       // V4.0 (spec 29.3): Little Mags trades a sleep dart for a venom dart.
       { name: 'Little Mags', cls: 'burglar', pack: ['dart', 'venomdart', 'smoke', 'lockpicks'] },
       { name: 'Cantor Vey', cls: 'pyromancer', pack: ['potion', 'antidote'] }, // V4.1 (WS7): oil (no crew lantern to fill) → antipoison
+      { name: 'Verger Crane', cls: 'shadowmancer', pack: ['smoke', 'firecracker'] }, // V4.1 (squads, spec 31.12)
     ],
+    // V4.1 (squads): 2–4; Deacon Harl and Little Mags (her poison dart) stay.
+    size: [2, 4], drop: ['Verger Crane', 'Cantor Vey'],
     hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
   },
   'the-wake': {
@@ -874,12 +898,43 @@ export const CREWS: Record<CrewId, CrewDef> = {
       { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },
       { name: 'Candle', cls: 'shadowmancer', pack: ['smoke', 'firecracker'] },
       { name: 'Spade', cls: 'sapper', pack: ['charge', 'charge', 'charge'] },
+      { name: 'Pall', cls: 'ranger', pack: ['caltrops', 'caltrops', 'potion'] }, // V4.1 (squads, spec 31.12)
     ],
+    // V4.1 (squads): 3–5; Mother Grave, Sexton (Mend, Briar) and Spade stay.
+    size: [3, 5], drop: ['Pall', 'Candle'],
     hideout: { siteId: 'the-wake-hideout', where: 'the Bone Pile' },
   },
 };
 /** Spec 18.5: the Level 2 pool. */
 export const CUTTHROAT_POOL: CrewId[] = ['ferrymen', 'gallows-choir'];
+
+// ---------------------------------------------------------------- V4.1 (squads, spec 31.12): squad size
+
+/** A new campaign's party slots; the muster roll brought home (story `muster`) makes it 4. Saves without the field: 4. */
+export const SQUAD_SLOTS_START = 3;
+export const SQUAD_SLOTS_MAX = 4;
+/** The muster roll's contract goes up on the board at this reputation (Level 3 opens then too), before or after Gerda. */
+export const MUSTER_REP = 2;
+/** How many heroes may go in: `campaign.squadSlots` (absent in saves from before V4.1 squads: 4, so no party breaks). */
+export function squadSlots(c: { squadSlots?: number } | undefined | null): number {
+  return c?.squadSlots ?? SQUAD_SLOTS_MAX;
+}
+/** Contract XP: a pot shared by the heroes who got out, rounded up (1 → 8, 2 → 4, 3 → 3, 4 → 2). Was +3 to every survivor. */
+export const CONTRACT_XP_POT = 8;
+export function contractXpEach(survivors: number): number {
+  return survivors > 0 ? Math.ceil(CONTRACT_XP_POT / survivors) : 0;
+}
+/** How many members a crew fields against a party of `party` heroes: clamp(party, min, max) (spec 31.12). */
+export function crewSize(def: CrewDef, party: number): number {
+  const [min, max] = def.size ?? [def.members.length, def.members.length];
+  return Math.max(min, Math.min(max, def.members.length, Math.floor(party)));
+}
+/** The members a crew of `n` fields: its defined members in order, less the first ones in its `drop` order. */
+export function crewLineup(def: CrewDef, n: number): CrewMemberDef[] {
+  const out = new Set(def.drop?.slice(0, Math.max(0, def.members.length - n)) ?? []);
+  const keep = def.members.filter((m) => !out.has(m.name));
+  return keep.slice(0, Math.max(1, n));
+}
 
 // ---------------------------------------------------------------- V3.5 parley (spec 18.6)
 

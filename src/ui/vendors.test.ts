@@ -16,7 +16,7 @@ const withVillage = (v: Partial<Village>): GameState => {
   Object.assign(s.campaign.village, v);
   return s;
 };
-const ALL: Village = { surgeon: true, innkeeper: true, smith: true, copper: true, caskbook: true, alchemist: true };
+const ALL: Village = { surgeon: true, innkeeper: true, smith: true, copper: true, caskbook: true, alchemist: true, muster: true };
 const row = (id: string) => CATALOG.find((r) => r.id === id)!;
 const status = (id: string, s: GameState) => rowStatus(row(id), s.campaign.village, shopOffers(s), aleOffers(s));
 

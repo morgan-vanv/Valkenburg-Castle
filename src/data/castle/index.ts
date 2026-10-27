@@ -179,6 +179,9 @@ export const castle: CastleDef = {
     // V4.1 (spec 31.3): Ilse among the archive's shelves, a step from the spider she milks (it's awake: no sneaking up
     // on her unseen), across the room from the archive's regular site and chest.
     { id: 'l2-story-archive', kind: 'rescue', at: L2(6, 11), where: 'the archive', story: 'alchemist' },
+    // V4.1 (squads, spec 31.12): the muster roll on the officers' table, behind the locked door at (13, 3): across the
+    // room from the Sisters' hideout (10, 5) and a step past the strongbox (8, 3).
+    { id: 'l2-story-officers', kind: 'recover', at: L2(10, 1), where: "the officers' quarters", story: 'muster' },
     // V3.7 (spec 20.4): crew hideouts, used only by "Bring back <name>" contracts for that crew's
     // captives: the Sisters camp in the officers' quarters (behind the locked door), the Ferrymen
     // by the Drain's water, the Choir in the east tunnels, the Wake in the Bone Pile's north-east corner.

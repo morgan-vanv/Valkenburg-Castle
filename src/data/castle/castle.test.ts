@@ -380,6 +380,7 @@ describe('story sites (19.1)', () => {
       smith: [2, 'forge', 'l2-story-forge'],
       copper: [2, 'barracks', 'l2-story-barracks'],
       alchemist: [2, 'archive', 'l2-story-archive'], // V4.1 (spec 31.3)
+      muster: [2, 'officers', 'l2-story-officers'], // V4.1 (squads, spec 31.12)
     };
     expect(story.map((s) => s.story).sort()).toEqual(Object.keys(want).sort());
     const taken = new Set([
@@ -439,7 +440,11 @@ describe('story sites (19.1)', () => {
       return seen;
     };
     const open = walk(false);
-    for (const s of story) expect(open.has(posKey(s.at)), `${s.id} reachable past unlocked doors only`).toBe(true);
+    // V4.1 (squads, spec 31.12): the muster roll lies behind the officers' locked door by design (pick it, key it, blast it).
+    for (const s of story) if (s.story !== 'muster') expect(open.has(posKey(s.at)), `${s.id} reachable past unlocked doors only`).toBe(true);
+    const muster = story.find((s) => s.story === 'muster')!;
+    expect(open.has(posKey(muster.at)), 'the muster roll is behind a locked door').toBe(false);
+    expect(walk(true).has(posKey(muster.at)), 'the muster roll is reachable through the locked door').toBe(true);
   });
 });
 

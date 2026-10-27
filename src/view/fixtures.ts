@@ -41,7 +41,7 @@ export function fixtureCampaign(): GameState['campaign'] {
     fallen: [{ name: 'Sten', cls: 'sellsword', level: 2, where: 'Level 1, the pit hall', delve: 1 }],
     litBraziers: [],
     lostGear: [],
-    village: { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false },
+    village: { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false, muster: false },
     captives: [],
   };
 }

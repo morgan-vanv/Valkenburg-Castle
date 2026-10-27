@@ -19,6 +19,7 @@ import { brightnessAt } from './common';
 import { lightsOf, migrateLight, siteUnlit } from './light'; // V4.1 (WS2)
 import { migrateArrows, syncGlows } from './arrows'; // V4.1 (WS6)
 import { NIGHTSIGHT_REFUND } from './data';
+import { SQUAD_SLOTS_MAX } from './data'; // V4.1 (squads)
 import { sightWash } from './stealth';
 import { edgeRiskAt, fallInfo } from './falls';
 import { aleOffers, backToCamp, campCommand, fitClass, newGame, newVillage, partyProblem, shopOffers } from './camp';
@@ -343,6 +344,8 @@ export function createEngine(castle: CastleDef, opts: EngineOptions = {}): Engin
         // V3.5: saves without the village start with nothing won back.
         s.campaign.village ??= newVillage();
         s.campaign.village.alchemist ??= false; // V4.1 (spec 31.3): saves from before Ilse
+        s.campaign.village.muster ??= false;
+        s.campaign.squadSlots ??= SQUAD_SLOTS_MAX; // V4.1 (squads, spec 31.12): saves from before keep four slots
         // V4.0 (spec 25): a save without `opened` had every way in open, and keeps them (campaignOpen
         // reads the absent field as open). A delve saved mid-way gets its ways set up the same way.
         const d = s.delve as DelveX | null;

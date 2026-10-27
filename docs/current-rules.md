@@ -1,6 +1,6 @@
 # Current rules (V4.0, with V4.1 changes as they ship)
 
-V4.1 so far: spec 31.1 (crew entrances), 31.2–31.3 (gold, gifts, Ilse and the pairs), 31.5 (light: torches are the clock, section 7), 31.8 (arrows: the Ranger's quiver, sections 9.3 and 9.5), 31.11 (play-test fixes: no notice on a killing blow, section 5.4; free swings on any step from an enemy's side, 8.4; Unshackle needs a lock tool, 9.2 and 15).
+V4.1 so far: spec 31.1 (crew entrances), 31.2–31.3 (gold, gifts, Ilse and the pairs), 31.5 (light: torches are the clock, section 7), 31.8 (arrows: the Ranger's quiver, sections 9.3 and 9.5), 31.11 (play-test fixes: no notice on a killing blow, section 5.4; free swings on any step from an enemy's side, 8.4; Unshackle needs a lock tool, 9.2 and 15), 31.12 (squad size: start gold 70, three slots and the muster roll, the contract XP pot, crews sized to the party; sections 2, 3 and 12).
 
 Current rules at V3.9.4 (2026-10-26), with V4.0's shut entrances (spec 25, branch `v4.0-entrances`) and V4.0's play-test fixes (spec 26: Walk/Sneak per hero, noticing during moves, when monsters turn), and V4.0's venom (spec 29; replaced by V4.1's poison, spec 31.4, section 8.6), and V4.0's play-test fixes 2 (spec 30: the Sapper without Brace, class kit by level). Verified against the code; where this and docs/v3-spec.md disagree, this file and the code win. The spec stays as the version-by-version history.
 
@@ -14,7 +14,7 @@ Conventions: "slot" is one die in a slot roll; "level" means a castle level (1 t
 
 Keven (id `keven`, class `heir`), son of the late Lord Hobart, retakes Castle Valkenburg from Lowgate, a derelict village under its walls. A campaign is one roguelite run on one fixed three-level castle.
 
-Loop: in camp, pick a contract from the notice post, pick 1 to 4 heroes, fill their packs from the stash, pick an open entrance (a new campaign has only the main gate; section 3.1), delve. A delve is a turn-based extraction: reach the objective, get out through an exit. The summary is applied in camp, the board and recruits refresh, repeat. The campaign ends when Keven dies or is carried off by a crew. There is no win state in code.
+Loop: in camp, pick a contract from the notice post, pick 1 to `campaign.squadSlots` heroes (3 on a new campaign, 4 once the muster roll is home; V4.1, spec 31.12), fill their packs from the stash, pick an open entrance (a new campaign has only the main gate; section 3.1), delve. A delve is a turn-based extraction: reach the objective, get out through an exit. The summary is applied in camp, the board and recruits refresh, repeat. The campaign ends when Keven dies or is carried off by a crew. There is no win state in code.
 
 Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`, `campCommand`, `startDelve`, `buildSummary`, `backToCamp`). Stages: `Stage` = 'camp' | 'delve' | 'summary' | 'over' (types.ts).
 
@@ -24,7 +24,8 @@ Code: src/game/engine.ts (`createEngine`, `apply`), src/game/camp.ts (`newGame`,
 
 ### 2.1 Start
 
-- Gold 120 (`START_GOLD`; V4.1, was 90): one level 1 hire and 60 to try the shop. Reputation 0. Roster: Keven alone. Village: nothing won back.
+- Gold 70 (`START_GOLD`; V4.1 squads, spec 31.12; was 120, before that 90): one level 1 hire (60) and a torch, or items for Keven alone. Reputation 0. Roster: Keven alone. Village: nothing won back.
+- Squad slots 3 (`campaign.squadSlots` = `SQUAD_SLOTS_START`; V4.1, spec 31.12): the fourth is won by bringing the muster roll home (section 2.3). Saves from before have no field and load with 4 (`squadSlots()` reads absent as `SQUAD_SLOTS_MAX` 4; `deserialize` writes it), so no existing party breaks.
 - V4.1 (spec 31.2, B1): on the campaign's first delve (`campaign.delveCount` 0 at `startDelve`), spawns marked `firstDelveAsleep` start asleep: in the castle, only the orc posted in the chapel by Brother Aldric (L1 (35, 24)). Later delves place it awake as usual.
 - Keven may delve alone; the camp does not force a hire.
 - Entrances: only the main gate is open (`campaign.opened = {}`); the sally port and the east breach are shut until opened in play (section 3.1). Castle memory empty (`campaign.explored = {}`).
@@ -56,11 +57,13 @@ Story contracts carry no "Story" or "Unlocks …" warnings (V4.0: the board show
 | alchemist (V4.1) | rescue Ilse the alchemist | l2-story-archive (L2 Archive, (6, 11), next to the spider) | Aldric home and reputation ≥ 1 | 2 antipoisons and a bundle of 3 glow arrows (V4.1, spec 31.8) to the cart | Ilse's bench |
 | copper | recover the brewing copper | l2-story-barracks (L2 Barracks) | Wim home | none | the first four ales |
 | caskbook | recover Wim's cask book | l3-recover-drain (L3 the Drain) | copper home and reputation ≥ 2 | none | three strong ales, better recruits |
+| muster (V4.1, spec 31.12) | recover the muster roll | l2-story-officers (L2 officers' quarters, (10, 1) on the officers' table, behind the locked door at (13, 3); the Sisters' hideout is at (10, 5)) | reputation ≥ 2 (`MUSTER_REP`; before or after Gerda) while `squadSlots` < 4 | none | a fourth party slot (`campaign.squadSlots = 4`) |
 
 - V4.1 (spec 31.2, pillar 18): story contracts pay 0 gold (`STORY_PAY`; was half the regular bounty). Reputation +1 and XP as usual. The card shows the gift instead of a bounty ("Gift: 2 potions"; "No pay" for the copper and the cask book).
 - Gifts (`GIFTS`, `giveGift` in camp.ts) are given in `backToCamp` the first time the villager comes home, after the roster is settled, with a `say` line. Wim's round: every hero on the roster without an ale waiting gets `ale = 'reserve'`, drunk at their next `startDelve` (Focus 4, max 4), even before the copper is home. Gerda's shield: `buyShield` with `credits.shield` > 0 costs 0 and takes one credit ("On the house.").
 - A rescued villager does not join the roster; the village flag is set on return and a `villageUnlocked` event fires.
-- The copper takes 2 pack slots and is `heavy` (carrier moves 3 at most, dash too). The cask book takes 1 slot. Both are worth 0, never sold, never handed over in parley, and go to the village, not the stash.
+- The copper takes 2 pack slots and is `heavy` (carrier moves 3 at most, dash too). The cask book and the muster roll take 1 slot. All three are worth 0, never sold, never handed over in parley, and go to the village (`village.copper`, `caskbook`, `muster`), not the stash.
+- V4.1 (spec 31.12): the muster roll brought home sets `village.muster` and `campaign.squadSlots = 4`, with the `villageUnlocked` event and the line "Wim pins the muster roll by the Flagon's door. A fourth can go in with you now." It pays no gold and gives no gift (pillar 18).
 
 ### 2.4 Regular board
 
@@ -141,7 +144,7 @@ V4.1: Wim and Ilse's three brews need Wim and Ilse home, not the copper (`AleOff
 ### 2.9 Heroes between delves
 
 - HP carries over. A delve starts each hero at their campaign HP (at least 1); a survivor's HP is written back. Nothing heals for free.
-- XP: kill XP by monster (`MONSTERS[kind].xp`: berserker 3, captain 2, ghoul 2, others 1); crew member killed 1; survive +1; contract done +3 to every survivor; Dragon slain: 10 split among every hero in the delve (remainder to the killer).
+- XP: kill XP by monster (`MONSTERS[kind].xp`: berserker 3, captain 2, ghoul 2, others 1); crew member killed 1; survive +1; contract done: a pot of `CONTRACT_XP_POT` 8 shared by the heroes who got out, rounded up (`contractXpEach`: 1 → 8, 2 → 4 each, 3 → 3, 4 → 2; V4.1 spec 31.12, was +3 to every survivor); Dragon slain: 10 split among every hero in the delve (remainder to the killer).
 - Level thresholds (total XP, `LEVEL_XP`): level 2 at 5, 3 at 12, 4 at 20, 5 at 30, 6 at 45 (max 6). Each level: +2 max HP and +2 HP, +5 to the class's main stat. Level-ups apply only to heroes who got out.
 - The dead go to `campaign.fallen`. Their pack drops where they died (class kit goes with them, section 9.5); non-heirloom, non-hoard items from fallen heroes persist as ground loot in later delves (`lostGear`).
 - Items taken in and not carried out are lost. Gold carried out goes to camp gold; other items to the stash. Class kit (improvised explosives, the improvised pick) never reaches the stash.
@@ -182,7 +185,8 @@ Code: camp.ts (`refreshCamp`, `makeBoard`, `storyAvailable`, `storyBounty`, `cap
 
 ## 3. Delve setup
 
-- Squad: 1 to 4 distinct heroes from the roster (`partyProblem`). No fitness check.
+- Squad: 1 to `squadSlots(campaign)` distinct heroes from the roster (`partyProblem`; V4.1 spec 31.12: 3 on a new campaign, 4 with the muster roll home, 4 for older saves). More are refused, in `partyProblem` and `startDelve`: "Three heroes at most for now. Bring the muster roll home from the officers' quarters (Level 2) and a fourth can sign on." (with 4 slots: "Four heroes at most."). No fitness check.
+- V4.1 (spec 31.12): Lowgate's Party step shows the slots the campaign has and, while the fourth is locked, a locked slot with Wim's hint ("Wim says the old muster roll is in the officers' quarters. With it, a fourth could sign on."); the bench, hiring, the loadout (`cleanLoadout`), "Same as last time" and the sim bot keep to the slots.
 - Packs: up to 4 slots per hero from the stash; each item in one pack only.
 - Entrances (`castle.entrances`, index order): 0 main gate L1 (24, 31), 1 sally port L1 (1, 14), 2 east breach L1 (44, 21). Only an open one may be used (section 3.1); `startDelve` refuses a shut one: "The sally port is barred shut. Go in by the main gate." / "The east breach is choked with rubble. Go in by the main gate." Heroes are placed on the entrance and the nearest free hexes.
 - Ways already opened this campaign stand open (the gate open and unlocked, the rubble in `blown`). While the sally port is shut, its key lies in the library at L1 (3, 1).
@@ -741,12 +745,23 @@ Built as heroes of their class at the crew level: HP = class HP + 2 × (level �
 
 | Crew | Level | Tiers | Members (pack) |
 | --- | --- | --- | --- |
-| Lantern Sisters | 4 (V4.1 WS7; was 2) | weapon 1, armor 1 | Ranger (2 caltrops, potion; V4.1: quiver 20, 3 glow arrows): 14 HP, 95%, armor 1. Shadowmancer (smoke, firecracker, antipoison): 12 HP, spells 90%. Burglar (2 darts, smoke, lockpicks, 4 improvised picks): 13 HP, 95%, darts 90% |
-| The Ferrymen | 4 (V4.1 WS7; was 3) | weapon 1, armor 1 | Sellsword (potion, glue): 16 HP, 95%, armor 2. Ranger (2 caltrops, potion; V4.1: quiver 20, 3 barbed arrows): 14 HP, 95%. Sapper (4 improvised explosives, 2 charges, glue): 15 HP, 85%, armor 1 (spec 30.1) |
-| The Gallows Choir | 5 (V4.1 WS7; was 3) | weapon 1, armor 1 | Sellsword (potion, glue): 18 HP, 95%, armor 2. Burglar (sleep dart, poison dart, smoke, lockpicks, 5 improvised picks): 15 HP, 95%, darts 95%. Pyromancer (potion, antipoison; was oil): 14 HP, spells 95% |
-| The Wake | 6 (V4.1 WS7; was 4) | weapon 2, armor 1 | Sellsword (2 potions): 20 HP, 95%, armor 2. Hedgewitch (2 potions): 17 HP, spells 95%. Shadowmancer (smoke, firecracker): 16 HP, spells 95%. Sapper (6 improvised explosives, 3 charges): 19 HP, 95%, armor 1 (spec 30.1) |
+| Lantern Sisters | 4 (V4.1 WS7; was 2) | weapon 1, armor 1 | Wenna, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 glow arrows): 14 HP, 95%, armor 1. Odile, Shadowmancer (smoke, firecracker, antipoison): 12 HP, spells 90%. Brisk, Burglar (2 darts, smoke, lockpicks, 4 improvised picks): 13 HP, 95%, darts 90%. V4.1 squads: Maud, Hedgewitch (smoke, antipoison): 13 HP, spells 85% |
+| The Ferrymen | 4 (V4.1 WS7; was 3) | weapon 1, armor 1 | Joost, Sellsword (potion, glue): 16 HP, 95%, armor 2. Sil, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 barbed arrows): 14 HP, 95%. Brecht, Sapper (4 improvised explosives, 2 charges, glue): 15 HP, 85%, armor 1 (spec 30.1). V4.1 squads: Kees, Burglar (sleep dart, poison dart, potion, lockpicks, 4 improvised picks): 13 HP, 95% |
+| The Gallows Choir | 5 (V4.1 WS7; was 3) | weapon 1, armor 1 | Deacon Harl, Sellsword (potion, glue): 18 HP, 95%, armor 2. Little Mags, Burglar (sleep dart, poison dart, smoke, lockpicks, 5 improvised picks): 15 HP, 95%, darts 95%. Cantor Vey, Pyromancer (potion, antipoison; was oil): 14 HP, spells 95%. V4.1 squads: Verger Crane, Shadowmancer (smoke, firecracker): 14 HP, spells 95% |
+| The Wake | 6 (V4.1 WS7; was 4) | weapon 2, armor 1 | Mother Grave, Sellsword (2 potions): 20 HP, 95%, armor 2. Sexton, Hedgewitch (2 potions): 17 HP, spells 95%. Candle, Shadowmancer (smoke, firecracker): 16 HP, spells 95%. Spade, Sapper (6 improvised explosives, 3 charges): 19 HP, 95%, armor 1 (spec 30.1). V4.1 squads: Pall, Ranger (2 caltrops, potion, quiver 30): 18 HP, 95% |
 
-Cutthroat members each carry a purse: 30 gold (the Ferrymen, the Gallows Choir), 50 (the Wake) (V4.1 WS7: `CrewDef.purse`, fixed per crew now that crew levels moved). Every level-built member has 3 Focus (V4.1 WS7, below). Crew levels are tuned to the arena (spec 31.9): each crew is about even with a fresh party of its level's size and level (the Sisters: three at level 2; the Level 2 crews: three at level 3; the Wake: four at level 4); a level below, one short or battle-worn, the party loses most fights. A member's numbers clamp at 95. The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
+**Crew size (V4.1 squads, spec 31.12).** A crew fields as many members as the party that set out (`crewSize(def, party)` = clamp(party, min, max), `CrewDef.size`; `startDelve` passes the number of heroes going in to `makeCrew`): the Sisters, the Ferrymen and the Gallows Choir 2–4, the Wake 3–5. A smaller crew leaves members out in its `CrewDef.drop` order (`crewLineup`), first left out first:
+
+| Crew | 4 | 3 | 2 |
+| --- | --- | --- | --- |
+| Lantern Sisters | Wenna, Odile, Brisk, Maud | Wenna, Odile, Brisk | Wenna, Brisk (the Burglar with the locks and the sally port key, the Ranger) |
+| The Ferrymen | Joost, Sil, Brecht, Kees | Joost, Sil, Brecht | Joost, Brecht (the Sapper) |
+| The Gallows Choir | Harl, Mags, Vey, Crane | Harl, Mags, Vey | Harl, Mags (her poison dart) |
+| The Wake | Grave, Sexton, Candle, Spade (5: + Pall) | Grave, Sexton, Spade | (3 at least) |
+
+Members keep their ids `r1`… in lineup order. Purses per member as before. With at most 4 heroes in a party, the Wake's fifth (Pall) is defined but not fielded today (spec 31.12, open question).
+
+Cutthroat members each carry a purse: 30 gold (the Ferrymen, the Gallows Choir), 50 (the Wake) (V4.1 WS7: `CrewDef.purse`, fixed per crew now that crew levels moved). Every level-built member has 3 Focus (V4.1 WS7, below). Crew levels are tuned to the arena (spec 31.9, 31.12): each crew is about even with a fresh party of its level's size and level (the Sisters: three at level 2; the Level 2 crews: three at level 3; the Wake: four at level 4), and, sized to the party, with parties of two and four at that level; a level below, one short or battle-worn, the party loses most fights. A member's numbers clamp at 95. The Sisters carry none. A killed member drops loot, purse and pack. Members who leave take everything.
 
 ### 12.3 Stances and behaviour
 
