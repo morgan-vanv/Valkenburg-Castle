@@ -122,6 +122,10 @@ const RESERVE = 60;
 /** Gold moved by camp commands, by kind (negative = spent). */
 const ledger: Record<string, number> = {};
 const throws = { thrown: 0, hits: 0, kills: 0, heroHits: 0 };
+/** V4.1 (WS9): what killed each hero: the last thing that hurt them, and where they died (level, room). */
+const lastHurt: Record<string, string> = {};
+const killers: Record<string, number> = {};
+const deathRooms: Record<string, number> = {};
 /** V4.1 (WS6): arrows the bot buys and the glow arrows it shoots ahead. */
 const arrows = { bundles: 0, glows: 0, knife: 0 };
 const sap = { fuses: 0, blasts: 0, walls: 0, collapsed: 0, rubbled: 0, locks: 0, selfHits: 0, friendHits: 0, kills: 0 };
@@ -146,6 +150,27 @@ const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarm
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
+  if (s.delve) {
+    const heroIds = new Set(s.delve.heroes.map((h) => h.heroId));
+    const nameOf = (id: string) => {
+      const m = s.delve!.monsters.find((x) => x.id === id) ?? r.state.delve?.monsters.find((x) => x.id === id);
+      if (m) return m.kind;
+      const c = s.delve!.rivals?.members.find((x) => x.id === id);
+      if (c) return `crew ${c.cls}`;
+      if (heroIds.has(id)) return 'a hero (own blast/fire)';
+      return id;
+    };
+    for (const ev of r.events) {
+      if (ev.type === 'hit' && heroIds.has(ev.target)) lastHurt[ev.target] = nameOf(ev.attacker);
+      if (ev.type === 'died' && heroIds.has(ev.id)) {
+        const h = s.delve.heroes.find((x) => x.heroId === ev.id)!;
+        const why = lastHurt[ev.id] ?? 'bled out / left behind';
+        killers[why] = (killers[why] ?? 0) + 1;
+        const room = `L${h.at.level} ${w.roomName(h.at) ?? '?'}`;
+        deathRooms[room] = (deathRooms[room] ?? 0) + 1;
+      }
+    }
+  }
   if (!r.error && s.stage === 'camp' && cmd.type !== 'startDelve') {
     const delta = r.state.campaign.gold - s.campaign.gold;
     const key = cmd.type === 'buy' ? `buy:${cmd.kind}` : cmd.type;
@@ -1425,6 +1450,8 @@ for (const pl of [1, 2, 3, 4, 5, 6]) {
   const cell = (lv: number) => { const x = rs.filter((r) => r.level === lv); return x.length ? `${x.filter((r) => r.done).length}/${x.length}` : '-'; };
   console.log(`  ${String(pl).padStart(8)}   ${cell(1).padStart(9)}   ${cell(2).padStart(9)}   ${cell(3).padStart(9)}`);
 }
+console.log(`hero deaths by last attacker: ${Object.entries(killers).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
+console.log(`hero deaths by room: ${Object.entries(deathRooms).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
 console.log(`campaigns: ${campaignNo} (a new one starts when the heir falls or is taken); sapper throws ${throws.thrown}`);
 console.log(`arrows (V4.1 WS6): plain bundles bought ${arrows.bundles}, glow arrows shot ahead ${arrows.glows}`);
 if (CSV) {

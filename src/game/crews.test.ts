@@ -418,3 +418,29 @@ describe('V4.0 crews play by the party\'s rules (spec 28)', () => {
     expect(distance(r.path[r.path.length - 1]!, sell!.at)).toBeGreaterThan(0);
   });
 });
+
+describe('V4.1 (spec 31.10): a waiting crew demands its toll only for noise the party is near', () => {
+  it('noise far from every hero (an orc bellowing at the crew) does not set off the toll; noise by the party does', async () => {
+    const { makeNoise } = await import('./common');
+    const s = delve(3);
+    const k = keven(s);
+    // Find two floor hexes on the party's level: one near the crew, one far from both.
+    const lvl = w.levels.get(k.at.level)!;
+    const floor = Object.keys(lvl.tiles).map((key) => { const [q, r] = key.split(',').map(Number) as [number, number]; return { level: k.at.level, q, r }; })
+      .filter((p) => kindAt(w, s.delve as DelveX, p) === 'floor');
+    const far = floor.filter((p) => distance(p, k.at) >= 12).sort((a, b) => distance(b, k.at) - distance(a, k.at))[0]!;
+    expect(far).toBeTruthy();
+    const spots = floor.filter((p) => distance(p, far) <= 2 && distance(p, k.at) >= 10).slice(0, 3);
+    crew(s, 'ferrymen', spots, 'waiting');
+    // A loud noise right by the crew, out of every hero's reach.
+    const c1 = ctx(s, 'player');
+    makeNoise(c1, far, 5);
+    expect(s.delve!.rivals!.stance).toBe('waiting');
+    // The same noise made where a hero stands and reaching the crew: they demand.
+    const near = floor.find((p) => distance(p, spots[0]!) === 3)!;
+    k.at = { ...near };
+    const c2 = ctx(s, 'player');
+    makeNoise(c2, near, 5);
+    expect(s.delve!.rivals!.stance).toBe('demanding');
+  });
+});
