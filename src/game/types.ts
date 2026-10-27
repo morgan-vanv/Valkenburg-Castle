@@ -540,6 +540,13 @@ export interface HeroInDelve {
    */
   moveMode?: 'walk' | 'sneak';
   /**
+   * V4.1 (spec 31.13, owner): how this hero answers each reaction during the castle's turn: 'ask' (the turn pauses
+   * with a `react` question), 'always' (yes without asking) or 'never' (no without asking). Absent kinds take
+   * `REACTION_DEFAULTS` (data.ts: both 'ask'). The `setReaction` command changes one (`setAmbush` is its old name
+   * for the hidden swing: on = always, off = never). Saves from the WIP build with `ambush: true` load as always.
+   */
+  reactions?: Partial<Record<ReactionKind, ReactionSetting>>;
+  /**
    * V4.1 (spec 31.4): poisoned: 1 damage at step 2 of every world phase, never below 1 HP, until cured (an antipoison,
    * Mend, leaving). Replaces V4.0's `venom` and `paralyzed` (old saves load either as poisoned).
    */
@@ -858,6 +865,11 @@ export interface Delve {
   log: string[];
   /** Kills this delve by hero id. */
   kills: Record<string, number>;
+  /**
+   * V4.1 (spec 31.13): a question waiting for the player's answer (the castle's turn paused). While set, `apply`
+   * takes only `react`; queries work as usual and see the state from before the paused command.
+   */
+  pending?: PendingReaction;
 }
 
 /** V4.1 (WS6, spec 31.8): a glow arrow's light. */
@@ -1003,6 +1015,15 @@ export type Command =
    */
   | { type: 'move'; heroId: string; path: Pos[]; /** V4.0 (spec 26.1): omitted = the hero's own Walk/Sneak setting */ sneak?: boolean; follow?: boolean }
   | { type: 'setMoveMode'; heroId: string; sneak: boolean } // V4.0 (spec 26.1): the hero's Walk/Sneak setting; free, player phase
+  /** V4.1 (spec 31.13): a hero's answer to one kind of reaction (ask / always / never); free, player phase. */
+  | { type: 'setReaction'; heroId: string; kind: ReactionKind; setting: ReactionSetting }
+  /** V4.1 (spec 31.13): the old hidden-swing toggle: on = setReaction hiddenSwing 'always', off = 'never'. Kept for old callers. */
+  | { type: 'setAmbush'; heroId: string; on: boolean }
+  /**
+   * V4.1 (spec 31.13): the answer to the question in `Delve.pending` (the only command accepted while one is set).
+   * The engine re-runs the paused command from the state before it with the answers so far plus this one.
+   */
+  | { type: 'react'; choice: ReactionChoice }
   | { type: 'act'; heroId: string; action: ActionKind; target: ActionTarget; focus: number }
   | { type: 'endTurn' }
   | { type: 'face'; heroId: string; facing: number } // V3.9 (spec 24.2): turn to face a direction; free, player phase
@@ -1100,11 +1121,66 @@ export type GameEvent =
   | { type: 'cured'; id: string; by?: string; how: 'antidote' | 'mend' | 'out' }
   /** V4.1 (spec 31.4): `by` lifts `id` (a downed hero or crew member, or the shackled captive); it shares their hex now. */
   | { type: 'carried'; by: string; id: string }
-  | { type: 'setDown'; by: string; id: string };
+  | { type: 'setDown'; by: string; id: string }
+  /**
+   * V4.1 (spec 31.13): the castle's turn (or a calm walk's) has paused for a hero's answer: always the last event of
+   * its result; `Delve.pending` holds the same question. Show it, then send `{ type: 'react', choice }`.
+   */
+  | { type: 'react'; question: ReactionQuestion };
+
+// ---------------------------------------------------------------- reactions (V4.1, spec 31.13)
+
+/** The reactions a hero can be asked for: a free swing at an enemy passing them while they're hidden from it; the overwatch shot. */
+export type ReactionKind = 'hiddenSwing' | 'overwatch';
+/** A hero's standing answer to one kind: ask each time, always yes, never (always no). */
+export type ReactionSetting = 'ask' | 'always' | 'never';
+/** 'yes': the first option (Strike, Shoot); 'no': the second (Let it pass, Hold). */
+export type ReactionChoice = 'yes' | 'no';
+
+export interface ReactionQuestion {
+  kind: ReactionKind;
+  heroId: string;
+  /** The monster or crew member the hero would react to. */
+  enemyId: string;
+  /** Where that enemy stands as the question comes (for the camera). */
+  at: Pos;
+  /** The question in plain words, e.g. "The orc steps past Fenna, who's hidden from it. Strike it, or let it pass?" */
+  text: string;
+  /** The two options: a button label and the consequence in one line. */
+  yes: { label: string; line: string };
+  no: { label: string; line: string };
+  /** The roll the yes answer makes (slots, per-slot chance 0..100). */
+  roll?: { slots: number; chance: number };
+}
+
+/**
+ * V4.1 (spec 31.13): a paused command (JSON, saved with the delve). The state holding it is the state from before
+ * `command` ran: answering re-runs `command` with `answers` plus the new choice, deterministically (same seed, same
+ * answers, same events), to the next question or the end.
+ */
+export interface PendingReaction {
+  /** The command that paused: `endTurn`, or a calm `move` whose walk let the castle turn. */
+  command: Command;
+  question: ReactionQuestion;
+  /** Answers already given, in the order asked, this command. */
+  answers: ReactionChoice[];
+  /** Events before the question (the result's `events` minus its last `react`): the prefix the next result repeats. */
+  played: number;
+}
 
 export interface ApplyResult {
   state: GameState;
   events: GameEvent[];
+  /**
+   * V4.1 (spec 31.13): on the result of a `react` (and of `Engine.resume`), the number of leading events the caller
+   * already played from the earlier result that paused: skip them. Absent (0) for every other command.
+   */
+  played?: number;
+  /**
+   * V4.1 (spec 31.13): set when the result paused (`state.delve.pending`): the world as it stood at the question, for
+   * display only (never send commands against it; `state` is the one to keep and save).
+   */
+  view?: GameState;
   /** Set when the command was refused; state is unchanged. A sentence for the player. */
   error?: string;
 }

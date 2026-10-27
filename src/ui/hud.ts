@@ -6,14 +6,14 @@
 
 import type { ActionOption, Engine, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
 import { DIRS, add, distance, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
-import type { ActionKind, ActionTarget, Brightness, DealOption, GameEvent, GameState, Hero, HeroInDelve, Intent, Item, JobKind, Monster, SlotRoll } from '../game/types';
+import type { ActionKind, ActionTarget, Brightness, DealOption, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Intent, Item, JobKind, Monster, ReactionChoice, ReactionKind, ReactionQuestion, ReactionSetting, SlotRoll } from '../game/types';
 import { sfx } from '../audio/sfx';
 import type { Diorama } from '../view/diorama';
 import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, REACT_NAME, REACT_HELP, REACT_SETTING_HELP, SETTING_WORD, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE } from '../game/data';
@@ -228,6 +228,11 @@ export class Hud {
   private bannerEl = h('div', { class: 'dl-banner hidden' });
   private toastEl = h('div', { class: 'hud-toast hidden' });
   private modal = h('div', { class: 'dl-modal hidden' });
+  /** V4.1 (spec 31.13): the reaction card, up while the castle's turn waits for an answer (`reactWait`). */
+  private reactEl = h('div', { class: 'dl-react hidden', role: 'dialog', 'aria-label': 'A hero can react', tabindex: -1 });
+  private reactWait: { q: ReactionQuestion; done: (c: ReactionChoice) => void } | null = null;
+  /** V4.1 (spec 31.13): the Reactions settings popover is open (for the selected hero). */
+  private reactOpen = false;
   /** V3.5 (18.6): the parley card; open while `parleyHero` is set. */
   private parleyEl = h('div', { class: 'dl-parley hidden' });
   private parleyHero: string | null = null;
@@ -243,7 +248,7 @@ export class Hud {
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.card, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.reactEl, this.card, this.tip, this.modal, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
@@ -273,6 +278,11 @@ export class Hud {
       const t = e.target as Node;
       if (!this.moreEl.classList.contains('hidden') && !this.moreEl.contains(t) && !(t instanceof Element && t.closest('[data-more]'))) this.moreEl.classList.add('hidden');
       if (!this.menuEl.classList.contains('hidden') && !this.menuEl.contains(t) && !(t instanceof Element && t.closest('[data-menu]'))) this.menuEl.classList.add('hidden');
+      // V4.1 (spec 31.13): the Reactions popover closes on a click elsewhere.
+      if (this.reactOpen && !(t instanceof Element && t.closest('.dl-reacts-pop, [data-react-b]'))) {
+        this.reactOpen = false;
+        this.renderBar();
+      }
     });
   }
 
@@ -1630,6 +1640,11 @@ export class Hud {
   private cancel(): void {
     this.fusePicked = false;
     this.hideTip();
+    if (this.reactOpen) {
+      this.reactOpen = false;
+      this.renderBar();
+      return;
+    }
     if (this.facing) {
       this.setFacing(false);
       return;
@@ -2542,6 +2557,8 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     // V4.1 (spec 31.4): poisoned: a green drop.
     if (hd.poisoned) out.push(h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': 'Poisoned', 'data-tip': `${POISON_TIP}\n${name} has ${hd.hp} HP; the poison never takes the last one.` }, icon('venom', 13)));
     if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
+    // V4.1 (spec 31.13): a hero set to strike from hiding without being asked.
+    if (hd.reactions?.hiddenSwing === 'always') add('ambush', 'sword', `Strikes from hiding · ${name} takes the free swing at an enemy passing them that hasn't spotted them, without asking, and gives themselves away. Change it under Reactions (beside Walk/Sneak).`);
     if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
@@ -2624,7 +2641,12 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const who = h(
       'div',
       { class: 'dl-who' },
-      h('span', { class: 'dl-who-n', tabindex: 0, 'data-tip': this.elsewhereTip(def) }, def.name, h('span', { class: 'dl-who-c' }, ` ${def.cls === 'heir' ? 'the heir' : className(def.cls).toLowerCase()}`)),
+      h(
+        'div',
+        { class: 'dl-who-top' },
+        h('span', { class: 'dl-who-n', tabindex: 0, 'data-tip': this.elsewhereTip(def) }, def.name, h('span', { class: 'dl-who-c' }, ` ${def.cls === 'heir' ? 'the heir' : className(def.cls).toLowerCase()}`)),
+        this.reactionsButton(sel, def),
+      ),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
       h(
         'span',
@@ -2692,6 +2714,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const moreBtn = h('button', { type: 'button', class: 'dl-ab dl-more-b', 'data-more': '1', 'aria-haspopup': 'menu', 'aria-expanded': this.moreEl.classList.contains('hidden') ? 'false' : 'true', disabled: this.busy || !more.length, 'data-tip': more.length ? `More · ${more.map((m) => m.label).join(', ')}` : 'More · nothing else to do here', onclick: () => this.toggleMore(more) }, icon('dots', 20), h('span', { class: 'dl-ab-l' }, 'More'));
     this.renderMore(more);
     this.bar.append(who, h('span', { class: 'dl-sep' }), acts, h('span', { class: 'dl-sep' }), pack, more.length ? moreBtn : '', this.endButton(d));
+    if (this.reactOpen && !this.busy) this.bar.append(this.reactionsPop(sel, def)); // V4.1 (spec 31.13)
     this.fitBar();
     // The armed-action pill sits just above the bar.
     if (this.pending && !this.pill.classList.contains('hidden')) this.pill.style.bottom = `${(this.bar.offsetHeight || 94) + 24}px`;
@@ -3324,6 +3347,122 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     await this.flashBanner('Combat!', why ?? 'Something has noticed the party. Your move.', 'combat', wait, 0.7);
   }
 
+  // ------------------------------------------------------------ reactions (V4.1, spec 31.13)
+
+  /** The kinds of reaction this hero can be asked for: the hidden swing for everyone, overwatch for a Ranger. */
+  private reactionKinds(cls: HeroClass): ReactionKind[] {
+    return cls === 'ranger' ? ['hiddenSwing', 'overwatch'] : ['hiddenSwing'];
+  }
+
+  /** The small Reactions button beside the hero's name: opens the per-hero settings (Ask / Always / Never). */
+  private reactionsButton(sel: HeroInDelve, def: Hero): HTMLElement {
+    const kinds = this.reactionKinds(def.cls);
+    const set = (k: ReactionKind) => sel.reactions?.[k] ?? 'ask';
+    const custom = kinds.some((k) => set(k) !== 'ask');
+    const lines = kinds.map((k) => `${REACT_NAME[k]}: ${SETTING_WORD[set(k)]}`).join('\n');
+    return h(
+      'button',
+      {
+        type: 'button',
+        class: `dl-react-b ${custom ? 'custom' : ''} ${this.reactOpen ? 'open' : ''}`,
+        'aria-expanded': this.reactOpen ? 'true' : 'false',
+        'aria-label': `${def.name}'s reactions`,
+        'data-react-b': '1',
+        disabled: this.busy,
+        'data-tip': `Reactions · ${def.name}\nWhat ${def.name} does when the castle's turn gives them a chance to react.\n${lines}\nAsk pauses the castle's turn for your answer; Always and Never answer for you.`,
+        onclick: () => {
+          this.reactOpen = !this.reactOpen;
+          this.renderBar();
+        },
+      },
+      icon('target', 14),
+      custom ? h('span', { class: 'dl-react-dot' }) : '',
+    );
+  }
+
+  /** The settings popover above the hotbar: one Ask / Always / Never row per kind of reaction. */
+  private reactionsPop(sel: HeroInDelve, def: Hero): HTMLElement {
+    const row = (k: ReactionKind) => {
+      const now = sel.reactions?.[k] ?? 'ask';
+      return h(
+        'div',
+        { class: 'dl-reacts-row' },
+        h('span', { class: 'dl-reacts-k', tabindex: 0, 'data-tip': REACT_HELP[k](def.name) }, REACT_NAME[k]),
+        h(
+          'span',
+          { class: 'dl-seg', role: 'radiogroup', 'aria-label': `${def.name}: ${REACT_NAME[k]}` },
+          ...(['ask', 'always', 'never'] as const).map((v) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'radio',
+                class: `dl-seg-b ${now === v ? 'on' : ''}`,
+                'aria-checked': now === v ? 'true' : 'false',
+                disabled: this.busy,
+                'data-tip': `${REACT_NAME[k]} · ${SETTING_WORD[v]}\n${REACT_SETTING_HELP[k][v](def.name)}`,
+                onclick: () => this.setReaction(sel.heroId, k, v),
+              },
+              SETTING_WORD[v],
+            ),
+          ),
+        ),
+      );
+    };
+    return h(
+      'div',
+      { class: 'dl-reacts-pop', role: 'group', 'aria-label': `${def.name}'s reactions` },
+      h('div', { class: 'dl-reacts-t' }, `Reactions · ${def.name}`),
+      h('p', { class: 'dl-reacts-p' }, `When the castle's turn gives ${def.name} a chance to react: ask you, always do it, or never.`),
+      ...this.reactionKinds(def.cls).map(row),
+    );
+  }
+
+  private setReaction(heroId: string, kind: ReactionKind, setting: ReactionSetting): void {
+    if (this.busy) return;
+    void this.host.send({ type: 'setReaction', heroId, kind, setting });
+  }
+
+  /**
+   * The castle's turn waits for a hero's answer: the reaction card (who, what, the two options with their consequence).
+   * Enter or 1 takes the first, Esc or 2 the second. Resolves with the answer; the app sends it and plays on.
+   */
+  askReaction(q: ReactionQuestion): Promise<ReactionChoice> {
+    return new Promise((resolve) => {
+      const name = this.heroDef(q.heroId)?.name ?? q.heroId;
+      const done = (c: ReactionChoice) => {
+        if (this.reactWait?.q !== q) return;
+        this.reactWait = null;
+        this.reactEl.classList.add('hidden');
+        clear(this.reactEl);
+        sfx.play('click', { pitch: c === 'yes' ? 1.1 : 0.85 });
+        resolve(c);
+      };
+      this.reactWait = { q, done };
+      this.caption.classList.add('hidden');
+      this.hideTip();
+      const opt = (c: ReactionChoice, keys: [string, string]) => {
+        const o = c === 'yes' ? q.yes : q.no;
+        return h(
+          'button',
+          { type: 'button', class: `dl-react-o ${c === 'yes' ? 'yes' : 'no'}`, 'data-choice': c, onclick: () => done(c) },
+          h('span', { class: 'dl-react-ol' }, o.label, ' ', h('kbd', null, keys[0]), h('kbd', null, keys[1])),
+          h('span', { class: 'dl-react-oc' }, o.line),
+        );
+      };
+      clear(this.reactEl);
+      this.reactEl.append(
+        h('div', { class: 'dl-react-k' }, icon(q.kind === 'overwatch' ? 'shoot' : 'sword', 14), ` ${REACT_NAME[q.kind]} · ${name}`),
+        h('p', { class: 'dl-react-q' }, q.text),
+        h('div', { class: 'dl-react-opts' }, opt('yes', ['1', 'Enter']), opt('no', ['2', 'Esc'])),
+        h('div', { class: 'dl-react-f' }, `The castle waits. To stop being asked, set ${name}'s Reactions (beside Walk/Sneak) to Always or Never.`),
+      );
+      this.reactEl.classList.remove('hidden');
+      this.reactEl.focus({ preventScroll: true });
+      sfx.play('click', { pitch: 1.3, gain: 0.6 });
+    });
+  }
+
   /** V4.0 (spec 26.1): Walk/Sneak is per hero: set the selected hero's (a free command; the engine keeps it). */
   private setSneak(on: boolean): void {
     const sel = this.selected();
@@ -3352,6 +3491,18 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
   private onKey(e: KeyboardEvent): void {
     const s = this.state;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
+    // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
+    if (this.reactWait) {
+      const w = this.reactWait;
+      if (e.key === 'Enter' || e.key === '1') {
+        e.preventDefault();
+        w.done('yes');
+      } else if (e.key === 'Escape' || e.key === '2') {
+        e.preventDefault();
+        w.done('no');
+      }
+      return;
+    }
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (e.key === 'Alt') {

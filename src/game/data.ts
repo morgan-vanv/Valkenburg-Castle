@@ -1,6 +1,6 @@
 // Numbers from docs/v3-spec.md.
 
-import type { AleEffect, AleKind, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, RivalClass, ShopKind, ShopOffer, Stat, Stats, StoryId, Vendor, Village } from './types';
+import type { AleEffect, AleKind, AleOffer, CrewId, DealKind, HeroClass, ItemKind, MonsterKind, ReactionChoice, ReactionKind, ReactionSetting, RivalClass, ShopKind, ShopOffer, Stat, Stats, StoryId, Vendor, Village } from './types';
 import type { ClassInfo } from './api';
 
 /** Spec 16.2: the lantern holds 20; stages bright > 12, dim 7..12, dark 1..6, pitch 0. */
@@ -304,6 +304,16 @@ export const SNEAK_ATTACK_SLOTS = 1;
 /** Free swings: the usual attack with one slot fewer (min 1); a bow swings with 1 slot. */
 export const SWING_SLOT_PENALTY = 1;
 export const SWING_BOW_SLOTS = 1;
+/**
+ * V4.1 (spec 31.13): reactions. A hero's setting for each kind when they haven't chosen one: both ask (the castle's
+ * turn pauses for the answer). Set to always / never per hero and the turn never stops for it.
+ */
+export const REACTION_DEFAULTS: Record<ReactionKind, ReactionSetting> = { hiddenSwing: 'ask', overwatch: 'ask' };
+/**
+ * V4.1 (spec 31.13): the answer when a rules call runs with nobody to ask (a Ctx made outside `apply`, as unit tests
+ * do): hidden heroes hold (stay hidden), overwatch shoots (the pre-31.13 behaviour of each).
+ */
+export const REACTION_FALLBACK: Record<ReactionKind, ReactionChoice> = { hiddenSwing: 'no', overwatch: 'yes' };
 /** Dread (Shadowmancer): 1 mana, 2 Wits slots at range 5; 1+ hits = feared for 2 world phases. */
 export const DREAD_MANA = 1;
 export const DREAD_SLOTS = 2;

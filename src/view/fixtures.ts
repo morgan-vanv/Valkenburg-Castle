@@ -470,6 +470,7 @@ export function fixtureEngine(castle0: CastleDef): Engine {
       pinStories(c);
       return { version: 3, seed, rng: seed, stage: 'camp', campaign: c, delve: null, summary: null };
     },
+    resume: () => null, // V4.1 (spec 31.13): the fixture engine never pauses
     apply(state: GameState, cmd: Command): ApplyResult {
       const res = applyInner(state, cmd);
       // The fixture writes the V3.7 lines into the delve log too (the real engine says them itself).

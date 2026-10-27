@@ -70,7 +70,9 @@ const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
 const VERBOSE = process.env.VERBOSE === '1';
 const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
-const e = createEngine(castle);
+// V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
+// enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
+const e = createEngine(castle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
 const w = new World(castle);
 const ROUND_CAP = 80;
 /**
@@ -151,6 +153,7 @@ const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarm
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
+  if (r.state.delve?.pending) throw new Error(`the bot's turn paused for a reaction: ${r.state.delve.pending.question.text}`); // V4.1 (spec 31.13): never, with the policy
   if (s.delve) {
     const heroIds = new Set(s.delve.heroes.map((h) => h.heroId));
     const nameOf = (id: string) => {

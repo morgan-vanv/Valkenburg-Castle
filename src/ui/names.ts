@@ -1,6 +1,6 @@
 // Player-facing names, glyphs and short texts.
 
-import type { ActionKind, AleEffect, AleKind, Brightness, CrewId, DealKind, HeroClass, Item, JobKind, MonsterKind, RivalCrew, StoryId } from '../game/types';
+import type { ActionKind, AleEffect, AleKind, Brightness, CrewId, DealKind, HeroClass, Item, JobKind, MonsterKind, ReactionKind, ReactionSetting, RivalCrew, StoryId } from '../game/types';
 import {
   BLINK_RANGE, BREATH_DMG, BURN_ROUNDS, CALTROPS_DMG, CLASSES, DIG_NOISE, DRAGON_WAKE_NOISE, FIREBALL_NOISE, FIREBALL_RANGE,
   FIRECRACKER_NOISE, FOCUS_MAX, GLUE_ROUNDS, GLOAM_DMG, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, OIL_LIGHT,
@@ -469,6 +469,27 @@ After moving, a second move (a dash, as far again: 4, Burglar 5) spends the acti
   sneak: `Sneak (S): up to 2 hexes (Burglar 4, dash 4), silent. Sleepers within 2 roll only ${V37.wakeSneak}% per hex (Burglar ${V39.burglarWakeSneak}%; half unlit; ending next to one ${V37.wakeEndSneak}%, Burglar ${V39.burglarWakeEndSneak}%). Awake monsters notice you ahead of them (a searching or hunting one at its sides too) within ${V37.noticeLitSneak} lit (Burglar ${V39.burglarNoticeLitSneak}), ${V37.noticeDarkSneak} unlit; an unaware one at its sides only right beside it (never a Burglar), and none straight behind (hovering an enemy says which way it faces). Your first strike on a monster that has not noticed you gets +${V37.sneakSlots} slot. S switches only the selected hero; Burglars start on Sneak.`,
   swing: 'Free swing: an enemy that is hunting you (or a hostile crew member that has noticed you) strikes once when you move from a hex next to it (away, round it or past it; once a move), with 1 slot fewer. Stepping up to it is free. Sneaking does not avoid it. Your heroes swing the same way at enemies that move from their side while their action is still ready.',
   blind: FACING_HELP.rear,
+};
+
+/** V4.1 (spec 31.13): the reactions a hero can be asked for in the castle's turn, by name. */
+export const REACT_NAME: Record<ReactionKind, string> = { hiddenSwing: 'Hidden swing', overwatch: 'Overwatch' };
+export const SETTING_WORD: Record<ReactionSetting, string> = { ask: 'Ask', always: 'Always', never: 'Never' };
+/** What each reaction is, for the Reactions popover (the hero's name in). */
+export const REACT_HELP: Record<ReactionKind, (n: string) => string> = {
+  hiddenSwing: (n) => `Hidden swing: an enemy steps away from ${n}'s side while ${n} is hidden from it (veiled, or it hasn't spotted them) and ${n}'s action is ready. ${n} may take the free swing, and give themselves away, or let it pass and stay hidden. An enemy that has spotted ${n} always draws the swing.`,
+  overwatch: (n) => `Overwatch: ${n} is on overwatch and an enemy moves or acts within ${DATA.OVERWATCH_RANGE} in sight. ${n} may shoot it now, or hold for another (still armed until the castle's turn ends).`,
+};
+export const REACT_SETTING_HELP: Record<ReactionKind, Record<ReactionSetting, (n: string) => string>> = {
+  hiddenSwing: {
+    ask: () => `The castle's turn pauses and asks: strike, or let it pass.`,
+    always: (n) => `${n} strikes from hiding every time, without asking, and gives themselves away.`,
+    never: (n) => `${n} always lets it pass and stays hidden, without asking.`,
+  },
+  overwatch: {
+    ask: () => `The castle's turn pauses and asks: shoot this one, or hold for another.`,
+    always: (n) => `${n} shoots the first enemy to move in sight, without asking.`,
+    never: (n) => `${n} never shoots from overwatch: it lapses unfired.`,
+  },
 };
 
 /** V4.1 (WS6, spec 31.8): what each arrow does (pack hovers, the Outfit's hover). */
