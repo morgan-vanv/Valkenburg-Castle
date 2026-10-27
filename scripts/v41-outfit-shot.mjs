@@ -15,7 +15,7 @@ await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
 const tag = `${W}`;
-const shot = async (name) => { await p.mouse.move(2, Number(H) / 2); await p.waitForTimeout(200); await p.screenshot({ path: `${out}/${tag}-${name}.png` }); };
+const shot = async (name) => { await p.evaluate(() => { const m = document.querySelector('.lg-main'); if (m) m.scrollTop = 0; }); await p.mouse.move(2, Number(H) / 2); await p.waitForTimeout(200); await p.screenshot({ path: `${out}/${tag}-${name}.png` }); };
 const step = async (s) => { await p.click(`.lg-step[data-step="${s}"]`); await p.waitForTimeout(120); };
 const tab = async (t) => { await p.click(`[data-vendor-tab="${t}"]`); await p.waitForTimeout(120); };
 

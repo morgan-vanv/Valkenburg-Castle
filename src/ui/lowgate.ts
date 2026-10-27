@@ -1176,11 +1176,11 @@ function vendorPanel(el: HTMLElement, id: VendorId, s: GameState, l: Loadout, ho
 }
 
 /** Badges for what the party already has of a ware: "2 packed", "1 on the cart" (never a price). */
-function ownedBadges(c: Campaign, keys: string[], packed: Set<string>): HTMLElement | '' {
+function ownedBadges(c: Campaign, keys: string[], packed: Set<string>): HTMLElement {
   const mine = c.stash.filter((i) => keys.includes(i.kind));
   const nPacked = mine.filter((i) => packed.has(i.id)).length;
   const nCart = mine.length - nPacked;
-  if (!nPacked && !nCart) return '';
+  // Always a cell, so the price and Buy columns line up row to row.
   return h('span', { class: 'lg-badges-r' }, nPacked ? h('span', { class: 'lg-badge on', 'data-owned': 'packed' }, `${nPacked} packed`) : '', nCart ? h('span', { class: 'lg-badge', 'data-owned': 'cart' }, `${nCart} on the cart`) : '');
 }
 
