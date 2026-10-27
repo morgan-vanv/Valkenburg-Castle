@@ -186,7 +186,7 @@ check('Kindle tooltip: 1 mana, 6 rounds of light, silent', /Kindle · 1 mana/.te
 check('Oil help says +8', /\+?8/.test(help.oil ?? '') && !/10/.test(help.oil));
 const missing = await p.evaluate(async () => {
   const n = await import('/src/ui/names.ts');
-  const kinds = ['attack', 'pick', 'smash', 'open', 'take', 'drop', 'give', 'disarm', 'light', 'torch', 'potion', 'revive', 'charge', 'rope', 'climb', 'jump', 'shove', 'free', 'bribe', 'rally', 'guard', 'firebolt', 'kindle', 'mend', 'passLantern', 'winch', 'shutter', 'escape', 'leave', 'overwatch', 'knockback', 'throwCharge', 'dig', 'fireball', 'veil', 'sleep', 'blink', 'ward', 'gust', 'smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple'];
+  const kinds = ['attack', 'pick', 'smash', 'open', 'take', 'drop', 'give', 'disarm', 'light', 'torch', 'potion', 'charge', 'rope', 'climb', 'jump', 'shove', 'bribe', 'rally', 'guard', 'firebolt', 'kindle', 'mend', 'passLantern', 'winch', 'shutter', 'escape', 'leave', 'overwatch', 'knockback', 'throwCharge', 'dig', 'fireball', 'veil', 'sleep', 'blink', 'ward', 'gust', 'smoke', 'glue', 'dart', 'caltrops', 'firecracker', 'key', 'oil', 'grapple'];
   const monsters = ['rats', 'orc', 'spider', 'cutpurse', 'berserker', 'dragon', 'gloam', 'archer', 'captain', 'ghoul'];
   return { acts: kinds.filter((k) => !n.ACTION_HELP[k]), mons: monsters.filter((k) => !n.MONSTER_NOTE[k]) };
 });

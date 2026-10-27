@@ -344,6 +344,7 @@ describe('V4.0 the Lantern Sisters make an entrance (spec 25.4)', () => {
     expect(b.pack?.some((i) => i.kind === 'gatekey')).toBe(true);
     // She dies: the key drops with her pack.
     hurtAny(ctx(s), b.id, 99, 'keven');
+    hurtAny(ctx(s), b.id, 1, 'keven'); // V4.1 (spec 31.4): down first, then dead
     // (The library still holds its own copy: the gate is shut.)
     const pile = s.delve!.ground.find((g) => samePos(g.at, b.at) && g.items.some((i) => i.kind === 'gatekey'));
     expect(pile).toBeTruthy();

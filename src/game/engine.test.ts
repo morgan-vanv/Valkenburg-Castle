@@ -513,7 +513,7 @@ describe('combat', () => {
     expect(hero(r2.state, 'brann').hp).toBe(10 - 3); // 2×1 + 1 perfect
   });
 
-  it('downed heroes bleed out in 2 world phases', () => {
+  it('downed heroes bleed out in 3 world phases (V4.1, spec 31.4)', () => {
     let s = delve();
     put(s, 'brann', GATE);
     hero(s, 'brann').hp = 1;
@@ -521,21 +521,25 @@ describe('combat', () => {
     orc.intent = { kind: 'attack', targetId: 'brann' };
     const r = until(s, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'downed'));
     s = r.state;
-    expect(hero(s, 'brann')).toMatchObject({ status: 'downed', bleed: 2, hp: 0 });
+    expect(hero(s, 'brann')).toMatchObject({ status: 'downed', bleed: 3, hp: 0 });
     s.delve!.monsters = [];
+    s = ok(s, { type: 'endTurn' }).state;
     s = ok(s, { type: 'endTurn' }).state;
     expect(hero(s, 'brann').bleed).toBe(1);
     s = ok(s, { type: 'endTurn' }).state;
     expect(hero(s, 'brann').status).toBe('dead');
   });
 
-  it('revive brings a downed hero back at 3 HP', () => {
+  it('V4.1 (spec 31.4): Revive is gone; a potion gets a downed hero up at 5', () => {
     let s = delve();
     put(s, 'brann', GATE);
     put(s, 'keven', at(1, 5, 7));
-    Object.assign(hero(s, 'brann'), { status: 'downed', hp: 0, bleed: 2 });
-    s = act(s, 'keven', 'revive', { id: 'brann' }).state;
-    expect(hero(s, 'brann')).toMatchObject({ status: 'active', hp: 3, revived: true });
+    Object.assign(hero(s, 'brann'), { status: 'downed', hp: 0, bleed: 3 });
+    expect(e.actions(s, 'keven').some((o) => (o.action as string) === 'revive')).toBe(false);
+    const pot = { id: 'kp', kind: 'potion' as const, name: 'Potion', amount: 1, slots: 1 };
+    hero(s, 'keven').pack.push(pot);
+    s = act(s, 'keven', 'potion', { id: 'brann', itemId: 'kp' }).state;
+    expect(hero(s, 'brann')).toMatchObject({ status: 'active', hp: 5 });
   });
 
   it('monsters ignore downed heroes', () => {
@@ -681,14 +685,15 @@ describe('contracts and summary', () => {
     expect(s.campaign.delveCount).toBe(1);
   });
 
-  it('rescue: free, escort, leave with the prisoner adjacent', () => {
+  it('rescue (V4.1, spec 31.4): Unshackle (Smash), the captive follows at walk 4, leave with them adjacent', () => {
     let s = delve({ kind: 'rescue', heroes: ['brann'] });
     const pr = s.delve!.prisoner!;
     expect(pr.at).toEqual(at(1, 16, 8));
+    expect(pr.freed).toBe(false);
     put(s, 'brann', at(1, 15, 8));
-    s = act(s, 'brann', 'free', { id: pr.id }).state;
+    s = until(s, { type: 'act', heroId: 'brann', action: 'unshackle', target: { id: pr.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'freed')).state;
     expect(s.delve!.prisoner).toMatchObject({ freed: true, escortedBy: 'brann' });
-    expect(Math.max(...e.reachable(s, 'brann', false).map((r) => r.cost))).toBe(3);
+    expect(Math.max(...e.reachable(s, 'brann', false).map((r) => r.cost))).toBe(4);
     // Teleport both to the exit for the test.
     put(s, 'brann', at(1, 18, 7));
     s.delve!.prisoner!.at = at(1, 17, 7);
@@ -2762,10 +2767,10 @@ describe('V3.5', () => {
       expect(r.state.delve!.rivals!.members[2]!.charges).toBe(2); // mana left
     });
 
-    it('a killed cutthroat drops its purse', () => {
+    it('a killed cutthroat drops its purse (V4.1, spec 31.4: once dead; down, it keeps it)', () => {
       const s = crewDelve('ferrymen', [at(2, 13, 2), at(2, 17, 8), at(2, 18, 8)], 'hostile');
       put(s, 'brann', at(2, 12, 2));
-      s.delve!.rivals!.members[0]!.hp = 1;
+      Object.assign(s.delve!.rivals!.members[0]!, { hp: 0, downed: true, bleed: 3 });
       const r = until(s, { type: 'act', heroId: 'brann', action: 'attack', target: { id: 'r1' }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied' && x.id === 'r1'));
       expect(r.state.delve!.ground.find((g) => samePos(g.at, at(2, 13, 2)))!.items.some((i) => i.kind === 'gold' && i.amount === 30)).toBe(true);
     });
@@ -3744,7 +3749,7 @@ describe('V3.7 crews', () => {
     expect(member(r.state, 2).intent?.kind).toBe('firebolt'); // 1 mana left
   });
 
-  it('a hero a member downs is robbed on the spot: gold and gems to its loot; then dragged 3 a round toward the exit, trailing behind', () => {
+  it('a hero a member downs is robbed on the spot: gold and gems to its loot; then carried 3 a round toward the exit, on its hex', () => {
     let s = crewDelve('ferrymen', [at(1, 12, 7), at(2, 17, 4), at(2, 18, 4)], 'hostile', ['brann', 'keven']);
     member(s, 1).hp = 0;
     member(s, 2).hp = 0;
@@ -3768,8 +3773,9 @@ describe('V3.7 crews', () => {
     s = r2.state;
     expect(hero(s, 'brann').bleed).toBe(bleed);
     expect(hero(s, 'brann').status).toBe('downed');
+    // V4.1 (spec 31.4): Carry: the hero shares the member's hex.
     const d = distance(member(s, 0).at, hero(s, 'brann').at);
-    expect(d).toBe(1);
+    expect(d).toBe(0);
     expect(distance(member(s, 0).at, at(1, 12, 7))).toBe(3); // three hexes toward the east exit
     expect(distance(hero(s, 'brann').at, at(1, 18, 7))).toBeLessThan(distance(at(1, 11, 7), at(1, 18, 7)));
     expect(r2.events.some((x) => x.type === 'moved' && x.id === 'r1')).toBe(true);
@@ -3873,10 +3879,14 @@ describe('V3.7 crews', () => {
     expect(hero(r.state, 'brann').status).toBe('downed');
     expect(samePos(hero(r.state, 'brann').at, at(1, 15, 7))).toBe(true);
     // Killed: pack (2 potions) and purse (50) on the ground, and the hero dropped.
+    // V4.1 (spec 31.4): downed first (the hero dropped), then killed (the spoils on the ground).
     const t = structuredClone(s);
     member(t, 0).hp = 1;
     member(t, 0).dragging = 'brann';
-    const r2 = until(t, { type: 'act', heroId: 'sable', action: 'attack', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied' && x.id === ss.id));
+    const r1 = until(t, { type: 'act', heroId: 'sable', action: 'attack', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'downed' && x.id === ss.id));
+    expect(member(r1.state, 0).dragging).toBeUndefined();
+    hero(r1.state, 'sable').acted = false;
+    const r2 = until(r1.state, { type: 'act', heroId: 'sable', action: 'attack', target: { id: ss.id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'monsterDied' && x.id === ss.id));
     const pile = r2.state.delve!.ground.find((g) => samePos(g.at, at(1, 14, 7)))!;
     expect(pile.items.filter((i) => i.kind === 'potion').length).toBe(2);
     expect(pile.items.some((i) => i.kind === 'gold' && i.amount === 50)).toBe(true);
@@ -3980,7 +3990,7 @@ describe('V3.7 crews', () => {
       // Doing nothing: dragged 3 toward the east exit, trailing.
       const r2 = ok(r.state, { type: 'endTurn' });
       expect(distance(member(r2.state, 0).at, at(1, 12, 7))).toBe(3);
-      expect(distance(member(r2.state, 0).at, hero(r2.state, 'brann').at)).toBe(1);
+      expect(distance(member(r2.state, 0).at, hero(r2.state, 'brann').at)).toBe(0); // V4.1 (spec 31.4): Carry, on its hex
       expect(hero(r2.state, 'brann').status).toBe('active');
       // Escape: one hit frees him where he stands.
       const r3 = until(r.state, { type: 'act', heroId: 'brann', action: 'escape', target: { id: member(r.state, 0).id }, focus: 0 }, (ev) => ev.some((x) => x.type === 'released' && x.id === 'brann'));
@@ -3993,37 +4003,14 @@ describe('V3.7 crews', () => {
       expect(member(t, 0).intent?.kind).not.toBe('rob');
     });
 
-    it('V4.0 (spec 29): paralyzed counts as helpless: seized alone, held through the paralysis; a paralyzed friend is not "up"', () => {
+    it('V4.1 (spec 31.4): a poisoned hero is not helpless (poison never downs anyone): not seized', () => {
       const s = scene(at(1, 2, 8), { dozing: true });
       const b0 = hero(s, 'brann') as HeroX;
       b0.dozing = undefined;
       b0.webbed = false;
-      b0.paralyzed = 5;
+      b0.poisoned = true;
       computeIntentsOf(ctx(s));
-      expect(member(s, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
-      const r = ok(s, { type: 'endTurn' });
-      expect(r.events.some((x) => x.type === 'say' && /finds Brann paralyzed and alone/.test(x.text))).toBe(true);
-      const b = hero(r.state, 'brann') as HeroX;
-      expect(b.grabbedBy).toBe(member(r.state, 0).id);
-      expect(b.status).toBe('active');
-      expect(e.actions(r.state, 'brann')).toEqual([]); // still paralyzed: no Escape yet
-      // Keven within 4 but paralyzed too: not "up", so Brann is still alone.
-      const t = scene(at(1, 15, 8), { dozing: true });
-      const bt = hero(t, 'brann') as HeroX;
-      bt.dozing = undefined;
-      bt.webbed = false;
-      bt.paralyzed = 5;
-      hero(t, 'keven').paralyzed = 5;
-      computeIntentsOf(ctx(t));
-      expect(member(t, 0).intent).toMatchObject({ kind: 'rob', targetId: 'brann' });
-      // Keven up within 4: not alone, not seized.
-      const u = scene(at(1, 15, 8), { dozing: true });
-      const bu = hero(u, 'brann') as HeroX;
-      bu.dozing = undefined;
-      bu.webbed = false;
-      bu.paralyzed = 5;
-      computeIntentsOf(ctx(u));
-      expect(member(u, 0).intent?.kind).not.toBe('rob');
+      expect(member(s, 0).intent?.kind).not.toBe('rob');
     });
 
     it('a lone heir downed is fair game: carried off, and the campaign ends', () => {
@@ -5282,14 +5269,14 @@ describe('V4.0 play-test fixes: the Burglar walks 5, class kit is the hero\'s ow
     expect(maxCost(step, 'pim', true)).toBe(4);
   });
 
-  it('a heavy item or the prisoner caps the Burglar at 3 too', () => {
+  it('a heavy item caps the Burglar at 3 too; V4.1 (spec 31.4): the following captive no longer slows anyone', () => {
     const s = alarm(delve());
     put(s, 'pim', PITHALL);
     hero(s, 'pim').pack.push({ id: 'cu', kind: 'hoard', name: 'Brewing copper', amount: 0, slots: 2, heavy: true });
     expect(maxCost(s, 'pim', false)).toBe(3);
     hero(s, 'pim').pack.pop();
     hero(s, 'pim').escorting = 'prisoner';
-    expect(maxCost(s, 'pim', false)).toBe(3);
+    expect(maxCost(s, 'pim', false)).toBe(5);
   });
 
   it('the Sapper (level 3) starts with "Improvised explosives" ×3: their own item kind, no slot, not counted in the pack', () => {

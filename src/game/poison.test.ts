@@ -12,7 +12,7 @@ import { makeHero } from './camp';
 import { hurtAny, makeItem, occupant } from './common';
 import { buildCrew, planRival } from './rivals';
 import { poison } from './poison';
-import { push } from './falls';
+import { fall } from './falls';
 
 const e = createEngine(testCastle);
 const w = new World(testCastle);
@@ -218,8 +218,7 @@ describe('V4.1 downed (spec 31.4)', () => {
   it(`Mend on a downed hero within 3 gets them up at ${MEND_UP_HP}`, () => {
     let s = delve([['brann', 'Brann', 'sellsword'], ['wren', 'Wren', 'hedgewitch']]);
     down(s, 'brann');
-    hero(s, 'brann').at = at(1, 6, 7);
-    hero(s, 'wren').at = at(1, 3, 6);
+    hero(s, 'wren').at = at(1, 6, 7); // two hexes from Brann at (4, 7)
     expect(opt(s, 'wren', 'mend')!.targets.some((t) => t.id === 'brann')).toBe(true);
     s = act(s, 'wren', 'mend', { id: 'brann' }).state;
     expect(hero(s, 'brann')).toMatchObject({ status: 'active', hp: MEND_UP_HP });
@@ -342,10 +341,8 @@ describe('V4.1 Carry (spec 31.4)', () => {
     hero(s, 'keven').at = at(1, 9, 2);
     hero(s, 'brann').at = at(1, 8, 2);
     s = act(s, 'keven', 'carry', { id: 'brann' }).state;
-    // A shove into the pit (Keven at (10,2), the pit mouth (10,3) below).
-    const c = ctx(s);
-    hero(s, 'keven').at = at(1, 10, 2);
-    push(c, 'keven', at(1, 10, 1), null);
+    // Keven goes down the pit mouth (10, 3): Level 2's bridge, a level down.
+    fall(ctx(s), 'keven', at(1, 10, 3), null);
     expect(hero(s, 'keven').at.level).toBe(2);
     expect(hero(s, 'brann').status).toBe('dead');
   });
@@ -400,7 +397,9 @@ describe('V4.1 shackled captives and Unshackle (spec 31.4)', () => {
     s = act(s, 'keven', 'unshackle', { id: 'p1', itemId: picks.id }).state;
     expect(hero(s, 'keven').escorting).toBe('p1');
     expect(Math.max(...e.reachable(s, 'keven').map((r) => r.cost))).toBe(4);
-    s = ok(s, { type: 'move', heroId: 'keven', path: [at(1, 4, 8), at(1, 3, 8)] }).state;
+    const walk = e.reachable(s, 'keven').find((r) => samePos(r.to, at(1, 2, 8)))!;
+    expect(walk.cost).toBeGreaterThanOrEqual(3);
+    s = ok(s, { type: 'move', heroId: 'keven', path: walk.path }).state;
     const pr = s.delve!.prisoner!;
     expect(Math.abs(pr.at.q - hero(s, 'keven').at.q) + Math.abs(pr.at.r - hero(s, 'keven').at.r)).toBeLessThanOrEqual(2);
     s = endTurn(s).state;
@@ -436,6 +435,7 @@ describe('V4.1 crews by the same rules (spec 31.4, pillar 17)', () => {
   it('a member at 0 HP goes down (bleeds out in 3), any damage kills it and drops its loot', () => {
     const { s, cr } = crewDelve();
     const r = cr.members[0] as RivalX;
+    s.delve!.ground = [];
     r.loot.push(makeItem({ s: s as GameStateX }, 'gold', 30));
     hurtAny(ctx(s), r.id, r.hp, 'keven');
     expect(r).toMatchObject({ downed: true, hp: 0, bleed: BLEED_START });

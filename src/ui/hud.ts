@@ -366,7 +366,7 @@ export class Hud {
   select(id: string): void {
     const d = this.state?.delve;
     const hd = d?.heroes.find((x) => x.heroId === id);
-    if (!hd || hd.status !== 'active') return;
+    if (!hd || (hd.status !== 'active' && !this.crawler(hd))) return;
     this.selectedId = id;
     this.pending = null;
     this.otherReach = null;
@@ -507,13 +507,20 @@ export class Hud {
     return !!d && d.phase === 'player' && !!sel && sel.status === 'active' && !sel.grabbedBy && !sel.webbed && !(sel.rooted ?? 0) && this.calmState().calm;
   }
 
+  /** V4.1 (spec 31.4): a downed hero who may crawl (splints, nobody carries or holds them): selectable, moves 1, may Leave. */
+  private crawler(h: HeroInDelve): boolean {
+    const d = this.state?.delve;
+    if (!d || h.status !== 'downed' || h.grabbedBy || !this.state || !pairsHome(this.state.campaign.village, 'smith', 'surgeon')) return false;
+    return !d.heroes.some((x) => x.carrying === h.heroId && x.status === 'active') && !d.rivals?.members.some((r) => r.dragging === h.heroId && r.hp > 0 && !r.goneOut);
+  }
+
   /** Recompute reach and options and redraw panels and highlights. */
   refresh(): void {
     const s = this.state;
     const d = s?.delve;
     if (!s || !d) return;
     const sel = this.selected();
-    const canAct = !!sel && sel.status === 'active' && d.phase === 'player';
+    const canAct = !!sel && (sel.status === 'active' || this.crawler(sel)) && d.phase === 'player';
     this.reach = canAct && !this.busy ? this.engine.reachable(s, sel.heroId, this.sneak) : [];
     this.otherReach = null;
     if (canAct && !this.busy && this.freeMove()) {
@@ -2391,7 +2398,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       const poisonMark = hd.status === 'downed' && hd.poisoned ? h('span', { class: 'dl-si venom', tabindex: 0, 'aria-label': 'Poisoned', 'data-tip': `${POISON_TIP}\nDown, it doesn't hurt them; cure it before they get up.` }, icon('venom', 13)) : '';
       return h(
         'div',
-        { class: `dl-rcard st-${hd.status} cls-${def.cls}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}` },
+        { class: `dl-rcard st-${hd.status} cls-${def.cls} ${sel ? 'sel' : ''}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}`, ...(this.crawler(hd) ? { onclick: () => this.select(hd.heroId) } : {}) },
         badge,
         h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
       );
