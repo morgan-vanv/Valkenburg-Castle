@@ -287,6 +287,42 @@ describe('V4.0 the Lantern Sisters make an entrance (spec 25.4)', () => {
     expect([...seen].sort()).toEqual([posKey(BREACH_EXIT), posKey(SALLY_EXIT)].sort());
   }, 20000);
 
+  it('V4.1 (owner): never by the party\'s own way in; by the main gate when the party came another way', () => {
+    const s = delve();
+    const [gate, sally, breach] = castle.entrances as [Pos, Pos, Pos];
+    for (const [party, others] of [[sally, [gate, breach]], [breach, [gate, sally]], [gate, [sally, breach]]] as [Pos, Pos[]][]) {
+      const seen = new Set<string>();
+      for (let seed = 1; seed < 60; seed++) {
+        (s as GameStateX).rng = seed;
+        const cr = makeCrew(w, s as GameStateX, s.delve as DelveX, 1, party);
+        if (cr) seen.add(posKey(cr.members[0]!.at));
+      }
+      expect(seen.has(posKey(party))).toBe(false);
+      expect([...seen].sort()).toEqual(others.map(posKey).sort());
+    }
+  }, 30000);
+
+  it('V4.1: coming by the open main gate, the Sisters walk in; nothing is blasted or unbarred', () => {
+    const c2: CastleDef = { ...castle, rivalEntrances: [castle.entrances[0]!] };
+    const w2 = new World(c2);
+    for (let seed = 1; seed < 60; seed++) {
+      const s = delve(camp(seed));
+      const cr = makeCrew(w2, s as GameStateX, s.delve as DelveX, 1, castle.entrances[1]!);
+      if (!cr) continue;
+      expect(cr.members.some((m) => m.pack?.some((i) => i.kind === 'gatekey'))).toBe(false);
+      s.delve!.rivals = cr;
+      cr.entersRound = s.delve!.round;
+      put(s, 'keven', L1(3, 14));
+      put(s, 'brann', L1(4, 14));
+      const r = ok(s, { type: 'endTurn' });
+      expect((r.state.delve!.rivals as CrewX).entered).toBe(true);
+      expect(r.events.some((x) => x.type === 'blast')).toBe(false);
+      expect(r.events.some((x) => x.type === 'say' && /key turns|set a charge/.test(x.text))).toBe(false);
+      return;
+    }
+    throw new Error('no crew rolled');
+  }, 20000);
+
   it('by a shut sally port: the Burglar sister unlocks the gate, the crew bars it behind them, and her key drops when she dies', () => {
     let s = sistersBy(SALLY_EXIT);
     const burglar = s.delve!.rivals!.members.find((r) => r.cls === 'burglar')!;

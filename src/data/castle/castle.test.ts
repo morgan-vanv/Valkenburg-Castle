@@ -732,8 +732,8 @@ describe('castle V4.0: the shut ways in (spec 25)', () => {
     expect(gate?.locked && gate?.barred).toBe(true);
     expect(breach.kind).toBe('rubble');
     for (const p of breach.at) expect(tile(p)?.kind === 'cracked' && tile(p)?.heap, show(p)).toBe(true);
-    // The rival entrances are exactly the two shut ways.
-    expect(castle.rivalEntrances.map(posKey).sort()).toEqual([sally, breach].map((x) => posKey(castle.entrances[x.entrance]!)).sort());
+    // V4.1 (owner): the rival entrances are every way in (the party's own is ruled out per delve).
+    expect(castle.rivalEntrances.map(posKey).sort()).toEqual(castle.entrances.map(posKey).sort());
   });
 
   /** Walk from the main gate: doors pass (locked ones too), but not the barred gate or the rubble. */
