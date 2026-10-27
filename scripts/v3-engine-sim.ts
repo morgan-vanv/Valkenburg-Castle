@@ -1129,7 +1129,7 @@ for (let i = 0; i < N; i++) {
     C.village.innkeeper = true;
     const sites = castle.contractSites.filter((x) => x.at.level === 2 && !x.story && !x.hideout);
     const site = sites[i % sites.length]!;
-    scenarioContract = { id: `l2-${i}`, kind: site.kind, title: `L2 ${site.kind} at ${site.where}`, brief: '', siteId: site.id, level: 2, bounty: 200, warnings: [] };
+    scenarioContract = { id: `l2-${i}`, kind: site.kind, title: `L2 ${site.kind} at ${site.where}`, brief: '', siteId: site.id, level: 2, bounty: 200, warnings: [], subject: site.kind === 'recover' ? 'the old reeve\'s seal' : 'a carter from Lowgate' } as Contract;
     C.board = [scenarioContract, ...C.board];
   }
   if (V41) s = campSell(s);
