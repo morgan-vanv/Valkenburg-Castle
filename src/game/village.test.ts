@@ -117,9 +117,9 @@ describe('V4.1 WS1 (spec 31.2): gold and the first delve', () => {
     for (const k of s.campaign.board.filter((x) => !x.story)) expect(k.bounty).toBe(BOUNTY[k.kind][k.level]);
   });
 
-  it('starts with 120 gold', () => {
-    expect(START_GOLD).toBe(120);
-    expect(e.newGame(9).campaign.gold).toBe(120);
+  it('starts with 70 gold (V4.1 squads, spec 31.12; was 120)', () => {
+    expect(START_GOLD).toBe(70);
+    expect(e.newGame(9).campaign.gold).toBe(70);
   });
 
   it('story contracts pay 0 gold (still +1 reputation and XP); "Bring back" contracts pay 0', () => {
@@ -315,7 +315,7 @@ describe('V4.1 WS5 (spec 31.3): Ilse and the village pairs', () => {
     expect(Object.values(locked(s)).every((x) => !x)).toBe(true);
     expect(e.ales(s).find((a) => a.kind === 'glowworm')!.locked).toMatch(/copper/); // the copper's ales still need it
     s = ok(s, { type: 'buyAle', heroId: 'brann', ale: 'dragonfire' }).state;
-    expect(s.campaign.gold).toBe(120 - 25);
+    expect(s.campaign.gold).toBe(START_GOLD - 25);
     const t = ok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 1, packs: {} }).state;
     expect(hero(t, 'brann').ale).toBe('dragonfire');
     // Night-eye and Spider-milk: the ale is drunk and carried as its effect name (their rules are WS2's and WS3's).
@@ -332,7 +332,7 @@ describe('V4.1 WS5 (spec 31.3): Ilse and the village pairs', () => {
     s.campaign.village.alchemist = true;
     expect(e.shop(s).find((o) => o.kind === 'charge')).toMatchObject({ price: 30, vendor: 'gerda' });
     const r = ok(s, { type: 'buy', kind: 'charge' }).state;
-    expect(r.campaign.gold).toBe(120 - 30);
+    expect(r.campaign.gold).toBe(START_GOLD - 30);
   });
 
   it('Aldric + Ilse: the greater potion (35) and the antidote at 12', () => {
@@ -347,7 +347,7 @@ describe('V4.1 WS5 (spec 31.3): Ilse and the village pairs', () => {
     expect(e.shop(s).find((o) => o.kind === 'antidote')).toMatchObject({ price: 12, vendor: 'aldric' });
     let t = ok(s, { type: 'buy', kind: 'greaterpotion' }).state;
     t = ok(t, { type: 'buy', kind: 'antidote' }).state;
-    expect(t.campaign.gold).toBe(120 - 35 - 12);
+    expect(t.campaign.gold).toBe(START_GOLD - 35 - 12);
     expect(t.campaign.stash.map((i) => i.kind)).toEqual(['greaterpotion', 'antidote']);
   });
 

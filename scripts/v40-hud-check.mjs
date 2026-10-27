@@ -5,7 +5,9 @@
 // the hovered figure, the monster sight shading on hover, the target card and the roll panel (a % on each die, an
 // outcome bar, Focus diamonds raising the kill chance), the castle's turn (banner, folded hotbar), the Chronicle
 // folding and opening (remembered), the parley tiles, the return report's boxes, and the first-delve coach marks
-// (shown once, gone for good once done). V4.1 poison (spec 31.4): the drop on a card, the antipoison from the pack; a downed ally's
+// (shown once, gone for good once done). V4.1 (spec 31.13): reactions: the Reactions button and popover, the castle's
+// turn stopping at an overwatch question (the card, the save holding it, the card again after a reload, key 1 answering
+// and the turn playing on), and a hero set to Always never stopping it. V4.1 poison (spec 31.4): the drop on a card, the antipoison from the pack; a downed ally's
 // bleed count, Carry (the body on the carrier's hex). V4.0 spec 30.3/30.4: the hovered (or Tab-chosen) target marked apart from the other options, a
 // pill entry marking its figure, a jump's landing; a Sapper with no charges and nobody in reach shows no unusable buttons;
 // the hotbar never scrolls at 1280, 1440 and 2560 wide (SHOTS=<dir> saves screenshots). No page errors.
@@ -24,7 +26,13 @@ const check = (name, ok, extra = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
 };
-const idle = () => p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 120000 });
+// V4.1 (spec 31.13): a reaction card that comes up in a castle's turn the check isn't about is answered (the first
+// option) so the turn plays on; the reactions section sets window.__keepReact to look at the card itself.
+const idle = () => p.waitForFunction(() => {
+  const r = document.querySelector('.dl-react');
+  if (r && !r.classList.contains('hidden') && !window.__keepReact) r.querySelector('[data-choice="yes"]')?.click();
+  return window.vc && !window.vc.busy();
+}, null, { timeout: 120000 });
 const tip = (sel) => p.$eval(sel, (e) => e.dataset.tip ?? e.getAttribute('title') ?? '').catch(() => '');
 const text = (sel) => p.$eval(sel, (e) => e.innerText).catch(() => '');
 const shown = (sel) => p.$eval(sel, (e) => !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none').catch(() => false);
@@ -45,6 +53,7 @@ const seed = await p.evaluate(async () => {
   for (let seed = 1; seed < 80; seed++) {
     const s = E.newGame(seed);
     s.campaign.gold = 1000;
+    s.campaign.squadSlots = 4; // V4.1 (spec 31.12): a new campaign takes 3; this check plays a full four
     window.vc.load(s);
     for (const r of window.vc.state().campaign.recruits) await window.vc.send({ type: 'hire', heroId: r.hero.id });
     for (const k of ['torch', 'potion', 'smoke']) await window.vc.send({ type: 'buy', kind: k });
@@ -472,6 +481,91 @@ if (crewAt) {
   await p.keyboard.press('Escape');
   check('Esc walks away', !(await shown('.dl-parley')));
 } else check('the Sisters on the map for the parley', false, 'no crew member');
+
+// ---- V4.1 (spec 31.13): reactions. The castle's turn stops at a question, shows the card, and plays on after the answer.
+{
+  // A hero on overwatch (any class: the shot uses their weapon) and an orc hunting them a few hexes off in sight.
+  const scene = await p.evaluate(() => {
+    const E = window.vcEngine;
+    const base = structuredClone(window.vc.state());
+    const d0 = base.delve;
+    const h0 = d0.heroes.find((x) => x.status === 'active');
+    const vis = E.visibility(base).visible;
+    const orc = d0.monsters.find((m) => m.kind === 'orc' && m.hp > 0) ?? d0.monsters.find((m) => m.hp > 0 && m.kind !== 'gloam' && m.kind !== 'dragon');
+    if (!h0 || !orc) return null;
+    const dist = (a, b) => (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
+    const spots = [...vis].map((k) => { const [lv, q, r] = k.split(/[:,]/).map(Number); return { level: lv, q, r }; }).filter((x) => x.level === h0.at.level && dist(x, h0.at) >= 2 && dist(x, h0.at) <= 4);
+    for (const at of spots) {
+      const s = structuredClone(base);
+      const d = s.delve;
+      d.rivals = null;
+      d.monsters = d.monsters.filter((m) => m.id === orc.id);
+      const h = d.heroes.find((x) => x.heroId === h0.heroId);
+      h.overwatch = true;
+      h.acted = true;
+      h.moved = true;
+      h.facing = undefined;
+      h.reactions = {};
+      const m = d.monsters[0];
+      m.at = { ...at };
+      m.awareness = 'hunting';
+      m.noticedIds = d.heroes.map((x) => x.heroId);
+      m.hp = 99;
+      if (d.heroes.some((x) => x.at.level === at.level && x.at.q === at.q && x.at.r === at.r)) continue;
+      const r = E.apply(s, { type: 'endTurn' });
+      if (r.state.delve?.pending?.question.kind === 'overwatch') return { s, hero: h.heroId, q: r.state.delve.pending.question };
+    }
+    return null;
+  });
+  check('reactions: a scene where an overwatch shot is asked', !!scene, scene ? scene.q.text : 'none found');
+  if (scene) {
+    await settings({ speed: 4 });
+    await p.evaluate((s) => { window.__keepReact = true; window.vc.load(s); }, scene.s);
+    await p.waitForTimeout(200);
+    // The Reactions button beside the name, its popover with the per-hero settings.
+    await p.evaluate((id) => window.vc.hud.select(id), scene.hero);
+    await p.waitForTimeout(150);
+    const btn = await p.$('.dl-hotbar .dl-react-b');
+    check('the hero block has a Reactions button with a hover that explains it', !!btn && /Reactions ·[\s\S]*Ask pauses the castle's turn/.test(await tip('.dl-hotbar .dl-react-b')));
+    if (btn) {
+      await btn.click();
+      await p.waitForTimeout(150);
+      const pop = await p.evaluate(() => { const e = document.querySelector('.dl-reacts-pop'); return e ? { rows: [...e.querySelectorAll('.dl-reacts-row')].map((r) => r.querySelector('.dl-reacts-k').textContent), on: [...e.querySelectorAll('.dl-seg-b.on')].map((b) => b.textContent) } : null; });
+      check('...opening a popover: a row per reaction, each on Ask', !!pop && pop.rows.includes('Hidden swing') && pop.on.every((x) => x === 'Ask'), JSON.stringify(pop));
+      await p.keyboard.press('Escape');
+      await p.waitForTimeout(100);
+      check('...Esc closes it', !(await p.$('.dl-reacts-pop')));
+    }
+    // End turn: the playback stops at the question with the card up.
+    await p.evaluate(() => { window.__endDone = false; void window.vc.send({ type: 'endTurn' }).then(() => (window.__endDone = true)); });
+    await p.waitForFunction(() => { const r = document.querySelector('.dl-react'); return r && !r.classList.contains('hidden'); }, null, { timeout: 120000 });
+    const card = await p.evaluate(() => { const r = document.querySelector('.dl-react'); return { text: r.innerText, opts: [...r.querySelectorAll('.dl-react-o')].map((b) => b.dataset.choice), busy: window.vc.busy(), pending: !!window.vc.state().delve.pending, saved: !!JSON.parse(localStorage.getItem('vc.save.v39') ?? '{}').delve?.pending }; });
+    check('the castle\'s turn stops at the question: the reaction card (who, the question, Shoot / Hold with what each does, keys)', /Overwatch ·/i.test(card.text) && card.text.includes(scene.q.text) && /Shoot[\s\S]*1[\s\S]*Enter/.test(card.text) && /Hold[\s\S]*2[\s\S]*Esc/.test(card.text) && card.opts.join() === 'yes,no', card.text.replace(/\n/g, ' | '));
+    check('...the turn waits (busy), the question is in the state and in the save', card.busy && card.pending && card.saved);
+    // A reload while it waits: the card comes back.
+    await p.reload();
+    await p.waitForFunction(() => !!window.vc);
+    await p.evaluate(() => { window.__keepReact = true; const raw = localStorage.getItem('vc.save.v39'); if (raw) window.vc.load(window.vcEngine.deserialize(raw)); });
+    await p.waitForFunction(() => { const r = document.querySelector('.dl-react'); return r && !r.classList.contains('hidden'); }, null, { timeout: 120000 });
+    check('after a reload mid-question, the castle\'s turn plays up to it and the card shows again', (await text('.dl-react')).includes(scene.q.text));
+    // Answer with the key: 1 shoots; the turn plays on to the player's phase.
+    await p.keyboard.press('1');
+    await idle();
+    await p.waitForTimeout(200);
+    const after = await p.evaluate((id) => { const s = window.vc.state(); return { pending: !!s.delve?.pending, phase: s.delve?.phase, round: s.delve?.round, card: !document.querySelector('.dl-react').classList.contains('hidden'), over: !!document.querySelector('.dl-hotbar.folded'), shot: s.delve?.log.some((l) => l.includes('looses an arrow') || l.includes('Overwatch')) }; }, scene.hero);
+    check('...key 1 answers: the card goes, the turn plays on to the next round', !after.pending && after.phase === 'player' && after.round === scene.s.delve.round + 1 && !after.card && !after.over, JSON.stringify(after));
+    // Set to Always: the same turn never stops.
+    await p.evaluate((x) => { window.vc.load(x.s); }, scene);
+    await p.waitForTimeout(150);
+    await p.evaluate((id) => window.vc.send({ type: 'setReaction', heroId: id, kind: 'overwatch', setting: 'always' }), scene.hero);
+    await p.evaluate(() => { window.__sawCard = false; const tick = () => { const r = document.querySelector('.dl-react'); if (r && !r.classList.contains('hidden')) window.__sawCard = true; if (!window.__endDone) requestAnimationFrame(tick); }; window.__endDone = false; requestAnimationFrame(tick); void window.vc.send({ type: 'endTurn' }).then(() => (window.__endDone = true)); });
+    await p.waitForFunction(() => window.__endDone, null, { timeout: 120000 });
+    const alw = await p.evaluate(() => ({ saw: window.__sawCard, pending: !!window.vc.state().delve?.pending, phase: window.vc.state().delve?.phase }));
+    check('a hero set to Always: the castle\'s turn never stops for it', !alw.saw && !alw.pending && alw.phase === 'player', JSON.stringify(alw));
+    await p.evaluate(() => { window.__keepReact = false; });
+    await settings();
+  }
+}
 
 // ---- the return report
 await p.evaluate(async () => {

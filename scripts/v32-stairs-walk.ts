@@ -14,7 +14,7 @@ import type { DelveX } from '../src/game/state';
 import { linkAt, linkButton, linkReach } from '../src/view/links';
 
 const SEED = Number(process.argv[2] ?? 1980);
-const e = createEngine(castle);
+const e = createEngine(castle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') }); // V4.1 (spec 31.13): never waits for an answer
 const w = new World(castle);
 const stairs = castle.links.find((l) => l.kind === 'stairs')!;
 const goal = stairs.a.level === 1 ? stairs.a : stairs.b;

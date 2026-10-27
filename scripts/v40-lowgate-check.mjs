@@ -3,7 +3,8 @@
 // choosing a job selects it; hiring from step 2 fills a party slot and costs the price; heroes
 // can leave the party and come back from the roster bench; healing shows in a wounded hero's
 // slot only with the surgeon home; buying on step 3 puts the item in the selected hero's pack;
-// the cart keeps valuables apart from gear and Sell all sells only valuables; V4.1 WS4 (spec 31.6): the Outfit step's
+// the cart keeps valuables apart from gear and Sell all sells only valuables; V4.1 (spec 31.11): the board's two labelled rows
+// (pinned by the village above work for hire), at most 3 cards each, a captive first, "+N more"; V4.1 WS4 (spec 31.6): the Outfit step's
 // two counters (Yours: packs and Keven's cart, no prices; Vendors: four tabs, a price and "Buy · N" on every live row,
 // locked rows with an in-voice hint, forge gear and ales bought for the selected hero); step 4 lists only the main gate on a new campaign
 // and shows no sketch (V4.0 spec 30.5: with a remembered Level 1 the sketch fills ≥ 45% of the window's height, the rest
@@ -48,7 +49,7 @@ for (const s of ['setout', 'outfit', 'party', 'job']) {
   check(`step "${s}" is clickable out of order`, (await page()) === s);
 }
 const head = await p.$eval('.lg-head', (e) => e.innerText);
-check('header: Delve 1, Lowgate, gold', /Delve 1/i.test(head) && /Lowgate/.test(head) && /120\s*gold/.test(head), head.replace(/\n/g, ' | ').slice(0, 120));
+check('header: Delve 1, Lowgate, gold', /Delve 1/i.test(head) && /Lowgate/.test(head) && /70\s*gold/.test(head), head.replace(/\n/g, ' | ').slice(0, 120));
 check('step summaries: the job, "Keven alone", "Packs empty", "Main gate"', /Rescue Brother Aldric|Recover|Rescue/.test(head) && /Keven alone/.test(head) && /Packs empty/.test(head) && /Main gate/.test(head));
 check('primary action bottom-right: "Next: Party"', /Next: Party/.test(await p.$eval('.lg-foot-r', (e) => e.innerText)));
 check('no "Same as last time" without a last loadout', !(await p.$('[data-same]')));
@@ -73,6 +74,18 @@ check('renown pips at the step heading, with a hover text', !!(await p.$('.lg-re
 await p.click('.lg-house[data-house="chapel"]');
 await p.waitForTimeout(80);
 check('the chapel\'s plea seal selects that job', (await p.$eval('.lg-card[data-story="surgeon"]', (e) => e.getAttribute('aria-pressed'))) === 'true');
+// V4.1 (spec 31.11): the board in two labelled rows, the village's pins above work for hire, at most 3 cards each.
+const boardRows = () => p.$$eval('.lg-board-row', (els) => els.map((e) => ({ id: e.dataset.row, label: e.querySelector('.lg-board-h')?.textContent, tip: e.querySelector('.lg-board-h')?.dataset.tip ?? '', cards: [...e.querySelectorAll('.lg-card')].map((c) => ({ story: c.dataset.story, captive: c.dataset.captive })), more: e.querySelector('.lg-board-more')?.textContent ?? '' })));
+let rows = await boardRows();
+check('board: "Pinned by the village" row above "Work for hire"', rows.map((r) => r.id).join(',') === 'village,hire' && rows[0].label === 'Pinned by the village' && rows[1].label === 'Work for hire', rows.map((r) => r.label).join(' / '));
+check('board: the row labels explain themselves (gifts, win people back; gold)', /gifts/.test(rows[0].tip) && /win people back/.test(rows[0].tip) && /gold/.test(rows[1].tip));
+check('board: the village row holds the pleas, work for hire the bounties', rows[0].cards.every((x) => x.story) && rows[1].cards.every((x) => !x.story && !x.captive) && rows[1].cards.length > 0);
+check('board: at most 3 cards a row', rows.every((r) => r.cards.length <= 3), rows.map((r) => r.cards.length).join('+'));
+await p.focus('.lg-board-village .lg-board-h');
+await p.keyboard.press('Tab');
+await p.keyboard.press('Shift+Tab');
+await p.waitForTimeout(80);
+check('board: the village row label shows its tip on keyboard focus', /gifts/.test(await p.evaluate(() => document.querySelector('.lg-tip:not(.hidden)')?.innerText ?? '')));
 
 // ---- step 2: Party
 await p.click('[data-next="party"]');
@@ -97,7 +110,7 @@ const r0 = await p.$eval('.lg-rc', (e) => e.dataset.recruit);
 await p.click(`.lg-rc[data-recruit="${r0}"] [data-hire]`);
 await p.waitForTimeout(120);
 let s = await st();
-check('hiring costs the price (120 → 60)', s.campaign.gold === 60, `${s.campaign.gold}`);
+check('hiring costs the price (70 → 10; V4.1 squads)', s.campaign.gold === 10, `${s.campaign.gold}`);
 check('the hire goes straight into the party slot', (await p.$$('.lg-slot.hero')).length === 2 && !!(await p.$(`.lg-slot.hero[data-hero="${r0}"]`)));
 check('the step summary lists the party', (await p.$eval('.lg-step[data-step="party"]', (e) => e.innerText)).includes(s.campaign.roster[1].name));
 await p.click(`[data-out="${r0}"]`);
@@ -106,6 +119,28 @@ check('a hero can leave the party, and waits on the roster bench', (await p.$$('
 await p.click(`[data-bench="${r0}"]`);
 await p.waitForTimeout(80);
 check('...and come back from the bench', (await p.$$('.lg-slot.hero')).length === 2);
+// V4.1 (squads, spec 31.12): three slots on a new campaign; the fourth is locked with Wim's hint until the muster roll is home.
+{
+  const lock = await p.$eval('.lg-slot.locked', (e) => ({ slot: e.dataset.slot, text: e.innerText, tip: e.dataset.tip ?? '' })).catch(() => null);
+  check('squads: the fourth slot is locked, with Wim\'s hint about the muster roll', !!lock && lock.slot === '3' && /Wim says the old muster roll is in the officers' quarters\. With it, a fourth could sign on\./.test(lock.text), JSON.stringify(lock));
+  check('squads: "Up to three for now."', /Up to three for now\./.test(await text()));
+  await edit(`const mk = (id, name) => ({ id, name, cls: 'sellsword', level: 1, xp: 0, maxHp: 10, hp: 10, stats: { might: 65, finesse: 40, wits: 30, nerve: 50 }, weaponTier: 0, armorTier: 0, wounded: 0, kills: 0, delves: 0 }); s.campaign.roster.push(mk('sq-a', 'Sq Ada'), mk('sq-b', 'Sq Bors'));`);
+  await p.click('[data-bench="sq-a"]');
+  await p.waitForTimeout(80);
+  const full = await p.$eval('[data-bench="sq-b"]', (e) => ({ off: e.getAttribute('aria-disabled'), tip: e.dataset.tip ?? '' }));
+  check('squads: with three in, the bench is full ("The party is full")', (await p.$$('.lg-slot.hero')).length === 3 && full.off === 'true' && /The party is full/.test(full.tip), JSON.stringify(full));
+  await edit(`s.campaign.squadSlots = 4; s.campaign.village.muster = true;`);
+  check('squads: with the muster roll home, the fourth slot opens', !(await p.$('.lg-slot.locked')) && (await p.$$('.lg-slot')).length === 4 && /Up to four\./.test(await text()));
+  await p.click('[data-bench="sq-b"]');
+  await p.waitForTimeout(80);
+  check('squads: ...and a fourth hero goes in', (await p.$$('.lg-slot.hero')).length === 4);
+  await p.click('[data-out="sq-a"]');
+  await p.waitForTimeout(60);
+  await p.click('[data-out="sq-b"]');
+  await p.waitForTimeout(60);
+  await edit(`s.campaign.roster = s.campaign.roster.filter((h) => !/^sq-/.test(h.id)); s.campaign.squadSlots = 3; s.campaign.village.muster = false;`);
+  check('squads: back to the party of two', (await p.$$('.lg-slot.hero')).length === 2);
+}
 // healing: no surgeon, a potion on the cart
 await edit(`s.campaign.roster[1].hp = s.campaign.roster[1].maxHp - 3; s.campaign.stash.push({ id: 'pot-x', kind: 'potion', name: 'Potion', amount: 1, slots: 1 });`);
 check('a wounded hero shows an HP bar', !!(await p.$(`.lg-slot.hero[data-hero="${r0}"] .lg-hpbar`)));
@@ -323,6 +358,29 @@ await p.waitForTimeout(150);
 s = await st();
 check('back in camp: lands on step 1', (await page()) === 'job' && s.stage === 'camp');
 check('no welcome card after delve 1', !(await p.$('.lg-welcome')));
+rows = await boardRows();
+check('after delve 1: still two rows, at most 3 cards each', rows.length >= 1 && rows.every((r) => r.cards.length <= 3) && (await p.$$('.lg-card')).length <= 6, rows.map((r) => `${r.id}:${r.cards.length}`).join(' '));
+// More pleas than fit, and a hero taken by a crew: the captive always shows (first) and counts toward the 3; "+N more".
+{
+  const saved = await st();
+  await edit(`
+    const plea = s.campaign.board.find((k) => k.story) ?? { kind: 'rescue', title: 'A plea', brief: 'Help.', siteId: 'x', level: 1, bounty: 0, warnings: [] };
+    for (const id of ['surgeon', 'smith', 'alchemist', 'innkeeper']) if (!s.campaign.board.some((k) => k.story === id)) s.campaign.board.push({ ...plea, id: 'plea-' + id, story: id, title: 'Plea ' + id });
+    const hero = structuredClone(s.campaign.roster.find((x) => x.id !== 'keven') ?? s.campaign.roster[0]);
+    hero.id = 'taken1'; hero.name = 'Bram';
+    s.campaign.captives = [...(s.campaign.captives ?? []), { hero, crew: 'ferrymen', siteId: 'hideout-test', delve: 1 }];
+    s.campaign.board.push({ id: 'bring-bram', kind: 'rescue', title: 'Bring back Bram', brief: 'Bram is held.', siteId: 'hideout-test', level: 2, bounty: 0, warnings: [] });
+  `);
+  await step('job');
+  rows = await boardRows();
+  const vr = rows.find((r) => r.id === 'village');
+  const pleas = (await st()).campaign.board.filter((k) => k.story).length;
+  check('board: a captive shows first in the village row and counts toward the 3', !!vr && vr.cards.length === 3 && vr.cards[0].captive === 'taken1', vr?.cards.map((x) => x.captive || x.story).join(','));
+  check('board: "+N more once you\'ve seen to these" for the pleas that wait', !!vr && vr.more === `+${pleas + 1 - 3} more once you've seen to these`, vr?.more);
+  check('board: work for hire still at most 3', (rows.find((r) => r.id === 'hire')?.cards.length ?? 0) <= 3);
+  await p.evaluate((x) => window.vc.load(x), saved);
+  await step('job');
+}
 const alive = partyBefore.filter((id) => s.campaign.roster.some((x) => x.id === id));
 check('"Same as last time" offered when the last party is all on the roster', !!(await p.$('[data-same]')) === (alive.length === 2), `${alive}`);
 if (await p.$('[data-same]')) {

@@ -16,6 +16,7 @@ import {
 // V4.1 (WS1/WS5, spec 31.2, 31.3)
 import { ARROW_BUNDLE } from './data'; // V4.1 (WS6)
 import { CAPTIVE_PAY, GIFTS, PAIR_PRICES, POTION_HEAL, STORY_PAY, SUPPER_HEAL, pairHome } from './data';
+import { MUSTER_REP, SQUAD_SLOTS_MAX, SQUAD_SLOTS_START, contractXpEach, squadSlots } from './data'; // V4.1 (squads, spec 31.12)
 import { placeHoard } from './dragon';
 import { HOARD_PIECES, SHIELD_PRICE } from './data';
 import { pick, random, shuffle } from './rng';
@@ -104,6 +105,7 @@ export function newGame(w: World, seed: number): GameStateX {
       captives: [], // V3.7 (spec 20.4): filled by the crews rework
       opened: {}, // V4.0 (spec 25): a new campaign goes in by the main gate only
       explored: {},
+      squadSlots: SQUAD_SLOTS_START, // V4.1 (squads, spec 31.12): three to start; the muster roll makes it four
     },
     delve: null,
     summary: null,
@@ -115,7 +117,7 @@ export function newGame(w: World, seed: number): GameStateX {
 }
 
 export function newVillage(): Village {
-  return { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
+  return { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false, muster: false };
 }
 
 /** The village as saved (older saves have none). */
@@ -261,6 +263,8 @@ export function storyAvailable(s: GameState, st: StoryDef): boolean {
     case 'caskbook': return v.copper && rep >= (REP_FOR_LEVEL[3] ?? 2);
     // V4.1 (spec 31.3): Aldric asks you to fetch Ilse once he's home and Level 2 is open.
     case 'alchemist': return v.surgeon && rep >= (REP_FOR_LEVEL[2] ?? 1);
+    // V4.1 (squads, spec 31.12): Wim mentions the muster roll at reputation 2, while the party still has a slot to win.
+    case 'muster': return rep >= MUSTER_REP && squadSlots(s.campaign) < SQUAD_SLOTS_MAX;
   }
 }
 
@@ -302,6 +306,11 @@ function storyBoard(w: World, s: GameStateX): Contract[] {
 
 function cap(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** V4.1 (squads): "three" for refusals. */
+function numWord(n: number): string {
+  return ['no', 'one', 'two', 'three', 'four', 'five'][n] ?? `${n}`;
 }
 
 // ---------------------------------------------------------------- camp commands
@@ -444,6 +453,7 @@ export const LOCKED = {
 const NEEDS_WHO: Record<StoryId, string> = {
   surgeon: 'Brother Aldric (Level 1, the chapel)', innkeeper: 'Old Wim (Level 1, the kitchens)', smith: 'Gerda the smith (Level 2, the forge)',
   copper: 'the brewing copper (Level 2, the barracks)', caskbook: "Wim's cask book (Level 3, the Drain)", alchemist: 'Ilse the alchemist (Level 2, the archive)',
+  muster: "the muster roll (Level 2, the officers' quarters)", // V4.1 (squads)
 };
 
 /** Why a ware that needs `needs` can't be bought with this village, or undefined. */
@@ -502,7 +512,9 @@ export function partyProblem(s: GameStateX, heroIds: string[]): string | null {
   const ids = [...new Set(heroIds)];
   if (C.roster.length < 1) return 'Hire at least one hero at the tavern.';
   if (ids.length < 1) return 'Pick at least one hero.';
-  if (ids.length > 4) return 'Four heroes at most.';
+  // V4.1 (squads, spec 31.12): `campaign.squadSlots` (3 on a new campaign; the muster roll makes it 4).
+  const slots = squadSlots(C);
+  if (ids.length > slots) return slots < SQUAD_SLOTS_MAX ? `${slots === 1 ? 'One hero' : `${cap(numWord(slots))} heroes`} at most for now. Bring the muster roll home from the officers' quarters (Level 2) and a fourth can sign on.` : `${cap(numWord(slots))} heroes at most.`;
   for (const id of ids) {
     const h = C.roster.find((x) => x.id === id);
     if (!h) return 'No such hero.';
@@ -637,7 +649,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
   // The Dragon's hoard: what's been carried out never comes back.
   placeHoard(w, s, d, Math.max(0, HOARD_PIECES - (s.hoardTaken ?? 0)));
   // Rivals (spec 18.5): the Sisters on a Level 1 contract, a cutthroat crew from the pool on Level 2 or 3.
-  d.rivals = makeCrew(w, s, d, contract.level, entrance);
+  d.rivals = makeCrew(w, s, d, contract.level, entrance, ids.length); // V4.1 (squads): crews match the party's size
   // Place heroes at the entrance and around it.
   const spots = freeSpotsNear(w, d, entrance, ids.length, monsters.map((m) => m.at));
   ids.forEach((id, i) => {
@@ -776,7 +788,8 @@ export function buildSummary(c: Ctx): void {
   const levelUps: string[] = [];
   for (const h of d.heroes) {
     let x = d.xp?.[h.heroId] ?? 0;
-    if (h.status === 'out') x += 1 + (done ? 3 : 0);
+    // V4.1 (squads, spec 31.12): survive +1; a done contract's XP is a pot shared by the survivors (rounded up).
+    if (h.status === 'out') x += 1 + (done ? contractXpEach(out.length) : 0);
     xp[h.heroId] = x;
     const def = C.roster.find((r) => r.id === h.heroId);
     if (def && h.status === 'out' && xpLevel(def.xp + x) > def.level) levelUps.push(h.heroId);
@@ -863,6 +876,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
     events.push({ type: 'villageUnlocked', story });
     events.push({ type: 'say', text: st.line });
     gift = story; // V4.1 (spec 31.2): given below, once the roster is settled
+    if (story === 'muster') C.squadSlots = Math.max(squadSlots(C), SQUAD_SLOTS_MAX); // V4.1 (squads): a fourth slot
   }
   // V4.1 (spec 31.3): Aldric and Wim's hot supper: every hero who got out heals a little (with them both home now).
   if (pairHome(C.village, 'surgeon', 'innkeeper')) {

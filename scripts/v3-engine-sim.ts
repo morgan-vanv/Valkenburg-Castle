@@ -64,12 +64,15 @@ import { breakableWall, chargeCount } from '../src/game/charges';
 import { calmReach } from '../src/game/calm';
 import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 import { quiverPerDelve } from '../src/game/data'; // V4.1 (WS6)
+import { squadSlots } from '../src/game/data'; // V4.1 (squads)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
 const VERBOSE = process.env.VERBOSE === '1';
 const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
-const e = createEngine(castle);
+// V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
+// enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
+const e = createEngine(castle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
 const w = new World(castle);
 const ROUND_CAP = 80;
 /**
@@ -150,6 +153,7 @@ const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarm
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   const r = e.apply(s, cmd);
+  if (r.state.delve?.pending) throw new Error(`the bot's turn paused for a reaction: ${r.state.delve.pending.question.text}`); // V4.1 (spec 31.13): never, with the policy
   if (s.delve) {
     const heroIds = new Set(s.delve.heroes.map((h) => h.heroId));
     const nameOf = (id: string) => {
@@ -1169,7 +1173,7 @@ for (let i = 0; i < N; i++) {
     }
   }
   // Squad building (spec 15.3): 3 heroes to start (Keven + 2), 4 once the gold is there.
-  if (!SCENARIO) s = recruit(s, i === 0 ? 3 : 4);
+  if (!SCENARIO) s = recruit(s, Math.min(squadSlots(s.campaign), i === 0 ? 3 : 4)); // V4.1 (squads): no more than the slots
   // V3.4 (spec 17.2): HP carries over. V3.5: heal at the infirmary once Brother Aldric is home;
   // before that, drink stash potions (buying one when a hero is badly hurt and the gold is there).
   const v = s.campaign.village;
@@ -1199,7 +1203,7 @@ for (let i = 0; i < N; i++) {
     if (ale) s = run(s, { type: 'buyAle', heroId: 'keven', ale: ale.kind });
   }
   if (DRAGON && s.campaign.gold > 60) s = run(s, { type: 'buy', kind: 'potion' });
-  const fit = s.campaign.roster.slice(0, 4).map((h) => h.id);
+  const fit = s.campaign.roster.slice(0, squadSlots(s.campaign)).map((h) => h.id); // V4.1 (squads): the party's slots
   if (!fit.length) break;
   // Spec 18.3: the surgeon first; other story contracts every other delve; else the regular ones in turn.
   const stories = s.campaign.board.filter((x) => x.story);

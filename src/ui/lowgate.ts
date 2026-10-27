@@ -8,6 +8,7 @@ import type { AleKind, AleOffer, Campaign, Captive, Command, Contract, GameState
 import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
 import { GIFTS } from '../game/data'; // V4.1 (spec 31.2)
 import { ARROWS_PER_LEVEL, quiverPerDelve } from '../game/data'; // V4.1 (WS6)
+import { SQUAD_SLOTS_MAX, squadSlots } from '../game/data'; // V4.1 (squads, spec 31.12)
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -59,7 +60,7 @@ export interface CampHost {
 const STEP_NAME: Record<Step, string> = { job: 'Job', party: 'Party', outfit: 'Outfit', setout: 'Set out' };
 const STEP_WHAT: Record<Step, string> = {
   job: 'Pick a contract from the notice post.',
-  party: 'Who goes in: hire, heal, take up to four.',
+  party: 'Who goes in: hire, heal, pick the party.',
   outfit: 'Buy from the vendors, pack from the cart.',
   setout: 'Which way in, and Delve.',
 };
@@ -121,10 +122,35 @@ const VALUABLE = new Set(['gem', 'jewelry', 'heirloom', 'hoard']);
 const isValuable = (i: Item) => VALUABLE.has(i.kind) && !i.story;
 const isHeir = (c: Campaign, id: string) => id === 'keven' || c.roster.find((x) => x.id === id)?.cls === 'heir';
 
-/** Contracts in the order they are shown: village pleas, bounties, then "Bring back" jobs. */
+/** V4.1 (spec 31.11, owner): at most this many cards in each row of the board (village pins; work for hire). */
+export const BOARD_ROW_MAX = 3;
+
+/**
+ * V4.1 (spec 31.11, owner): the board in two rows. "Pinned by the village": "Bring back" jobs first (urgent: they always
+ * show and count toward the 3), then the village's pleas in board order, at most 3 shown (`more`: how many wait behind
+ * them). "Work for hire": the regular bounties, at most 3. The chosen job always shows (a house's plea seal can pick one
+ * that waits): it takes the last plea's place.
+ */
+export function boardRows(c: Campaign, chosenId?: string): { pins: Contract[]; hire: Contract[]; more: number } {
+  const cap = (k: Contract) => !k.story && !!contractCaptive(c, k);
+  const captives = c.board.filter(cap);
+  const pleas = c.board.filter((k) => k.story);
+  const all = [...captives, ...pleas];
+  const pins = all.slice(0, Math.max(BOARD_ROW_MAX, captives.length));
+  const chosen = all.find((k) => k.id === chosenId);
+  if (chosen && !pins.includes(chosen)) {
+    const last = pins.map((k) => !!k.story).lastIndexOf(true);
+    if (last >= 0) pins[last] = chosen;
+    else pins.push(chosen);
+  }
+  const hire = c.board.filter((k) => !k.story && !cap(k)).slice(0, BOARD_ROW_MAX);
+  return { pins, hire, more: all.length - pins.length };
+}
+
+/** Contracts in the order they are shown: the village row (captives, then pleas), then work for hire. */
 export function boardOrder(c: Campaign): Contract[] {
-  const cap = (k: Contract) => !!contractCaptive(c, k);
-  return [...c.board.filter((k) => k.story), ...c.board.filter((k) => !k.story && !cap(k)), ...c.board.filter((k) => !k.story && cap(k))];
+  const { pins, hire } = boardRows(c);
+  return [...pins, ...hire];
 }
 
 /** The loadout checked against the state: heroes on the roster, items on the cart, a selectable entrance. */
@@ -132,7 +158,7 @@ export function cleanLoadout(s: GameState, engine: Engine, l: Loadout | null): L
   const c = s.campaign;
   const prev = l ?? { heroIds: [], packs: {}, entrance: 0 };
   const contract = c.board.find((k) => k.id === prev.contractId) ?? boardOrder(c)[0];
-  const heroIds = [...new Set(prev.heroIds)].filter((id) => c.roster.some((x) => x.id === id)).slice(0, 4);
+  const heroIds = [...new Set(prev.heroIds)].filter((id) => c.roster.some((x) => x.id === id)).slice(0, squadSlots(c)); // V4.1 (squads)
   const packs: Record<string, string[]> = {};
   const used = new Set<string>();
   for (const id of heroIds) {
@@ -163,7 +189,7 @@ export function freshLoadout(s: GameState, engine: Engine, last: Loadout | null)
 
 /** "Same as last time": the remembered loadout, if its heroes are all still on the roster. */
 export function sameAsLast(s: GameState, last: Loadout | null): boolean {
-  return !!last && last.heroIds.length > 0 && last.heroIds.every((id) => s.campaign.roster.some((x) => x.id === id));
+  return !!last && last.heroIds.length > 0 && last.heroIds.length <= squadSlots(s.campaign) && last.heroIds.every((id) => s.campaign.roster.some((x) => x.id === id)); // V4.1 (squads): within the slots
 }
 
 function packItems(c: Campaign, l: Loadout, id: string): Item[] {
@@ -567,7 +593,7 @@ function delveButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
 
 // ------------------------------------------------------------ step 1: Job
 
-const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
+const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false, muster: false };
 export function villageOf(s: GameState): Village {
   return s.campaign.village ?? NO_VILLAGE;
 }
@@ -647,16 +673,27 @@ function jobStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): v
     main.append(h('p', { class: 'lg-empty' }, 'Nothing on the notice post. Come back after the next delve.'));
     return;
   }
-  const rescues = c.board.filter((k) => !k.story && contractCaptive(c, k));
-  const grid = h('div', { class: 'lg-cards', role: 'group', 'aria-label': 'Jobs' });
-  for (const k of [...c.board.filter((x) => x.story), ...c.board.filter((x) => !x.story && !rescues.includes(x))]) grid.append(contractCard(k, l, host));
-  main.append(grid);
-  if (rescues.length) {
-    main.append(h('h3', { class: 'lg-h3 lg-captive-h', 'data-tip': "Taken by a crew · A crew dragged one of yours out. The hideout is theirs; the prisoner is your own hero, at 1 HP. Freed and brought out, they rejoin with their level and gear.", tabindex: 0 }, h('span', { class: 'lg-seal lg-seal-cap lg-seal-sm', 'aria-hidden': 'true' }, '⛓'), ' Taken by a crew'));
-    const rg = h('div', { class: 'lg-cards', role: 'group', 'aria-label': 'Bring back' });
-    for (const k of rescues) rg.append(contractCard(k, l, host, contractCaptive(c, k)));
-    main.append(rg);
+  // V4.1 (spec 31.11, owner): two labelled rows, at most 3 cards each: what the village pinned, then work for hire.
+  const { pins, hire, more } = boardRows(c, l.contractId);
+  const row = (id: string, label: string, tip: string, ks: Contract[], extra?: HTMLElement) => {
+    const grid = h('div', { class: 'lg-cards', role: 'group', 'aria-label': label });
+    for (const k of ks) {
+      const cp = k.story ? undefined : contractCaptive(c, k);
+      grid.append(contractCard(k, l, host, cp));
+    }
+    main.append(h('section', { class: `lg-board-row lg-board-${id}`, 'data-row': id }, h('h3', { class: 'lg-h3 lg-board-h', tabindex: 0, 'data-tip': tip }, label), grid, extra ?? ''));
+  };
+  if (pins.length) {
+    const hasCaptive = pins.some((k) => !k.story);
+    row(
+      'village',
+      'Pinned by the village',
+      `Pinned by the village · Pleas from Lowgate's people${hasCaptive ? ', and your own heroes a crew carried off' : ''}. They pay in gifts, not gold, and win people back: a house lit again, a hero home.`,
+      pins,
+      more > 0 ? h('p', { class: 'lg-note lg-board-more' }, `+${more} more once you've seen to these`) : undefined,
+    );
   }
+  if (hire.length) row('hire', 'Work for hire', 'Work for hire · Bounties from whoever is paying. They pay gold, if the prize comes out with you.', hire);
 }
 
 const KIND_WORD: Record<Contract['kind'], string> = { rescue: 'Rescue', recover: 'Recover', slay: 'Slay' };
@@ -751,14 +788,20 @@ function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive
 function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): void {
   const c = s.campaign;
   const v = villageOf(s);
-  main.append(stepHead('Who goes in?', "Up to four. Keven can go alone, but if he falls, it's over."));
+  // V4.1 (squads, spec 31.12): three slots until the muster roll is home; the fourth shows locked with Wim's hint.
+  const room = squadSlots(c);
+  main.append(stepHead('Who goes in?', `Up to ${room >= SQUAD_SLOTS_MAX ? 'four' : room === 3 ? 'three for now' : room}. Keven can go alone, but if he falls, it's over.`));
   const set = (next: Loadout) => host.setDraft(next, 'party');
   const slots = h('div', { class: 'lg-slots', role: 'list', 'aria-label': 'Party' });
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < Math.max(SQUAD_SLOTS_MAX, room); i++) {
     const id = l.heroIds[i];
     const hr = id ? heroOf(c, id) : undefined;
     if (hr) slots.append(heroSlot(hr, s, l, host, set));
-    else {
+    else if (i >= room) {
+      const muster = c.board.some((k) => k.story === 'muster');
+      const hint = "Wim says the old muster roll is in the officers' quarters. With it, a fourth could sign on.";
+      slots.append(h('div', { class: 'lg-slot empty locked', role: 'listitem', 'data-slot': `${i}`, 'data-locked': 'muster', tabindex: 0, 'data-tip': `A fourth slot · locked\n${hint}${muster ? '\nThe job is on the notice post.' : ''}` }, h('span', { class: 'lg-slot-e' }, '🔒 Locked'), h('span', { class: 'lg-slot-h' }, hint)));
+    } else {
       const first = i === l.heroIds.length;
       const bench = c.roster.some((x) => !l.heroIds.includes(x.id));
       slots.append(h('div', { class: `lg-slot empty ${first ? 'first' : ''}`, role: 'listitem', 'data-slot': `${i}` }, h('span', { class: 'lg-slot-e' }, 'Empty'), first && c.recruits.length ? h('span', { class: 'lg-slot-h' }, 'Hire someone below.') : first && bench ? h('span', { class: 'lg-slot-h' }, 'Add someone from your roster.') : ''));
@@ -768,7 +811,7 @@ function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost):
 
   const bench = c.roster.filter((x) => !l.heroIds.includes(x.id));
   if (bench.length) {
-    const full = l.heroIds.length >= 4;
+    const full = l.heroIds.length >= room; // V4.1 (squads)
     main.append(
       h(
         'div',
@@ -813,7 +856,7 @@ function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost):
       'div',
       { class: 'lg-sh lg-sh-sm' },
       h('div', { class: 'lg-sh-l' }, h('h3', { class: 'lg-h3' }, flagon ? 'At the Gilded Flagon' : 'At the campfire'), h('p', { class: 'lg-sub' }, sub)),
-      n ? h('span', { class: 'lg-sub' }, l.heroIds.length < 4 ? 'Hired hands go straight into a free slot.' : 'The party is full: hired hands wait on the roster.') : '',
+      n ? h('span', { class: 'lg-sub' }, l.heroIds.length < room ? 'Hired hands go straight into a free slot.' : 'The party is full: hired hands wait on the roster.') : '',
     ),
   );
   if (!n) main.append(h('p', { class: 'lg-empty' }, 'Nobody looking for work. Come back after the next delve.'));
@@ -977,11 +1020,11 @@ function recruitCard(hr: Hero, price: number, s: GameState, l: Loadout, host: Ca
           k: `hire-${hr.id}`,
           data: { hire: hr.id },
           off: short,
-          tip: short ? `Hire · ${price} gold\nYou have ${c.gold} gold.` : `Hire ${hr.name} · ${price} gold\n${l.heroIds.length < 4 ? 'Goes straight into a free party slot.' : 'The party is full: they wait on the roster.'}`,
+          tip: short ? `Hire · ${price} gold\nYou have ${c.gold} gold.` : `Hire ${hr.name} · ${price} gold\n${l.heroIds.length < squadSlots(c) ? 'Goes straight into a free party slot.' : 'The party is full: they wait on the roster.'}`,
           onclick: async () => {
             if (!(await host.send({ type: 'hire', heroId: hr.id }))) return;
             sfx.play('coin');
-            if (l.heroIds.length < 4) host.setDraft({ ...structuredClone(l), heroIds: [...l.heroIds, hr.id] }, 'party');
+            if (l.heroIds.length < squadSlots(c)) host.setDraft({ ...structuredClone(l), heroIds: [...l.heroIds, hr.id] }, 'party');
           },
         },
         'Hire · ',

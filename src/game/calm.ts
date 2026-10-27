@@ -126,6 +126,8 @@ interface Walker {
   h: HeroInDelve;
   /** Hexes walked since the last `moved` event. */
   seg: Pos[];
+  /** V4.1 (spec 31.11): enemies that already swung at this walker on this move (once per enemy per move). */
+  swung?: Set<string>;
 }
 
 /** Monsters and crew members (not a hired crew's) some active hero can see right now. Per figure, not the whole visible set: this runs every step. */
@@ -155,7 +157,7 @@ function stepTo(c: Ctx, wk: Walker, p: Pos, sneak: boolean, last: boolean, lit: 
       c.ev.push({ type: 'doorChanged', at: p, open: true, locked: door.locked });
     }
   }
-  provokeSwings(c, h, from, p, new Set());
+  provokeSwings(c, h, from, p, (wk.swung ??= new Set()));
   if (h.status !== 'active') return { trap: false };
   wk.seg.push(p);
   if (p.level !== from.level) {

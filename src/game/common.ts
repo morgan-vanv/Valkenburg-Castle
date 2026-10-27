@@ -499,13 +499,17 @@ export function hurtAny(c: Ctx, id: string, dmg: number, by: string | null, opts
     m.hp -= dmg;
     c.ev.push({ type: 'hit', attacker: by ?? 'blast', target: m.id, damage: dmg, crit: !!opts.crit, ...(opts.backstab ? { backstab: true } : {}) });
     // V4.0 (spec 28.2): a crew member's hit counts like a hero's: it hunts and knows the striker.
+    // V4.1 (spec 31.11, owner): not when the hit kills it: a killing blow from stealth is never "noticed" (no `awake`,
+    // no `noticed`); others who see the kill react by the usual rules (sight, the death's noise).
     const crewBy = by ? rivalsOnMap(c).find((x) => x.id === by) : undefined;
-    if (m.awareness !== 'hunting') {
-      const src = by ? hd(c, by) : undefined;
-      goHunting(c, m, src?.at ?? crewBy?.at);
+    if (m.hp > 0) {
+      if (m.awareness !== 'hunting') {
+        const src = by ? hd(c, by) : undefined;
+        goHunting(c, m, src?.at ?? crewBy?.at);
+      }
+      // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
+      if (by && (hd(c, by) || crewBy)) noticeFigure(c, m, by);
     }
-    // V3.7 (spec 20.1): hit by a hero, it knows them now (no more sneak attacks from that one).
-    if (by && (hd(c, by) || crewBy)) noticeFigure(c, m, by);
     if (opts.noise !== false) hearLoud(c, m.at, CLASH_HEAR, 'scream');
     if (m.hp <= 0) {
       killMonster(c, m, by);

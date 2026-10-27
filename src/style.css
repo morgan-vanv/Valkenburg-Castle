@@ -2164,7 +2164,12 @@ input.seed {
 .lg-card-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: 16px; color: var(--parch-dim); }
 .lg-card-foot.on { color: var(--lg-cream); }
 .lg-card .lg-card-foot { padding-top: 2px; }
-.lg-captive-h { margin-top: 10px; color: #ffb4ac; font-size: 22px; display: flex; align-items: center; gap: 8px; }
+/* V4.1 (spec 31.11): the board's two rows, labelled */
+.lg-board-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lg-board-row + .lg-board-row { margin-top: 22px; }
+.lg-board-h { font-size: 22px; color: var(--lg-ink-3); align-self: flex-start; cursor: help; }
+.lg-board-village .lg-board-h { color: var(--ember); }
+.lg-board-more { margin-top: 6px; font-style: italic; }
 
 /* step 2: party */
 .lg-hex, .cbadge.lg-hex { clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); display: flex; align-items: center; justify-content: center; font-family: var(--display); color: #120e0a; flex: none; }
@@ -2180,6 +2185,9 @@ input.seed {
 .lg-slot-e { font-size: 18px; color: var(--muted); }
 .lg-slot.empty.first .lg-slot-e { color: var(--lg-ink-3); }
 .lg-slot-h { font-size: 14px; color: var(--lg-ink-4); }
+/* V4.1 (squads, spec 31.12): the fourth slot, locked until the muster roll is home. */
+.lg-slot.empty.locked { border-style: dotted; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255, 255, 255, 0.02) 8px 16px); }
+.lg-slot.empty.locked .lg-slot-e { color: var(--lg-ink-4); }
 .lg-slot.hero { border: 1px solid var(--line); background: var(--lg-card); }
 .lg-slot.hero.heir { border-color: var(--ember-dim); background: #1c1610; }
 .lg-slot.hero.wounded { border-color: var(--red-dim); background: #1a1111; }
@@ -3054,3 +3062,33 @@ div.dl-deal { cursor: default; }
 .tag-venom .ic { color: var(--venom); }
 .tag-bleed { color: var(--red); font-weight: 700; font-size: 0.72rem; }
 .tag-carried { color: #9ec8ff; font-size: 0.68rem; }
+/* V4.1 (spec 31.13): reactions. The per-hero settings button beside the name, its popover above the hotbar,
+   and the reaction card the castle's turn waits on. */
+.dl-who-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dl-who-top .dl-who-n { flex: 1; min-width: 0; }
+.dl-react-b { position: relative; flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: transparent; border: 1px solid var(--line-hi); border-radius: 3px; color: var(--dl-ink-4); cursor: pointer; }
+.dl-react-b:hover, .dl-react-b.open { color: var(--dl-cream); border-color: var(--ember-dim); }
+.dl-react-b.custom { color: var(--dl-cream); }
+.dl-react-dot { position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--ember); }
+.dl-reacts-pop { position: absolute; left: 10px; bottom: calc(100% + 8px); width: min(380px, calc(100vw - 52px)); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: rgba(14, 11, 9, 0.97); border: 1px solid var(--line-hi); border-top: 2px solid var(--ember-dim); border-radius: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 12; }
+.dl-reacts-t { font-family: var(--display); font-size: 18px; color: var(--dl-cream); }
+.dl-reacts-p { margin: 0; font-size: 14px; color: var(--dl-ink-3); line-height: 1.35; }
+.dl-reacts-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dl-reacts-k { font-size: 15px; color: var(--dl-ink-2); cursor: help; border-bottom: 1px dotted var(--line-hi); }
+.dl-reacts-row .dl-seg-b { font-size: 14px; padding: 4px 10px; min-height: 30px; }
+.dl-react { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(600px, calc(100vw - 32px)); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: rgba(14, 11, 9, 0.97); border: 1px solid var(--ember-dim); border-top: 2px solid var(--ember); border-radius: 4px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); z-index: 30; pointer-events: auto; }
+.dl-react:focus { outline: none; }
+.dl-react-k { display: flex; align-items: center; gap: 6px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ember); }
+.dl-react-q { margin: 0; font-family: var(--display); font-size: 21px; line-height: 1.25; color: var(--parchment); }
+.dl-react-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dl-react-o { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; min-height: 64px; text-align: left; background: #1d1916; border: 1px solid var(--line-hi); border-radius: 3px; cursor: pointer; }
+.dl-react-o.yes { background: #3a2a12; border-color: var(--ember); }
+.dl-react-o:hover { border-color: var(--dl-cream); }
+.dl-react-ol { display: flex; align-items: center; gap: 6px; font-size: 18px; color: var(--dl-cream); }
+.dl-react-ol kbd { font-size: 10px; }
+.dl-react-oc { font-size: 14px; line-height: 1.35; color: var(--dl-ink-2); }
+.dl-react-f { font-size: 13px; color: var(--dl-ink-4); }
+@media (max-width: 560px) {
+  .dl-react-opts { grid-template-columns: 1fr; }
+  .dl-react { bottom: 76px; }
+}

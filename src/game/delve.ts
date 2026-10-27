@@ -2,7 +2,7 @@
 // specs and effects), leave/abandon, the end of the delve.
 
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
-import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
+import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, ReactionKind, ReactionSetting, Stat } from './types';
 import type { ActionOption } from './api';
 import {
   HEAVY_MOVE, SMUGGLER_SNEAK, BURGLAR_WALK, WALK_MOVE, BLINK_RANGE, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
@@ -43,7 +43,7 @@ import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
 import { CARRY_MOVE } from './data';
 // V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
-import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, UNSHACKLE_SMASH_HITS, UNSHACKLE_SMASH_NOISE, UNSHACKLE_SMASH_SLOTS, pairHome } from './data';
+import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, pairHome } from './data';
 import { bodyName, carryOut, carryable, checkCarries, closeTo, curePoison, endCarry, isPoisoned, poison, poisonTakes, startCarry, trapDamage } from './poison';
 import { bodiesOn, bringCarried, carrierOf, downedCrew, setDownNear } from './common';
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
@@ -180,6 +180,21 @@ export function sneakSetting(c: Ctx, heroId: string): boolean {
   return hd(c, heroId)?.moveMode === 'sneak';
 }
 
+/**
+ * V4.1 (spec 31.13): the `setReaction` command: free, any active hero, player phase: how this hero answers one kind
+ * of reaction (ask, always, never). `setAmbush` is the old hidden-swing toggle (on = always, off = never).
+ */
+export function doSetReaction(c: Ctx, heroId: string, kind: ReactionKind, setting: ReactionSetting): string | undefined {
+  const h = hd(c, heroId);
+  if (!h) return 'No such hero.';
+  if (h.status !== 'active') return `${heroName(c, heroId)} isn't in a state to react to anything.`;
+  if (kind !== 'hiddenSwing' && kind !== 'overwatch') return 'No such reaction.';
+  if (setting !== 'ask' && setting !== 'always' && setting !== 'never') return 'Ask, always or never.';
+  (h.reactions ??= {})[kind] = setting;
+  delete (h as HeroInDelve & { ambush?: boolean }).ambush; // the WIP flag (spec 31.13) is folded into the setting
+  return undefined;
+}
+
 /** V4.0 (spec 26.1): the `setMoveMode` command: free, any active hero, player phase. Changes nothing else. */
 export function doSetMoveMode(c: Ctx, heroId: string, sneak: boolean): string | undefined {
   const h = hd(c, heroId);
@@ -313,7 +328,7 @@ export function doMove(c: Ctx, heroId: string, path: Pos[], sneak: boolean, foll
         c.ev.push({ type: 'doorChanged', at: p, open: true, locked: door.locked });
       }
     }
-    // V3.7 (spec 20.2): stepping out of an enemy's reach gives it a free swing (once per enemy per move).
+    // V3.7 (spec 20.2), V4.1 (spec 31.11): any step from a hex next to an engaged enemy gives it a free swing (once per enemy per move).
     provokeSwings(c, h, from, p, swung);
     if (h.status !== 'active') break;
     walked.push(p);
@@ -675,6 +690,9 @@ export function pickTool(c: Ctx, h: HeroInDelve): { item: Item; slots: number; p
   return imp ? { item: imp, slots: LOCKPICK_SLOTS, proper: false } : null;
 }
 
+/** V4.1 (spec 31.11, owner): the reason Unshackle isn't offered without a lock tool. */
+export const NO_UNSHACKLE = 'Unshackling takes lockpicks, an improvised pick or a key. Or carry them out.';
+
 /** V4.1 (WS6, spec 31.8): the reason a bow-only shot isn't offered. */
 export const OUT_OF_ARROWS = 'Out of arrows';
 export const NO_PLAIN_ARROWS = 'Out of plain arrows: only specialty arrows left (Attack picks one)';
@@ -797,7 +815,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
       // V4.1 (spec 31.4): a downed hero or the shackled captive next to you that nobody carries.
       return carryable(c, h).map((o) => ({ id: o.id, at: o.at }));
     case 'unshackle': {
-      // V4.1 (spec 31.4): the shackled captive next to you (or on your back): with each tool you have, and Smash.
+      // V4.1 (spec 31.4, 31.11): the shackled captive next to you (or on your back): with each lock tool you have.
       const pr = c.d.prisoner;
       if (!pr || pr.freed || pr.dead || pr.out || !closeTo(pr.at, h.at)) return [];
       const out: ActionTarget[] = [];
@@ -805,7 +823,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
         const it = itemOf(h, k);
         if (it) out.push({ id: pr.id, at: pr.at, itemId: it.id });
       }
-      out.push({ id: pr.id, at: pr.at });
+      // V4.1 (spec 31.11, owner): no Smash: without a lock tool there is nothing to unshackle with (Carry them out).
       return out;
     }
     case 'setDown':
@@ -1005,7 +1023,7 @@ const LABELS: Record<ActionKind, string> = {
   shoot: 'Shoot arrow', // V4.1 (WS6)
 };
 
-const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart', 'unshackle'];
+const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'carry', 'unshackle', 'setDown', 'potion', 'antidote', 'mend',
   'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'snuff', 'dropTorch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
@@ -1065,6 +1083,12 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
       if (PLAIN_SHOTS.includes(a) && def && bowClass(def.cls)) {
         const would = targetsFor(c, h, a, true);
         if (would.length) out.push({ action: a, label: LABELS[a], targets: would, rolls: ROLLS.includes(a), pick: PICK[a], blocked: bowReady(h.pack) ? NO_PLAIN_ARROWS : OUT_OF_ARROWS });
+        continue;
+      }
+      // V4.1 (spec 31.11): the shackled captive next to you and no lock tool: listed blocked, so the hover card says why.
+      if (a === 'unshackle') {
+        const pr = c.d.prisoner;
+        if (pr && !pr.freed && !pr.dead && !pr.out && closeTo(pr.at, h.at)) out.push({ action: a, label: LABELS[a], targets: [{ id: pr.id, at: pr.at }], rolls: false, pick: PICK[a], blocked: NO_UNSHACKLE });
         continue;
       }
       // Spec 21.4: a locked thing in reach, and no pick to work it: the option says what would.
@@ -1387,7 +1411,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (it?.kind === 'lockpicks') return simple(`Pick ${who}'s shackles with the lockpicks. Sure and silent`);
       if (it?.kind === 'key') return simple(`Open ${who}'s shackles with the skeleton key. Silent; the key is used up`);
       if (it?.kind === 'improvised') return simple(`Work ${who}'s shackles with an improvised pick. Sure; uses one up. Noise ${UNSHACKLE_IMPROVISED_NOISE}`, UNSHACKLE_IMPROVISED_NOISE);
-      return base('might', UNSHACKLE_SMASH_SLOTS, withLight(def.stats.might), ['Holds, noise 4', `${who} is free, noise 4`, `${who} is free, noise 4`], UNSHACKLE_SMASH_NOISE);
+      return no(NO_UNSHACKLE);
     }
     case 'setDown':
       return simple(`Set ${bodyName(c, h.carrying ?? '')} down. Free.`);
@@ -1689,14 +1713,14 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       const tid = t.id!;
       makeNoise(c, h.at, sp.noise);
       if (c.d.rivals?.members.some((x) => x.id === tid)) makeHostile(c);
-      wakeTarget(c, tid, h.at, heroId);
       if (r.hits < 2) {
+        wakeTarget(c, tid, h.at, heroId);
         c.ev.push({ type: 'miss', attacker: heroId, target: tid });
         break;
       }
       c.ev.push({ type: 'cast', by: heroId, spell: 'knockback', targetId: tid, at: figurePos(c, tid) });
       const from = pusherFor(h.at, figurePos(c, tid)!);
-      push(c, tid, from, heroId);
+      wakeTarget(c, tid, h.at, heroId, () => push(c, tid, from, heroId));
       turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
@@ -1915,24 +1939,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'unshackle': {
       const pr = c.d.prisoner!;
       const it = t.itemId ? h.pack.find((i) => i.id === t.itemId) : undefined;
-      let how: 'lockpicks' | 'improvised' | 'key' | 'smash';
+      let how: 'lockpicks' | 'improvised' | 'key';
       if (it?.kind === 'lockpicks') how = 'lockpicks';
       else if (it?.kind === 'key') {
         how = 'key';
         useItem(h, it.id);
-      } else if (it?.kind === 'improvised') {
+      } else {
+        // V4.1 (spec 31.11): an improvised pick (findTarget only offers the lock tools; no Smash).
         how = 'improvised';
-        const left = spendPick(h.pack, it);
+        const left = spendPick(h.pack, it!);
         makeNoise(c, pr.at, UNSHACKLE_IMPROVISED_NOISE);
         if (left === 0) say(c, `${name}'s last improvised pick is spent.`);
-      } else {
-        how = 'smash';
-        const r = doRoll();
-        makeNoise(c, pr.at, UNSHACKLE_SMASH_NOISE);
-        if (r.hits < UNSHACKLE_SMASH_HITS) {
-          say(c, `The shackles hold. Everyone heard that.`);
-          break;
-        }
       }
       unshackle(c, h, how);
       break;
@@ -2021,10 +2038,11 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         wakeTarget(c, tid, h.at, heroId);
         break;
       }
-      wakeTarget(c, tid, h.at, heroId);
-      push(c, tid, h.at, heroId);
-      // Perfect: 1 more damage on top of whatever the push did.
-      if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
+      wakeTarget(c, tid, h.at, heroId, () => {
+        push(c, tid, h.at, heroId);
+        // Perfect: 1 more damage on top of whatever the push did.
+        if (r.perfect && (c.d.monsters.some((x) => x.id === tid) || rivalsOnMap(c).some((x) => x.id === tid))) hurtAny(c, tid, 1, heroId);
+      });
       turnOnHit(c, tid, heroId); // V4.0 (spec 26.3)
       break;
     }
@@ -2193,7 +2211,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'jump': {
-      // V3.7 (spec 20.2): leaving an enemy's side by jumping provokes its free swing first.
+      // V3.7 (spec 20.2): jumping from an enemy's side provokes its free swing first.
       provokeSwings(c, h, h.at, t.at!, new Set());
       if (h.status !== 'active') break;
       say(c, `${name} jumps.`);
@@ -2320,11 +2338,21 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
 }
 
 
-function wakeTarget(c: Ctx, id: string, from: Pos, by?: string): void {
+/**
+ * A monster struck (or missed) by `by` hunts and notices them. V4.1 (spec 31.11, owner): `then` is the strike's effect
+ * (a shove, a knockback): when it kills the monster, the `awake` and `noticed` it raised for this hit are taken back:
+ * a killing blow from stealth is never "noticed" (damage through hurtAny already skips the notice on a kill).
+ */
+function wakeTarget(c: Ctx, id: string, from: Pos, by?: string, then?: () => void): void {
   const m = c.d.monsters.find((x) => x.id === id);
-  if (!m) return;
-  if (m.awareness !== 'hunting') goHunting(c, m, from);
-  if (by) noticeHero(c, m, by);
+  const mark = c.ev.length;
+  if (m) {
+    if (m.awareness !== 'hunting') goHunting(c, m, from);
+    if (by) noticeHero(c, m, by);
+  }
+  const raised = c.ev.length;
+  then?.();
+  if (m && !c.d.monsters.includes(m) && raised > mark) c.ev.splice(mark, raised - mark);
 }
 
 export function leaveCastle(c: Ctx, h: HeroInDelve): void {
@@ -2350,7 +2378,7 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
 }
 
 /** V4.1 (spec 31.4): unshackled: the captive follows `h` from now on (walk 4, placed beside them after each move). */
-function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'key' | 'smash'): void {
+function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'key'): void {
   const pr = c.d.prisoner!;
   for (const o of c.d.heroes) if (o.carrying === pr.id) o.carrying = undefined;
   pr.freed = true;
@@ -2363,7 +2391,7 @@ function unshackle(c: Ctx, h: HeroInDelve, how: 'lockpicks' | 'improvised' | 'ke
   if (samePos(pr.at, h.at)) setDownNear(c, pr.id, h.at);
   c.ev.push({ type: 'freed', prisonerId: pr.id, by: h.heroId, how });
   const name = heroName(c, h.heroId);
-  say(c, how === 'smash' ? `${name} smashes ${pr.name}'s shackles. Stay close.` : how === 'key' ? `${name} turns the skeleton key in ${pr.name}'s shackles. Stay close.` : `${name} picks ${pr.name}'s shackles. Stay close.`);
+  say(c, how === 'key' ? `${name} turns the skeleton key in ${pr.name}'s shackles. Stay close.` : `${name} picks ${pr.name}'s shackles. Stay close.`);
 }
 
 /** V4.1 (spec 31.4): a line in the return report for a hero who came out poisoned. */

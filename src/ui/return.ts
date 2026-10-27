@@ -7,6 +7,7 @@ import type { Engine } from '../game/api';
 import { hexKey, parsePosKey, type Pos } from '../game/hex';
 import type { GameState, Hero, Item } from '../game/types';
 import { CLASSES, GIFTS, LEVEL_XP, MAX_LEVEL, REP_FOR_LEVEL, REP_FOR_SLAY } from '../game/data';
+import { CONTRACT_XP_POT, contractXpEach } from '../game/data'; // V4.1 (squads, spec 31.12)
 import { isKit } from '../game/charges';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -193,6 +194,8 @@ export function returnScreen(el: HTMLElement, s: GameState, host: ReturnHost): v
     if (up) ups.push(h('div', { class: 'dl-rt-up' }, h('span', { class: 'dl-rt-up-t' }, `${hr.name} is level ${lvAfter}`), h('span', { class: 'dl-rt-up-d' }, upWords(hr))));
   }
   partyBox.append(rows, ...ups);
+  // V4.1 (squads, spec 31.12): the contract's XP is a pot shared by the heroes who got out.
+  if (sm.contractDone && out.length) partyBox.append(h('span', { class: 'dl-rt-note', 'data-xp': 'contract', 'data-tip': `Contract XP · ${CONTRACT_XP_POT} for the job, shared by the heroes who got out (rounded up): ${contractXpEach(out.length)} each. Kills and getting out (+1) are on top.` }, `Contract: ${CONTRACT_XP_POT} XP ${out.length === 1 ? `to ${name(out[0]!.heroId)}` : `shared by ${out.length}`}.`));
   const wounded = out.filter((x) => x.hp < (def(x.heroId)?.maxHp ?? 0));
   if (wounded.length) partyBox.append(h('span', { class: 'dl-rt-note' }, `Wounds don't mend on their own. ${listAnd(wounded.map((x) => name(x.heroId)))} can be healed when you pick the party.`));
   const notes = sm.notes.filter((n) => !/^Contract (done|failed)/.test(n) && !/dragged out by/.test(n) && !/was left behind/.test(n));

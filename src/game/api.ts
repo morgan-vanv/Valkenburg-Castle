@@ -50,7 +50,7 @@ export interface Reach {
    * V3.7 (spec 20.1, 20.2): what stepping along this path risks, for the move preview.
    * wake: sleepers that could wake (hex where it happens, monster id, chance 0..100).
    * notice: awake enemies that would notice the hero at the destination.
-   * swings: enemies that get a free swing as the hero leaves their reach (with damage range).
+   * swings: enemies that get a free swing as the hero moves from their side (spec 31.11: any step from a hex next to one, once each; with damage range).
    */
   risks?: MoveRisks;
 }
@@ -173,7 +173,17 @@ export interface EntranceInfo {
 export interface Engine {
   castle(): CastleDef;
   newGame(seed: number): GameState;
+  /**
+   * V4.1 (spec 31.13): a result with `state.delve.pending` paused for a hero's answer (its last event is `react`, its
+   * `view` the world at the question). While pending, only `{ type: 'react', choice }` is taken: its result repeats
+   * the paused events (skip the first `played`) and goes on to the next question or the end.
+   */
   apply(state: GameState, command: Command): ApplyResult;
+  /**
+   * V4.1 (spec 31.13): for a state with a pending question (a reloaded save): the paused command run again up to the
+   * same question, as `apply` returned it (all its events, `played` 0, `view`); null when nothing is pending. Read only.
+   */
+  resume(state: GameState): ApplyResult | null;
 
   // delve queries
   /** V4.0 (spec 26.1): `sneak` omitted = the hero's own Walk/Sneak setting. */
