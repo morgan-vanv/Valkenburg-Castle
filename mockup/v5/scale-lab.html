@@ -1,0 +1,764 @@
+<title>Valkenburg Scale Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: one dark workbench. The viewport is the page; controls sit under it in three labelled trays, notes after. Uses the game's own tokens (src/style.css). */
+:root {
+  --void: #060505;
+  --stone: #14110f;
+  --panel: #120f0d;
+  --line: #3a322b;
+  --line-hi: #5a4c3f;
+  --ember: #e8a33d;
+  --ember-dim: #8a5f24;
+  --parchment: #efe4cf;
+  --parch-dim: #b8ab94;
+  --muted: #8a7f6e;
+  --serif: 'IM Fell English', Georgia, 'Times New Roman', serif;
+  --display: 'IM Fell English SC', 'IM Fell English', Georgia, serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+body { background: var(--void); color: var(--parchment); font-family: var(--serif); font-size: 16px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 20px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(28px, 4vw, 40px); margin: 0; letter-spacing: 0.02em; text-wrap: balance; }
+h1 small { color: var(--ember); font-size: 0.55em; letter-spacing: 0.08em; margin-left: 10px; }
+.lede { margin: 0; color: var(--parch-dim); max-width: 64ch; }
+.label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+.stage { position: relative; border: 1px solid var(--line); background: #000; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; touch-action: none; }
+.stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.stage canvas:active { cursor: grabbing; }
+.presets { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.chip { pointer-events: auto; font-family: var(--mono); font-size: 12px; padding: 6px 10px; background: rgba(16, 13, 11, 0.86); color: var(--parch-dim); border: 1px solid var(--line-hi); cursor: pointer; }
+.chip:hover { color: var(--parchment); border-color: var(--ember-dim); }
+.chip.on { color: var(--void); background: var(--ember); border-color: var(--ember); }
+.chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.readout { position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.readout div { background: rgba(16, 13, 11, 0.86); border: 1px solid var(--line); padding: 5px 9px; font-family: var(--mono); font-size: 12px; color: var(--parch-dim); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--parchment); font-weight: 700; }
+.hint { position: absolute; right: 12px; bottom: 12px; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(16, 13, 11, 0.7); padding: 4px 8px; pointer-events: none; }
+
+.trays { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tray { background: var(--panel); border: 1px solid var(--line); padding: 14px 16px 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
+.row label { font-size: 15px; }
+.row output { font-family: var(--mono); font-size: 12px; color: var(--ember); font-variant-numeric: tabular-nums; }
+.row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--ember); }
+.toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.toggles label { display: flex; gap: 8px; align-items: center; font-size: 15px; cursor: pointer; }
+.toggles input { accent-color: var(--ember); }
+.seg { display: flex; border: 1px solid var(--line-hi); }
+.seg button { flex: 1; background: transparent; color: var(--parch-dim); border: 0; padding: 7px 8px; font-family: var(--serif); font-size: 15px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line-hi); }
+.seg button.on { background: var(--ember); color: var(--void); }
+
+.notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 28px; border-top: 1px solid var(--line); padding-top: 18px; }
+.notes section { min-width: 0; }
+.notes h2 { font-family: var(--display); font-weight: 400; font-size: 21px; margin: 0 0 6px; color: var(--parchment); }
+.notes p, .notes li { color: var(--parch-dim); margin: 0 0 8px; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; }
+.tbl { overflow-x: auto; margin-bottom: 10px; }
+table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; }
+td:first-child { color: var(--parchment); }
+
+@media (max-width: 860px) { .trays { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .stage { aspect-ratio: 4 / 5; } .hint { display: none; } }
+@media (prefers-reduced-motion: reduce) { .chip { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Scale Lab <small>in-delve study · V5.0 · 27 Oct 2026</small></h1>
+    <p class="lede">One room of the castle on the game's real hex grid (hex size 1, pointy-top), drawn with procedural stand-ins. Switch presets to compare today's framing with a For the King style board, then drag the sliders to find your own.</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="c" aria-label="3D scale test scene"></canvas>
+    <div class="presets" role="group" aria-label="Presets">
+      <button class="chip" data-preset="today">Today</button>
+      <button class="chip" data-preset="todayClose">Today's art, FTK camera</button>
+      <button class="chip" data-preset="ftk">FTK board</button>
+      <button class="chip" data-preset="ftkTactical">FTK art, zoomed out</button>
+      <button class="chip" data-preset="v5">V5.0 default</button>
+    </div>
+    <div class="readout" aria-live="polite">
+      <div>hexes across <b id="r-hex">0</b></div>
+      <div>hero on screen <b id="r-fig">0</b>%</div>
+      <div>Level 1 width <b id="r-scr">0</b> screens</div>
+    </div>
+    <div class="hint">drag to orbit · wheel to zoom</div>
+  </div>
+
+  <div class="trays">
+    <div class="tray">
+      <span class="label">Figures and walls</span>
+      <div class="row"><label for="figH">Hero height (hexes)</label><output id="o-figH"></output><input id="figH" type="range" min="0.9" max="2.2" step="0.05"></div>
+      <div class="row"><label for="head">Head share of height</label><output id="o-head"></output><input id="head" type="range" min="0.18" max="0.4" step="0.01"></div>
+      <div class="row"><label for="wallH">Wall height (hexes)</label><output id="o-wallH"></output><input id="wallH" type="range" min="1.2" max="3.2" step="0.05"></div>
+    </div>
+    <div class="tray">
+      <span class="label">Camera</span>
+      <div class="row"><label for="dist">Distance</label><output id="o-dist"></output><input id="dist" type="range" min="6" max="30" step="0.5"></div>
+      <div class="row"><label for="pitch">Pitch (degrees)</label><output id="o-pitch"></output><input id="pitch" type="range" min="25" max="80" step="1"></div>
+      <div class="row"><label for="fov">Field of view</label><output id="o-fov"></output><input id="fov" type="range" min="18" max="60" step="1"></div>
+    </div>
+    <div class="tray">
+      <span class="label">Look</span>
+      <div class="seg" role="group" aria-label="Art treatment">
+        <button id="look-flat" type="button">Today's flat</button>
+        <button id="look-dio" type="button">Diorama</button>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="shadows"> Shadows</label>
+        <label><input type="checkbox" id="bloom"> Bloom</label>
+        <label><input type="checkbox" id="tilt"> Tilt-shift</label>
+        <label><input type="checkbox" id="fog"> Haze</label>
+        <label><input type="checkbox" id="props"> Dressing</label>
+        <label><input type="checkbox" id="range"> Move range</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <section>
+      <h2>What the presets are</h2>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>Preset</th><th>Hero</th><th>Head</th><th>Wall</th><th>Dist</th><th>Pitch</th><th>FOV</th></tr></thead>
+          <tbody>
+            <tr><td>Today</td><td>2.0</td><td>1/5</td><td>2.6</td><td>19</td><td>53°</td><td>40</td></tr>
+            <tr><td>Today's art, FTK camera</td><td>2.0</td><td>1/5</td><td>2.6</td><td>11</td><td>36°</td><td>30</td></tr>
+            <tr><td>FTK board</td><td>1.35</td><td>1/3</td><td>2.3</td><td>11</td><td>42°</td><td>30</td></tr>
+            <tr><td>FTK art, zoomed out</td><td>1.35</td><td>1/3</td><td>2.3</td><td>22</td><td>58°</td><td>30</td></tr>
+            <tr><td>V5.0 default</td><td>1.35</td><td>1/3</td><td>2.3</td><td>16</td><td>48°</td><td>30</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>"Today" uses the live game's numbers (src/view/world.ts, camera.ts, unit.ts). The FTK numbers are this study's proposal, read off reference screenshots; IronOak has not published its camera or model specs.</p>
+    </section>
+    <section>
+      <h2>What to look for</h2>
+      <ul>
+        <li><b>Today's art, FTK camera</b> shows the real problem: the camera alone gets the framing, but at that distance the primitives, flat floor and empty room fall apart.</li>
+        <li><b>FTK board</b> shrinks heroes against the tile, gives them big heads, bedrolls and gear, and fills the room. Scale comes from density as much as from size.</li>
+        <li><b>Zoomed out</b> checks that the same art still reads when you pull back to plan a move, so free zoom works without a separate planning view.</li>
+        <li><b>V5.0 default</b> is the owner's chosen starting camera (distance 16, FOV 30); the pitch of 48° is a starting guess that eases lower as you zoom in.</li>
+        <li>Everything here is built from primitives in the browser with no downloads, on three.js r170 with its own post-processing. Real art would come from authored or CC0 models.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const SQ3 = Math.sqrt(3);
+const LEVEL1_WIDTH = 45; // hexes across Level 1 (src/data/castle/level1.ts)
+
+const PRESETS = {
+  today:       { figH: 2.0,  head: 0.20, wallH: 2.6, dist: 19, pitch: 53, fov: 40, look: 'flat', shadows: false, bloom: false, tilt: false, fog: false, props: false, range: true },
+  todayClose:  { figH: 2.0,  head: 0.20, wallH: 2.6, dist: 11, pitch: 36, fov: 30, look: 'flat', shadows: false, bloom: false, tilt: false, fog: false, props: false, range: true },
+  ftk:         { figH: 1.35, head: 0.33, wallH: 2.3, dist: 11, pitch: 42, fov: 30, look: 'dio',  shadows: true,  bloom: true,  tilt: true,  fog: true,  props: true,  range: false },
+  ftkTactical: { figH: 1.35, head: 0.33, wallH: 2.3, dist: 22, pitch: 58, fov: 30, look: 'dio',  shadows: true,  bloom: true,  tilt: false, fog: true,  props: true,  range: true },
+  v5:          { figH: 1.35, head: 0.33, wallH: 2.3, dist: 16, pitch: 48, fov: 30, look: 'dio',  shadows: true,  bloom: true,  tilt: true,  fog: true,  props: true,  range: true },
+};
+const P = { ...PRESETS.ftk, yaw: 0.35 };
+
+// ------------------------------------------------------------------ renderer
+const canvas = document.getElementById('c');
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.1, 200);
+const target = new THREE.Vector3(0, 0, 0);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.55, 0.5, 0.82);
+composer.addPass(bloom);
+const tiltShader = (dir) => ({
+  uniforms: { tDiffuse: { value: null }, dir: { value: new THREE.Vector2(...dir) }, res: { value: new THREE.Vector2(1, 1) }, amount: { value: 2.2 }, focusY: { value: 0.5 }, band: { value: 0.2 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform vec2 dir; uniform vec2 res; uniform float amount; uniform float focusY; uniform float band; varying vec2 vUv;
+    void main(){
+      float d = smoothstep(band, band + 0.32, abs(vUv.y - focusY));
+      vec2 st = dir / res * amount * d;
+      vec4 c = texture2D(tDiffuse, vUv) * 0.2270270270;
+      c += texture2D(tDiffuse, vUv + st * 1.3846153846) * 0.3162162162;
+      c += texture2D(tDiffuse, vUv - st * 1.3846153846) * 0.3162162162;
+      c += texture2D(tDiffuse, vUv + st * 3.2307692308) * 0.0702702703;
+      c += texture2D(tDiffuse, vUv - st * 3.2307692308) * 0.0702702703;
+      gl_FragColor = c;
+    }`,
+});
+const tiltH = new ShaderPass(tiltShader([1, 0]));
+const tiltV = new ShaderPass(tiltShader([0, 1]));
+const tiltH2 = new ShaderPass(tiltShader([1, 0]));
+const tiltV2 = new ShaderPass(tiltShader([0, 1]));
+tiltH2.uniforms.amount.value = tiltV2.uniforms.amount.value = 1.0;
+composer.addPass(tiltH); composer.addPass(tiltV); composer.addPass(tiltH2); composer.addPass(tiltV2);
+composer.addPass(new OutputPass());
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, strength: { value: 0.0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float strength; varying vec2 vUv;
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 p = vUv - 0.5; float v = smoothstep(0.85, 0.25, length(p * vec2(1.1, 1.25)));
+      vec3 warm = c.rgb * vec3(1.04, 0.99, 0.94);
+      vec3 g = mix(c.rgb, warm * mix(0.72, 1.0, v), strength);
+      gl_FragColor = vec4(g, c.a);
+    }`,
+});
+composer.addPass(grade);
+
+// ------------------------------------------------------------------ materials
+const matCache = new Map();
+function mat(color, opts = {}) {
+  const key = `${P.look}|${color}|${JSON.stringify(opts)}`;
+  if (matCache.has(key)) return matCache.get(key);
+  let m;
+  if (opts.basic) m = new THREE.MeshBasicMaterial({ color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthWrite: !opts.opacity, fog: false });
+  else if (P.look === 'dio') m = new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: opts.rough ?? 0.82, metalness: opts.metal ?? 0, emissive: opts.emissive ?? 0x000000, emissiveIntensity: opts.ei ?? 1 });
+  else m = new THREE.MeshLambertMaterial({ color, flatShading: true, emissive: opts.emissive ?? 0x000000 });
+  matCache.set(key, m);
+  return m;
+}
+function mesh(geo, color, pos, rot, opts) {
+  const m = new THREE.Mesh(geo, mat(color, opts));
+  if (pos) m.position.set(...pos);
+  if (rot) m.rotation.set(...rot);
+  m.castShadow = !opts?.basic; m.receiveShadow = !opts?.basic;
+  return m;
+}
+const box = (w, h, d, c, pos, rot, o) => mesh(new THREE.BoxGeometry(w, h, d), c, pos, rot, o);
+const cyl = (rt, rb, h, s, c, pos, rot, o) => mesh(new THREE.CylinderGeometry(rt, rb, h, s), c, pos, rot, o);
+const ball = (r, c, pos, detail = 1, o) => mesh(new THREE.IcosahedronGeometry(r, detail), c, pos, undefined, o);
+const cone = (r, h, s, c, pos, rot, o) => mesh(new THREE.ConeGeometry(r, h, s), c, pos, rot, o);
+
+// deterministic jitter
+function hash(x, y, s = 0) { let h = (x * 374761393 + y * 668265263 + s * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+
+// ------------------------------------------------------------------ the room
+// Rows r 0..9, columns c 0..11 (offset), axial q = c - floor(r/2). Hex size 1.
+const ROWS = 10, COLS = 12;
+const hexes = [];
+for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  const q = c - Math.floor(r / 2);
+  hexes.push({ q, r, x: SQ3 * (q + r / 2), z: 1.5 * r });
+}
+const minX = Math.min(...hexes.map((h) => h.x)), maxX = Math.max(...hexes.map((h) => h.x));
+const minZ = 0, maxZ = 1.5 * (ROWS - 1);
+const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2 + 0.75;
+hexes.forEach((h) => { h.x -= cx; h.z -= cz; });
+const at = (q, r) => { const h = hexes.find((e) => e.q === q && e.r === r); return h ? [h.x, h.z] : [0, 0]; };
+const backZ = -cz - 1.05, leftX = minX - cx - 1.2;
+
+const world = new THREE.Group();
+scene.add(world);
+const units = [];
+const lights = [];
+let keven = null;
+
+function clearWorld() {
+  world.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  world.clear(); units.length = 0; lights.length = 0;
+  matCache.forEach((m) => m.dispose()); matCache.clear();
+}
+
+function buildFloor() {
+  const dio = P.look === 'dio';
+  const g = new THREE.CylinderGeometry(dio ? 0.935 : 1.0, dio ? 0.975 : 1.0, dio ? 0.26 : 0.18, 6);
+  const m = dio ? new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9 }) : new THREE.MeshLambertMaterial({ flatShading: true });
+  const inst = new THREE.InstancedMesh(g, m, hexes.length);
+  const tmp = new THREE.Object3D(), col = new THREE.Color();
+  const dioCols = [0x6a5d6e, 0x5f5566, 0x74667a, 0x665a62, 0x5a5160];
+  hexes.forEach((h, i) => {
+    const j = hash(h.q, h.r);
+    tmp.position.set(h.x, dio ? -0.13 + (j - 0.5) * 0.05 : -0.09, h.z);
+    tmp.rotation.set(dio ? (hash(h.q, h.r, 2) - 0.5) * 0.025 : 0, 0, dio ? (hash(h.q, h.r, 3) - 0.5) * 0.025 : 0);
+    tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix);
+    if (dio) col.setHex(dioCols[Math.floor(j * dioCols.length)]).multiplyScalar(0.85 + hash(h.q, h.r, 5) * 0.3);
+    else col.setHex(0x8a7e70);
+    inst.setColorAt(i, col);
+  });
+  inst.receiveShadow = true; inst.frustumCulled = false;
+  world.add(inst);
+  // grout / void under tiles
+  const under = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), new THREE.MeshLambertMaterial({ color: dio ? 0x1a1418 : 0x2c2722 }));
+  under.rotation.x = -Math.PI / 2; under.position.y = -0.22; under.receiveShadow = true;
+  world.add(under);
+  if (!dio) {
+    // engraved hex lines, as in the game
+    const pts = [];
+    for (const h of hexes) for (let k = 0; k < 6; k++) {
+      const a0 = (Math.PI / 3) * k, a1 = (Math.PI / 3) * (k + 1);
+      pts.push(h.x + Math.sin(a0) * 0.99, 0.005, h.z + Math.cos(a0) * 0.99, h.x + Math.sin(a1) * 0.99, 0.005, h.z + Math.cos(a1) * 0.99);
+    }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    world.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x3a322b })));
+  } else {
+    // a few split stones for texture
+    for (const h of hexes) {
+      if (hash(h.q, h.r, 9) > 0.18) continue;
+      const crack = box(0.9, 0.012, 0.03, 0x3b3340, [h.x, 0.005, h.z], [0, hash(h.q, h.r, 4) * Math.PI, 0]);
+      crack.castShadow = false; world.add(crack);
+    }
+  }
+}
+
+function buildWalls() {
+  const dio = P.look === 'dio';
+  const H = P.wallH;
+  const len = maxX - minX + 2.6;
+  const doorX = 1.2, doorW = 1.6;
+  const segs = [[-len / 2, doorX - doorW / 2], [doorX + doorW / 2, len / 2]];
+  if (!dio) {
+    for (const [a, b] of segs) {
+      world.add(box(b - a, H, 0.24, 0x2c2722, [(a + b) / 2, H / 2, backZ]));
+      world.add(box(b - a, 0.06, 0.3, 0xd8cfbe, [(a + b) / 2, H + 0.03, backZ]));
+    }
+    const sideL = maxZ - minZ + 2.2;
+    world.add(box(0.24, H, sideL, 0x2c2722, [leftX, H / 2, backZ + sideL / 2]));
+    world.add(box(0.3, 0.06, sideL, 0xd8cfbe, [leftX, H + 0.03, backZ + sideL / 2]));
+    world.add(box(0.1, H, 0.1, 0x6b4426, [doorX - doorW / 2, H / 2, backZ + 0.1]));
+    world.add(box(0.1, H, 0.1, 0x6b4426, [doorX + doorW / 2, H / 2, backZ + 0.1]));
+    return;
+  }
+  // diorama: stacked bricks with jitter, a mortar core, a stone cap
+  const brickH = 0.34, brickL = 0.82;
+  const brickCols = [0x7a6a7a, 0x6e6170, 0x85738a, 0x6a5c6c];
+  const brickGeo = new THREE.BoxGeometry(1, 1, 1);
+  const bricks = [];
+  const layWall = (along, a, b, fixed, thick) => {
+    const rows = Math.ceil(H / brickH);
+    for (let row = 0; row < rows; row++) {
+      const off = row % 2 ? brickL / 2 : 0;
+      for (let s = a - off; s < b; s += brickL) {
+        const s0 = Math.max(a, s), s1 = Math.min(b, s + brickL);
+        if (s1 - s0 < 0.12) continue;
+        const j = hash(Math.round(s * 10), row, along === 'x' ? 1 : 2);
+        const h = Math.min(brickH, H - row * brickH) - 0.03;
+        const pos = along === 'x' ? [(s0 + s1) / 2, row * brickH + h / 2 + 0.015, fixed + (j - 0.5) * 0.05] : [fixed + (j - 0.5) * 0.05, row * brickH + h / 2 + 0.015, (s0 + s1) / 2];
+        const size = along === 'x' ? [s1 - s0 - 0.04, h, thick] : [thick, h, s1 - s0 - 0.04];
+        bricks.push({ pos, size, color: brickCols[Math.floor(j * brickCols.length)], j });
+      }
+    }
+    const core = along === 'x' ? box(b - a, H, thick * 0.8, 0x2a2128, [(a + b) / 2, H / 2, fixed]) : box(thick * 0.8, H, b - a, 0x2a2128, [fixed, H / 2, (a + b) / 2]);
+    world.add(core);
+  };
+  for (const [a, b] of segs) layWall('x', a, b, backZ, 0.5);
+  const sideA = backZ, sideB = backZ + (maxZ - minZ) + 2.2;
+  layWall('z', sideA, sideB, leftX, 0.5);
+  const bm = new THREE.InstancedMesh(brickGeo, new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9 }), bricks.length);
+  const tmp = new THREE.Object3D(), col = new THREE.Color();
+  bricks.forEach((b, i) => {
+    tmp.position.set(...b.pos); tmp.scale.set(...b.size); tmp.rotation.set(0, (b.j - 0.5) * 0.04, 0); tmp.updateMatrix();
+    bm.setMatrixAt(i, tmp.matrix); bm.setColorAt(i, col.setHex(b.color).multiplyScalar(0.8 + b.j * 0.35));
+  });
+  bm.castShadow = bm.receiveShadow = true; bm.frustumCulled = false;
+  world.add(bm);
+  // pillars at wall joints, door arch
+  const pillar = (x, z) => {
+    world.add(cyl(0.34, 0.38, H + 0.1, 8, 0x8a7a8c, [x, (H + 0.1) / 2, z]));
+    world.add(cyl(0.46, 0.46, 0.18, 8, 0x9a8a9c, [x, H + 0.15, z]));
+    world.add(cyl(0.46, 0.5, 0.2, 8, 0x5a4e5c, [x, 0.1, z]));
+  };
+  pillar(leftX, backZ);
+  pillar(doorX - doorW / 2 - 0.2, backZ); pillar(doorX + doorW / 2 + 0.2, backZ);
+  world.add(box(doorW + 0.8, 0.32, 0.6, 0x8a7a8c, [doorX, H - 0.16, backZ]));
+  world.add(box(doorW, H - 0.3, 0.05, 0x0d0a0c, [doorX, (H - 0.3) / 2, backZ - 0.2], undefined, { basic: true }));
+}
+
+// ------------------------------------------------------------------ figures
+// Units: world. H = height to the top of the head (hats add). head = head share of H.
+function figure(o) {
+  const H = P.figH * (o.scale ?? 1);
+  const hs = H * P.head; // head height
+  const bodyH = H - hs;
+  const legH = bodyH * 0.38, torsoH = bodyH - legH;
+  const chibi = P.head > 0.26;
+  const W = Math.max(H * 0.3, hs * (chibi ? 1.0 : 1.35)) * (o.wide ?? 1);
+  const g = new THREE.Group();
+  const add = (m) => (g.add(m), m);
+  // legs, boots
+  for (const s of [-1, 1]) {
+    add(box(W * 0.3, legH, W * 0.34, o.legs, [s * W * 0.2, legH / 2, 0]));
+    add(box(W * 0.34, legH * 0.28, W * 0.44, o.boots ?? 0x3b2a1c, [s * W * 0.2, legH * 0.14, W * 0.04]));
+  }
+  // torso and belt
+  const torso = add(cyl(W * 0.42, W * 0.5, torsoH, 6, o.tunic, [0, legH + torsoH / 2, 0], [0, Math.PI / 6, 0]));
+  torso.scale.z = 0.78;
+  add(cyl(W * 0.51, W * 0.51, torsoH * 0.13, 6, 0x3b2a1c, [0, legH + torsoH * 0.12, 0], [0, Math.PI / 6, 0])).scale.z = 0.8;
+  // arms
+  for (const s of [-1, 1]) {
+    add(box(W * 0.24, torsoH * 0.82, W * 0.26, o.tunic, [s * W * 0.58, legH + torsoH * 0.52, 0], [0, 0, s * 0.12]));
+    add(ball(W * 0.14, o.skin, [s * W * 0.66, legH + torsoH * 0.1, 0.02], 0));
+  }
+  // head
+  const hy = legH + torsoH + hs * 0.5;
+  const head = add(ball(hs * 0.52, o.skin, [0, hy, 0], 1));
+  head.scale.set(chibi ? 1.08 : 0.92, 1, 1);
+  for (const s of [-1, 1]) add(box(hs * 0.1, hs * 0.16, 0.02, 0x1a1210, [s * hs * 0.18, hy + hs * 0.04, hs * 0.5], undefined, { basic: true }));
+  if (o.beard) add(cone(hs * 0.36, hs * 0.5, 5, o.beard, [0, hy - hs * 0.32, hs * 0.22], [Math.PI, 0, 0]));
+  // hats
+  const top = legH + torsoH + hs;
+  if (o.hat === 'crown') {
+    add(cyl(hs * 0.42, hs * 0.42, hs * 0.18, 8, 0xd9a93a, [0, top - hs * 0.05, 0], undefined, { rough: 0.3, metal: 0.6 }));
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; add(cone(hs * 0.07, hs * 0.18, 4, 0xd9a93a, [Math.sin(a) * hs * 0.38, top + hs * 0.13, Math.cos(a) * hs * 0.38], undefined, { rough: 0.3, metal: 0.6 })); }
+  } else if (o.hat === 'hood') {
+    add(cone(hs * 0.62, hs * 1.0, 6, o.hatColor, [0, top - hs * 0.12, -hs * 0.06], [-0.18, 0, 0]));
+  } else if (o.hat === 'wizard') {
+    add(cyl(hs * 0.85, hs * 0.85, hs * 0.07, 10, o.hatColor, [0, top - hs * 0.08, 0]));
+    add(cone(hs * 0.48, hs * 1.15, 7, o.hatColor, [0, top + hs * 0.5, -hs * 0.05], [-0.25, 0, 0.1]));
+  } else if (o.hat === 'horned') {
+    add(ball(hs * 0.56, 0x8d9095, [0, top - hs * 0.32, 0], 1, { rough: 0.35, metal: 0.5 })).scale.y = 0.62;
+    for (const s of [-1, 1]) add(cone(hs * 0.14, hs * 0.55, 5, 0xefe4cf, [s * hs * 0.55, top + hs * 0.05, 0], [0, 0, -s * 0.9]));
+  }
+  // backpack + bedroll (the FTK signature)
+  if (o.pack) {
+    add(box(W * 0.7, torsoH * 0.7, W * 0.32, 0x7a4a2a, [0, legH + torsoH * 0.5, -W * 0.48]));
+    add(cyl(W * 0.17, W * 0.17, W * 0.95, 8, 0xd8cfbe, [0, legH + torsoH * 0.95, -W * 0.5], [0, 0, Math.PI / 2]));
+  }
+  if (o.cape) add(box(W * 0.9, torsoH * 1.05, 0.04, o.cape, [0, legH + torsoH * 0.45, -W * 0.42], [0.08, 0, 0]));
+  // weapons
+  const hand = [W * 0.68, legH + torsoH * 0.12, 0.06];
+  if (o.weapon === 'sword') {
+    add(box(0.06, H * 0.5, 0.025, 0xc8ccd2, [hand[0], hand[1] + H * 0.27, hand[2] + 0.05], undefined, { rough: 0.25, metal: 0.8 }));
+    add(box(W * 0.4, 0.04, 0.06, 0x3b3a3d, [hand[0], hand[1] + 0.03, hand[2] + 0.05]));
+  } else if (o.weapon === 'staff') {
+    add(cyl(0.03, 0.03, H * 1.05, 5, 0x6b4426, [hand[0], hand[1] + H * 0.28, hand[2]]));
+    add(ball(0.09, o.glow, [hand[0], hand[1] + H * 0.82, hand[2]], 0, { basic: true }));
+  } else if (o.weapon === 'daggers') {
+    for (const s of [-1, 1]) add(box(0.04, H * 0.2, 0.02, 0xc8ccd2, [s * hand[0], hand[1] - H * 0.08, hand[2] + 0.06], [0.4, 0, 0], { rough: 0.25, metal: 0.8 }));
+  } else if (o.weapon === 'axe') {
+    add(cyl(0.035, 0.035, H * 0.62, 5, 0x6b4426, [hand[0], hand[1] + H * 0.12, hand[2]]));
+    add(box(0.05, H * 0.2, H * 0.22, 0x8d9095, [hand[0], hand[1] + H * 0.36, hand[2] + H * 0.08], undefined, { rough: 0.3, metal: 0.6 }));
+  }
+  if (o.shield) add(cyl(W * 0.4, W * 0.4, 0.06, 8, o.shield, [-W * 0.78, legH + torsoH * 0.5, 0.08], [0, 0, Math.PI / 2]));
+  if (o.hunch) g.children.forEach((c) => { if (c.position.y > legH) { c.position.z += (c.position.y - legH) * o.hunch; } });
+  g.userData.height = top;
+  return g;
+}
+
+function spider(scale = 1) {
+  const s = P.figH * 0.3 * scale;
+  const g = new THREE.Group();
+  { const ab = ball(s * 0.55, 0x1c1a20, [0, s * 0.55, -s * 0.5], 1); ab.scale.set(1, 0.8, 1.2); g.add(ab); }
+  g.add(ball(s * 0.32, 0x26222a, [0, s * 0.5, s * 0.25], 1));
+  g.add(ball(s * 0.12, 0xb3141e, [0, s * 0.95, -s * 0.5], 0));
+  for (const e of [-1, 1]) g.add(ball(s * 0.06, 0xff3b30, [e * s * 0.1, s * 0.6, s * 0.52], 0, { basic: true }));
+  for (let k = 0; k < 4; k++) for (const e of [-1, 1]) {
+    const leg = box(s * 1.0, s * 0.07, s * 0.07, 0x1c1a20, [e * s * 0.55, s * 0.55, s * (0.25 - k * 0.25)], [0, e * (k - 1.5) * 0.35, e * -0.6]);
+    g.add(leg);
+  }
+  g.userData.height = s;
+  return g;
+}
+
+function blob(r) {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(r, 16).rotateX(-Math.PI / 2), mat(0x000000, { basic: true, opacity: 0.38 }));
+  m.position.y = 0.012; m.castShadow = false; m.receiveShadow = false;
+  return m;
+}
+
+function place(g, q, r, face = 0) {
+  const [x, z] = at(q, r);
+  const root = new THREE.Group();
+  root.position.set(x, 0, z);
+  g.rotation.y = face;
+  root.add(g);
+  if (P.look === 'dio' && !P.shadows) root.add(blob(P.figH * 0.28));
+  world.add(root);
+  units.push({ g, phase: hash(q, r, 7) * 6 });
+  return root;
+}
+
+function buildUnits() {
+  const toward = (q, r, tq, tr) => { const [x, z] = at(q, r), [tx, tz] = at(tq, tr); return Math.atan2(tx - x, tz - z); };
+  const dio = P.look === 'dio';
+  const party = [
+    { q: 4, r: 3, o: { skin: 0xe0b48a, tunic: 0x2f4f8a, legs: 0x3a2f2a, hat: 'crown', weapon: 'sword', cape: 0xb03a2e, pack: dio, beard: 0x7a4a2a } },
+    { q: 5, r: 3, o: { skin: 0xc68a5e, tunic: 0xb03a2e, legs: 0x4a3a30, hat: 'horned', weapon: 'sword', shield: 0x8a5a2b, pack: dio } },
+    { q: 3, r: 4, o: { skin: 0xe8c39c, tunic: 0x2e5a34, legs: 0x2a2620, hat: 'hood', hatColor: 0x3b6a3a, weapon: 'daggers', pack: dio } },
+    { q: 4, r: 4, o: { skin: 0xd9a77e, tunic: 0x3a7a8a, legs: 0x3a2f2a, hat: 'wizard', hatColor: 0x2f8a9a, weapon: 'staff', glow: 0x7fe7ff, pack: dio, beard: 0xd8cfbe } },
+  ];
+  party.forEach((p, i) => {
+    const g = figure(p.o);
+    const root = place(g, p.q, p.r, toward(p.q, p.r, 8, 4));
+    if (i === 0) keven = { root, g };
+    if (p.o.glow) addLight(new THREE.Vector3(...at(p.q, p.r)).setY(0) , 0x7fd8ff, 1.6, 3.2, P.figH * 1.0, root);
+  });
+  const orc = figure({ skin: 0x5a7a3a, tunic: 0x4a3a2a, legs: 0x2a2620, hat: 'none', weapon: 'axe', wide: 1.25, scale: 1.12, hunch: 0.25, pack: false });
+  place(orc, 8, 2, toward(8, 2, 5, 3));
+  place(spider(), 7, 5, toward(7, 5, 4, 4));
+  // selection ring + move range
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xe8a33d, transparent: true, opacity: 0.9, depthWrite: false });
+  const ringGeo = (a, b) => { const g = new THREE.RingGeometry(a, b, 6, 1); g.rotateX(-Math.PI / 2); g.rotateY(Math.PI / 6 + Math.PI / 2); return g; };
+  const [kx, kz] = at(4, 3);
+  const sel = new THREE.Mesh(ringGeo(0.7, 0.86), ringMat); sel.position.set(kx, 0.02, kz); world.add(sel);
+  if (P.range) {
+    const rm = new THREE.MeshBasicMaterial({ color: 0xe8a33d, transparent: true, opacity: 0.55, depthWrite: false });
+    const dist = (a, b) => (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
+    for (const h of hexes) {
+      const d = dist(h, { q: 4, r: 3 });
+      if (d < 1 || d > 3) continue;
+      if (party.some((p) => p.q === h.q && p.r === h.r)) continue;
+      const m = new THREE.Mesh(ringGeo(0.72, 0.84), rm); m.position.set(h.x, 0.015, h.z); world.add(m);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ props and lights
+function addLight(pos, color, intensity, distance, y = 0.6, parent = world, shadow = false) {
+  const l = new THREE.PointLight(color, intensity, distance, 1.4);
+  if (parent === world) l.position.set(pos.x, y, pos.z); else l.position.set(0, y, 0);
+  l.castShadow = shadow && P.shadows;
+  if (l.castShadow) { l.shadow.mapSize.set(512, 512); l.shadow.bias = -0.004; l.shadow.radius = 3; l.shadow.camera.near = 0.1; }
+  parent.add(l);
+  lights.push({ l, base: intensity, seed: lights.length * 1.7 + pos.x });
+  return l;
+}
+function flame(x, y, z, s = 1) {
+  const g = new THREE.Group();
+  g.add(cone(0.07 * s, 0.2 * s, 5, 0xffb35c, [0, 0.1 * s, 0], undefined, { basic: true }));
+  g.add(cone(0.04 * s, 0.12 * s, 5, 0xfff0c0, [0, 0.07 * s, 0], undefined, { basic: true }));
+  g.position.set(x, y, z);
+  world.add(g);
+  units.push({ flame: g, phase: x * 3 + z });
+  return g;
+}
+function buildProps() {
+  const dio = P.look === 'dio';
+  const W = P.wallH;
+  // wall torches (always: the game has sconces)
+  for (const x of [-4.2, 5.6]) {
+    world.add(box(0.12, 0.4, 0.12, 0x3b3a3d, [x, W * 0.6, backZ + 0.32]));
+    flame(x, W * 0.6 + 0.2, backZ + 0.36, 1.3);
+    addLight(new THREE.Vector3(x, 0, backZ + 0.9), 0xff9a40, dio ? 9 : 4, 8, W * 0.62);
+  }
+  // brazier (key light, casts the one shadow)
+  const [bx, bz] = at(2, 1);
+  world.add(cyl(0.38, 0.22, 0.32, 8, 0x3b3a3d, [bx, 0.5, bz], undefined, { rough: 0.5, metal: 0.5 }));
+  world.add(cyl(0.06, 0.12, 0.36, 6, 0x3b3a3d, [bx, 0.18, bz]));
+  flame(bx, 0.62, bz, 2.4);
+  addLight(new THREE.Vector3(bx, 0, bz), 0xff8a30, dio ? 14 : 6, 10, 1.1, world, true);
+  // chest
+  const [chx, chz] = at(9, 0);
+  world.add(box(0.8, 0.42, 0.52, 0x6b4426, [chx, 0.21, chz]));
+  world.add(cyl(0.26, 0.26, 0.8, 8, 0x7a4e2c, [chx, 0.42, chz], [0, 0, Math.PI / 2]));
+  world.add(box(0.84, 0.06, 0.08, 0xd9a93a, [chx, 0.42, chz + 0.26], undefined, { rough: 0.3, metal: 0.6 }));
+  if (!P.props) {
+    // the plain set the game has today: a pillar and a bench
+    const [px, pz] = at(7, 7);
+    world.add(cyl(0.45, 0.45, W, 8, 0x7a6f62, [px, W / 2, pz]));
+    world.add(box(1.4, 0.3, 0.4, 0x6b4426, [at(2, 8)[0], 0.15, at(2, 8)[1]]));
+    return;
+  }
+  // dressing: barrels, crates, table with candles, rug, bones, banners, cobwebby columns
+  const barrel = (x, z, s = 1) => {
+    world.add(cyl(0.3 * s, 0.3 * s, 0.62 * s, 10, 0x7a4a2a, [x, 0.31 * s, z]));
+    for (const y of [0.12, 0.5]) world.add(cyl(0.315 * s, 0.315 * s, 0.05, 10, 0x3b3a3d, [x, y * s, z]));
+  };
+  barrel(leftX + 0.75, backZ + 0.8); barrel(leftX + 1.45, backZ + 0.65, 0.9); barrel(leftX + 0.8, backZ + 1.5, 0.85);
+  world.add(box(0.6, 0.6, 0.6, 0x8a5f3a, [-2.8, 0.3, backZ + 0.75], [0, 0.3, 0]));
+  world.add(box(0.45, 0.45, 0.45, 0x7a5232, [-2.75, 0.83, backZ + 0.75], [0, 0.7, 0]));
+  // table with candles
+  const [tx, tz] = at(1, 5);
+  world.add(box(1.5, 0.08, 0.8, 0x6b4426, [tx, 0.56, tz]));
+  for (const s of [-1, 1]) for (const e of [-1, 1]) world.add(box(0.08, 0.56, 0.08, 0x3d2615, [tx + s * 0.65, 0.28, tz + e * 0.32]));
+  for (const [dx, h] of [[-0.45, 0.22], [-0.3, 0.14], [0.4, 0.18]]) {
+    world.add(cyl(0.04, 0.04, h, 6, 0xefe4cf, [tx + dx, 0.6 + h / 2, tz + 0.1]));
+    flame(tx + dx, 0.6 + h, tz + 0.1, 0.6);
+  }
+  world.add(box(0.3, 0.12, 0.24, 0xa83a2e, [tx + 0.1, 0.66, tz - 0.15]));
+  addLight(new THREE.Vector3(tx, 0, tz), 0xffb862, 3, 5, 1.0);
+  // floor candelabra cluster near the left wall
+  const [cx2, cz2] = at(0, 8);
+  for (const [dx, dz, h] of [[0, 0, 0.3], [0.18, 0.1, 0.2], [-0.12, 0.16, 0.16], [0.08, -0.16, 0.24]]) {
+    world.add(cyl(0.05, 0.05, h, 6, 0xefe4cf, [cx2 + dx, h / 2, cz2 + dz]));
+    flame(cx2 + dx, h, cz2 + dz, 0.6);
+  }
+  addLight(new THREE.Vector3(cx2, 0, cz2), 0xffb862, 3, 5, 0.5);
+  // rug
+  const [rx, rz] = at(5, 6);
+  const rug = box(3.2, 0.02, 1.6, 0x7a2430, [rx, 0.01, rz]); world.add(rug);
+  world.add(box(2.9, 0.025, 1.3, 0x9a3a3a, [rx, 0.012, rz]));
+  // bones
+  const [bnx, bnz] = at(6, 8);
+  world.add(ball(0.14, 0xe8dcc0, [bnx, 0.12, bnz], 1));
+  for (let k = 0; k < 4; k++) world.add(box(0.36, 0.05, 0.05, 0xe0d4b8, [bnx + (hash(k, 1) - 0.5) * 0.6, 0.03, bnz + (hash(k, 2) - 0.5) * 0.5], [0, hash(k, 3) * 3, 0]));
+  // banners
+  for (const [x, c] of [[-1.6, 0xb03a2e], [3.8, 0x2f4f8a]]) {
+    world.add(box(0.9, 0.06, 0.08, 0x6b4426, [x, W * 0.86, backZ + 0.3]));
+    const b = box(0.7, W * 0.5, 0.03, c, [x, W * 0.6, backZ + 0.32]); world.add(b);
+    { const tip = cone(0.35, 0.3, 3, c, [x, W * 0.35 - 0.1, backZ + 0.32], [Math.PI, 0, 0]); tip.scale.z = 0.1; world.add(tip); }
+  }
+  // a freestanding column in the room
+  const [px, pz] = at(7, 7);
+  world.add(cyl(0.36, 0.4, W, 8, 0x8a7a8c, [px, W / 2, pz]));
+  world.add(cyl(0.5, 0.5, 0.2, 8, 0x9a8a9c, [px, W, pz]));
+  world.add(cyl(0.5, 0.55, 0.22, 8, 0x5a4e5c, [px, 0.11, pz]));
+  // rubble
+  for (let k = 0; k < 7; k++) {
+    const [ux, uz] = at(9, 6);
+    world.add(ball(0.08 + hash(k, 9) * 0.1, 0x6e6170, [ux + (hash(k, 4) - 0.5) * 1.2, 0.06, uz + (hash(k, 5) - 0.5) * 1.2], 0));
+  }
+}
+
+function buildLighting() {
+  const dio = P.look === 'dio';
+  if (dio) {
+    world.add(new THREE.AmbientLight(0x5a4f78, 1.0));
+    world.add(new THREE.HemisphereLight(0xa89ad0, 0x3a2418, 1.7));
+    const key = new THREE.DirectionalLight(0xffd6a8, 1.6); key.position.set(6, 14, 16); world.add(key);
+  } else {
+    world.add(new THREE.AmbientLight(0x3a3f4a, 1.4));
+    world.add(new THREE.HemisphereLight(0x9aa4b8, 0x2a2018, 2.2));
+    const rim = new THREE.DirectionalLight(0x6f8fc8, 0.22); rim.position.set(-6, 9, -8); world.add(rim);
+    const key = new THREE.DirectionalLight(0xfff0dc, 0.55); key.position.set(-20, 40, 25); world.add(key);
+  }
+}
+
+function rebuild() {
+  clearWorld();
+  renderer.shadowMap.enabled = P.shadows;
+  renderer.toneMapping = P.look === 'dio' ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1.3;
+  scene.background = new THREE.Color(P.look === 'dio' ? 0x0c0810 : 0x050404);
+  scene.fog = P.fog ? new THREE.FogExp2(0x1a1020, 0.032) : null;
+  buildLighting(); buildFloor(); buildWalls(); buildProps(); buildUnits();
+  renderer.shadowMap.needsUpdate = true;
+}
+
+// ------------------------------------------------------------------ camera + loop
+let W = 0, Hh = 0;
+function resize() {
+  const r = stage.getBoundingClientRect();
+  W = Math.max(1, Math.round(r.width)); Hh = Math.max(1, Math.round(r.height));
+  renderer.setSize(W, Hh, false);
+  composer.setSize(W, Hh);
+  bloom.setSize(W, Hh);
+  for (const t of [tiltH, tiltV, tiltH2, tiltV2]) t.uniforms.res.value.set(W, Hh);
+  camera.aspect = W / Hh; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+
+function placeCamera() {
+  const pitch = THREE.MathUtils.degToRad(P.pitch);
+  camera.fov = P.fov; camera.updateProjectionMatrix();
+  const off = new THREE.Vector3(Math.sin(P.yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(P.yaw) * Math.cos(pitch)).multiplyScalar(P.dist);
+  target.set(at(5, 3)[0], 0.4, at(5, 3)[1] - 0.4);
+  camera.position.copy(target).add(off);
+  camera.lookAt(target);
+}
+
+const rHex = document.getElementById('r-hex'), rFig = document.getElementById('r-fig'), rScr = document.getElementById('r-scr');
+function readouts() {
+  const across = (2 * P.dist * Math.tan(THREE.MathUtils.degToRad(P.fov / 2)) * camera.aspect) / SQ3;
+  rHex.textContent = across.toFixed(1);
+  rScr.textContent = (LEVEL1_WIDTH / across).toFixed(1);
+  if (keven) {
+    const base = keven.root.position.clone(), topP = base.clone(); topP.y += keven.g.userData.height;
+    const a = base.project(camera), b = topP.project(camera);
+    rFig.textContent = Math.round(Math.abs(b.y - a.y) * 50);
+  }
+}
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clock = new THREE.Clock();
+function frame() {
+  const t = clock.getElapsedTime();
+  placeCamera();
+  for (const u of units) {
+    if (u.g && !reduce) u.g.scale.y = 1 + Math.sin(t * 2.2 + u.phase) * 0.012;
+    if (u.flame) { u.flame.scale.y = 1 + Math.sin(t * 11 + u.phase) * 0.18; u.flame.scale.x = 1 + Math.sin(t * 13 + u.phase) * 0.08; }
+  }
+  for (const L of lights) L.l.intensity = L.base * (1 + Math.sin(t * 11 + L.seed) * 0.05 + Math.sin(t * 23 + L.seed * 2) * 0.03);
+  const post = P.look === 'dio' && (P.bloom || P.tilt);
+  bloom.enabled = P.bloom;
+  for (const p of [tiltH, tiltV, tiltH2, tiltV2]) p.enabled = P.tilt;
+  grade.uniforms.strength.value = P.look === 'dio' ? 1 : 0;
+  if (post || P.look === 'dio') composer.render(); else renderer.render(scene, camera);
+  readouts();
+  requestAnimationFrame(frame);
+}
+
+// ------------------------------------------------------------------ controls
+const sliders = {
+  figH: (v) => v.toFixed(2), head: (v) => `1/${(1 / v).toFixed(1)}`, wallH: (v) => v.toFixed(2),
+  dist: (v) => v.toFixed(1), pitch: (v) => `${v}°`, fov: (v) => `${v}°`,
+};
+const structural = new Set(['figH', 'head', 'wallH']);
+let rebuildTimer = 0;
+for (const k of Object.keys(sliders)) {
+  const el = document.getElementById(k);
+  el.addEventListener('input', () => {
+    P[k] = Number(el.value);
+    document.getElementById(`o-${k}`).textContent = sliders[k](P[k]);
+    markPreset(null);
+    if (structural.has(k)) { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuild, 60); }
+  });
+}
+const toggles = ['shadows', 'bloom', 'tilt', 'fog', 'props', 'range'];
+for (const k of toggles) document.getElementById(k).addEventListener('change', (e) => { P[k] = e.target.checked; markPreset(null); rebuild(); });
+const lookBtns = { flat: document.getElementById('look-flat'), dio: document.getElementById('look-dio') };
+for (const [k, b] of Object.entries(lookBtns)) b.addEventListener('click', () => { P.look = k; markPreset(null); syncUI(); rebuild(); });
+
+function syncUI() {
+  for (const k of Object.keys(sliders)) { document.getElementById(k).value = P[k]; document.getElementById(`o-${k}`).textContent = sliders[k](P[k]); }
+  for (const k of toggles) document.getElementById(k).checked = P[k];
+  for (const [k, b] of Object.entries(lookBtns)) { b.classList.toggle('on', P.look === k); b.setAttribute('aria-pressed', P.look === k); }
+}
+function markPreset(name) {
+  document.querySelectorAll('.chip').forEach((c) => { c.classList.toggle('on', c.dataset.preset === name); c.setAttribute('aria-pressed', c.dataset.preset === name); });
+}
+document.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+  Object.assign(P, PRESETS[c.dataset.preset]);
+  markPreset(c.dataset.preset); syncUI(); rebuild();
+}));
+
+// orbit + zoom
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+  P.yaw -= dx * 0.006;
+  P.pitch = THREE.MathUtils.clamp(P.pitch + dy * 0.25, 25, 80);
+  document.getElementById('pitch').value = Math.round(P.pitch); document.getElementById('o-pitch').textContent = `${Math.round(P.pitch)}°`;
+});
+const endDrag = () => (drag = null);
+canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  P.dist = THREE.MathUtils.clamp(P.dist * Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 120) * 0.0015), 6, 30);
+  document.getElementById('dist').value = P.dist; document.getElementById('o-dist').textContent = P.dist.toFixed(1);
+}, { passive: false });
+
+// start
+const startPreset = (() => { try { const h = location.hash.slice(1); return PRESETS[h] ? h : 'ftk'; } catch { return 'ftk'; } })();
+Object.assign(P, PRESETS[startPreset]);
+markPreset(startPreset); syncUI(); resize(); rebuild();
+window.__lab = { P, PRESETS, rebuild, markPreset, syncUI, composer, renderer, camera, ready: true };
+requestAnimationFrame(frame);
+</script>
