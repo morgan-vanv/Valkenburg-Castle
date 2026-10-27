@@ -157,6 +157,7 @@ const SINGLE: Record<ItemKind, string> = {
   lockpicks: 'Lockpicks', improvised: 'Improvised pick', 'improvised-charge': 'Improvised explosive', nightsight: 'Night-eye draught',
   gatekey: 'Sally port key',
   antidote: 'Antidote', venomdart: 'Venom dart',
+  greaterpotion: 'Greater potion', // V4.1 (spec 31.3)
 };
 
 /**

@@ -15,6 +15,7 @@ import { chestLoot, hd, hurtAny, isSatchel, makeItem, makeNoise, nameOf, occupan
 import { doorAt, fallColumn, fallDamage, kindAt, pitsNextTo, type World } from './world';
 import { fall, figure, push } from './falls';
 import { checkWays, wayAtHex } from './ways';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 /** Engine-private: when a fuse was lit, so one set during a world phase isn't counted down in that same phase. */
 export interface FuseX extends Fuse {
@@ -294,7 +295,7 @@ export function blast(c: Ctx, at: Pos, by: string): void {
   if (pr && !pr.dead && !pr.out && pr.at.level === at.level && distance(pr.at, at) <= 2) hurt.push([pr.id, pr.at]);
   const credit = hd(c, by) ? by : null;
   for (const [id, p] of hurt) {
-    const dmg = shielded(c, by, id, distance(p, at) <= 1 ? BLAST_INNER_DMG : BLAST_OUTER_DMG);
+    const dmg = fireWard(c, id, shielded(c, by, id, distance(p, at) <= 1 ? BLAST_INNER_DMG : BLAST_OUTER_DMG));
     if (dmg > 0) hurtAny(c, id, dmg, hd(c, id) ? null : (credit ?? by), { noise: false });
   }
   // Spec 20.3a: the floor. Rubble first, then the collapse: whoever stands on it falls down the column.

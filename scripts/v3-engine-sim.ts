@@ -1044,7 +1044,8 @@ for (let i = 0; i < N; i++) {
   if (rescue && k === rescue) crewStats.rescuesTried++;
   crewLog = [];
   // Oil for the Hollow (spec 16.2): one flask per Level 3 contract when the gold is there.
-  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15) s = run(s, { type: 'buy', kind: 'oil' });
+  // V4.1 (spec 31.3): oil is Ilse's; only when her bench sells it.
+  if (k.level >= 3 && !s.campaign.stash.some((it) => it.kind === 'oil') && s.campaign.gold >= 15 && !e.shop(s).find((o) => o.kind === 'oil')?.locked) s = run(s, { type: 'buy', kind: 'oil' });
   // V4.0 (spec 29.6): an antidote for the deeper levels (spiders, venom traps, the Gallows Choir), when 20 gold can be spared.
   if (k.level >= 2 && !s.campaign.stash.some((it) => it.kind === 'antidote') && s.campaign.gold >= 40) {
     const before = s;

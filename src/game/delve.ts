@@ -43,6 +43,8 @@ import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
 import { CARRY_MOVE, VENOM_ROUNDS } from './data';
 import { canStir, carryFollow, checkCarries, cureVenom, endCarry, envenom, isEnvenomed, isParalyzed, shoulderable, trapDamage, venomTakes } from './venom';
+import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
+import { POTION_HEAL, TRIPWIRE_FUSE } from './data'; // V4.1 (spec 31.3)
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -648,6 +650,11 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       }
       return out;
     }
+    case 'setTripwire': {
+      // V4.1 (spec 31.3): Gerda and Ilse home: a Sapper's charge on an adjacent floor hex that an enemy's step next to it sets off.
+      if (!canTripwire(c, cls) || !chargeCount(h)) return [];
+      return posNeighbors(h.at).filter((p) => chargeSpot(c, p) && isFloorish(c.w, c.d, p) && !occupant(c, p)).map((at) => ({ at }));
+    }
     case 'dig':
       if (cls !== 'sapper' && h.ale !== 'mole') return [];
       return posNeighbors(h.at).filter((p) => { const k = kindAt(c.w, c.d, p); return k === 'rubble' || k === 'cracked'; }).map((at) => ({ at }));
@@ -793,14 +800,17 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return it ? [{ id: h.heroId, itemId: it.id }] : [];
     }
     case 'potion': {
-      const pot = h.pack.find((i) => i.kind === 'potion');
-      if (!pot) return [];
+      // V4.1 (spec 31.3): a plain potion and a greater one are both used through Potion (one target set per kind carried).
+      const pots = (['potion', 'greaterpotion'] as const).map((k) => h.pack.find((i) => i.kind === k)).filter((i): i is Item => !!i);
+      if (!pots.length) return [];
       const out: ActionTarget[] = [];
-      if (h.hp < def.maxHp) out.push({ id: h.heroId, itemId: pot.id });
-      for (const o of others) {
-        if (!adjacent(o.at, h.at)) continue;
-        const od = heroDef(c, o.heroId)!;
-        if (o.status === 'downed' || (o.status === 'active' && o.hp < od.maxHp)) out.push({ id: o.heroId, itemId: pot.id });
+      for (const pot of pots) {
+        if (h.hp < def.maxHp) out.push({ id: h.heroId, itemId: pot.id });
+        for (const o of others) {
+          if (!adjacent(o.at, h.at)) continue;
+          const od = heroDef(c, o.heroId)!;
+          if (o.status === 'downed' || (o.status === 'active' && o.hp < od.maxHp)) out.push({ id: o.heroId, itemId: pot.id });
+        }
       }
       return out;
     }
@@ -907,7 +917,7 @@ const LABELS: Record<ActionKind, string> = {
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
   bribe: 'Bribe', parley: 'Parley', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
   passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
-  overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', setCharge: 'Set charge', dig: 'Dig', fireball: 'Fireball',
+  overwatch: 'Overwatch', knockback: 'Knockback shot', throwCharge: 'Throw charge', setCharge: 'Set charge', setTripwire: 'Set tripwire', dig: 'Dig', fireball: 'Fireball',
   veil: 'Veil', sleep: 'Sleep', blink: 'Blink', ward: 'Ward', gust: 'Gust', dread: 'Dread',
   smoke: 'Smoke bomb', glue: 'Glue bomb', dart: 'Sleep dart', caltrops: 'Caltrops', firecracker: 'Firecracker',
   key: 'Skeleton key', oil: 'Oil flask', grapple: 'Grapple up', nightsight: 'Night-eye draught', unbar: 'Unbar the gate',
@@ -918,7 +928,7 @@ const LABELS: Record<ActionKind, string> = {
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'shoulder', 'setDown', 'potion', 'antidote', 'mend',
-  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
+  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
@@ -928,13 +938,13 @@ const PICK: Record<ActionKind, ActionOption['pick']> = {
   light: 'hex', torch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
   shove: 'enemy', free: 'other', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
-  overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
+  overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', setTripwire: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
   blink: 'hex', ward: 'ally', gust: 'hex', dread: 'enemy', smoke: 'hex', glue: 'hex', dart: 'enemy', caltrops: 'hex', firecracker: 'hex',
   key: 'hex', unbar: 'hex', oil: 'self', grapple: 'self', nightsight: 'self',
   brace: 'self', hamstring: 'enemy', nightthorn: 'enemy', briar: 'enemy', smashProp: 'hex',
   venomdart: 'enemy', antidote: 'ally', shoulder: 'ally', setDown: 'self',
 };
-const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2 };
+const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke: 1, glue: 1, charge: 2, throwCharge: 2, setCharge: 2, setTripwire: 2 };
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
 /** Attacks break a Veil (spec 15.3). */
 const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash', 'hamstring', 'nightthorn', 'briar', 'smashProp'];
@@ -1181,6 +1191,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       return blastSpec(c, h, t.at!, 1);
     case 'setCharge':
       return blastSpec(c, h, t.at!, t.fuse ?? 1);
+    case 'setTripwire': {
+      // V4.1 (spec 31.3): as a charge with the tripwire's fuse, and the trigger.
+      const sp = blastSpec(c, h, t.at!, TRIPWIRE_FUSE);
+      sp.outcomes = [`Tripwire: goes off when a monster or crew member steps next to it, or ${sp.outcomes[0]!.charAt(0).toLowerCase()}${sp.outcomes[0]!.slice(1)}`];
+      return sp;
+    }
     case 'dig':
       return simple(kindAt(c.w, c.d, t.at!) === 'rubble' || c.w.tile(t.at!)?.heap ? 'Clears the rubble' : 'Breaks through the cracked wall', DIG_NOISE);
     case 'fireball': {
@@ -1325,7 +1341,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'nightsight': return simple(`Night-eye for ${NIGHTSIGHT_ROUNDS} rounds: full sight, no dark penalty. Silent. The dark still hunts`);
     case 'potion': {
       const o = hd(c, t.id!)!;
-      return simple(o.status === 'downed' ? 'Back up with 5 HP' : 'Heal 5');
+      const heal = POTION_HEAL[h.pack.find((i) => i.id === t.itemId)?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3)
+      return simple(o.status === 'downed' ? `Back up with ${heal} HP` : `Heal ${heal}`);
     }
     case 'revive': return simple('Back up with 3 HP');
     case 'charge': return blastSpec(c, h, t.at!, 1);
@@ -1551,6 +1568,13 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       say(c, `${name} sets a charge. Fuse ${fuse}. Stand clear.`);
       break;
     }
+    case 'setTripwire': {
+      // V4.1 (spec 31.3): village.ts springTripwires sets it off early.
+      spendCharge(h);
+      setFuse(c, t.at!, TRIPWIRE_FUSE, heroId).tripwire = true;
+      say(c, `${name} sets a charge on a tripwire. Fuse ${TRIPWIRE_FUSE}, or the first enemy to step beside it.`);
+      break;
+    }
     case 'dig': {
       const rubble = digOut(c, t.at!);
       say(c, rubble ? `${name} clears the rubble.` : `${name} breaks through the wall.`);
@@ -1579,8 +1603,9 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
         const m = c.d.monsters.find((x) => x.id === id);
         const armor = m ? monsterArmor(c, m) : hd(c, id) ? armorOf(heroDef(c, id)!) : 0;
         const dmg = r.hits * Math.max(1, 2 - armor) + (r.perfect ? 1 : 0);
-        if (hd(c, id)) hurtHero(c, hd(c, id)!, dmg, heroId, r.perfect);
-        else hurtAny(c, id, dmg, heroId, { crit: r.perfect });
+        if (hd(c, id)) {
+          if (fireWard(c, id, dmg) > 0) hurtHero(c, hd(c, id)!, fireWard(c, id, dmg), heroId, r.perfect); // V4.1 (spec 31.3): Dragonfire Porter
+        } else hurtAny(c, id, dmg, heroId, { crit: r.perfect });
       }
       break;
     }
@@ -1949,15 +1974,17 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       say(c, `${name} drinks the night-eye draught. The dark thins.`);
       break;
     case 'potion': {
-      useItem(h, t.itemId);
+      const pot = useItem(h, t.itemId);
+      const heal = POTION_HEAL[pot?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3): 5, a greater potion 8
       const o = hd(c, t.id!)!;
       const od = heroDef(c, o.heroId)!;
       if (o.status === 'downed') {
         o.status = 'active';
-        o.hp = 5;
+        o.hp = Math.min(od.maxHp, heal);
         o.bleed = 0;
         c.ev.push({ type: 'revived', id: o.heroId });
-      } else o.hp = Math.min(od.maxHp, o.hp + 5);
+      } else o.hp = Math.min(od.maxHp, o.hp + heal);
+      if (pot?.kind === 'greaterpotion') say(c, `${heroName(c, o.heroId)} drinks a greater potion (+${heal}).`);
       break;
     }
     case 'revive': {

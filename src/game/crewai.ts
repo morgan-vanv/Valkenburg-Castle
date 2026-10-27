@@ -23,6 +23,7 @@ import { faceToward, inRearHalf } from './stealth';
 import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals';
 import { cureVenom, envenom, isParalyzed, venomTakes } from './venom';
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
+import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 
 // ---------------------------------------------------------------- the pack
 
@@ -697,7 +698,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
           // The heroes' fireball rule (spec 15.3): 2 per hit less armor (min 1), less the ward.
           const def = c.s.campaign.roster.find((x) => x.id === id)!;
           const per = Math.max(0, Math.max(1, 2 - (CLASSES[def.cls].armor + def.armorTier)) - (h.ward > 0 ? 1 : 0));
-          hurtHero(c, h, rr.hits * per + (rr.perfect ? 1 : 0), r.id, rr.perfect);
+          const fd = fireWard(c, id, rr.hits * per + (rr.perfect ? 1 : 0)); // V4.1 (spec 31.3): Dragonfire Porter
+          if (fd > 0) hurtHero(c, h, fd, r.id, rr.perfect);
         } else {
           const m = c.d.monsters.find((x) => x.id === id);
           const armor = m ? monsterArmor(c, m) : 0;

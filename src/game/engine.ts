@@ -269,6 +269,7 @@ export function createEngine(castle: CastleDef): Engine {
         for (const h of s.campaign.roster) if (typeof h.hp !== 'number') h.hp = h.maxHp;
         // V3.5: saves without the village start with nothing won back.
         s.campaign.village ??= newVillage();
+        s.campaign.village.alchemist ??= false; // V4.1 (spec 31.3): saves from before Ilse
         // V4.0 (spec 25): a save without `opened` had every way in open, and keeps them (campaignOpen
         // reads the absent field as open). A delve saved mid-way gets its ways set up the same way.
         const d = s.delve as DelveX | null;

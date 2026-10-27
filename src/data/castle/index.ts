@@ -70,7 +70,8 @@ export const castle: CastleDef = {
     { at: L1(31, 17), kind: 'orc' }, // hall, east of the pit
     { at: L1(36, 4), kind: 'orc' }, // tower stair
     { at: L1(17, 25), kind: 'orc' }, // courtyard, by the gatehouse
-    { at: L1(35, 24), kind: 'orc' }, // chapel, by the chest
+    // V4.1 (spec 31.2, B1): Aldric's guard dozes on a campaign's first delve.
+    { at: L1(35, 24), kind: 'orc', firstDelveAsleep: true }, // chapel, by the chest
     // The hall patrol: clockwise round the pit mouth, floor only, no doors.
     { at: L1(19, 10), kind: 'orc', patrol: route(1, [[19, 10], [27, 10], [32, 12], [32, 18], [25, 20], [18, 17]]) },
     // Level 2: the Crossing. The barracks squad sleeps with its captain; everything else is up.
@@ -169,6 +170,9 @@ export const castle: CastleDef = {
     { id: 'l1-story-kitchens', kind: 'rescue', at: L1(9, 14), where: 'the kitchens', story: 'innkeeper' },
     { id: 'l2-story-forge', kind: 'rescue', at: L2(38, 26), where: 'the forge', story: 'smith' },
     { id: 'l2-story-barracks', kind: 'recover', at: L2(28, 3), where: 'the barracks', story: 'copper' },
+    // V4.1 (spec 31.3): Ilse among the archive's shelves, a step from the spider she milks (it's awake: no sneaking up
+    // on her unseen), across the room from the archive's regular site and chest.
+    { id: 'l2-story-archive', kind: 'rescue', at: L2(6, 11), where: 'the archive', story: 'alchemist' },
     // V3.7 (spec 20.4): crew hideouts, used only by "Bring back <name>" contracts for that crew's
     // captives: the Sisters camp in the officers' quarters (behind the locked door), the Ferrymen
     // by the Drain's water, the Choir in the east tunnels, the Wake in the Bone Pile's north-east corner.
