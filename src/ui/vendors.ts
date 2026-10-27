@@ -114,7 +114,7 @@ export interface CatalogRow {
   soon?: string;
   /** The workstream that builds it, if it came from the plan (for builders; never shown). */
   ws?: string;
-  /** A glyph when the item kind has none in names.ts (arrows, gear, the lantern). */
+  /** A glyph when the item kind has none in names.ts (arrows, gear). */
   glyph?: string;
 }
 
@@ -142,7 +142,7 @@ export const CATALOG: CatalogRow[] = [
   { id: 'blade', glyph: '⚔', vendor: 'gerda', kind: 'gear', keys: ['weapon'], name: 'Blade', group: 'Gear for a hero', use: 'A keener edge on their weapon.', price: 60, gate: [G], hint: "Old Hobart's smith could put an edge on anything. If she's still alive down there..." },
   { id: 'mail', glyph: '▦', vendor: 'gerda', kind: 'gear', keys: ['armor'], name: 'Mail', group: 'Gear for a hero', use: 'Takes the sting out of every hit.', price: 80, gate: [G], hint: 'Proper mail needs a proper forge. Ours went cold the night the castle fell.' },
   { id: 'shield', glyph: '⛨', vendor: 'gerda', kind: 'shield', keys: ['shield'], name: 'Shield', group: 'Gear for a hero', use: 'Stops arrows and bolts short.', price: 50, gate: [G], hint: 'A good shield would stop those arrows. Nobody in Lowgate works steel any more.' },
-  { id: 'lantern', glyph: '◈', vendor: 'gerda', kind: 'ware', keys: ['lantern'], name: 'Lantern', group: 'Metalwork', use: 'Light when you want it, dark when you don\'t. Keeps.', price: 120, gate: [G], hint: "A lantern with a shutter: light when we want it, dark when we don't. If only someone could make one.", ws: 'WS2' },
+  { id: 'lantern', vendor: 'gerda', kind: 'ware', keys: ['lantern'], name: 'Lantern', group: 'Metalwork', use: 'Light when you want it, dark when you don\'t. Keeps.', price: 120, gate: [G], hint: "A lantern with a shutter: light when we want it, dark when we don't. If only someone could make one.", ws: 'WS2' },
   { id: 'hook', vendor: 'gerda', kind: 'ware', keys: ['hook'], name: 'Grappling hook', group: 'Metalwork', use: 'Climb out of a pit, again and again.', price: 40, gate: [G], hint: 'With a hook I could climb out of that pit. Mott hasn\'t seen one in years.' },
   { id: 'key', vendor: 'gerda', kind: 'ware', keys: ['key'], name: 'Skeleton key', group: 'Metalwork', use: 'Opens one lock, silently.', price: 30, gate: [G], hint: 'Gerda used to cut keys for every lock in the keep, they say.' },
   { id: 'lockpicks', vendor: 'gerda', kind: 'ware', keys: ['lockpicks'], name: 'Lockpicks', group: 'Metalwork', use: 'Pick locks quietly, as often as you like.', price: 25, gate: [G], hint: 'Real picks, not bent nails. A smith\'s work.' },

@@ -9,7 +9,7 @@ import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { HeroInDelve, Item } from './types';
 import { PARALYSIS_ROUNDS, TRAP_DMG, VENOM_ROUNDS, VENOM_TRAP_DMG } from './data';
 import { say, type Ctx, type MonsterX, type RivalX } from './state';
-import { dropCaptive, hd, heroName, onMap, occupant, passLanternIfNeeded, releaseHold, rivalsOnMap } from './common';
+import { dropCaptive, hd, heroName, onMap, occupant, releaseHold, rivalsOnMap } from './common';
 import { partySees } from './hearing';
 import { adjacent, canEnter, kindAt } from './world';
 
@@ -95,7 +95,6 @@ function paralyze(c: Ctx, id: string): void {
     h.braced = undefined;
     if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
     h.escorting = undefined;
-    if (c.d.lanternBearer === h.heroId) passLanternIfNeeded(c);
   } else if (t.monster) {
     const m = t.monster;
     m.intent = undefined;

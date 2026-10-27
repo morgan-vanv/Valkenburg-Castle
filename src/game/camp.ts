@@ -1,12 +1,13 @@
 // Camp: new campaign, board, recruits, shop, smithy, infirmary, starting a
 // delve, and applying the summary afterwards.
 
+import { freeLantern, restLight } from './light'; // V4.1 (WS2)
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type {
   AleOffer, Campaign, Command, Contract, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Item, Recruit, ShopOffer, SpawnDef, StoryId, Village,
 } from './types';
 import {
-  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP, LIGHT_MAX,
+  ARMOR_PRICE, BOUNTY, CLASSES, FOCUS_MAX, HEIRLOOM_VALUE, HEIRLOOMS, LEVEL_XP,
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP,
   START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
   ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
@@ -574,8 +575,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     heroes: [],
     monsters,
     rivals: null,
-    light: LIGHT_MAX,
-    lanternBearer: ids.includes('keven') ? 'keven' : ids[0]!,
+    // V4.1 (WS2, spec 31.5): no free lantern (no `light`, `lanternBearer`, `lanternOpen`): light is what the party packs.
     doors,
     chests: w.castle.chests.map((c) => ({ id: c.id, at: { ...c.at }, tier: c.tier, locked: !!c.locked, jammed: false, opened: false })),
     ground: [],
@@ -584,7 +584,6 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     blown: [],
     ropes: [],
     liftWorking: false,
-    lanternOpen: true,
     knownRoutes: [],
     gloamCalm: 0,
     smoke: {},
@@ -611,7 +610,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     if (way.kind === 'gate' && way.keyAt && !wayOpen(s, way.id)) d.ground.push({ at: { ...way.keyAt }, items: [makeItem({ s }, 'gatekey')] });
   }
   for (const lg of C.lostGear) {
-    d.ground.push({ at: { ...lg.at }, items: lg.items.map((i) => ({ ...i })) });
+    d.ground.push({ at: { ...lg.at }, items: lg.items.map((i) => ({ ...i, ...(i.lit ? { lit: false } : {}) })) }); // V4.1: lost torches lie out
     d.lostIds!.push(...lg.items.map((i) => i.id));
   }
   // Objective.
@@ -673,6 +672,9 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     else if (kit) hid.pack.push(kit);
     // V3.9 (spec 24.2): everyone starts facing into the castle.
     hid.facing = facingInto(w, d, hid.at);
+    // V4.1 (WS2): FREE_LANTERN (off) hands the first hero the old free lantern; packed torches and lanterns go in unlit.
+    for (const it of hid.pack) if (it.kind === 'torch' || it.kind === 'lantern') it.lit = false;
+    if (id === (ids.includes('keven') ? 'keven' : ids[0])) freeLantern(s, hid);
     d.heroes.push(hid);
   });
   s.delve = d;
@@ -807,7 +809,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
       if (it.story || isGateKey(it)) continue; // spec 18.3: to the village, below; V4.0: the sally key opens its gate (ways.ts)
       if (isKit(it)) continue; // spec 20.3, 21.4, 26.5: class kit (improvised explosives, the improvised pick) refills each delve
       if (it.kind === 'gold') C.gold += it.amount;
-      else C.stash.push(it);
+      else if (restLight(it)) C.stash.push(it); // V4.1 (WS2): a lantern is refilled free, a torch put out (keeps its rounds); a loaner is gone
     }
   }
   C.gold += sum.bounty;
@@ -837,7 +839,7 @@ export function backToCamp(w: World, s: GameStateX): Res {
   // Lost gear: ground items that came from fallen heroes (this or earlier delves).
   const lostIds = new Set(d.lostIds ?? []);
   for (const g of d.ground) {
-    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i) && !isGateKey(i));
+    const items = g.items.filter((i) => lostIds.has(i.id) && i.kind !== 'heirloom' && i.kind !== 'hoard' && !isKit(i) && !isGateKey(i) && !i.loaner);
     if (items.length) lost.push({ at: { ...g.at }, items });
   }
   C.lostGear = lost;

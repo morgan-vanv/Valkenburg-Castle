@@ -128,7 +128,7 @@ await p.waitForTimeout(80);
 check('"Next: Outfit" goes to step 3', (await page()) === 'outfit');
 check('two sides: "Yours" (packs, then Keven\'s cart) and "Vendors"', !!(await p.$('[data-side="yours"] .lg-hero')) && !!(await p.$('[data-side="yours"] [data-cartbox]')) && !!(await p.$('[data-side="vendors"]')) && /Yours/i.test(await p.$eval('[data-side="yours"]', (e) => e.innerText)) && /Vendors/i.test(await p.$eval('[data-side="vendors"]', (e) => e.innerText)));
 check('one loadout card per party hero, the first "Packing"', (await p.$$('.lg-hero')).length === 2 && /Packing/i.test(await p.$eval('.lg-hero.sel', (e) => e.innerText)));
-check('Keven carries the lantern', !!(await p.$('.lg-hero[data-hero="keven"] .lg-lantern')));
+check('V4.1: no free lantern on Keven\'s card', !(await p.$('.lg-hero[data-hero="keven"] .lg-lantern')));
 const vtabs = await p.$$eval('[data-vendor-tab]', (els) => els.map((e) => `${e.dataset.vendorTab}:${e.classList.contains('away') ? 'away' : 'open'}`));
 check('four vendor tabs, always: Mott open, the forge, the bench and the Flagon away', vtabs.join(',') === 'mott:open,gerda:away,ilse:away,flagon:away', vtabs.join(','));
 // V4.0 (26.5): class kit shows under the 4 slots: "Brings their own: ...". Keven has none.
@@ -167,7 +167,7 @@ await p.waitForTimeout(80);
 const hint = await p.evaluate(() => ({ shown: !document.querySelector('.lg-tip')?.classList.contains('hidden'), text: document.querySelector('.lg-tip')?.innerText ?? '' }));
 check('a locked row\'s hover (on keyboard focus) gives the in-voice hint, not the rule', hint.shown && /Mott hasn't seen one in years/.test(hint.text) && !/Level 2|rescue/i.test(hint.text), hint.text.replace(/\n/g, ' | '));
 check('a pair\'s ware names the pair in its hint only', /both here/.test(await p.$eval('[data-row="gerda-charge"]', (e) => e.dataset.tip)) && !/both/.test(await p.$eval('[data-row="gerda-charge"]', (e) => e.innerText)));
-check('items not built yet (the lantern, arrows) still show from the catalog', !!(await p.$('[data-row="lantern"]')) && !!(await p.$('[data-row="barbarrows"]')));
+check('items not built yet (the arrows) still show from the catalog', !!(await p.$('[data-row="barbarrows"]')));
 await p.click('[data-vendor-tab="flagon"]');
 await p.waitForTimeout(80);
 check('the Flagon while Wim is away: "The Gilded Flagon\'s taps are dry.", every ale locked with that line', /taps are dry/.test(await p.$eval('.lg-vhead', (e) => e.innerText)) && (await p.$$eval('[data-side="vendors"] .lg-vrow[data-kind="ale"]', (els) => els.length >= 10 && els.every((e) => e.dataset.state === 'locked' && /taps are dry/.test(e.dataset.tip)))));
@@ -233,6 +233,7 @@ check('no forge gear or ales on the hero cards', !(await p.$('[data-side="yours"
 await p.click('[data-vendor-tab="gerda"]');
 await p.waitForTimeout(80);
 const hname = (await st()).campaign.roster.find((x) => x.id === r0).name;
+check('with the smith home: Gerda\'s lantern is a live row', (await p.$eval('[data-row="lantern"]', (e) => e.dataset.state)) === 'live' && /Buy · 120/.test(await p.$eval('[data-buy="lantern"]', (e) => e.innerText.replace(/\s+/g, ' '))));
 check('with the smith home: the forge is open, metalwork live', (await p.$eval('.lg-vhead', (e) => e.dataset.home)) === 'yes' && !!(await p.$('[data-buy="hook"]')) && !!(await p.$('[data-buy="lockpicks"]')) && !!(await p.$('[data-buy="caltrops"]')));
 check(`"Forge for ${hname} · 60" with tier pips`, new RegExp(`Forge for ${hname} · 60`).test(await p.$eval(`[data-upgrade="weapon"][data-hero="${r0}"]`, (e) => e.innerText.replace(/\s+/g, ' '))) && (await p.$$('[data-row="blade"] .lg-pip')).length === 2);
 check('Gerda\'s gift: "Free · a gift" on the shield', /Free for .* · a gift/.test(await p.$eval('[data-buy="shield"]', (e) => e.innerText.replace(/\s+/g, ' '))));
@@ -268,7 +269,7 @@ const hasMemory = await p.evaluate(() => typeof window.vcEngine.castleMemory ===
 check('step 4 lists only the main gate on a new campaign', ents.length === 1 && /Main gate|Gatehouse/.test(ents[0]), ents.join(','));
 check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(await p.$('.lg-sketch.none')) && !(await p.$('.lg-sketch svg')));
 // V4.0 (spec 30.5): with a remembered Level 1, the sketch takes most of the column (≥ 45% of the window's height) and the
-// ways in, the lantern choice and the plan still show without scrolling, at 1280×800 and 1440×900.
+// ways in and the plan still show without scrolling, at 1280×800 and 1440×900 (V4.1: the lantern checkbox is gone).
 {
   const SHOTS = process.env.SHOTS ?? '';
   const keep = await p.evaluate(() => structuredClone(window.vc.state().campaign));
@@ -281,10 +282,10 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
       const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
       const main = document.querySelector('.lg-main');
       const sk = r('.lg-sketch svg');
-      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 9999, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
+      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 0, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
     });
     check(`${w}×${hh}: the sketch takes ≥ 45% of the window's height`, m.svg && m.sketch >= 0.45 * m.vh, `${Math.round(m.sketch)} of ${m.vh}`);
-    check(`...ways in, lantern and plan in view without scrolling`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
+    check(`...ways in and plan in view without scrolling (no lantern checkbox)`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
     check('...room names readable (≥ 11px) and the ways in named on it', m.names >= 3 && m.fs >= 11 && m.ents2 >= 1, `${m.names} names, ${m.ents2} ways, ${Math.round(m.fs)}px`);
     if (SHOTS) {
       await p.mouse.move(5, hh - 5);
@@ -296,18 +297,16 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
   await edit(`s.campaign.explored = ${JSON.stringify(keep.explored ?? null)} ?? undefined; s.campaign.opened = ${JSON.stringify(keep.opened ?? null)} ?? undefined;`);
   await step('setout');
 }
-check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Lantern/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Torch/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+check('V4.1: no lantern checkbox on Set out', !(await p.$('.lg-shutter input')));
 check('the plan warns when Keven goes', /If he falls, the campaign ends with him\./.test(await p.$eval('.lg-plan', (e) => e.innerText)));
-await p.click('.lg-shutter input');
-await p.waitForTimeout(60);
-check('the lantern shutter checkbox sticks', await p.$eval('.lg-shutter input', (e) => e.checked));
 const partyBefore = (await st()).campaign.roster.map((x) => x.id);
 await p.click('.lg-delve');
 await p.waitForFunction(() => window.vc.state()?.stage === 'delve', null, { timeout: 15000 }).catch(() => {});
 s = await st();
 check('Delve starts a delve with the party and packs', s.stage === 'delve' && s.delve.heroes.length === 2 && s.delve.heroes.some((x) => x.pack.some((i) => i.kind === 'torch')), s.stage);
 await p.waitForFunction(() => !window.vc.busy(), null, { timeout: 30000 }).catch(() => {});
-check('...shuttered as asked', s.stage !== 'delve' || (await p.evaluate(() => window.vc.state().delve.lanternOpen === false)));
+check('...the packed torch goes in unlit (V4.1)', s.stage !== 'delve' || (await p.evaluate(() => window.vc.state().delve.heroes.every((h) => h.pack.every((i) => !i.lit)))));
 
 // ---- back in camp: Same as last time
 await p.evaluate(async () => {
@@ -334,7 +333,7 @@ if (await p.$('[data-same]')) {
   await p.waitForTimeout(100);
   const plan = await p.$eval('.lg-plan', (e) => e.innerText).catch(() => '');
   check('"Same as last time" jumps to step 4 with the remembered party', (await page()) === 'setout' && (await p.$$('.lg-plan-hero')).length === 2 && /Keven/.test(plan));
-  check('...keeps the chosen job and the shutter', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).length > 0 && (await p.$eval('.lg-shutter input', (e) => e.checked)));
+  check('...keeps the chosen job', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).length > 0);
 }
 
 // ---- won back: banner, Show me

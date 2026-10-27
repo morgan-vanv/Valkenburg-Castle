@@ -1,5 +1,6 @@
 // Shared delve helpers: lookups, occupancy, rolls, damage, noise, loot.
 
+import { DARK_PENALTY } from './data'; // V4.1 (WS2)
 import { distance, posKey, samePos, type Pos } from './hex';
 import type { Brightness, Hero, HeroInDelve, Item, ItemKind, SlotRoll } from './types';
 import {
@@ -8,7 +9,7 @@ import {
 } from './data';
 import { chance, int, pick, random } from './rng';
 import { newItemId, say, type Ctx, type MonsterX, type RivalX } from './state';
-import { brightnessOf, litSet, noiseField, within, type World } from './world';
+import { lightTierAt, litSet, nightEyedHero, noiseField, within, type World } from './world';
 import { faceToward, forgetHeroes, noticeFigure } from './stealth';
 import { CLASH_HEAR, hearLoud, type LoudWhat } from './hearing';
 
@@ -108,19 +109,22 @@ export function monsterAt(c: Ctx, p: Pos): MonsterX | undefined {
 
 // ---------------------------------------------------------------- light
 
-/** Brightness a hero acts at: the lantern's level, at least Dark when outside all light. */
+/**
+ * V4.1 (WS2): darkness by the hero's own hex, as a Brightness: lit by party light (a torch, a lantern, Glowworm) or
+ * daylight `bright` (no penalty); lit only by a castle light (sconce, fire, brazier, fungus, glow, burning, a crew's
+ * light) `dim` (−10); unlit `dark` (−20). The lantern stage no longer matters ('pitch' is never returned).
+ */
 export function brightnessAt(w: World, c: Ctx, at: Pos, lit?: Set<string>): Brightness {
-  const g = brightnessOf(c.d.light);
-  const L = lit ?? litSet(w, c.d);
-  if (L.has(posKey(at))) return g === 'pitch' ? 'dark' : g;
-  return g === 'pitch' ? 'pitch' : 'dark';
+  const t = lightTierAt(w, c.d, at, lit ?? litSet(w, c.d));
+  return t === 'party' || t === 'day' ? 'bright' : t === 'castle' ? 'dim' : 'dark';
 }
 
-export const LIGHT_PENALTY: Record<Brightness, number> = { bright: 0, dim: -10, dark: -20, pitch: -30 };
+/** V4.1 (WS2): bright = party light or daylight, dim = a castle light only, dark = unlit (DARK_PENALTY); pitch is never used now. */
+export const LIGHT_PENALTY: Record<Brightness, number> = { bright: DARK_PENALTY.party, dim: DARK_PENALTY.castle, dark: DARK_PENALTY.unlit, pitch: -30 };
 
 /** V3.6 (spec 19.3): the hero has the night-eye draught in them: no dark penalties to sight or rolls. */
 export function nightEyed(h: HeroInDelve): boolean {
-  return (h.nightEyes ?? 0) > 0 && h.status === 'active';
+  return nightEyedHero(h); // V4.1 (WS2): Night-eye Stout (ale `nighteye`), or an old save's draught rounds
 }
 
 /** The brightness penalty to this hero's rolls: by the light they stand in, 0 with night-eye. */
@@ -156,7 +160,7 @@ const SINGLE: Record<ItemKind, string> = {
   key: 'Skeleton key', oil: 'Oil flask', firecracker: 'Firecracker',
   lockpicks: 'Lockpicks', improvised: 'Improvised pick', 'improvised-charge': 'Improvised explosive', nightsight: 'Night-eye draught',
   gatekey: 'Sally port key',
-  antidote: 'Antidote', venomdart: 'Venom dart',
+  antidote: 'Antidote', venomdart: 'Venom dart', lantern: 'Lantern', // V4.1 (WS2)
   greaterpotion: 'Greater potion', // V4.1 (spec 31.3)
 };
 
@@ -251,18 +255,8 @@ export function valueOf(items: { kind: string; amount: number }[]): number {
 
 // ---------------------------------------------------------------- damage
 
-export function passLanternIfNeeded(c: Ctx): void {
-  const b = hd(c, c.d.lanternBearer);
-  // V4.0 (spec 29.2): a paralyzed bearer drops it too.
-  if (b && b.status === 'active' && !((b.paralyzed ?? 0) > 0)) return;
-  const from = b?.at;
-  const cands = activeHeroes(c).filter((h) => !((h.paralyzed ?? 0) > 0));
-  if (!cands.length) return;
-  const far = (p: Pos) => (from && p.level === from.level ? distance(p, from) : 99);
-  cands.sort((x, y) => far(x.at) - far(y.at));
-  c.d.lanternBearer = cands[0]!.heroId;
-  say(c, `${heroName(c, cands[0]!.heroId)} takes the lantern.`);
-}
+/** V4.1 (WS2): kept as a no-op hook for callers: lanterns and torches are pack items now and go where the pack goes. */
+export function passLanternIfNeeded(_c: Ctx): void {}
 
 export function killHero(c: Ctx, h: HeroInDelve): void {
   h.status = 'dead';
@@ -279,8 +273,7 @@ export function killHero(c: Ctx, h: HeroInDelve): void {
   h.escorting = undefined;
   // V3.7 (spec 20.4): a member dragging them lets go.
   for (const r of c.d.rivals?.members ?? []) if (r.dragging === h.heroId) r.dragging = undefined;
-  // The lantern drops with them; the nearest active hero picks it up.
-  if (c.d.lanternBearer === h.heroId) passLanternIfNeeded(c);
+  // V4.1 (WS2): a lit torch or open lantern in the pack drops with it, still burning (lost gear as usual).
 }
 
 /** Damage a hero (already reduced by armor). Active → downed at 0; downed → dead. */
@@ -297,7 +290,6 @@ export function hurtHero(c: Ctx, h: HeroInDelve, dmg: number, by: string, crit =
       if (h.escorting && c.d.prisoner) c.d.prisoner.escortedBy = undefined;
       h.escorting = undefined;
       if (h.guarding) h.guarding = undefined;
-      if (c.d.lanternBearer === h.heroId) passLanternIfNeeded(c);
     }
   } else if (h.status === 'downed') {
     c.ev.push({ type: 'hit', attacker: by, target: h.heroId, damage: dmg, crit });

@@ -2,9 +2,10 @@
 // state: tiles, doors, line of sight, light, sight and path finding.
 
 import { DIRS, distance, hexKey, hexToWorld, line, posKey, posNeighbors, range, samePos, worldToHex, type Hex, type Pos } from './hex';
-import type { Brightness, CastleDef, LevelDef, LightDef, TileDef, TileKind } from './types';
+import type { Brightness, CastleDef, HeroInDelve, Item, LevelDef, LightDef, TileDef, TileKind } from './types';
 import type { DelveX } from './state';
 import { DARK_SIGHT, FIXED_LIGHT_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
+import { CREW_LIGHT_RADIUS, LANTERN_LOW_AT, LANTERN_MAX, LANTERN_RADIUS_FULL, LANTERN_RADIUS_LOW, NIGHTEYE_ALE, TORCH_RADIUS, TORCH_ROUNDS } from './data'; // V4.1 (WS2)
 
 export class World {
   readonly levels = new Map<number, LevelDef>();
@@ -284,36 +285,113 @@ export function monsterSees(w: World, d: DelveX, from: Pos, t: Pos, lit: Set<str
   return los(w, d, from, t);
 }
 
+/** Kept for old callers (the HUD's legend): the V3.3 lantern's radius by stage. V4.1 (WS2): the lantern is an item, see `lanternRadius`. */
 export const LANTERN_RADIUS: Record<Brightness, number> = { bright: 4, dim: 3, dark: 2, pitch: 0 };
 
+// ---------------------------------------------------------------- V4.1 (WS2): light sources
+
+/** Rounds of light left in a torch or lantern item (absent = full: a fresh torch, a lantern refilled in camp). */
+export function roundsOf(i: Item): number {
+  if (i.rounds !== undefined) return i.rounds;
+  return i.kind === 'lantern' ? LANTERN_MAX : TORCH_ROUNDS;
+}
+
+/** The most a torch or lantern holds. */
+export function roundsMax(i: Item): number {
+  return i.kind === 'lantern' ? LANTERN_MAX : TORCH_ROUNDS;
+}
+
+/** A torch or lantern (the things that make party light). */
+export function isLightItem(i: Item): boolean {
+  return i.kind === 'torch' || i.kind === 'lantern';
+}
+
+/** Is this torch lit, or this lantern open with light left? */
+export function burning(i: Item): boolean {
+  return isLightItem(i) && !!i.lit && roundsOf(i) > 0;
+}
+
+/** Radius a burning torch or lantern lights (the lantern 4 at LANTERN_LOW_AT and above, 3 below); 0 when out. */
+export function lightRadius(i: Item): number {
+  if (!burning(i)) return 0;
+  if (i.kind === 'torch') return TORCH_RADIUS;
+  return roundsOf(i) >= LANTERN_LOW_AT ? LANTERN_RADIUS_FULL : LANTERN_RADIUS_LOW;
+}
+
+/** One light in the castle right now: who or what carries it, where, how far it reaches; `party` = the party's own light. */
+export interface LightSrc {
+  at: Pos;
+  radius: number;
+  party: boolean;
+  /** torch, lantern (an item: held by `holder`, or lying on the ground), glow (Glowworm Pale), crew, brazier. */
+  kind: 'torch' | 'lantern' | 'glow' | 'crew' | 'brazier';
+  holder?: string;
+  item?: Item;
+}
+
+function alive(h: { status: string }): boolean {
+  return h.status === 'active' || h.status === 'downed';
+}
+
+/**
+ * V4.1 (WS2): every light that moves or burns down: torches and lanterns in the packs of heroes on the map (active or
+ * downed) and lying on the ground, Glowworm drinkers, crew members (each carries its own, CREW_LIGHT_RADIUS) and lit
+ * braziers. Fixed castle lights and burning hexes are added by `litSet`.
+ */
+export function lightSources(d: DelveX): LightSrc[] {
+  const out: LightSrc[] = [];
+  for (const h of d.heroes) {
+    if (!alive(h)) continue;
+    for (const i of h.pack) {
+      const r = lightRadius(i);
+      if (r > 0) out.push({ at: h.at, radius: r, party: true, kind: i.kind as 'torch' | 'lantern', holder: h.heroId, item: i });
+    }
+    // Spec 18.4: Glowworm Pale: the drinker sheds light radius 1.
+    if (h.ale === 'glowworm') out.push({ at: h.at, radius: 1, party: true, kind: 'glow', holder: h.heroId });
+  }
+  for (const g of d.ground) {
+    for (const i of g.items) {
+      const r = lightRadius(i);
+      if (r > 0) out.push({ at: g.at, radius: r, party: true, kind: i.kind as 'torch' | 'lantern', item: i });
+    }
+  }
+  const cr = d.rivals;
+  if (cr && cr.entered) for (const r of cr.members) if (!r.goneOut && r.hp > 0) out.push({ at: r.at, radius: CREW_LIGHT_RADIUS, party: false, kind: 'crew', holder: r.id });
+  for (const k of d.lit) out.push({ at: parsePos(k), radius: 3, party: false, kind: 'brazier' });
+  return out;
+}
+
+/** Does this hero carry burning party light (a lit torch, an open lantern with light left, Glowworm)? */
+export function emitsLight(h: HeroInDelve): boolean {
+  return h.ale === 'glowworm' || h.pack.some(burning);
+}
+
+/**
+ * A cheap signature of what lights the castle (for caches). `moving` false leaves out where carried lights are and the
+ * crews' lights: what changes only when a light is lit, put out, dropped, burns out or a lantern runs low ("the light changed").
+ */
+export function lightSig(d: DelveX, moving = true): string {
+  return lightSources(d)
+    .filter((L) => moving || L.kind !== 'crew')
+    .map((L) => `${L.kind}${L.holder ?? ''}${moving || !L.holder ? `@${posKey(L.at)}` : ''}/${L.radius}`)
+    .join(';');
+}
+
+/** Kept for old callers: where the V3.3 party lantern is (V4.1: the first hero carrying a burning lantern), or null. */
 export function lanternPos(d: DelveX): Pos | null {
-  const b = d.heroes.find((h) => h.heroId === d.lanternBearer);
-  if (!b || (b.status !== 'active' && b.status !== 'downed')) return null;
-  return b.at;
+  const L = lightSources(d).find((x) => x.kind === 'lantern' && x.holder);
+  return L ? L.at : null;
 }
 
 /** Every lit hex, by posKey. */
 export function litSet(w: World, d: DelveX): Set<string> {
   const out = new Set<string>();
-  const shine = (src: Pos, r: number) => {
-    if (r <= 0) return;
-    for (const h of range(src, r)) {
-      const p = { level: src.level, ...h };
+  for (const L of lightSources(d)) {
+    for (const h of range(L.at, L.radius)) {
+      const p = { level: L.at.level, ...h };
       if (!w.tile(p)) continue;
-      if (lightLos(w, d, src, p)) out.add(posKey(p));
+      if (lightLos(w, d, L.at, p)) out.add(posKey(p));
     }
-  };
-  const lp = d.lanternOpen === false ? null : lanternPos(d);
-  if (lp) shine(lp, LANTERN_RADIUS[brightnessOf(d.light)]);
-  for (const h of d.heroes) {
-    if (h.torch > 0 && (h.status === 'active' || h.status === 'downed')) shine(h.at, 2);
-    // Spec 18.4: Glowworm Pale: the drinker sheds light radius 1.
-    if (h.ale === 'glowworm' && (h.status === 'active' || h.status === 'downed')) shine(h.at, 1);
-  }
-  for (const k of d.lit) {
-    const [lv, rest] = k.split(':');
-    const [q, r] = (rest ?? '0,0').split(',').map(Number) as [number, number];
-    shine({ level: Number(lv), q, r }, 3);
   }
   for (const k of fixedLit(w, d)) out.add(k);
   // Burning hexes (fireball) light themselves.
@@ -363,11 +441,9 @@ export function farLitTest(w: World, d: DelveX, lit: Set<string>): (k: string) =
   const day = fixedLights(w, d).day;
   const src = new Set<string>();
   for (const L of w.castle.lights ?? []) if (L.kind !== 'daylight') src.add(posKey(L.at));
-  for (const k of d.lit) src.add(k);
   for (const [k, n] of Object.entries(d.burning ?? {})) if (n > 0) src.add(k);
-  const lp = d.lanternOpen === false ? null : lanternPos(d);
-  if (lp && LANTERN_RADIUS[brightnessOf(d.light)] > 0) src.add(posKey(lp));
-  for (const h of d.heroes) if ((h.torch > 0 || h.ale === 'glowworm') && (h.status === 'active' || h.status === 'downed')) src.add(posKey(h.at));
+  // V4.1 (WS2): every carried or dropped torch and lantern, Glowworm drinkers, crew members' lights, lit braziers.
+  for (const L of lightSources(d)) src.add(posKey(L.at));
   return (k) => lit.has(k) && (day.has(k) || src.has(k));
 }
 
@@ -376,38 +452,73 @@ export const SIGHT_BY_STAGE: Record<Brightness, number> = { bright: 8, dim: 6, d
 export function sightRangeOf(light: number, level: number): number {
   return Math.max(2, SIGHT_BY_STAGE[brightnessOf(light)] - Math.max(0, level - 1));
 }
+
 /**
- * Sight range of someone standing at `at` (spec 16.2, 17.4). Unlit: the level's dark range
- * (L1 4, L2 2, L3 1). Lit by the party's own light (the open lantern, a torch): the stage
- * range minus depth. Lit only by the castle: daylight 8; any other light (a fire, a brazier,
- * a sconce, fungus, the pit glow, a burning hex) FIXED_LIGHT_SIGHT minus depth, never below 2.
+ * V4.1 (WS2): what lights a hex, for darkness by the hero's own hex: `party` (a torch, a lantern, Glowworm, a torch or
+ * lantern lying lit), `day` (daylight), `castle` (only a castle light: sconce, fire, brazier, fungus, glow, a burning hex,
+ * a crew member's light), `unlit`.
+ */
+export type LightTier = 'party' | 'day' | 'castle' | 'unlit';
+export function lightTierAt(w: World, d: DelveX, at: Pos, lit: Set<string> = litSet(w, d)): LightTier {
+  const k = posKey(at);
+  if (!lit.has(k)) return 'unlit';
+  if (partyLights(w, d, at)) return 'party';
+  if (fixedLights(w, d).day.has(k)) return 'day';
+  return 'castle';
+}
+
+/** V4.1 (WS2): Night-eye Stout (ale effect `nighteye`), or the old night-eye draught's rounds (saves from before). */
+export function nightEyedHero(h: HeroInDelve): boolean {
+  return h.status === 'active' && (h.ale === NIGHTEYE_ALE || (h.nightEyes ?? 0) > 0);
+}
+
+/**
+ * Sight range of someone standing at `at` (V4.1, WS2). Party light or daylight: 8/7/6 by level (the old bright row);
+ * a castle light only: FIXED_LIGHT_SIGHT minus depth (4/3/2); unlit: the level's dark range (4/2/1). A night-eyed hero
+ * standing here sees as if lit by party light.
  */
 export function sightRangeAt(w: World, d: DelveX, at: Pos, lit: Set<string> = litSet(w, d)): number {
-  const k = posKey(at);
-  // V3.6 (spec 19.3): a night-eyed hero standing here sees the bright-stage range minus depth, whatever the light.
-  if (d.heroes.some((h) => h.status === 'active' && (h.nightEyes ?? 0) > 0 && samePos(h.at, at))) return nightSightRange(at.level);
-  if (!lit.has(k)) return DARK_SIGHT[at.level] ?? 1;
-  if (partyLights(w, d, at)) return sightRangeOf(d.light, at.level);
-  if (fixedLights(w, d).day.has(k)) return SIGHT_BY_STAGE.bright;
+  if (d.heroes.some((h) => nightEyedHero(h) && samePos(h.at, at))) return nightSightRange(at.level);
+  const tier = lightTierAt(w, d, at, lit);
+  if (tier === 'unlit') return DARK_SIGHT[at.level] ?? 1;
+  if (tier === 'party' || tier === 'day') return nightSightRange(at.level);
   return Math.max(2, FIXED_LIGHT_SIGHT - Math.max(0, at.level - 1));
 }
 
-/** V3.6 (spec 19.3): night-eye sight: the bright-stage range minus depth (8/7/6). */
+/** The party-light sight range: the bright-stage range minus depth (8/7/6). */
 export function nightSightRange(level: number): number {
   return Math.max(2, SIGHT_BY_STAGE.bright - Math.max(0, level - 1));
 }
 
-/** Does the party's own light (open lantern, a lit torch) reach `at`? */
+/** Does the party's own light (a torch or lantern carried or lying lit, Glowworm) reach `at`? */
 export function partyLights(w: World, d: DelveX, at: Pos): boolean {
-  const lp = d.lanternOpen === false ? null : lanternPos(d);
-  const r = LANTERN_RADIUS[brightnessOf(d.light)];
-  if (lp && lp.level === at.level && r > 0 && distance(lp, at) <= r && lightLos(w, d, lp, at)) return true;
-  for (const h of d.heroes) {
-    if ((h.status !== 'active' && h.status !== 'downed') || h.at.level !== at.level) continue;
-    const r = h.torch > 0 ? 2 : h.ale === 'glowworm' ? 1 : 0;
-    if (r && distance(h.at, at) <= r && lightLos(w, d, h.at, at)) return true;
+  for (const L of lightSources(d)) {
+    if (!L.party || L.at.level !== at.level || distance(L.at, at) > L.radius) continue;
+    if (lightLos(w, d, L.at, at)) return true;
   }
   return false;
+}
+
+/**
+ * V4.1 (WS2, the board's "Unlit" chip): does any fixed castle light (sconce, daylight, fire, fungus, glow, or a
+ * brazier relit for good) reach `at`, with every door open? No delve needed.
+ */
+export function fixedLightReaches(w: World, at: Pos, braziers: string[] = []): boolean {
+  for (const L of w.castle.lights ?? []) {
+    if (L.at.level !== at.level || distance(L.at, at) > L.radius) continue;
+    if (openLos(w, L.at, at)) return true;
+  }
+  for (const k of braziers) {
+    const b = parsePos(k);
+    if (b.level === at.level && distance(b, at) <= 3 && openLos(w, b, at)) return true;
+  }
+  return false;
+}
+
+/** Line of light with every door open (the castle as built). */
+function openLos(w: World, a: Pos, b: Pos): boolean {
+  const d = { doors: new Proxy({}, { get: () => ({ open: true, locked: false, jammed: false }) }), blown: [], burning: {}, smoke: {}, lit: [] } as unknown as DelveX;
+  return lightLos(w, d, a, b);
 }
 /** Far lights (see `farLit`) in line of sight are visible from this far, whatever the sight range. */
 export const LIT_SIGHT = 14;

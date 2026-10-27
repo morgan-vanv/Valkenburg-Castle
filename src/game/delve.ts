@@ -5,18 +5,18 @@ import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type 
 import type { ActionKind, ActionTarget, HeroClass, HeroInDelve, Item, Stat } from './types';
 import type { ActionOption } from './api';
 import {
-  HEAVY_MOVE, SMUGGLER_SNEAK, BURGLAR_WALK, WALK_MOVE, BLINK_RANGE, BRAZIER_LIGHT, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
-  BURGLAR_PICK_SLOTS, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LIGHT_MAX, LOCKPICK_SLOTS, NIGHTSIGHT_ROUNDS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
-  THROW_CHARGE_RANGE, THROW_RANGE, TORCH_ROUNDS, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
+  HEAVY_MOVE, SMUGGLER_SNEAK, BURGLAR_WALK, WALK_MOVE, BLINK_RANGE, BURN_ROUNDS, CLASSES, DIG_NOISE, FIREBALL_NOISE, FIREBALL_RANGE, FIRECRACKER_NOISE, GHOUL_RISE_RANGE,
+  BURGLAR_PICK_SLOTS, GLUE_ROUNDS, GUST_NOISE, GUST_RANGE, KINDLE_LIGHT, KNOCKBACK_RANGE, LOCKPICK_SLOTS, OIL_LIGHT, PACK_SLOTS, SLEEP_RANGE, SMOKE_ROUNDS, SPELL_RANGE,
+  THROW_CHARGE_RANGE, THROW_RANGE, VEIL_BREAK_NOISE, VEIL_ROUNDS, WARD_ROUNDS, WINCH_NOISE, BLAST_INNER_DMG, BLAST_OUTER_DMG, BLAST_NOISE,
 } from './data';
 import { say, type Ctx, type HeroX, type MonsterX, type RivalX } from './state';
 import {
   activeHeroes, addToPack, focusMax, levelHeal, armorOf, brightnessAt, checkHolds, chestLoot, cleanGround, goHunting, hd, heroDef, heroName, hurtAny, hurtHero, killHero,
-  LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, passLanternIfNeeded, putOnGround,
+  LIGHT_PENALTY, lightPenaltyFor, makeHostile, makeNoise, monsterArmor, monsterStats, nightEyed, noteOnce, occupant, onMap, packUsed, putOnGround,
   releaseHold, releaseCrewHold, rivalsOnMap, roll, shieldWalled, turnOnHit, valueOf, wakeAdjacent, dropCaptive,
 } from './common';
 import {
-  adjacent, brightnessOf, canEnter, clampLight, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
+  adjacent, canEnter, dijkstra, doorAt, fallColumn, freeNear, glimpseSet, isFloorish, kindAt, litSet, los, monsterSees, pathTo,
   pitsNextTo, standable, steps, visibleSet, within,
 } from './world';
 import { buildSummary } from './camp';
@@ -45,6 +45,7 @@ import { CARRY_MOVE, VENOM_ROUNDS } from './data';
 import { canStir, carryFollow, checkCarries, cureVenom, endCarry, envenom, isEnvenomed, isParalyzed, shoulderable, trapDamage, venomTakes } from './venom';
 import { canTripwire, fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter, the tripwire
 import { POTION_HEAL, TRIPWIRE_FUSE } from './data'; // V4.1 (spec 31.3)
+import { doLight, lightSpecText, lightTargets } from './light'; // V4.1 (spec 31.5, WS2)
 
 // ---------------------------------------------------------------- sight bookkeeping
 
@@ -148,20 +149,9 @@ export function unlitOnL3(c: Ctx, lit: Set<string> = litSet(c.w, c.d)): HeroInDe
   return c.d.heroes.filter((h) => h.status === 'active' && h.at.level === 3 && !lit.has(posKey(h.at)));
 }
 
-export function setLight(c: Ctx, value: number): void {
+/** V4.1 (WS2): the party lantern's oil is gone (no free lantern); kept as a no-op for old callers. */
+export function setLight(c: Ctx, _value: number): void {
   c.visCache = undefined;
-  const before = c.d.light;
-  c.d.light = clampLight(value);
-  if (c.d.light !== before) c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
-  if (c.d.light > 0 && before === 0) {
-    const g = c.d.monsters.find((m) => m.kind === 'gloam');
-    if (g && !unlitOnL3(c).length) {
-      c.d.monsters = c.d.monsters.filter((m) => m !== g);
-      c.d.gloamCalm = 0;
-      c.ev.push({ type: 'monsterDied', id: g.id });
-      say(c, 'The dark draws back.');
-    }
-  }
 }
 
 // ---------------------------------------------------------------- movement
@@ -436,7 +426,7 @@ setAfterLanding((c, h) => {
 
 // ---------------------------------------------------------------- targets
 
-const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown'];
+const FREE: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown', 'snuff', 'dropTorch'];
 
 function lockedThingAt(c: Ctx, p: Pos): { door?: boolean; chest?: boolean; jammed: boolean; barred?: boolean } | null {
   const door = kindAt(c.w, c.d, p) === 'door' ? doorAt(c.d, p) : undefined;
@@ -734,10 +724,8 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (!it) return [];
       return aroundAndSelf(h.at).filter((p) => { const l = lockedThingAt(c, p); return l && !l.jammed && !l.barred; }).map((at) => ({ at, itemId: it.id }));
     }
-    case 'oil': {
-      const it = itemOf(h, 'oil');
-      return it && c.d.light < LIGHT_MAX ? [{ id: h.heroId, itemId: it.id }] : [];
-    }
+    case 'oil':
+      return lightTargets(c, h, 'oil'); // V4.1 (WS2): +10 to a lantern in the pack
     case 'grapple': {
       const it = itemOf(h, 'hook');
       if (!it) return [];
@@ -791,14 +779,12 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       return aroundAndSelf(h.at).filter((p) => c.d.traps[posKey(p)]?.spotted).map((at) => ({ at }));
     case 'light':
       return posNeighbors(h.at).filter((p) => kindAt(c.w, c.d, p) === 'brazier' && !c.d.lit.includes(posKey(p))).map((at) => ({ at }));
-    case 'torch': {
-      const t = h.pack.find((i) => i.kind === 'torch');
-      return t ? [{ itemId: t.id }] : [];
-    }
-    case 'nightsight': {
-      const it = itemOf(h, 'nightsight');
-      return it ? [{ id: h.heroId, itemId: it.id }] : [];
-    }
+    case 'torch':
+    case 'snuff':
+    case 'dropTorch':
+      return lightTargets(c, h, action); // V4.1 (WS2): light or relight, snuff, drop it lit
+    case 'nightsight':
+      return []; // V4.1 (WS2): the night-eye draught is retired (Night-eye Stout is an ale); an old one does nothing
     case 'potion': {
       // V4.1 (spec 31.3): a plain potion and a greater one are both used through Potion (one target set per kind carried).
       const pots = (['potion', 'greaterpotion'] as const).map((k) => h.pack.find((i) => i.kind === k)).filter((i): i is Item => !!i);
@@ -862,7 +848,7 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
       if (cls !== 'sellsword') return [];
       return others.filter((o) => o.status === 'active' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId }));
     case 'kindle':
-      return mage('pyromancer', 1) && c.d.light < LIGHT_MAX ? [{ id: h.heroId }] : [];
+      return mage('pyromancer', 1) ? lightTargets(c, h, 'kindle') : []; // V4.1 (WS2): a torch or lantern held within 3
     case 'mend': {
       if (!mage('hedgewitch', 1)) return [];
       // V4.0 (spec 29.6): Mend draws out venom too: a hero envenomed or paralyzed is a target even at full HP.
@@ -871,10 +857,9 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind): ActionTa
         .map((o) => ({ id: o.heroId }));
     }
     case 'passLantern':
-      if (c.d.lanternBearer !== h.heroId) return [];
-      return others.filter((o) => o.status === 'active' && adjacent(o.at, h.at)).map((o) => ({ id: o.heroId }));
+      return []; // V4.1 (WS2): lanterns are pack items: Give hands one over
     case 'shutter':
-      return c.d.lanternBearer === h.heroId ? [{ id: h.heroId }] : [];
+      return lightTargets(c, h, 'shutter'); // V4.1 (WS2): the lantern in this hero's pack
     case 'escape':
       // V4.0 (spec 28.8): a crew member's grip too (a seized hero, awake again).
       return h.grabbedBy && (onMap(c).some((m) => m.id === h.grabbedBy) || rivalsOnMap(c).some((r) => r.id === h.grabbedBy && r.dragging === h.heroId)) ? [{ id: h.grabbedBy }] : [];
@@ -913,7 +898,7 @@ export function smashable(c: Ctx, p: Pos): boolean {
 
 const LABELS: Record<ActionKind, string> = {
   attack: 'Attack', pick: 'Pick lock', smash: 'Smash', open: 'Open', take: 'Take', drop: 'Drop', give: 'Give',
-  disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', potion: 'Potion', revive: 'Revive',
+  disarm: 'Disarm', light: 'Light brazier', torch: 'Light torch', snuff: 'Snuff torch', dropTorch: 'Drop torch', potion: 'Potion', revive: 'Revive',
   charge: 'Place charge', rope: 'Anchor rope', climb: 'Climb', jump: 'Jump down', shove: 'Shove', free: 'Free',
   bribe: 'Bribe', parley: 'Parley', rally: 'Rally', guard: 'Guard', firebolt: 'Firebolt', kindle: 'Kindle', mend: 'Mend',
   passLantern: 'Pass lantern', winch: 'Work the winch', leave: 'Leave castle', shutter: 'Shutter lantern', escape: 'Break free',
@@ -928,14 +913,14 @@ const LABELS: Record<ActionKind, string> = {
 const ROLLS: ActionKind[] = ['attack', 'pick', 'smash', 'disarm', 'shove', 'firebolt', 'knockback', 'fireball', 'sleep', 'dart', 'escape', 'dread', 'hamstring', 'nightthorn', 'briar', 'venomdart'];
 const ORDER: ActionKind[] = [
   'escape', 'shutter', 'attack', 'knockback', 'hamstring', 'overwatch', 'brace', 'firebolt', 'fireball', 'sleep', 'dread', 'nightthorn', 'briar', 'gust', 'shove', 'pick', 'smash', 'smashProp', 'key', 'unbar', 'open', 'take', 'free', 'revive', 'shoulder', 'setDown', 'potion', 'antidote', 'mend',
-  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
+  'ward', 'veil', 'blink', 'kindle', 'oil', 'rally', 'guard', 'light', 'torch', 'snuff', 'dropTorch', 'nightsight', 'disarm', 'charge', 'setCharge', 'setTripwire', 'throwCharge', 'dig', 'smoke', 'glue', 'dart', 'venomdart',
   'caltrops', 'firecracker', 'winch', 'rope', 'climb', 'grapple', 'jump', 'parley', 'passLantern', 'give', 'drop', 'leave',
 ];
 
 /** How the UI targets each action (ActionOption.pick). */
 const PICK: Record<ActionKind, ActionOption['pick']> = {
   attack: 'enemy', pick: 'other', smash: 'other', open: 'other', take: 'hex', drop: 'item', give: 'other', disarm: 'hex',
-  light: 'hex', torch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
+  light: 'hex', torch: 'self', snuff: 'self', dropTorch: 'self', potion: 'ally', revive: 'ally', charge: 'hex', rope: 'self', climb: 'hex', jump: 'hex',
   shove: 'enemy', free: 'other', bribe: 'enemy', parley: 'enemy', rally: 'self', guard: 'ally', firebolt: 'enemy', kindle: 'self', mend: 'ally',
   passLantern: 'ally', winch: 'self', leave: 'self', shutter: 'self', escape: 'enemy',
   overwatch: 'self', knockback: 'enemy', throwCharge: 'hex', setCharge: 'hex', setTripwire: 'hex', dig: 'hex', fireball: 'hex', veil: 'ally', sleep: 'enemy',
@@ -977,7 +962,7 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
       continue;
     }
     const opt: ActionOption = { action: a, label: LABELS[a], targets: t, rolls: ROLLS.includes(a), pick: PICK[a] };
-    if (a === 'shutter' && !c.d.lanternOpen) opt.label = 'Open lantern';
+    if (a === 'shutter' && !h.pack.find((i) => i.id === t[0]!.itemId)?.lit) opt.label = 'Open lantern';
     if (AREA[a]) opt.area = AREA[a];
     if (MANA_COST[a]) opt.mana = MANA_COST[a];
     // Blocked options (spec 15.7): listed, with the reason, when none of the targets can be done now.
@@ -1277,7 +1262,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'unbar':
       return simple('Opens the gate, silently. It stays open');
     case 'oil':
-      return simple(`+${OIL_LIGHT} light`, 0, OIL_LIGHT);
+      return simple(lightSpecText(c, h, 'oil', t), 0, OIL_LIGHT);
     case 'grapple': {
       const g = grappleTop(c, h.at, heroId);
       if (!g || !g.to) return no('No room at the top of the pit.');
@@ -1336,9 +1321,11 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     }
     case 'drop': return simple('Drop it here');
     case 'give': return simple(`Hand to ${heroName(c, t.id!)}`);
-    case 'light': return simple(`+${BRAZIER_LIGHT} light, lit for good`, 0, BRAZIER_LIGHT);
-    case 'torch': return simple(`Torchlight for ${TORCH_ROUNDS} rounds`);
-    case 'nightsight': return simple(`Night-eye for ${NIGHTSIGHT_ROUNDS} rounds: full sight, no dark penalty. Silent. The dark still hunts`);
+    case 'light': return simple('Lights the room round it (radius 3), for good');
+    case 'torch':
+    case 'snuff':
+    case 'dropTorch': return simple(lightSpecText(c, h, action, t));
+    case 'nightsight': return no('The old night-eye draught has gone flat. Night-eye Stout is poured at the Flagon now.');
     case 'potion': {
       const o = hd(c, t.id!)!;
       const heal = POTION_HEAL[h.pack.find((i) => i.id === t.itemId)?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3)
@@ -1369,8 +1356,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'parley': return simple('Talk terms: pick a deal. Free.');
     case 'rally': return simple('+1 Focus to allies within 3');
     case 'guard': return simple(`Take hits meant for ${heroName(c, t.id!)}`);
-    case 'kindle': return withMana(simple(`+${KINDLE_LIGHT} light`, 0, KINDLE_LIGHT), 1);
-    case 'shutter': return simple(c.d.lanternOpen ? 'Shutter the lantern: no light, no burn. Free.' : 'Open the lantern: light again. Free.');
+    case 'kindle': return withMana(simple(lightSpecText(c, h, 'kindle', t), 0, KINDLE_LIGHT), 1);
+    case 'shutter': return simple(lightSpecText(c, h, 'shutter', t));
     case 'escape': {
       const m = (c.d.monsters.find((x) => x.id === t.id) ?? c.d.rivals?.members.find((x) => x.id === t.id))!;
       return base('might', 2, withLight(def.stats.might), ['Still held', `Free of ${m.name}`, `Free of ${m.name}`], 1);
@@ -1379,7 +1366,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const o = hd(c, t.id!);
       return withMana(simple(o && ((o.venom ?? 0) > 0 || isParalyzed(o)) ? 'Heal 4 and draw out the venom' : 'Heal 4'), 1);
     }
-    case 'passLantern': return simple(`${heroName(c, t.id!)} carries the lantern`);
+    case 'passLantern': return no('Give the lantern instead.');
     case 'leave': return simple('Leave the castle');
     // ---- V3.7 (spec 20.5) kit
     case 'brace': {
@@ -1782,9 +1769,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       say(c, `${name} turns the skeleton key. Click.`);
       break;
     case 'oil':
-      useItem(h, t.itemId);
-      setLight(c, c.d.light + OIL_LIGHT);
-      say(c, `${name} tops up the lantern.`);
+      doLight(c, h, 'oil', t); // V4.1 (WS2)
       break;
     case 'grapple': {
       const g = grappleTop(c, h.at, heroId)!;
@@ -1935,18 +1920,12 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     case 'light': {
       c.d.lit.push(posKey(t.at!));
       c.ev.push({ type: 'brazierLit', at: t.at! });
-      setLight(c, c.d.light + BRAZIER_LIGHT);
       say(c, `${name} lights the brazier.`);
       break;
     }
-    case 'shutter': {
-      c.d.lanternOpen = !c.d.lanternOpen;
-      c.visCache = undefined;
-      c.ev.push({ type: 'shutter', open: c.d.lanternOpen });
-      c.ev.push({ type: 'light', light: c.d.light, brightness: brightnessOf(c.d.light) });
-      say(c, c.d.lanternOpen ? `${name} opens the lantern.` : `${name} shutters the lantern.`);
+    case 'shutter':
+      doLight(c, h, 'shutter', t); // V4.1 (WS2): the lantern in the pack
       break;
-    }
     case 'escape': {
       const r = doRoll();
       const m = c.d.monsters.find((x) => x.id === t.id);
@@ -1963,16 +1942,12 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'torch':
-      useItem(h, t.itemId);
-      h.torch = TORCH_ROUNDS;
-      say(c, `${name} lights a torch.`);
+    case 'snuff':
+    case 'dropTorch':
+      doLight(c, h, action, t); // V4.1 (WS2): light or relight, snuff, drop it lit
       break;
     case 'nightsight':
-      useItem(h, t.itemId);
-      h.nightEyes = NIGHTSIGHT_ROUNDS;
-      c.visCache = undefined;
-      say(c, `${name} drinks the night-eye draught. The dark thins.`);
-      break;
+      break; // V4.1 (WS2): retired (never a target)
     case 'potion': {
       const pot = useItem(h, t.itemId);
       const heal = POTION_HEAL[pot?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3): 5, a greater potion 8
@@ -2069,7 +2044,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       h.guarding = t.id;
       break;
     case 'kindle':
-      setLight(c, c.d.light + KINDLE_LIGHT);
+      doLight(c, h, 'kindle', t); // V4.1 (WS2): a torch or lantern held within 3
       break;
     case 'mend': {
       const o = hd(c, t.id!)!;
@@ -2079,8 +2054,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'passLantern':
-      c.d.lanternBearer = t.id!;
-      break;
+      break; // V4.1 (WS2): retired (never a target)
     case 'leave':
       leaveCastle(c, h);
       break;
@@ -2152,7 +2126,7 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
   }
   checkHolds(c);
   checkCarries(c);
-  if (action !== 'shutter' && action !== 'leave' && action !== 'parley' && action !== 'setDown') rivalOverwatchFire(c, heroId);
+  if (action !== 'shutter' && action !== 'leave' && action !== 'parley' && action !== 'setDown' && action !== 'snuff' && action !== 'dropTorch') rivalOverwatchFire(c, heroId);
   refreshSight(c);
   checkDelveEnd(c);
   return undefined;
@@ -2188,7 +2162,6 @@ export function leaveCastle(c: Ctx, h: HeroInDelve): void {
     pr.escortedBy = undefined;
   }
   h.escorting = undefined;
-  passLanternIfNeeded(c);
 }
 
 /** V4.0 (spec 29.6): a line in the return report for a hero who came out with venom in them. */
