@@ -8,6 +8,7 @@ import type { AleKind, AleOffer, Campaign, Captive, Command, Contract, GameState
 import { ARMOR_PRICE, CLASSES, HEAL_PER_HP, PACK_SLOTS, STORIES, WEAPON_PRICE, kitPerDelve } from '../game/data';
 import { GIFTS } from '../game/data'; // V4.1 (spec 31.2)
 import { ARROWS_PER_LEVEL, quiverPerDelve } from '../game/data'; // V4.1 (WS6)
+import { SQUAD_SLOTS_MAX, squadSlots } from '../game/data'; // V4.1 (squads, spec 31.12)
 import { distance, hexToWorld, parseHexKey } from '../game/hex';
 import { sfx } from '../audio/sfx';
 import { clear, gold, h } from './dom';
@@ -59,7 +60,7 @@ export interface CampHost {
 const STEP_NAME: Record<Step, string> = { job: 'Job', party: 'Party', outfit: 'Outfit', setout: 'Set out' };
 const STEP_WHAT: Record<Step, string> = {
   job: 'Pick a contract from the notice post.',
-  party: 'Who goes in: hire, heal, take up to four.',
+  party: 'Who goes in: hire, heal, pick the party.',
   outfit: 'Buy from the vendors, pack from the cart.',
   setout: 'Which way in, and Delve.',
 };
@@ -132,7 +133,7 @@ export function cleanLoadout(s: GameState, engine: Engine, l: Loadout | null): L
   const c = s.campaign;
   const prev = l ?? { heroIds: [], packs: {}, entrance: 0 };
   const contract = c.board.find((k) => k.id === prev.contractId) ?? boardOrder(c)[0];
-  const heroIds = [...new Set(prev.heroIds)].filter((id) => c.roster.some((x) => x.id === id)).slice(0, 4);
+  const heroIds = [...new Set(prev.heroIds)].filter((id) => c.roster.some((x) => x.id === id)).slice(0, squadSlots(c)); // V4.1 (squads)
   const packs: Record<string, string[]> = {};
   const used = new Set<string>();
   for (const id of heroIds) {
@@ -163,7 +164,7 @@ export function freshLoadout(s: GameState, engine: Engine, last: Loadout | null)
 
 /** "Same as last time": the remembered loadout, if its heroes are all still on the roster. */
 export function sameAsLast(s: GameState, last: Loadout | null): boolean {
-  return !!last && last.heroIds.length > 0 && last.heroIds.every((id) => s.campaign.roster.some((x) => x.id === id));
+  return !!last && last.heroIds.length > 0 && last.heroIds.length <= squadSlots(s.campaign) && last.heroIds.every((id) => s.campaign.roster.some((x) => x.id === id)); // V4.1 (squads): within the slots
 }
 
 function packItems(c: Campaign, l: Loadout, id: string): Item[] {
@@ -567,7 +568,7 @@ function delveButton(s: GameState, l: Loadout, host: CampHost): HTMLElement {
 
 // ------------------------------------------------------------ step 1: Job
 
-const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false };
+const NO_VILLAGE: Village = { surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false, muster: false };
 export function villageOf(s: GameState): Village {
   return s.campaign.village ?? NO_VILLAGE;
 }
@@ -751,14 +752,20 @@ function contractCard(k: Contract, l: Loadout, host: CampHost, captive?: Captive
 function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): void {
   const c = s.campaign;
   const v = villageOf(s);
-  main.append(stepHead('Who goes in?', "Up to four. Keven can go alone, but if he falls, it's over."));
+  // V4.1 (squads, spec 31.12): three slots until the muster roll is home; the fourth shows locked with Wim's hint.
+  const room = squadSlots(c);
+  main.append(stepHead('Who goes in?', `Up to ${room >= SQUAD_SLOTS_MAX ? 'four' : room === 3 ? 'three for now' : room}. Keven can go alone, but if he falls, it's over.`));
   const set = (next: Loadout) => host.setDraft(next, 'party');
   const slots = h('div', { class: 'lg-slots', role: 'list', 'aria-label': 'Party' });
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < Math.max(SQUAD_SLOTS_MAX, room); i++) {
     const id = l.heroIds[i];
     const hr = id ? heroOf(c, id) : undefined;
     if (hr) slots.append(heroSlot(hr, s, l, host, set));
-    else {
+    else if (i >= room) {
+      const muster = c.board.some((k) => k.story === 'muster');
+      const hint = "Wim says the old muster roll is in the officers' quarters. With it, a fourth could sign on.";
+      slots.append(h('div', { class: 'lg-slot empty locked', role: 'listitem', 'data-slot': `${i}`, 'data-locked': 'muster', tabindex: 0, 'data-tip': `A fourth slot · locked\n${hint}${muster ? '\nThe job is on the notice post.' : ''}` }, h('span', { class: 'lg-slot-e' }, '🔒 Locked'), h('span', { class: 'lg-slot-h' }, hint)));
+    } else {
       const first = i === l.heroIds.length;
       const bench = c.roster.some((x) => !l.heroIds.includes(x.id));
       slots.append(h('div', { class: `lg-slot empty ${first ? 'first' : ''}`, role: 'listitem', 'data-slot': `${i}` }, h('span', { class: 'lg-slot-e' }, 'Empty'), first && c.recruits.length ? h('span', { class: 'lg-slot-h' }, 'Hire someone below.') : first && bench ? h('span', { class: 'lg-slot-h' }, 'Add someone from your roster.') : ''));
@@ -768,7 +775,7 @@ function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost):
 
   const bench = c.roster.filter((x) => !l.heroIds.includes(x.id));
   if (bench.length) {
-    const full = l.heroIds.length >= 4;
+    const full = l.heroIds.length >= room; // V4.1 (squads)
     main.append(
       h(
         'div',
@@ -813,7 +820,7 @@ function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost):
       'div',
       { class: 'lg-sh lg-sh-sm' },
       h('div', { class: 'lg-sh-l' }, h('h3', { class: 'lg-h3' }, flagon ? 'At the Gilded Flagon' : 'At the campfire'), h('p', { class: 'lg-sub' }, sub)),
-      n ? h('span', { class: 'lg-sub' }, l.heroIds.length < 4 ? 'Hired hands go straight into a free slot.' : 'The party is full: hired hands wait on the roster.') : '',
+      n ? h('span', { class: 'lg-sub' }, l.heroIds.length < room ? 'Hired hands go straight into a free slot.' : 'The party is full: hired hands wait on the roster.') : '',
     ),
   );
   if (!n) main.append(h('p', { class: 'lg-empty' }, 'Nobody looking for work. Come back after the next delve.'));
@@ -977,11 +984,11 @@ function recruitCard(hr: Hero, price: number, s: GameState, l: Loadout, host: Ca
           k: `hire-${hr.id}`,
           data: { hire: hr.id },
           off: short,
-          tip: short ? `Hire · ${price} gold\nYou have ${c.gold} gold.` : `Hire ${hr.name} · ${price} gold\n${l.heroIds.length < 4 ? 'Goes straight into a free party slot.' : 'The party is full: they wait on the roster.'}`,
+          tip: short ? `Hire · ${price} gold\nYou have ${c.gold} gold.` : `Hire ${hr.name} · ${price} gold\n${l.heroIds.length < squadSlots(c) ? 'Goes straight into a free party slot.' : 'The party is full: they wait on the roster.'}`,
           onclick: async () => {
             if (!(await host.send({ type: 'hire', heroId: hr.id }))) return;
             sfx.play('coin');
-            if (l.heroIds.length < 4) host.setDraft({ ...structuredClone(l), heroIds: [...l.heroIds, hr.id] }, 'party');
+            if (l.heroIds.length < squadSlots(c)) host.setDraft({ ...structuredClone(l), heroIds: [...l.heroIds, hr.id] }, 'party');
           },
         },
         'Hire · ',

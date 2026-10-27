@@ -12,6 +12,10 @@
 // A crew that calls the fight off (spec 31.9) counts as a party win (`fell back`). Initiative: the older cells give the
 // party the first turn (as before); the crew-relative cells alternate (odd fights: the crew moves first, as when it sees
 // the party first). FIRST=party|crew|alt overrides.
+// V4.1 (squads, spec 31.12): the crew fields as many members as the party brings (crewSize: the Sisters, Ferrymen and Choir
+// 2–4, the Wake 3–5), so every cell builds the crew at its party's size (the older cells too). New cells `par2` and `par4`
+// (every crew): parity level, a party of 2 / 4 against a crew of that size. `short` is now one hero short against the
+// crew sized for the full party (the crew doesn't shrink when you're a hero down). CREWSIZE=n forces the crew's size.
 
 import { createEngine } from '../src/game/engine';
 import { at, testCastle } from '../src/game/test/testCastle';
@@ -20,7 +24,7 @@ import type { ActionKind, GameState, HeroClass, Item } from '../src/game/types';
 import type { GameStateX } from '../src/game/state';
 import { buildCrew } from '../src/game/rivals';
 import { makeHero } from '../src/game/camp';
-import { CREWS } from '../src/game/data';
+import { CREWS, crewSize } from '../src/game/data';
 import type { CrewId } from '../src/game/types';
 
 const N = Number(process.argv[2] ?? 40);
@@ -44,6 +48,8 @@ type PartyDef = {
   name: string; heroes: [HeroClass, number][]; weaponTier?: 0 | 1 | 2; armorTier?: 0 | 1 | 2; potions?: number;
   /** V4.1 (WS7): start at this share of max HP (battle-worn); carry one lit torch (Keven); who moves first. */
   hpFrac?: number; torch?: boolean; first?: 'party' | 'crew' | 'alt';
+  /** V4.1 (squads): the party size the crew is built for (default: this party's size). */
+  crewFor?: number;
 };
 const PARTIES: Record<string, PartyDef> = {
   l1x3: { name: '3 heroes L1 (heir, sellsword, burglar), 1 potion', heroes: [['heir', 1], ['sellsword', 1], ['burglar', 1]], potions: 1 },
@@ -71,22 +77,26 @@ function crewCells(crewId: CrewId): Record<string, PartyDef> {
   const g1 = `W${GEAR[lv - 1]![0]} A${GEAR[lv - 1]![1]}`;
   return {
     par: mk(`parity: ${n} L${lv} ${g}, ${pots} potions, a torch`, n, lv),
-    ...(PAR[crewId].level === 3 ? { par4: mk(`parity: 4 L2 ${g1}, ${pots} potions`, 4, 2) } : {}),
+    // V4.1 (squads): parties of 2 and 4 at the parity level, against a crew of their size.
+    par2: mk(`parity: 2 L${lv} ${g} vs ${crewSize(def, 2)}`, 2, lv),
+    par4: mk(`parity: 4 L${lv} ${g} vs ${crewSize(def, 4)}`, 4, lv),
+    ...(PAR[crewId].level === 3 ? { 'par4-l2': mk(`4 L2 ${g1}, ${pots} potions vs ${crewSize(def, 4)}`, 4, 2) } : {}),
     'lvl-1': mk(`a level below: ${n} L${lv - 1} ${g1}`, n, lv - 1),
-    short: mk(`one short: ${n - 1} L${lv} ${g}`, n - 1, lv),
+    short: mk(`one short: ${n - 1} L${lv} ${g} vs ${crewSize(def, n)}`, n - 1, lv, { crewFor: n }),
     worn: mk(`battle-worn: parity at 60% HP, no potions`, n, lv, { hpFrac: 0.6, potions: 0 }),
   };
 }
-const CELL_KEYS = ['par', 'par4', 'lvl-1', 'short', 'worn'];
+const CELL_KEYS = ['par', 'par2', 'par4', 'par4-l2', 'lvl-1', 'short', 'worn'];
 const CREW_LIST: CrewId[] = (process.env.CREW ? [process.env.CREW as CrewId] : ['lantern-sisters', 'ferrymen', 'gallows-choir', 'the-wake']);
 const PARTY_LIST = process.env.PARTY ? process.env.PARTY.split(',') : [...Object.keys(PARTIES), ...(process.env.CELLS === '0' ? [] : CELL_KEYS)];
 
 // The Crossing (L2): the crew east of the pit at its posts, the party by the west door.
-const CREW_SPOTS = [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4), at(2, 17, 3)];
+const CREW_SPOTS = [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4), at(2, 17, 3), at(2, 16, 3)]; // V4.1 (squads): a fifth spot
 const HERO_SPOTS = [at(2, 8, 2), at(2, 9, 2), at(2, 8, 1), at(2, 9, 1)];
 
 function setup(seed: number, pd: PartyDef, crewId: CrewId): GameState {
   let s = e.newGame(seed);
+  s.campaign.squadSlots = 4; // V4.1 (squads): the arena fields parties of four
   const ids: string[] = [];
   pd.heroes.forEach(([cls, level], i) => {
     const id = i === 0 ? 'keven' : `h${i}`;
@@ -120,7 +130,8 @@ function setup(seed: number, pd: PartyDef, crewId: CrewId): GameState {
     const it: Item = { id: `pot${i}`, kind: 'potion', name: 'Potion', amount: 1, slots: 1 };
     h.pack.push(it);
   }
-  const cr = buildCrew(s as GameStateX, crewId, CREW_SPOTS);
+  // V4.1 (squads, spec 31.12): the crew at the party's size (`crewFor` for the one-short cell), as startDelve builds it.
+  const cr = buildCrew(s as GameStateX, crewId, CREW_SPOTS, process.env.CREWSIZE ? Number(process.env.CREWSIZE) : (pd.crewFor ?? pd.heroes.length));
   cr.stance = 'hostile';
   cr.spotted = true;
   d.rivals = cr;

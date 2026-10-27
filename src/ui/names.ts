@@ -841,6 +841,20 @@ export const STORY: Record<StoryId, {
     itemTip: '',
     when: 'once Brother Aldric is home and Level 2 is open',
   },
+  // V4.1 (squads, spec 31.12)
+  muster: {
+    who: 'the muster roll',
+    where: "Level 2, the officers' quarters",
+    verb: 'Recover',
+    unlocks: 'A fourth hero in the party',
+    step: 'party',
+    home: 'The muster roll is home.',
+    homeLine: "Wim pins it by the Flagon's door. A fourth hero can go in with you now: pick them when you pick the party.",
+    service: 'A fourth hero in the party.',
+    line: "Wim pins the muster roll by the Flagon's door. A fourth can go in with you now.",
+    itemTip: "Carry it out and it goes home to Lowgate, not the cart. It can't be sold.",
+    when: 'at reputation 2',
+  },
 };
 
 /** "Rescue Gerda the smith (Level 2, the forge)." */

@@ -2180,6 +2180,9 @@ input.seed {
 .lg-slot-e { font-size: 18px; color: var(--muted); }
 .lg-slot.empty.first .lg-slot-e { color: var(--lg-ink-3); }
 .lg-slot-h { font-size: 14px; color: var(--lg-ink-4); }
+/* V4.1 (squads, spec 31.12): the fourth slot, locked until the muster roll is home. */
+.lg-slot.empty.locked { border-style: dotted; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255, 255, 255, 0.02) 8px 16px); }
+.lg-slot.empty.locked .lg-slot-e { color: var(--lg-ink-4); }
 .lg-slot.hero { border: 1px solid var(--line); background: var(--lg-card); }
 .lg-slot.hero.heir { border-color: var(--ember-dim); background: #1c1610; }
 .lg-slot.hero.wounded { border-color: var(--red-dim); background: #1a1111; }

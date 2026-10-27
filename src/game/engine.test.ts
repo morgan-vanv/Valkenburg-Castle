@@ -28,6 +28,7 @@ function party(s: GameState, extra: [string, string, HeroClass, number?][] = [])
     makeHero('aldous', 'Aldous', 'pyromancer'),
     ...extra.map(([id, name, cls, level]) => makeHero(id, name, cls, level ?? 1)),
   );
+  s.campaign.squadSlots = 4; // V4.1 (squads, spec 31.12): the classic party of four (a new campaign has 3 slots)
   return s;
 }
 
@@ -117,9 +118,9 @@ const GATE = at(1, 4, 7);
 const PITHALL = at(1, 10, 7);
 
 describe('camp', () => {
-  it('new game: 120 gold (V4.1, spec 31.2), Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
+  it('new game: 70 gold (V4.1 squads, spec 31.12; was 120), Keven alone, 3 level-1 drifters of 3 classes at 60 at the campfire (spec 15.3, 17.1, 18.2)', () => {
     const s = e.newGame(7);
-    expect(s.campaign.gold).toBe(120);
+    expect(s.campaign.gold).toBe(70);
     expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
     expect(s.campaign.roster.map((h) => h.id)).toEqual(['keven']);
     expect(s.campaign.board).toHaveLength(2); // the test castle has only 2 sites
@@ -150,7 +151,7 @@ describe('camp', () => {
   it('buys, hires, refuses when poor', () => {
     let s = e.newGame(7);
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
-    expect(s.campaign.gold).toBe(100);
+    expect(s.campaign.gold).toBe(50);
     expect(s.campaign.stash.map((i) => i.kind)).toEqual(['potion']);
     s.campaign.gold = 5;
     const r = e.apply(s, { type: 'buy', kind: 'charge' });
@@ -158,15 +159,15 @@ describe('camp', () => {
     expect(r.state).toBe(s);
   });
 
-  it('the starting purse buys one level-1 hire and 60 to try the shop (21.2; V4.1 spec 31.2: 120), or two hires and nothing else', () => {
+  it('the starting purse buys one level-1 hire and a torch, or items for Keven alone (21.2; V4.1 squads, spec 31.12: 70)', () => {
     let s = e.newGame(7);
-    s = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
-    expect(s.campaign.gold).toBe(60);
-    const two = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
-    expect(two.campaign.gold).toBe(0);
-    expect(e.apply(two, { type: 'hire', heroId: two.campaign.recruits[0]!.hero.id }).error).toBe('Not enough gold.');
+    const hired = ok(s, { type: 'hire', heroId: s.campaign.recruits[0]!.hero.id }).state;
+    expect(hired.campaign.gold).toBe(10);
+    expect(e.apply(hired, { type: 'hire', heroId: hired.campaign.recruits[0]!.hero.id }).error).toBe('Not enough gold.');
+    expect(ok(hired, { type: 'buy', kind: 'torch' }).state.campaign.gold).toBe(0);
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
     s = ok(s, { type: 'buy', kind: 'potion' }).state;
+    s = ok(s, { type: 'buy', kind: 'torch' }).state;
     s = ok(s, { type: 'buy', kind: 'rope' }).state;
     expect(s.campaign.gold).toBe(5);
     expect(e.apply(s, { type: 'buy', kind: 'firecracker' }).error).toBeTruthy();
@@ -681,7 +682,8 @@ describe('contracts and summary', () => {
     expect(s.campaign.gold).toBe(gold + 140);
     expect(s.campaign.stash.some((i) => i.kind === 'heirloom')).toBe(true);
     expect(s.campaign.reputation).toBe(1);
-    expect(s.campaign.roster.find((h) => h.id === 'brann')!.xp).toBe(brannXp + 4);
+    // V4.1 (squads, spec 31.12): survive +1, and the contract's 8 XP shared by the two who got out (4 each).
+    expect(s.campaign.roster.find((h) => h.id === 'brann')!.xp).toBe(brannXp + 1 + 4);
     expect(s.campaign.delveCount).toBe(1);
   });
 
@@ -1120,7 +1122,7 @@ describe('slay contract', () => {
     const sum = s.summary!;
     expect(sum.contractDone).toBe(true);
     expect(sum.bounty).toBe(600);
-    expect(sum.xp.keven).toBe(5 + 1 + 3);
+    expect(sum.xp.keven).toBe(5 + 1 + 8); // V4.1 (squads): the Dragon's 5, survive 1, the contract's pot of 8 to the one who got out
     expect(sum.dead).toEqual(['brann']);
   });
 });
@@ -1585,7 +1587,7 @@ describe('15.4 quartermaster', () => {
     expect(shop.find((o) => o.kind === 'hook')!.price).toBe(40);
     let s = e.newGame(2);
     s = ok(s, { type: 'buy', kind: 'firecracker' }).state;
-    expect(s.campaign.gold).toBe(110);
+    expect(s.campaign.gold).toBe(60);
     expect(s.campaign.stash[0]!.kind).toBe('firecracker');
   });
 
@@ -2191,6 +2193,9 @@ describe('16.5 the Lantern Sisters\' kit', () => {
     }
     void k;
     expect(s.delve!.rivals).toBeTruthy();
+    // V4.1 (squads, spec 31.12): a party of one or two meets two sisters; these tests are about the classic three.
+    const cr0 = s.delve!.rivals!;
+    if (cr0.members.length !== 3) cr0.members = buildCrew(s as GameStateX, 'lantern-sisters', cr0.members.map((r) => r.at), 3).members;
     s.delve!.monsters = [];
     s.delve!.traps = {};
     oldLantern(s); // V4.1: the old free lantern, now an item (Keven's, or the first hero's)
@@ -2406,7 +2411,7 @@ describe('V3.5', () => {
     it('starts with nothing won back; the campfire has 3 level-1 drifters at 60', () => {
       for (let seed = 1; seed < 20; seed++) {
         const s = se.newGame(seed);
-        expect(s.campaign.village).toEqual({ surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false });
+        expect(s.campaign.village).toEqual({ surgeon: false, innkeeper: false, smith: false, copper: false, caskbook: false, alchemist: false, muster: false });
         expect(s.campaign.recruits).toHaveLength(3);
         expect(new Set(s.campaign.recruits.map((r) => r.hero.cls)).size).toBe(3);
         expect(s.campaign.recruits.every((r) => r.hero.level === 1 && r.price === 60)).toBe(true);
@@ -2509,7 +2514,7 @@ describe('V3.5', () => {
       expect(r.events.some((x) => x.type === 'say' && /infirmary is open/.test(x.text))).toBe(true);
       expect(r.state.campaign.board.some((k) => k.story === 'surgeon')).toBe(false);
       expect(r.state.campaign.reputation).toBe(1);
-      expect(r.state.campaign.gold).toBe(120); // V4.1 (spec 31.2): no gold, Aldric's 2 potions instead
+      expect(r.state.campaign.gold).toBe(70); // V4.1 (spec 31.2): no gold, Aldric's 2 potions instead
       expect(r.state.campaign.stash.filter((i) => i.kind === 'potion')).toHaveLength(2);
     });
 
@@ -2555,7 +2560,7 @@ describe('V3.5', () => {
       expect(se.ales(s).find((a) => a.kind === 'smuggler')!.locked).toMatch(/cask book/);
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'smuggler' }).error).toMatch(/cask book/);
       s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'reserve' }).state;
-      expect(s.campaign.gold).toBe(100);
+      expect(s.campaign.gold).toBe(50);
       expect(s.campaign.roster.find((h) => h.id === 'brann')!.ale).toBe('reserve');
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'glowworm' }).error).toMatch(/already/);
       s = sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann', 'keven'], entrance: 0, packs: {} }).state;
@@ -3579,7 +3584,7 @@ describe('V3.7 crews', () => {
     for (let i = 1; i <= 100; i++) {
       const t = structuredClone(s) as GameStateX;
       t.rng = i * 2654435761 >>> 0;
-      const cr = makeCrew(w, t, t.delve!, 3);
+      const cr = makeCrew(w, t, t.delve!, 3, undefined, 4); // V4.1 (squads): against a party of four
       if (!cr) { none++; continue; }
       wake++;
       expect(cr.crew).toBe('the-wake');

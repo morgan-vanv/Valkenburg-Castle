@@ -34,6 +34,7 @@ import { blast } from './charges';
 import { checkWays, wayAtEntrance, wayOpen } from './ways';
 import { CREW_FOCUS } from './data'; // V4.1 (WS7)
 import { POWER_KIT, heldRound, crewRetreat, crewWary, nearHero, noteWary, powerPlan, waryStep } from './crewpower'; // V4.1 (WS7, spec 31.9)
+import { crewLineup, crewSize } from './data'; // V4.1 (squads, spec 31.12)
 
 // ---------------------------------------------------------------- making a crew
 
@@ -111,12 +112,14 @@ function purse(s: GameStateX, def: CrewDef): Item {
 }
 
 /** A cutthroat crew from `def` at `post` (members on the free hexes around it), or null if there's no room. */
-function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
-  const spots = spotsAround(c.w, c.d, post, def.members.length, (p) => !!occupant(c, p));
-  if (spots.length < def.members.length) return null;
+function postCrew(c: Ctx, def: CrewDef, post: Pos, party: number): CrewX | null {
+  // V4.1 (squads, spec 31.12): as many members as the party brings (the crew's size range; its drop order).
+  const lineup = crewLineup(def, crewSize(def, party));
+  const spots = spotsAround(c.w, c.d, post, lineup.length, (p) => !!occupant(c, p));
+  if (spots.length < lineup.length) return null;
   const crew: CrewX = {
     crew: def.id, name: def.name, temperament: 'cutthroat', stance: 'waiting', goal: 'loot', spotted: false, entersRound: 1,
-    members: def.members.map((m, i) => {
+    members: lineup.map((m, i) => {
       const r = member(c.s, `r${i + 1}`, def, m, spots[i]!);
       r.post = { ...spots[i]! };
       return r;
@@ -133,8 +136,10 @@ function postCrew(c: Ctx, def: CrewDef, post: Pos): CrewX | null {
  * waiting from round 1 at a post on Level 2. Level 3: the Wake, 60%, at a post on Level 3 (the
  * pool on Level 2 when the castle has no Level 3 posts). Never two crews.
  */
-export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, partyEntrance?: Pos): CrewX | null {
+export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, partyEntrance?: Pos, partySize?: number): CrewX | null {
   const c: Ctx = { w, s, d, ev: [] };
+  // V4.1 (squads, spec 31.12): the number of heroes who set out (startDelve passes it; else the delve's heroes, else 3).
+  const party = partySize ?? (d.heroes.length || 3);
   if (level <= 1) {
     // Spec 23.2: never within 6 of the party's own way in. V4.0 (spec 25.4): any other way in, by the
     // dice (shut or not: the Sisters make their own entrance). V4.1 (owner): the main gate is one of them,
@@ -143,7 +148,7 @@ export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, part
     if (!ways.length || random(s) >= PROSPECTOR_CHANCE) return null;
     const at = pick(s, ways);
     const def = CREWS['lantern-sisters'];
-    const members = def.members.map((m, i) => member(s, `r${i + 1}`, def, m, at));
+    const members = crewLineup(def, crewSize(def, party)).map((m, i) => member(s, `r${i + 1}`, def, m, at)); // V4.1 (squads)
     // V4.0 (spec 25.4): coming by a barred gate, the Burglar sister carries its key.
     const way = wayAtEntrance(w.castle, at);
     if (way?.kind === 'gate' && !wayOpen(s, way.id)) {
@@ -161,20 +166,23 @@ export function makeCrew(w: World, s: GameStateX, d: DelveX, level: number, part
   const l3 = posts.filter((p) => p.level === 3);
   if (level >= 3 && l3.length) {
     if (random(s) >= WAKE_CHANCE) return null;
-    return postCrew(c, CREWS['the-wake'], pick(s, l3));
+    return postCrew(c, CREWS['the-wake'], pick(s, l3), party);
   }
   const l2 = posts.filter((p) => p.level === 2);
   if (!l2.length || random(s) >= CUTTHROAT_CHANCE) return null;
-  return postCrew(c, CREWS[pick(s, CUTTHROAT_POOL)], pick(s, l2));
+  return postCrew(c, CREWS[pick(s, CUTTHROAT_POOL)], pick(s, l2), party);
 }
 
-/** A crew of `id` standing on `spots` (for tests and fixtures): cutthroats waiting with posts and purses. */
-export function buildCrew(s: GameStateX, id: CrewX['crew'], spots: Pos[]): CrewX {
+/**
+ * A crew of `id` standing on `spots` (for tests and fixtures): cutthroats waiting with posts and purses. V4.1 (squads):
+ * `size` members (clamped to the crew's range), by default as many as there are spots.
+ */
+export function buildCrew(s: GameStateX, id: CrewX['crew'], spots: Pos[], size = spots.length): CrewX {
   const def = CREWS[id];
   const cut = def.temperament === 'cutthroat';
   const crew: CrewX = {
     crew: def.id, name: def.name, temperament: def.temperament, stance: cut ? 'waiting' : 'neutral', goal: 'loot', spotted: false, entersRound: 1,
-    members: def.members.map((m, i) => {
+    members: crewLineup(def, crewSize(def, size)).map((m, i) => {
       const r = member(s, `r${i + 1}`, def, m, spots[i] ?? spots[0]!);
       if (cut) r.post = { ...r.at };
       return r;
