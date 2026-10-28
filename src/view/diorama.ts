@@ -742,7 +742,9 @@ export class Diorama {
       if (L.holder) {
         const v = this.units.get(L.holder);
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
-        const off = L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.5, 0.3) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.3, 0.2) : new THREE.Vector3(-0.3, v.height + 0.4, 0.2);
+        // V5.0 (G): carried lights sit a little ahead of the figure and above its head, so they don't blow out its hat and pack.
+        const ahead = new THREE.Vector3(Math.sin(v.facing), 0, Math.cos(v.facing)).multiplyScalar(0.45);
+        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.55, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.45, 0) : new THREE.Vector3(-0.25, v.height + 0.5, 0)).add(ahead);
         srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 1, kind: L.kind, seed: srcs.length * 1.7 });
       } else {
         if (!this.vis.explored.has(posKey(L.at))) continue;
@@ -773,6 +775,10 @@ export class Diorama {
             c.scale.x = 1 + Math.sin(t * 13 + f.at.z) * 0.08;
           }
         });
+      lv.dressingFlames.forEach((f, i) => {
+        f.scale.y = 1 + Math.sin(t * (10 + (i % 3) * 2) + i) * 0.2;
+        f.scale.x = 1 + Math.sin(t * 13 + i * 1.7) * 0.08;
+      });
       if (this.drumSpin > 0) {
         this.drumSpin = Math.max(0, this.drumSpin - 0.016);
         for (const d of lv.drums) d.rotation.x += 0.12;
@@ -3610,6 +3616,7 @@ export class Diorama {
     if (len < 0.01) return;
     dir.normalize();
     const reach = Math.min(0.6, len * 0.35);
+    a.playClip?.('strike'); // V5.0 (G): a rigged figure swings its arm with the lunge
     a.busy++;
     await this.clock.tween(0.1, (k) => a.rig.position.copy(dir).multiplyScalar(reach * easeOutCubic(k)));
     void this.clock.tween(0.16, (k) => a.rig.position.copy(dir).multiplyScalar(reach * (1 - k))).then(() => a.busy--);
@@ -3617,6 +3624,7 @@ export class Diorama {
 
   private async recoil(t: UnitView, a?: UnitView): Promise<void> {
     const dir = a ? t.root.position.clone().sub(a.root.position).setY(0).normalize() : new THREE.Vector3(0, 0, 1);
+    t.playClip?.('hit'); // V5.0 (G)
     await this.clock.tween(0.18, (k) => t.rig.position.copy(dir).multiplyScalar(Math.sin(k * Math.PI) * 0.26));
     t.rig.position.set(0, 0, 0);
   }

@@ -14,7 +14,8 @@ const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftsha
 
 /** Where the party stands in each room (axial), facing the camera; and the shots' look-at. */
 const ROOMS = {
-  hall: { level: 1, at: [{ q: 13, r: 15 }, { q: 12, r: 15 }, { q: 14, r: 14 }, { q: 12, r: 16 }], look: { q: 15, r: 14 } },
+  // The party near the dais, so the north wall, the high table and the flanking pillars are in the shot.
+  hall: { level: 1, at: [{ q: 18, r: 11 }, { q: 17, r: 11 }, { q: 19, r: 10 }, { q: 17, r: 12 }], look: { q: 18, r: 10 } },
 };
 
 async function session(quality) {
@@ -71,7 +72,7 @@ async function session(quality) {
   await p.waitForTimeout(600);
   // The look is the question: hide the HUD and the tags, leave the 3D view.
   await p.addStyleTag({ content: '.dl-hud, .dio-fx { visibility: hidden !important; }' });
-  await p.evaluate(() => { window.vc.dio.select(null); window.vc.dio.setFollow(null); });
+  await p.evaluate(() => { const d = window.vc.dio; d.select(null); d.setFollow(null); d.clearHighlights(); d.showPath(null); d.showSight(null); d.setHover(null); });
   return p;
 }
 
