@@ -2976,6 +2976,8 @@ div.dl-deal { cursor: default; }
 .dl-menu { position: absolute; right: 16px; top: 84px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; background: rgba(14, 11, 9, 0.97); border: 1px solid var(--line-hi); border-radius: 4px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); z-index: 45; }
 .dl-menu-sec { display: flex; flex-direction: column; gap: 8px; }
 .dl-menu-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* V5.0 (P): a row's label before its buttons (Quality High / Low). */
+.dl-menu-k { color: var(--dl-ink-3); font-size: 13px; margin-right: 2px; }
 .dl-menu-end { border-top: 1px solid var(--line); padding-top: 12px; }
 .dl-check { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--dl-ink-2); cursor: pointer; }
 .dl-check input { accent-color: var(--ember); width: 16px; height: 16px; }

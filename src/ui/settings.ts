@@ -8,7 +8,7 @@ export interface Settings {
   reduceFlashes: boolean;
   /** Skip the "still waiting" question on End turn (15.7 asks once by default). */
   noEndTurnAsk: boolean;
-  /** V3.4: lower walls between the camera and the focus (the diorama's cutaway). Off by default. */
+  /** V3.4: lower walls between the camera and the focus (the diorama's cutaway). V5.0: retired (the cutaway is always on); kept so old settings load. */
   cutaway: boolean;
   /** V4.0 HUD: hover cards always show the full rules card (as if Alt were held), for touch screens. */
   fullCards: boolean;

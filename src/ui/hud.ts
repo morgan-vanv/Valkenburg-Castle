@@ -3374,10 +3374,18 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
           save();
           if (!v) this.cancelFlow();
         }, 'When nobody can move, act or use anything, the turn ends on its own after a moment. Any key or click keeps it open.'),
-        check('Lower walls near the camera', !!st.cutaway, (v) => {
-          st.cutaway = v;
+        // V5.0 (P, docs/v5-ship.md step 2): the look rows; "Lower walls near the camera" is retired (the cutaway is always on).
+        h('span', { class: 'dl-menu-row' }, h('span', { class: 'dl-menu-k' }, 'Quality'), ...(['high', 'low'] as const).map((q) => h('button', { type: 'button', class: `dl-btn dl-btn-s ${(st.quality ?? 'high') === q ? 'on' : ''}`, 'data-tip': q === 'high' ? 'High · shadows, bloom and the tilt-shift blur.' : 'Low · no shadows, bloom or blur; for slower machines.', onclick: () => { st.quality = q; save(); this.dio.setQuality(q); this.renderMenu(); } }, q === 'high' ? 'High' : 'Low'))),
+        check('Action camera', st.actionCamera !== false, (v) => {
+          st.actionCamera = v;
           save();
-        }, 'Walls between the camera and your heroes drop low so you can see past them.'),
+          this.dio.setActionCamera(v);
+        }, 'The camera pushes in on attacks, shots, spells and item use.'),
+        check('Tilt-shift blur', st.tiltShift !== false, (v) => {
+          st.tiltShift = v;
+          save();
+          this.dio.setTiltShift(v);
+        }, 'The diorama blur above and below the focus (High quality only).'),
         check('Full hover cards (as if Alt were held)', !!st.fullCards, (v) => {
           st.fullCards = v;
           save();
