@@ -206,12 +206,44 @@ export function statName(s?: string): string {
 
 // ------------------------------------------------------------ DOM
 
-/** The outcome bar: segments by outcome, the kill chance on the kill segment. */
-export function outcomeBar(read: RollRead): HTMLElement {
-  const bar = h('div', { class: 'dl-ocbar', role: 'img', 'aria-label': read.segments.map((s) => `${s.label} ${pctText(s.p)}`).join(', ') });
-  for (const s of read.segments) {
-    const label = s.cls === 'kill' ? `${s.label} · ${pctText(s.p)}` : s.p >= 0.12 ? s.label : '';
-    bar.append(h('span', { class: `dl-oc dl-oc-${s.cls}`, style: `flex:${Math.max(0.02, s.p)} 1 0`, 'data-tip': `${cap(s.label)} · ${pctText(s.p)}` }, label));
+/** One segment of the outcome bar, as data (tested): what it shows in the bar and what its hover says. */
+export interface BarSegment {
+  cls: string;
+  /** Share of the bar (flex), never under 0.02. */
+  flex: number;
+  /** The words in the segment: the label where it fits (≥ 12%), the kill segment with its chance. */
+  text: string;
+  /** The hover: the label and the full chance, the kill segment with the headline and what Focus changed. */
+  tip: string;
+  /** "was N%" shown in the kill segment after Focus raised it (the span keeps the `dl-roll-was` class). */
+  was?: string;
+}
+
+/**
+ * V5.0 (P, B4; pillar 15): the bar carries the read on its own. No line under it: the kill segment says its chance,
+ * other segments their label where they fit, and every segment's hover has the full number. `was` is the kill
+ * chance before the Focus spent on this roll; it shows in the kill segment ("was 48%") so spending Focus reads.
+ */
+export function barSegments(read: RollRead, was: number | null = null): BarSegment[] {
+  const changed = was !== null && Math.abs(was - read.kill) > 0.004;
+  return read.segments.map((s) => {
+    const kill = s.cls === 'kill';
+    const text = kill ? `${s.label} · ${pctText(s.p)}` : s.p >= 0.12 ? s.label : '';
+    const lines = [`${cap(s.label)} · ${pctText(s.p)}`];
+    if (kill) {
+      lines.push(`${read.headline}${read.sub ? ` · ${read.sub}` : ''}`);
+      if (changed) lines.push(`Was ${pctText(was!)} before Focus.`);
+    }
+    return { cls: s.cls, flex: Math.max(0.02, s.p), text, tip: lines.join('\n'), was: kill && changed ? `was ${pctText(was!)}` : undefined };
+  });
+}
+
+/** The outcome bar: segments by outcome, the kill chance on the kill segment, the whole read on hover. */
+export function outcomeBar(read: RollRead, was: number | null = null): HTMLElement {
+  const segs = barSegments(read, was);
+  const bar = h('div', { class: 'dl-ocbar', role: 'img', 'aria-label': `${read.headline}. ${read.segments.map((s) => `${s.label} ${pctText(s.p)}`).join(', ')}`, 'data-tip': `${read.headline}${read.sub ? ` · ${read.sub}` : ''}` });
+  for (const s of segs) {
+    bar.append(h('span', { class: `dl-oc dl-oc-${s.cls}`, style: `flex:${s.flex} 1 0`, 'data-tip': s.tip }, s.text, s.was ? h('span', { class: 'dl-roll-was' }, ` (${s.was})`) : ''));
   }
   return bar;
 }

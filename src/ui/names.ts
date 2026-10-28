@@ -356,7 +356,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   charge: `Set a bought charge on a door, chest or cracked wall next to you, fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; opens locks, breaks cracked walls and built walls on Levels 1 and 2. Noise ${V37.blastNoise}, heard a level up and down.`,
   rope: 'Anchor a rope at this pit edge. From then on anyone here can Climb down and back up.',
   climb: 'Climb the rope to the other level, no damage. Takes the whole turn (move and action).',
-  jump: 'Drop into the pit to the level below. The fall hurts, more for each level. Takes the whole turn.',
+  jump: 'Drop into the pit to the level below. The fall hurts, more for each level. It is your move (no dash after); you land with your action ready.',
   shove: 'Push an enemy next to you 1 hex straight away: 2 Might slots (Sellsword 3), needs 2 hits. Into a pit it falls; into a wall it takes 1. Noise 2.',
   bribe: 'Pay the rival crew 40 gold from the party\'s packs: they stop fighting and leave.',
   parley: 'Talk to a rival crew within 4 hexes, in sight. Free. Opens the deal card: pay them to leave, buy a truce, give them a job, hire them, or fight. One deal per crew per round; paid from the party\'s packs.',
@@ -419,13 +419,15 @@ export function actionHelp(action: ActionKind, cls?: string): string {
 
 /** Actions that don't use the hero's action, and those that take the whole turn. */
 export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown', 'snuff', 'dropTorch']);
-export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'jump', 'grapple']);
+export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'grapple']);
+/** V5.0 (spec 32.1): a jump is the hero's move, not their action. */
+export const MOVE_ACTIONS = new Set<ActionKind>(['jump']);
 
 /** What the bar tooltip says it costs. */
 export function actionCost(action: ActionKind, mana?: number, rolls?: boolean): string {
   const parts: string[] = [];
   if (mana) parts.push(`${mana} mana`);
-  parts.push(FREE_ACTIONS.has(action) ? 'free' : WHOLE_TURN_ACTIONS.has(action) ? 'whole turn' : action === 'open' ? 'free for doors' : 'uses the action');
+  parts.push(FREE_ACTIONS.has(action) ? 'free' : WHOLE_TURN_ACTIONS.has(action) ? 'whole turn' : MOVE_ACTIONS.has(action) ? 'uses the move' : action === 'open' ? 'free for doors' : 'uses the action');
   if (rolls) parts.push('roll');
   return parts.join(' · ');
 }
@@ -472,12 +474,13 @@ After moving, a second move (a dash, as far again: 4, Burglar 5) spends the acti
 };
 
 /** V4.1 (spec 31.13): the reactions a hero can be asked for in the castle's turn, by name. */
-export const REACT_NAME: Record<ReactionKind, string> = { hiddenSwing: 'Hidden swing', overwatch: 'Overwatch' };
+export const REACT_NAME: Record<ReactionKind, string> = { hiddenSwing: 'Hidden swing', overwatch: 'Overwatch', shieldBlock: 'Shield block' };
 export const SETTING_WORD: Record<ReactionSetting, string> = { ask: 'Ask', always: 'Always', never: 'Never' };
 /** What each reaction is, for the Reactions popover (the hero's name in). */
 export const REACT_HELP: Record<ReactionKind, (n: string) => string> = {
   hiddenSwing: (n) => `Hidden swing: an enemy steps away from ${n}'s side while ${n} is hidden from it (veiled, or it hasn't spotted them) and ${n}'s action is ready. ${n} may take the free swing, and give themselves away, or let it pass and stay hidden. An enemy that has spotted ${n} always draws the swing.`,
   overwatch: (n) => `Overwatch: ${n} is on overwatch and an enemy moves or acts within ${DATA.OVERWATCH_RANGE} in sight. ${n} may shoot it now, or hold for another (still armed until the castle's turn ends).`,
+  shieldBlock: (n) => `Shield block: a hit lands on ${n} for more than ${DATA.SHIELD_BLOCK_CAP} while ${n} has Focus. ${n} may take it on the shield for ${DATA.SHIELD_BLOCK_FOCUS} Focus (the hit does ${DATA.SHIELD_BLOCK_CAP}), or take the hit and keep the Focus.`,
 };
 export const REACT_SETTING_HELP: Record<ReactionKind, Record<ReactionSetting, (n: string) => string>> = {
   hiddenSwing: {
@@ -489,6 +492,11 @@ export const REACT_SETTING_HELP: Record<ReactionKind, Record<ReactionSetting, (n
     ask: () => `The castle's turn pauses and asks: shoot this one, or hold for another.`,
     always: (n) => `${n} shoots the first enemy to move in sight, without asking.`,
     never: (n) => `${n} never shoots from overwatch: it lapses unfired.`,
+  },
+  shieldBlock: {
+    ask: () => `The castle's turn pauses and asks: block, or take the hit.`,
+    always: (n) => `${n} blocks every hit over ${DATA.SHIELD_BLOCK_CAP} while they have Focus, without asking.`,
+    never: (n) => `${n} never blocks: the Focus is kept for attacks.`,
   },
 };
 
@@ -605,8 +613,10 @@ export function itemTip(i: Item, withUse = true): string {
 }
 
 /** Hotkey per action (letters not used by the global keys). */
+// V5.0 (P, spec 32.8): the camera has W A S D, so no action sits on those; Attack is Space, Disarm / Dig N,
+// charges and the winch C. ' ' is shown as "Space".
 export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
-  attack: 'a',
+  attack: ' ',
   firebolt: 'v', // V3.9: F is Face
   pick: 'p',
   smash: 'x',
@@ -622,22 +632,22 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   kindle: 'k',
   mend: 'm',
   leave: 'q',
-  disarm: 'd',
+  disarm: 'n',
   shove: 'z',
   bribe: 'b',
   parley: 'b',
-  charge: 'w',
-  passLantern: 'n',
+  charge: 'c',
+  passLantern: 'y',
   rope: 'y',
   climb: 'y',
   jump: 'j',
   give: 'i',
   drop: 'u',
-  winch: 'w',
+  winch: 'c',
   overwatch: 'o',
   knockback: 'k',
-  throwCharge: 'w',
-  dig: 'd',
+  throwCharge: 'c',
+  dig: 'n',
   fireball: 'b',
   veil: 'v',
   sleep: 'z',
@@ -654,8 +664,8 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   grapple: 'y',
   shutter: 'l',
   escape: 'x',
-  nightsight: 'n',
-  setCharge: 'w',
+  nightsight: 'y',
+  setCharge: 'c',
   setTripwire: 'w', // V4.1 (spec 31.3): Set charge's key; the bar gives it to whichever comes first
   dread: 'k', // V3.9: F is Face
   brace: 'x',
@@ -1152,3 +1162,9 @@ export const ENTRANCE_LINE: Record<string, string> = {
   'Sally port': 'A side door in the west wall.',
   'East breach': 'A gap in the east wall.',
 };
+
+/** A key as the player reads it on a button or in the help (V5.0, spec 32.8). */
+export function keyName(k: string): string {
+  if (k === ' ') return 'Space';
+  return k.length === 1 ? k.toUpperCase() : k;
+}

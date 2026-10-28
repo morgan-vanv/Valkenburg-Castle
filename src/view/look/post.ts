@@ -131,6 +131,14 @@ export class LookPost {
     this.setSize(this.w, this.h);
   }
 
+  private focusY = 0.5;
+  /** Where the tilt-shift's sharp band sits (0 bottom, 1 top of the screen); eased toward the party. */
+  setFocus(y: number, dt: number): void {
+    const a = 1 - Math.exp(-dt * 4);
+    this.focusY += (THREE.MathUtils.clamp(y, 0.2, 0.8) - this.focusY) * a;
+    for (const t of this.tilts) t.uniforms.focusY!.value = this.focusY;
+  }
+
   /** Does the frame go through the chain at all? Off: straight to the canvas. */
   get active(): boolean {
     const f = this.features;

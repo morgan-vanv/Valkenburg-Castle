@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import type { MoveRisks, Visibility } from '../game/api';
 import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
-import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, LevelDef, Monster, Rival, RivalCrew } from '../game/types';
+import type { Brightness, CastleDef, GameEvent, GameState, Intent, Item, LevelDef, Rival, RivalCrew } from '../game/types';
 import { AnimClock } from './anim';
 import { CameraRig } from './camera';
 import type { ModelKey } from './figures';
@@ -21,9 +21,13 @@ import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, exitShut, linkEnds, linkMarker, prizeInHand } from './links';
 import { heardFade, heardIcon, heardTitle } from './sounds';
 import { INTENT_ICON, iconSvg, intentTone } from './icons';
+import { bleedMark, heroTag, monsterTag, pipsHtml, venomMark } from '../ui/tags'; // V5.0: the tags' content is the play track's (src/ui/tags.ts)
 import { LookPost, POST } from './look/post';
 import { FILL, POINT, makeFill, placeKey, setupShadowLight, type SourceKind } from './look/lights';
-import { featuresOf, readQuality, type Quality, type QualityFeatures } from './look/quality';
+import { featuresOf, readLookSettings, readQuality, type Quality, type QualityFeatures } from './look/quality';
+import { ActionCam } from './look/actioncam';
+import { StatusFx, type UnitStatus } from './look/status';
+import { LOOK_CUTAWAY, WALL_LOOK } from './look/walls';
 
 const MAX_LIGHTS = 12;
 
@@ -143,6 +147,10 @@ export class Diorama {
   private post: LookPost;
   quality: Quality = 'high';
   private features: QualityFeatures = featuresOf('high');
+  private tiltShift = true;
+  /** V5.0 (G, W1): the action cam (look/actioncam.ts) and the in-world status effects (look/status.ts). */
+  readonly actionCam: ActionCam;
+  private statusFx = new StatusFx();
   private highlights = new Map<HighlightStyle, THREE.InstancedMesh>();
   /** V4.0 HUD (spec 27): the floor a hovered monster sees: bright ahead, faint at an unaware monster's sides. */
   private sightFront!: THREE.InstancedMesh;
@@ -305,9 +313,14 @@ export class Diorama {
     this.flashLight = new THREE.PointLight(0xffd2a0, 0, 20, 1.2);
     this.scene.add(this.flashLight);
     // V5.0 (G): overlays live in their own scene, drawn sharp after the post chain (look/post.ts).
-    this.scene.add(this.propGroup);
+    this.scene.add(this.propGroup, this.statusFx.group);
     this.overlayScene.add(this.overlay);
+    this.overlay.add(this.statusFx.rings);
     this.post = new LookPost(this.renderer);
+    this.actionCam = new ActionCam(this.rig);
+    const look = readLookSettings();
+    this.tiltShift = look.tiltShift;
+    this.actionCam.enabled = look.actionCamera;
     this.setQuality(readQuality());
 
     // Overlays.
@@ -652,11 +665,35 @@ export class Diorama {
   /** V5.0 (G): switch render quality live (Settings; scripts pass ?quality=low). */
   setQuality(q: Quality): void {
     this.quality = q;
-    this.features = featuresOf(q);
+    this.features = featuresOf(q, this.tiltShift);
     this.renderer.shadowMap.enabled = this.features.shadows;
     this.post.setFeatures(this.features);
     for (const v of this.units.values()) v.setBlob(this.features.shadows ? 0.16 : 0.32);
     this.resize();
+  }
+
+  /** V5.0 (G, W1): settings the play track's menu rows call. */
+  setTiltShift(on: boolean): void {
+    this.tiltShift = on;
+    this.setQuality(this.quality);
+  }
+
+  setActionCamera(on: boolean): void {
+    this.actionCam.enabled = on;
+    if (!on) this.actionCam.cancel();
+  }
+
+  /**
+   * V5.0 (G, W1): push the camera in on an action between two figures (or a figure and a hex) for about `ms`.
+   * Skipped at the fastest speed and under "reduce camera shake", and when neither end is on the shown level.
+   */
+  private pushCam(a: UnitView | undefined, b: UnitView | Pos | undefined, ms: number): void {
+    if (!a || !b || this.clock.speed >= 6 || this.reduceShake) return;
+    if (a.at.level !== this.shownLevel) return;
+    const pa = a.root.position;
+    const pb = b instanceof UnitView ? (b.at.level === this.shownLevel ? b.root.position : null) : b.level === this.shownLevel ? this.worldOf(b) : null;
+    if (!pb) return;
+    this.actionCam.play(pa, pb, ms / Math.max(0.25, this.clock.speed));
   }
 
   private loop = (): void => {
@@ -665,7 +702,7 @@ export class Diorama {
     this.lastTime = now;
     this.clock.tick(dtReal);
     const t = this.clock.real;
-    if (this.followId) {
+    if (this.followId && !this.actionCam.active) {
       const v = this.units.get(this.followId);
       if (v && v.at.level === this.shownLevel) {
         const p = v.root.position;
@@ -676,9 +713,18 @@ export class Diorama {
     this.updateCutaway();
     if (this.active) {
       for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
+      this.statusFx.update(this.units, t);
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
       this.effects.update(t);
+      // V5.0 (G, W1): the tilt-shift's sharp band follows the selected hero (or the camera target).
+      {
+        const sel = this.selectedId ? this.units.get(this.selectedId) : undefined;
+        const p = sel && sel.root.visible ? sel.root.position.clone() : this.rig.currentTarget().clone();
+        p.y += 0.6;
+        const ndc = p.project(this.rig.camera);
+        this.post.setFocus((ndc.y + 1) / 2, dtReal);
+      }
       this.post.render(this.scene, this.overlayScene, this.rig.camera);
       this.updateDom();
     }
@@ -705,8 +751,9 @@ export class Diorama {
     const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
     if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
     CUTAWAY.dir.value.copy(d.normalize());
-    // Off: the cut height is above every wall, so nothing is lowered.
-    CUTAWAY.height.value = this.cutaway ? 0.3 : 99;
+    // V5.0 (G, W2): the look's walls are lowered to their plinth on the camera's side of the focus whenever the
+    // walls are the new brick runs (the camera sits lower now); the old setting still forces it on elsewhere.
+    CUTAWAY.height.value = this.cutaway || LOOK_CUTAWAY ? WALL_LOOK.plinthH : 99;
   }
 
   /** Render one frame now (for screenshots in a throttled headless tab). */
@@ -738,6 +785,11 @@ export class Diorama {
       (this.lanternFlame.material as THREE.MeshBasicMaterial).color.setHex(lit ? 0xffd27a : 0x2a1e14);
       this.lanternFlame.scale.y = lit ? 0.9 + Math.sin(t * 11) * 0.12 : 0.6;
     }
+    // V5.0 (G, W3): a rigged hero carrying a lit torch holds it.
+    {
+      const torches = new Set(this.lightSrcs.filter((L) => L.kind === 'torch' && L.holder).map((L) => L.holder!));
+      for (const v of this.units.values()) if (v.side === 'hero') v.setTorch(torches.has(v.id));
+    }
     for (const L of this.lightSrcs) {
       if (L.at.level !== this.shownLevel) continue;
       if (L.holder) {
@@ -745,7 +797,7 @@ export class Diorama {
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         // V5.0 (G): carried lights sit a little ahead of the figure and above its head, so they don't blow out its hat and pack.
         const ahead = new THREE.Vector3(Math.sin(v.facing), 0, Math.cos(v.facing)).multiplyScalar(0.45);
-        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.7, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.6, 0) : new THREE.Vector3(-0.25, v.height + 0.7, 0)).add(ahead);
+        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.9, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.8, 0) : new THREE.Vector3(-0.25, v.height + 0.95, 0)).add(ahead);
         // Carried lights are close to the figure that carries them: a fraction of a fixed source's candela is plenty.
         srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.45, kind: L.kind, seed: srcs.length * 1.7 });
       } else {
@@ -976,14 +1028,10 @@ export class Diorama {
     const same = next.size === this.darkHeroes.size && [...next].every((id) => this.darkHeroes.has(id));
     if (same) return;
     this.darkHeroes = next;
+    // V5.0 (G, W1): the black ring is gone; an unlit hero's figure goes cold instead, and on Level 3 the
+    // Gloam's pulse breathes under it (look/status.ts, synced from the state).
     this.darkRings.clear();
-    let i = 0;
-    for (const id of next) {
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.92, 1.55, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x030208, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
-      ring.userData = { unit: id, phase: i++ * 1.3 };
-      ring.renderOrder = 1;
-      this.darkRings.add(ring);
-    }
+    if (this.state) this.syncStatus(this.state);
   }
 
   /** 16.2: open or shutter the lantern model and light. */
@@ -1410,6 +1458,7 @@ export class Diorama {
       this.setShackles(v, !p.freed);
     }
     for (const id of [...this.units.keys()]) if (!keep.has(id)) this.removeUnit(id);
+    this.syncStatus(state);
   }
 
   private setTag(id: string, html: string): void {
@@ -1504,6 +1553,42 @@ export class Diorama {
   }
 
   /** Show or hide units and props by level and fog. */
+  /** V5.0 (G, W1): in-world status effects (look/status.ts), from the same state the tags read; re-run when the HUD's dark set changes. */
+  private syncStatus(state: GameState): void {
+    const d = state.delve;
+    if (!d) return;
+    const carriers = new Set<string>();
+    for (const x of d.heroes) if (x.carrying && x.status === 'active') carriers.add(x.carrying);
+    for (const r of d.rivals?.members ?? []) if (!r.goneOut && r.hp > 0 && !r.downed) {
+      if (r.carrying) carriers.add(r.carrying);
+      if (r.dragging) carriers.add(r.dragging);
+    }
+    const states = new Map<string, UnitStatus>();
+    const gloamAbout = d.monsters.some((m) => m.kind === 'gloam' && m.hp > 0);
+    for (const h of d.heroes) {
+      if (!this.units.has(h.heroId)) continue;
+      states.set(h.heroId, {
+        dark: this.darkHeroes.has(h.heroId),
+        gloam: gloamAbout && h.at.level === 3,
+        poisoned: !!h.poisoned,
+        poisonBad: !!h.poisoned && h.hp <= 1,
+        bleed: h.status === 'downed' && !carriers.has(h.heroId) ? h.bleed : undefined,
+        braced: !!h.braced,
+        veiled: (h.veil ?? 0) > 0,
+      });
+    }
+    for (const m of d.monsters) {
+      if (!this.units.has(m.id)) continue;
+      states.set(m.id, { hunting: m.awareness === 'hunting', poisoned: !!m.poisoned, poisonBad: !!m.poisoned && m.hp <= 1, feared: (m.feared ?? 0) > 0 });
+    }
+    const crew = d.rivals;
+    for (const r of crew?.members ?? []) {
+      if (!this.units.has(r.id)) continue;
+      states.set(r.id, { hunting: crew?.stance === 'hostile', poisoned: !!r.poisoned, poisonBad: !!r.poisoned && r.hp <= 1, bleed: r.downed && !carriers.has(r.id) ? r.bleed : undefined, braced: !!r.braced, veiled: (r.veil ?? 0) > 0, feared: (r.feared ?? 0) > 0 });
+    }
+    this.statusFx.sync(this.units, states);
+  }
+
   refreshUnits(): void {
     const visible = this.extraVisible ? new Set([...this.vis.visible, ...this.extraVisible]) : this.vis.visible;
     for (const v of this.units.values()) {
@@ -2755,6 +2840,7 @@ export class Diorama {
         if (!t) return;
         const watch = (a?.root.visible ?? false) || t.root.visible;
         if (!watch) return;
+        this.pushCam(a, t, 520); // V5.0 (G): action cam
         if (a && a.id !== t.id) await this.lunge(a, t);
         if (e.type === 'hit') {
           t.flash(new THREE.Color(1, 0.15, 0.1), 0.9);
@@ -2767,6 +2853,19 @@ export class Diorama {
           this.floatText(t.root.position.clone().add(new THREE.Vector3(0, t.height + 0.2, 0)), 'miss', 'miss', 0.9);
           await clock.wait(0.12);
         }
+        return;
+      }
+      case 'blocked': {
+        // V5.0 (G, spec 32.10): the hit landed on the shield: a gold flash on the figure (the brace colour) and a label.
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        const a = this.units.get(e.attacker);
+        if (a) v.face(a.root.position.x - v.root.position.x, a.root.position.z - v.root.position.z);
+        v.flash(new THREE.Color(1.0, 0.75, 0.2), 0.9);
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.6, 0)), 0xffd060, 2);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), `Blocked · ${e.from} → ${e.to}`, 'info', 1.1);
+        await clock.wait(0.2);
+        v.flash(new THREE.Color(0, 0, 0), 0);
         return;
       }
       case 'downed': {
@@ -3330,6 +3429,8 @@ export class Diorama {
         if (!watch) return;
         const by = this.units.get(e.by);
         if (by) by.face(b.x - a.x, b.z - a.z);
+        by?.playClip?.('use'); // V5.0 (G)
+        this.pushCam(by, e.to, 500); // V5.0 (G): action cam
         const color = THROW_COLOR[e.kind] ?? 0xd8d0c0;
         const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color }));
         this.overlay.add(m);
@@ -3355,7 +3456,9 @@ export class Diorama {
           const w = this.worldOf(at);
           by.face(w.x - by.root.position.x, w.z - by.root.position.z);
         }
+        this.pushCam(by, at, 600); // V5.0 (G): action cam
         if (by) {
+          by.playClip?.('cast'); // V5.0 (G)
           by.flash(new THREE.Color(color), 0.6);
           this.flash(by.root.position.clone().add(new THREE.Vector3(0, by.height, 0)), color, 1.5);
         }
@@ -3619,7 +3722,7 @@ export class Diorama {
     if (len < 0.01) return;
     dir.normalize();
     const reach = Math.min(0.6, len * 0.35);
-    a.playClip?.('strike'); // V5.0 (G): a rigged figure swings its arm with the lunge
+    a.playClip?.(len > 2.2 ? 'shoot' : 'strike'); // V5.0 (G): a rigged figure swings, or looses an arrow from range
     a.busy++;
     await this.clock.tween(0.1, (k) => a.rig.position.copy(dir).multiplyScalar(reach * easeOutCubic(k)));
     void this.clock.tween(0.16, (k) => a.rig.position.copy(dir).multiplyScalar(reach * (1 - k))).then(() => a.busy--);
@@ -3993,45 +4096,10 @@ export function itemsText(items: Item[]): string {
   return [gold ? `${gold} gold` : '', ...rest].filter(Boolean).join(', ') || 'nothing';
 }
 
-function pipsHtml(hp: number, max: number, cls: string): string {
-  const n = Math.max(0, Math.min(max, hp));
-  if (max > 14) return `<span class="hp-bar ${cls}"><i style="width:${(n / max) * 100}%"></i></span>`;
-  let s = `<span class="hp-pips ${cls}">`;
-  for (let i = 0; i < max; i++) s += `<i class="${i < n ? 'on' : ''}"></i>`;
-  return s + '</span>';
-}
-
-/** V4.0 HUD: a hero's tag is their health only (lantern, braced, held and the rest are on the party card). */
-function heroTag(h: HeroInDelve, max: number, carried = false): string {
-  // V4.1 (spec 31.4): the downed show their bleed-out count; the poisoned their drop.
-  return pipsHtml(h.hp, max, 'hero') + (h.status === 'downed' ? bleedMark(h.bleed, carried) : '') + venomMark(h);
-}
-
 /** The intent's icon (its glyph when the kind has none yet). */
 function intentIconHtml(kind: Intent['kind']): string {
   const name = INTENT_ICON[kind];
   return name ? `<span class="intent-icon">${iconSvg(name, 14)}</span>` : `<span class="intent-icon">${INTENT_GLYPH[kind] ?? '?'}</span>`;
-}
-
-function monsterTag(m: Monster): string {
-  // V4.0 (spec 27): the mark is the mood: z asleep, ? searching (alert with a search running), ! hunting; at its post nothing, on patrol 👣.
-  const aw = m.awareness === 'asleep' ? '<b class="tag-sleep">z</b>' : m.awareness === 'alert' && m.searchRounds !== undefined ? '<b class="tag-alert" title="Searching: sees its sides as well as ahead">?</b>' : m.awareness === 'hunting' && m.kind !== 'dragon' ? '<b class="tag-hunt" title="Hunting">!</b>' : m.awareness === 'patrol' ? '<b class="tag-patrol" title="On patrol">👣</b>' : '';
-  const hold = m.holding ? '<b class="tag-grab">⛓</b>' : '';
-  const fear = (m.feared ?? 0) > 0 ? `<b class="tag-fear" title="Feared: flees from the caster for ${m.feared} more turn${m.feared === 1 ? '' : 's'}, attacks nobody">feared</b>` : '';
-  const stuck = (m.stuck ?? 0) > 0 ? `<b class="tag-rooted" title="Rooted or glued: can't move for ${m.stuck} more round${m.stuck === 1 ? '' : 's'}; it can still act">rooted · ${m.stuck}</b>` : '';
-  return `${aw}${hold}${pipsHtml(m.hp, m.maxHp, 'enemy')}${fear}${stuck}${venomMark(m)}`;
-}
-
-/** V4.1 (spec 31.4): a poisoned figure's drop (heroes, monsters and crew members). */
-export function venomMark(f: { poisoned?: boolean }): string {
-  return f.poisoned ? `<b class="tag-venom" title="Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out.">${iconSvg('venom', 11)}</b>` : '';
-}
-
-/** V4.1 (spec 31.4): a downed hero's or crew member's bleed-out count, on its tag (pillar 15: it decides what you do). */
-function bleedMark(bleed: number | undefined, carried: boolean): string {
-  if (carried) return '<b class="tag-carried" title="Carried: not bleeding">carried</b>';
-  const n = bleed ?? 0;
-  return `<b class="tag-bleed" title="Down: dies in ${n} turn${n === 1 ? '' : 's'}">✚ ${n}</b>`;
 }
 
 function targetPos(state: GameState, id: string): Pos | null {

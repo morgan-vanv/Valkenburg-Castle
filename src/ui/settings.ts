@@ -12,11 +12,17 @@ export interface Settings {
   cutaway: boolean;
   /** V4.0 HUD: hover cards always show the full rules card (as if Alt were held), for touch screens. */
   fullCards: boolean;
+  /** V5.0 (P, spec 32.5): end the turn on its own when no hero can move, act or use anything. On by default. */
+  autoEndTurn: boolean;
   /** V5.0 (G): render quality. 'low' = no shadow, bloom or tilt-shift, pixel ratio 1 (headless checks use it). */
   quality?: 'high' | 'low';
+  /** V5.0 (G): the action cam pushes in on attacks, shots, spells and item use (on by default). */
+  actionCamera?: boolean;
+  /** V5.0 (G): tilt-shift blur on High quality (on by default). */
+  tiltShift?: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, quality: 'high' };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, autoEndTurn: true, quality: 'high', actionCamera: true, tiltShift: true };
 
 export function loadSettings(): Settings {
   try {

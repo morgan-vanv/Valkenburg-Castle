@@ -30,7 +30,13 @@ export interface QualityFeatures {
   pixelRatio: number;
 }
 
-export function featuresOf(q: Quality): QualityFeatures {
+export function featuresOf(q: Quality, tiltShift = true): QualityFeatures {
   if (q === 'low') return { shadows: false, bloom: false, tiltShift: false, vignette: false, pixelRatio: 1 };
-  return { shadows: true, bloom: true, tiltShift: true, vignette: true, pixelRatio: Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2) };
+  return { shadows: true, bloom: true, tiltShift, vignette: true, pixelRatio: Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2) };
+}
+
+/** The look settings the view reads for itself (the play track draws the menu rows). */
+export function readLookSettings(): { tiltShift: boolean; actionCamera: boolean } {
+  const s = loadSettings();
+  return { tiltShift: s.tiltShift !== false, actionCamera: s.actionCamera !== false };
 }

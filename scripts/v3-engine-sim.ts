@@ -72,7 +72,7 @@ const VERBOSE = process.env.VERBOSE === '1';
 const castle = process.env.CASTLE === 'test' ? testCastle : realCastle;
 // V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
 // enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
-const e = createEngine(castle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
+const e = createEngine(castle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : q.kind === 'shieldBlock' ? ((q.damage ?? 0) >= 3 ? 'yes' : 'no') : 'no') }); // V5.0 (spec 32.10): block a hit of 3+
 const w = new World(castle);
 const ROUND_CAP = 80;
 /**
@@ -150,9 +150,45 @@ let stabbing = false;
 /** V4.0 (spec 29): venom on heroes and monsters. */
 const venom = { heroDoses: 0, monsterDoses: 0, crewDoses: 0, antidotes: 0, mends: 0, out: 0, carries: 0, carriedOut: 0, upByPotion: 0, upByMend: 0, unshackled: 0, crewDowned: 0, crewUp: 0, venomTraps: 0, darts: 0, bought: 0 };
 const parity = { monsterHits: 0, hitsOnMonsters: 0, picks: 0, smashes: 0, disarms: 0, trapsSprung: 0, trapsSpotted: 0, woke: 0, fuses: 0, backstabs: 0, sneakAttacks: 0, killedByMonsters: 0, lootedPiles: 0, leftWithLoot: 0, members: 0 };
+/** V5.0 (P, the pitch's P3): damage dealt by heroes, by class, split by whether the target had noticed them. */
+type DmgRow = { attacks: number; hits: number; dmg: number; kills: number; unawareAttacks: number; unawareDmg: number; unawareKills: number; range: number };
+const dmgByClass: Record<string, DmgRow> = {};
+const dmgRow = (cls: string): DmgRow => (dmgByClass[cls] ??= { attacks: 0, hits: 0, dmg: 0, kills: 0, unawareAttacks: 0, unawareDmg: 0, unawareKills: 0, range: 0 });
+const DMG_ACTIONS = new Set(['attack', 'shoot', 'knockback', 'hamstring', 'firebolt', 'fireball', 'nightthorn', 'briar', 'throwCharge', 'dart', 'venomdart']);
 function run(s: GameState, cmd: Command): GameState {
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
+  let unaware = false;
+  let dmgCls: string | null = null;
+  let farShot = false;
+  if (cmd.type === 'act' && DMG_ACTIONS.has(cmd.action) && s.delve) {
+    const h = s.delve.heroes.find((x) => x.heroId === cmd.heroId);
+    const def = s.campaign.roster.find((x) => x.id === cmd.heroId);
+    if (h && def) {
+      dmgCls = def.cls;
+      const mods = e.preview(s, cmd.heroId, cmd.action, cmd.target).modifiers;
+      unaware = mods.some((m) => /^(Sneak attack|Backstab|Asleep)/.test(m));
+      const tp = cmd.target.at ?? s.delve.monsters.find((m) => m.id === cmd.target.id)?.at ?? s.delve.rivals?.members.find((m) => m.id === cmd.target.id)?.at;
+      farShot = !!tp && Math.max(Math.abs(tp.q - h.at.q), Math.abs(tp.r - h.at.r), Math.abs(tp.q + tp.r - h.at.q - h.at.r)) > 1;
+    }
+  }
   const r = e.apply(s, cmd);
+  if (dmgCls && !r.error) {
+    const row = dmgRow(dmgCls);
+    row.attacks++;
+    if (unaware) row.unawareAttacks++;
+    if (farShot) row.range++;
+    for (const ev of r.events) {
+      if (ev.type === 'hit' && ev.attacker === (cmd as { heroId: string }).heroId) {
+        row.hits++;
+        row.dmg += ev.damage;
+        if (unaware) row.unawareDmg += ev.damage;
+      }
+      if ((ev.type === 'monsterDied') || (ev.type === 'downed' && s.delve?.rivals?.members.some((m) => m.id === ev.id))) {
+        row.kills++;
+        if (unaware) row.unawareKills++;
+      }
+    }
+  }
   if (r.state.delve?.pending) throw new Error(`the bot's turn paused for a reaction: ${r.state.delve.pending.question.text}`); // V4.1 (spec 31.13): never, with the policy
   if (s.delve) {
     const heroIds = new Set(s.delve.heroes.map((h) => h.heroId));
@@ -1420,6 +1456,10 @@ for (const lv of [1, 2, 3]) {
 }
 console.log(`hired: ${Object.entries(hired).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`calm (spec 20.5): free moves ${calm.moves} (${calm.follows} with follow), steps walked while calm ${calm.steps}, castle turns on the way ${calm.turns}, walks stopped by combat ${calm.stopped}, braces ${calm.braces}, heroes hamstrung ${calm.hamstrung}`);
+console.log('damage by class (V5.0 P3): attacks, hits, damage, kills; of which on targets that had not noticed the hero (sneak attack, backstab, asleep); attacks from beyond reach 1');
+for (const [cls, r] of Object.entries(dmgByClass).sort((a, b) => b[1].dmg - a[1].dmg)) {
+  console.log(`  ${cls.padEnd(12)} attacks ${String(r.attacks).padStart(4)}  hits ${String(r.hits).padStart(4)}  dmg ${String(r.dmg).padStart(5)}  kills ${String(r.kills).padStart(3)}  | unaware: attacks ${String(r.unawareAttacks).padStart(4)} dmg ${String(r.unawareDmg).padStart(5)} kills ${String(r.unawareKills).padStart(3)}  | ranged attacks ${String(r.range).padStart(4)}  | dmg/attack ${(r.dmg / Math.max(1, r.attacks)).toFixed(2)} (aware ${((r.dmg - r.unawareDmg) / Math.max(1, r.attacks - r.unawareAttacks)).toFixed(2)}, unaware ${(r.unawareDmg / Math.max(1, r.unawareAttacks)).toFixed(2)})`);
+}
 console.log(`sapper (spec 20.3): fuses lit ${sap.fuses}, blasts ${sap.blasts}, walls broken ${sap.walls}, floor collapsed ${sap.collapsed} / rubbled ${sap.rubbled}, locks blown ${sap.locks}, kills ${sap.kills}, hero hits by own blasts ${sap.friendHits}`);
 if (sapLog.length) console.log(`  blasts: ${sapLog.slice(0, 12).join('; ')}${sapLog.length > 12 ? '; ...' : ''}`);
 const first = rows.filter((r) => r.contract.endsWith('L1')).slice(0, 5);

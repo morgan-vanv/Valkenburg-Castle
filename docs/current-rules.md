@@ -223,11 +223,12 @@ Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.
 - A round = player phase, then world phase. No initiative.
 - Player phase: each active hero may move once and act once, in either order.
   - **Dash**: a hero who has moved and not acted may spend the action on a second move (same allowance, walk or sneak). A hero who acted first gets a normal move afterwards.
-  - Whole-turn actions (need both move and action unused): jump, climb, grapple.
-  - Free actions (no action used, any number): open/close a door, take, drop, give, leave, shutter, parley (deals are a separate free command, one per crew per round), V4.1 set down. Opening a chest is free for a Burglar; for anyone else it uses the action.
+  - Whole-turn actions (need both move and action unused): climb, grapple. V5.0 (spec 32.1): **jump is the hero's move** (needs the move unused; no dash after it; the action stays, so a jumper can light a torch, drink, attack or take where they land).
+  - Free actions (no action used, any number): open/close a door, take (V5.0, spec 32.7: from a pile, or from the pack of a downed friend or downed crew member next to you, kit excepted), drop, give, leave, shutter, parley (deals are a separate free command, one per crew per round), V4.1 set down. Opening a chest is free for a Burglar; for anyone else it uses the action.
   - V4.1 (spec 31.4): a hero carrying a body (Carry) takes free actions only (doors, take, drop, give, leave, parley, set down), no chest, and moves 3 at most. With the splints, a downed hero may crawl 1 hex (no dash) and Leave on an exit; nothing else.
   - Walk/Sneak (`setMoveMode`, V4.0): free, any number, any active hero; changes only that hero's setting (section 5.1).
   - V4.1 (spec 31.13): Reactions (`setReaction`): free, any number, any active hero: how that hero answers each kind of reaction (Ask, Always, Never; default Ask). `setAmbush` is the old name for the hidden swing's (on = Always, off = Never).
+- V5.0 (spec 32.5, 32.6, UI): **the flow**: when the selected hero has nothing plausible left (no move, nothing but housekeeping), the selection and the camera cycle to the next hero after a beat; the End turn question asks only while someone can still do something and says what; when nobody can, the turn ends on its own (setting "Auto end turn", on by default).
 - **End turn** runs the world phase:
   1. Sight refreshed; `heard` cleared; unseen-attacker reveals that expired are dropped.
   2. Every lit torch and open lantern burns 1 (carried or on the floor; a torch at 0 is gone). Burning hexes deal 1 to everyone on them. Hiccups noise. Roots on heroes −1. Downed heroes bleed −1 (die at 0), except a carried one (a friend's Carry, or a crew carrying them off). V4.1: downed crew members bleed the same way (not while a crewmate carries them). Then poison: every poisoned figure that is up takes 1, never below 1 HP (section 8.6), heroes, monsters and crew members alike.
@@ -241,7 +242,7 @@ Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.
 - The delve ends when no hero is active (V4.1: or crawling, with the splints). At the end, downed heroes still inside die (a downed hero being carried off, or a seized hero held by a crew member, is captured instead). A downed hero carried out by a friend lives (section 8.5).
 - `abandon`: heroes on an exit leave; everyone else still inside dies.
 
-Code: world-phase.ts `worldPhase`, `computeIntents`; engine.ts `apply`/`run`/`resume` and react.ts (V4.1 reactions); delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`, V4.1 `CARRY_OK`), `canCrawl`, `checkDelveEnd`, `endDelve`, `abandon`.
+Code: world-phase.ts `worldPhase`, `computeIntents`; engine.ts `apply`/`run`/`resume` and react.ts (V4.1 reactions); delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`, V5.0 `MOVE_ONLY`, V4.1 `CARRY_OK`), `canCrawl`, `checkDelveEnd`, `endDelve`, `abandon`.
 
 ---
 
@@ -477,6 +478,8 @@ Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLig
 
 ### 8.2 Hero attack modifiers
 
+- V5.0 (spec 32.9): **a bow shot at a target that has noticed the archer loses a slot** ("It saw you draw −1 slot"); unaware targets take the full draw and the sneak-attack slot. Attack and Overwatch; not Knockback or Hamstring. Crew Rangers the same against heroes who have noticed them.
+
 | Modifier | Effect | Applies to |
 | --- | --- | --- |
 | Brightness | 0 / −10 / −20 / −30 | every hero roll |
@@ -492,6 +495,8 @@ Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLig
 Damage to a monster or crew member per hit: max(1, weapon damage − armor), minus 1 if the crew member is warded. Monster armor: Dragon 1, captain 1, plus 1 for an orc or archer adjacent to a captain (shield wall). Crew armor: class armor + armor tier. Being hit makes a monster hunt and notice the attacker (so sneak attack works once).
 
 ### 8.3 Enemy attacks on heroes
+
+- V5.0 (spec 32.10): **the shield block**, a reaction: a hit over 1 on a hero with the forge shield who has Focus asks: Block (1 Focus, the hit does 1) or Take it. Crew Sellswords block a hit of 3+ by policy.
 
 - Roll the enemy's slots at its chance (+1 slot blindsided; −15 if the hero is braced).
 - Damage per hit: max(0, max(1, damage − hero armor) − ward 1 − brace 1 − shield (ranged only: 1, or 2 braced)); Perfect +1.
@@ -572,7 +577,7 @@ V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Mig
 | Light brazier | Adjacent unlit brazier: +4 light, lit for the campaign |
 | Light torch (an action), Snuff, Drop torch (free) | Section 7.1 |
 | Potion, Oil, thrown items | Section 9.5 |
-| Jump | Whole turn; from a hex next to a pit, into it (section 13.1). Preview confirms for drops over 1 level |
+| Jump | V5.0 (spec 32.1): uses the move (no dash after); the action stays. From a hex next to a pit, into it (section 13.1). Preview confirms for drops over 1 level |
 | Rope, Climb, Grapple | Section 13.1 |
 | Winch | Next to the winch, if the lift isn't running: lift works for the delve; noise 6 |
 | Carry | V4.1 (spec 31.4): an action, next to a downed hero or the shackled captive nobody carries. The body shares the carrier's hex (it doesn't block; the carrier counts) and moves with them, through falls, shoves and blinks too. The carrier moves `CARRY_MOVE` 3 at most (dash too) and takes free actions only: no jump, climb, grapple or blink, no chest, no attack. A carried downed hero doesn't bleed. Area effects on the hex (fireball, burning, blasts, breath, a fall) hit both, and any damage kills a downed body; single strikes pick one (monsters still ignore a downed hero; they may strike a carried captive). Carrying ends when the carrier is downed or killed (the body lies there) |
@@ -656,7 +661,7 @@ V4.0: the sally port's barred gate is none of these: only its own key (Unbar) or
 - Grappling hook, rope: section 13.1.
 - Blasting charge (bought, 1 slot): a non-Sapper sets it with fuse 1 on an adjacent locked door, locked chest or breakable/cracked wall. A Sapper spends bought charges through Set/Throw, after their improvised explosives.
 - Arrows (V4.1, spec 31.8): 1-slot bundles, `amount` = arrows left, named with the count ("Glow arrows (3)"); a bundle at 0 is gone. **Plain** (6; after the quiver). **Whistling** (3): noise 6 where it lands, hit or miss (the target's hex), or Shoot at a hex. **Glow** (3): light radius 2 for 8 rounds (`Delve.glows`) where it lands, or on the creature it hits (the light moves with it; one in a figure that dies stays where it fell): a castle light for the hero standing in it (−10, sight 4/3/2), lit for monsters' noticing; the Gloam recoils from it. Hit or miss on an Attack (a miss lights the target's hex), or Shoot at a hex. **Fire** (3): +1 damage on a hit and the target's hex burns 2 rounds (the fireball's burning). **Poison** (3): a hit poisons (section 8.6). **Barbed** (3): a hit roots 2 rounds, no −20. **Rope arrow** (1): Shoot at an edge hex beside a pit within 5: a rope is anchored there (climb from there as from a hero's rope, section 13.1). **Blast** (2): Shoot at a hex: 3 damage within 1 (no outer ring, no push, the floor stays whole), noise 8 heard a level up and down, opens doors and chests and breaks cracked and breakable walls within 1 (section 13.8); the setter's shield applies (the Ranger 0, other heroes half).
-- Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised picks are the hero's own, one a hero level each delve (spec 30.2; crew members by crew level: the Ferrymen's Brecht 3 explosives plus 2 bought charges, the Wake's Spade 4 plus 3). No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives. V4.1 (spec 31.8): the Ranger's quiver is class kit by the same rules (5 arrows a level); a Ranger in a delve saved before arrows gets one on load (`migrateArrows`).
+- Class kit (V4.0): the Sapper's improvised explosives and the Burglar's improvised picks are the hero's own, one a hero level each delve (spec 30.2; crew members by crew level: the Ferrymen's Brecht 3 explosives plus 2 bought charges, the Wake's Spade 5 plus 3; V5.0: the Wake at level 5). No pack slot (never counted in the 4); never dropped, given, stolen by a cutpurse, robbed by a crew, paid over in a parley or banked; a fresh set each delve. If the hero dies, their kit goes with them: it doesn't drop as loot and is never lost gear. A slotless `charge` "satchel" in a save from before V4.0 loads as improvised explosives. V4.1 (spec 31.8): the Ranger's quiver is class kit by the same rules (5 arrows a level); a Ranger in a delve saved before arrows gets one on load (`migrateArrows`).
 
 Code: data.ts `CLASSES`, `ROLES` (ability text), `SHOP`, ability constants (`DREAD_*`, `HAMSTRING_*`, `NIGHTTHORN_*`, `BRIAR_*`, `FIREBALL_*`, `SPELL_RANGE`, `SLEEP_RANGE`, `BLINK_RANGE`, `GUST_*`, `VEIL_*`, `WARD_ROUNDS`, `BURN_ROUNDS`, `BURN_DMG`, `THROW_RANGE`, `SMOKE_ROUNDS`, `GLUE_ROUNDS`, `CALTROPS_DMG`, `FIRECRACKER_NOISE`, `LOCKPICK_SLOTS`, `BURGLAR_PICK_SLOTS`, `KIT_PER_LEVEL`, `kitPerDelve`, `SMASH_*`, `PACK_SLOTS`); delve.ts `targetsFor`, `spec`, `doAct`, `pickTool`, `takePlan`, `smokeOut`, `putToSleep`; charges.ts `chargeCount`, `spendCharge`, `satchelName`, `pickName`, `classKit`, `spendPick`, `migrateSatchel`; camp.ts `fitClass`; crewmove.ts `crewWorkLock`; common.ts `addToPack`, `rootFigure`, `isKit`, `isSatchel`, `killHero`; world-phase.ts `stealable`; engine.ts `deserialize`; V4.1 poison.ts (`poison`, `curePoison`, `poisonTakes`); V4.1 (spec 31.8) arrows.ts (`classQuiver`, `spendArrow`, `attackArrow`, `weaponNow`, `arrowLands`, `shootTargets`, `tickGlows`, `migrateArrows`), data.ts `ARROWS_PER_LEVEL`, `quiverPerDelve`, `KNIFE`, `ARROW_BUNDLE`, `WHISTLE_NOISE`, `GLOW_ARROW_*`, `FIRE_ARROW_DMG`, `BARB_ROUNDS`, `ROPE_ARROW_RANGE`, `BLAST_ARROW_DMG`, delve.ts `spendHeroArrow`, `OUT_OF_ARROWS`.
 
@@ -748,7 +753,7 @@ Built as heroes of their class at the crew level: HP = class HP + 2 × (level �
 | Lantern Sisters | 4 (V4.1 WS7; was 2) | weapon 1, armor 1 | Wenna, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 glow arrows): 14 HP, 95%, armor 1. Odile, Shadowmancer (smoke, firecracker, antipoison): 12 HP, spells 90%. Brisk, Burglar (2 darts, smoke, lockpicks, 4 improvised picks): 13 HP, 95%, darts 90%. V4.1 squads: Maud, Hedgewitch (smoke, antipoison): 13 HP, spells 85% |
 | The Ferrymen | 4 (V4.1 WS7; was 3) | weapon 1, armor 1 | Joost, Sellsword (potion, glue): 16 HP, 95%, armor 2. Sil, Ranger (2 caltrops, potion; V4.1: quiver 20, 3 barbed arrows): 14 HP, 95%. Brecht, Sapper (4 improvised explosives, 2 charges, glue): 15 HP, 85%, armor 1 (spec 30.1). V4.1 squads: Kees, Burglar (sleep dart, poison dart, potion, lockpicks, 4 improvised picks): 13 HP, 95% |
 | The Gallows Choir | 5 (V4.1 WS7; was 3) | weapon 1, armor 1 | Deacon Harl, Sellsword (potion, glue): 18 HP, 95%, armor 2. Little Mags, Burglar (sleep dart, poison dart, smoke, lockpicks, 5 improvised picks): 15 HP, 95%, darts 95%. Cantor Vey, Pyromancer (potion, antipoison; was oil): 14 HP, spells 95%. V4.1 squads: Verger Crane, Shadowmancer (smoke, firecracker): 14 HP, spells 95% |
-| The Wake | 6 (V4.1 WS7; was 4) | weapon 2, armor 1 | Mother Grave, Sellsword (2 potions): 20 HP, 95%, armor 2. Sexton, Hedgewitch (2 potions): 17 HP, spells 95%. Candle, Shadowmancer (smoke, firecracker): 16 HP, spells 95%. Spade, Sapper (6 improvised explosives, 3 charges): 19 HP, 95%, armor 1 (spec 30.1). V4.1 squads: Pall, Ranger (2 caltrops, potion, quiver 30): 18 HP, 95% |
+| The Wake | 5 (V5.0 spec 32.13; V4.1 WS7 had 6, V3.7 4) | weapon 2, armor 1 | Mother Grave, Sellsword (2 potions): 18 HP, 95%, armor 2. Sexton, Hedgewitch (2 potions): 15 HP, spells 90%. Candle, Shadowmancer (smoke, firecracker): 14 HP, spells 90%. Spade, Sapper (5 improvised explosives, 3 charges): 17 HP, 95%, armor 1 (spec 30.1). V4.1 squads: Pall, Ranger (2 caltrops, potion, quiver 25): 16 HP, 95% |
 
 **Crew size (V4.1 squads, spec 31.12).** A crew fields as many members as the party that set out (`crewSize(def, party)` = clamp(party, min, max), `CrewDef.size`; `startDelve` passes the number of heroes going in to `makeCrew`): the Sisters, the Ferrymen and the Gallows Choir 2–4, the Wake 3–5. A smaller crew leaves members out in its `CrewDef.drop` order (`crewLineup`), first left out first:
 

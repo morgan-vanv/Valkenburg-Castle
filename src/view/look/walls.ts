@@ -16,8 +16,11 @@ import { DIRS, add, hexKey, hexToWorld, type Hex } from '../../game/hex';
 import type { TileDef } from '../../game/types';
 import { HEX, WALL_HEIGHT, hash2 } from '../world';
 
-/** Rooms whose walls get the brick look. W0: the Great Hall and its dais; W2 opens it to every room. */
-export const LOOK_WALL_ROOMS: ReadonlySet<string> = new Set(['hall', 'dais']);
+/** Rooms whose walls get the brick look. W0: the Great Hall and its dais; W2: empty, so every room. */
+export const LOOK_WALL_ROOMS: ReadonlySet<string> = new Set();
+
+/** W2: lower the brick walls between the camera and the focus to their plinth (the camera sits lower than V4). */
+export const LOOK_CUTAWAY = true;
 
 export const WALL_LOOK = {
   brickL: 0.82,
@@ -34,6 +37,7 @@ export const WALL_LOOK = {
   plinth: 0x5a5056,
   pillar: 0x8a7e86,
   cap: 0x9a8e96,
+  rock: 0x4e4850,
 };
 
 export interface WallItem {
@@ -56,6 +60,8 @@ export interface LookWalls {
   plinths: WallItem[];
   pillars: WallItem[];
   caps: WallItem[];
+  /** Cave walls (every open neighbour in a rock, earth or bone room): jittered dark rock blocks, not brick. */
+  rocks: WallItem[];
   /** Where a sconce on this wall hex should hang: offset from the hex centre to the brick face toward the given direction index. */
   sconceAt(h: Hex, dir: number): { x: number; z: number } | null;
   /**
@@ -73,6 +79,8 @@ export interface WallContext {
   open(t: TileDef | undefined): boolean;
   /** Room ids whose walls get the look (W0: the Great Hall). Empty = every room. */
   rooms: ReadonlySet<string>;
+  /** Is this a floor-like tile of a cave room (rock, earth, bone)? Walls facing only caves are rock mass. */
+  cave(t: TileDef | undefined): boolean;
 }
 
 type Family = { kind: 'axis'; i: number } | { kind: 'v'; parity: 0 | 1 };
@@ -106,7 +114,14 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
   const roomOf = (t: TileDef | undefined) => t?.room ?? '';
   const faces = (h: Hex) => DIRS.map((d) => ctx.tile(add(h, d))).map((t) => ctx.open(t) && (ctx.rooms.size === 0 || ctx.rooms.has(roomOf(t))));
   const qual = new Map<string, Hex>();
-  for (const h of walls) if (faces(h).some(Boolean)) qual.set(hexKey(h), h);
+  const rocks: Hex[] = [];
+  for (const h of walls) {
+    const f = faces(h);
+    if (!f.some(Boolean)) continue;
+    const opens = DIRS.map((d) => ctx.tile(add(h, d))).filter((_t, i) => f[i]);
+    if (opens.every((t) => ctx.cave(t))) rocks.push(h);
+    else qual.set(hexKey(h), h);
+  }
 
   // Maximal runs per family, longest first; each hex joins one run.
   const runs: Run[] = [];
@@ -147,7 +162,11 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
   }
   const lone = [...qual.values()].filter((h) => !taken.has(hexKey(h)));
 
-  const out: LookWalls = { hexes: new Set(qual.keys()), bricks: [], cores: [], plinths: [], pillars: [], caps: [], sconceAt: () => null, frame: () => null };
+  const out: LookWalls = { hexes: new Set([...qual.keys(), ...rocks.map(hexKey)]), bricks: [], cores: [], plinths: [], pillars: [], caps: [], rocks: [], sconceAt: () => null, frame: () => null };
+  for (const h of rocks) {
+    const j = (k: number) => hash2(h.q, h.r, 50 + k);
+    out.rocks.push({ h, rot: j(0) * Math.PI * 2, dx: (j(1) - 0.5) * 0.2, dz: (j(2) - 0.5) * 0.2, dy: 0, sx: 0.96 + j(3) * 0.12, sy: 0.9 + j(4) * 0.2, sz: 0.96 + j(5) * 0.12, color: new THREE.Color(WALL_LOOK.rock).multiplyScalar(0.8 + j(6) * 0.4) });
+  }
   /** Per run hex: the run's normal, the slab half-thickness, the hex centre's signed offset from the centreline and its extent along the normal. */
   const sconce = new Map<string, { n: THREE.Vector2; f: number; o: number; ext: number }>();
   const w2 = (h: Hex) => {
@@ -282,7 +301,7 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
 }
 
 /** Geometries for the batches (unit-sized where the item scales them). */
-export function wallGeometries(): { brick: THREE.BufferGeometry; core: THREE.BufferGeometry; plinth: THREE.BufferGeometry; pillar: THREE.BufferGeometry; cap: THREE.BufferGeometry } {
+export function wallGeometries(): { rock: THREE.BufferGeometry; brick: THREE.BufferGeometry; core: THREE.BufferGeometry; plinth: THREE.BufferGeometry; pillar: THREE.BufferGeometry; cap: THREE.BufferGeometry } {
   const shade = (g0: THREE.BufferGeometry, top: number, side: number): THREE.BufferGeometry => {
     const g = g0.index ? g0.toNonIndexed() : g0;
     const pos = g.getAttribute('position');
@@ -301,6 +320,7 @@ export function wallGeometries(): { brick: THREE.BufferGeometry; core: THREE.Buf
   const unitBox = () => new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const H = WALL_HEIGHT;
   return {
+    rock: shade(new THREE.CylinderGeometry(1.02, 1.08, H, 6, 1).translate(0, H / 2, 0), 1.05, 0.75),
     brick: shade(unitBox(), 1.06, 1),
     core: shade(unitBox(), 1.15, 0.9),
     plinth: shade(new THREE.CylinderGeometry(WALL_LOOK.plinthR * 0.97, WALL_LOOK.plinthR, WALL_LOOK.plinthH, 6, 1).translate(0, WALL_LOOK.plinthH / 2, 0), 1.1, 0.8),

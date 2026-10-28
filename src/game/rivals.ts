@@ -27,7 +27,7 @@ import {
 import { classKit } from './charges';
 // V4.1 (WS6, spec 31.8): crew quivers and arrows.
 import { classQuiver, crewBowReady, crewBundle, crewCounts, crewLoosed, spendCrewArrow } from './arrows';
-import { FIRE_ARROW_DMG, KNIFE } from './data';
+import { DODGE_SLOTS, FIRE_ARROW_DMG, KNIFE } from './data';
 import { litSet } from './world';
 import { KIT, hiredKit, hiredUse, hostileAct, hostilePlan, manaOf, rescueAct, rescuePlan, spellChance, useKit } from './crewai';
 import { blast } from './charges';
@@ -409,7 +409,7 @@ export function rivalOverwatchFire(c: Ctx, heroId: string): void {
     if (crewCounts(r) && !spendCrewArrow(r, 'plain')) continue;
     say(c, `${r.name} looses an arrow at ${heroName(c, heroId)}.`);
     c.ev.push({ type: 'cast', by: r.id, spell: 'overwatch', targetId: heroId, at: { ...h.at } });
-    strike(c, r.id, heroId, st.slots, st.chance, st.dmg, 'Overwatch');
+    strike(c, r.id, heroId, Math.max(1, st.slots - DODGE_SLOTS), st.chance, st.dmg, 'Overwatch'); // V5.0 (spec 32.9): the party ducks a hostile crew's arrows
     return;
   }
 }
