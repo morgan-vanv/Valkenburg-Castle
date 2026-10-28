@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import type { Pos } from '../game/hex';
 import type { AnimClock } from './anim';
-import { getModel, makeFigure, type FigureModel, type ModelKey } from './figures';
+import type { ModelKey } from './figures';
 import { easeOutCubic } from './world';
 import { rigMaterials } from './look/keven';
 import { makeRigFigure } from './look/cast';
@@ -18,32 +18,8 @@ export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
  * 0.8x wide, orc 1.05x, berserker a head taller, captain like an orc, ghoul gaunt at hero
  * height, the Gloam looming. The Dragon is built in world units and drawn at 1 (unchanged).
  */
-/**
- * V5.0 (G, W0): the owner's figurine scale: a hero stands about 1.35 hexes (For the King 1), so today's
- * figures are drawn at 1.35 / 2.0 of their V3.3 size until W3 rebuilds them on the joint rig. The Dragon
- * is built in world units and keeps scale 1.
- */
+/** V5.0 (G): a hero stands about 1.35 hexes (For the King 1); the figures are built in world units (look/cast.ts). */
 export const HERO_SCALE = 1.35;
-const K = HERO_SCALE / 2.0;
-export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
-  heir: 2.0 * K,
-  rats: 1.3 * K,
-  orc: 2.1 * K,
-  archer: 2.0 * K,
-  captain: 2.1 * K,
-  ghoul: 2.0 * K,
-  cutpurse: 1.9 * K,
-  berserker: 2.5 * K,
-  spider: 1.25 * K,
-  gloam: 1.8 * K,
-  sister: 1.95 * K,
-  sisterRanger: 1.95 * K,
-  sisterShadow: 1.95 * K,
-  sisterBurglar: 1.95 * K,
-  prisoner: 1.9 * K,
-  dragon: 1,
-  dragonSleep: 1,
-};
 
 /** Colour and opacity of a hero seen through a wall. */
 const SILHOUETTE_COLOR = 0xffb24a;
@@ -67,7 +43,8 @@ export class UnitView {
   private lastIdleTime = 0;
   /** Heroes: the through-wall silhouette material (see the constructor). */
   readonly silhouette?: THREE.MeshBasicMaterial;
-  model: FigureModel;
+  /** Height to the top of the head or hat and the footprint radius, world units; `floats`/`ghost` for the Gloam. */
+  model: { height: number; radius: number; floats?: boolean; ghost?: boolean };
   at: Pos;
   /** Shown at all (fog, other level). */
   shown = true;
@@ -89,8 +66,8 @@ export class UnitView {
     private readonly clock: AnimClock,
   ) {
     this.at = { ...at };
-    this.model = getModel(key);
-    const ghost = !!this.model.ghost;
+    // V5.0 (G, W5): every figure is built on the joint rig (look/cast.ts); the V3 merged models are retired.
+    const ghost = key === 'gloam';
     this.baseOpacity = key === 'gloam' ? 0.92 : ghost ? 0.6 : 1;
     this.body = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0, transparent: true, opacity: this.baseOpacity, emissive: 0x000000, depthWrite: !ghost || key === 'gloam' });
     this.glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: key !== 'gloam' });
@@ -101,33 +78,21 @@ export class UnitView {
     if (side === 'hero') this.silhouette = new THREE.MeshBasicMaterial({ color: SILHOUETTE_COLOR, transparent: true, opacity: SILHOUETTE_OPACITY, depthWrite: false, depthFunc: THREE.GreaterDepth });
     const mats = rigMaterials();
     const rig = makeRigFigure(key, { body: this.body, metal: mats.metal, glow: this.glow });
-    if (rig) {
-      // V5.0 (G, W3): the cast on the joint rig, built in world units (scale 1). The Dragon keeps its V3 model.
-      this.metal = mats.metal as THREE.MeshStandardMaterial;
-      this.rigged = rig;
-      this.fig = rig.object as THREE.Group;
-      this.model = { body: new THREE.BufferGeometry(), height: rig.height, radius: rig.radius };
-      if (this.silhouette) {
-        for (const m of rig.meshes()) {
-          if (m.material === this.glow) continue;
-          const sil = new THREE.Mesh(m.geometry, this.silhouette);
-          sil.name = 'silhouette';
-          sil.renderOrder = -1;
-          m.parent?.add(sil);
-        }
-      }
-      this.scale = 1;
-    } else {
-      this.fig = makeFigure(this.model, { body: this.body, glow: this.glow });
-      if (this.silhouette) {
-        const sil = new THREE.Mesh(this.model.body, this.silhouette);
+    if (!rig) throw new Error(`No figure for model ${key}`);
+    this.metal = mats.metal as THREE.MeshStandardMaterial;
+    this.rigged = rig;
+    this.fig = rig.object as THREE.Group;
+    this.model = { height: rig.height, radius: rig.radius, floats: key === 'gloam', ghost };
+    if (this.silhouette) {
+      for (const m of rig.meshes()) {
+        if (m.material === this.glow) continue;
+        const sil = new THREE.Mesh(m.geometry, this.silhouette);
         sil.name = 'silhouette';
         sil.renderOrder = -1;
-        this.fig.add(sil);
+        m.parent?.add(sil);
       }
-      this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.0 * K);
-      this.fig.scale.setScalar(this.scale);
     }
+    this.scale = 1;
     this.fig.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) {
         (o as THREE.Mesh).castShadow = o.name !== 'silhouette' && o.name !== 'glow';

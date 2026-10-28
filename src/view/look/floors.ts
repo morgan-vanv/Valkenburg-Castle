@@ -20,6 +20,8 @@ export const FLOOR_LOOK = {
   colorJitter: 0.15,
   /** Darkening applied to the level data's floor tints under the look's brighter fill. */
   shade: 0.78,
+  /** Pull saturated room tints toward grey a little (the lair's red, the dais rug), so the lights colour them. */
+  desaturate: 0.22,
   under: 0x1a1418,
 };
 
@@ -56,6 +58,12 @@ export interface TileJitter {
   tiltZ: number;
   /** Colour multiplier. */
   shade: number;
+}
+
+/** The look's take on a room tint: shaded and a little desaturated. */
+export function lookTint(c: THREE.Color): THREE.Color {
+  const l = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  return c.lerp(new THREE.Color(l, l, l), FLOOR_LOOK.desaturate);
 }
 
 export function tileJitter(h: Hex, level: number): TileJitter {
