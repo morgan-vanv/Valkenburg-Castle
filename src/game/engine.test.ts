@@ -1344,15 +1344,16 @@ describe('15.3 classes', () => {
     const m = monster(t, 'orc', at(3, 7, 8), 'hunting');
     const p = e.preview(t, 'rae', 'attack', { id: m.id });
     expect(p.ok).toBe(true);
-    expect(p.slots).toBe(3);
+    expect(p.slots).toBe(2); // V5.0 (spec 32.9): the hunting orc has noticed her: it saw her draw, −1 slot
+    expect(p.modifiers).toContain('It saw you draw −1 slot');
     expect(p.stat).toBe('finesse');
     expect(p.noise).toBe(1);
     // Out of range at 7.
     m.at = at(3, 8, 8);
     expect(option(t, 'rae', 'attack')).toBeUndefined();
-    // Adjacent: 2 slots.
+    // Adjacent: another slot off, never below 1.
     m.at = at(3, 2, 8);
-    expect(e.preview(t, 'rae', 'attack', { id: m.id }).slots).toBe(2);
+    expect(e.preview(t, 'rae', 'attack', { id: m.id }).slots).toBe(1);
     // Behind a wall: no.
     m.at = at(3, 14, 8);
     expect(option(t, 'rae', 'attack')).toBeUndefined();
@@ -1374,7 +1375,8 @@ describe('15.3 classes', () => {
     const r = until(ow, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'cast' && x.spell === 'overwatch') && ev.some((x) => x.type === 'hit' && x.attacker === 'rae'));
     expect(r.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBeLessThan(20);
     expect(hero(r.state, 'rae').overwatch).toBe(false);
-    expect(rolls(r.events).filter((x) => x.slots === 3).length).toBeGreaterThanOrEqual(1);
+    // V5.0 (spec 32.9): 3 slots while the orc hasn't noticed her, 2 once it has (it walked into her light).
+    expect(rolls(r.events).filter((x) => x.slots === 3 || x.slots === 2).length).toBeGreaterThanOrEqual(1);
   });
 
   it('ranger: knockback shot pushes a monster away from the ranger along the line (into the pit)', () => {
@@ -4330,6 +4332,7 @@ describe('V3.7 kit and calm', () => {
       const u = delve({ heroes: ['brann'] });
       (u.campaign.roster.find((h) => h.id === 'brann')!).shield = true;
       put(u, 'brann', GATE);
+      hero(u, 'brann').reactions = { shieldBlock: 'never' }; // V5.0 (spec 32.10): the block is a reaction; this tests the passive shield
       const o = monster(u, 'orc', at(1, 5, 7), 'hunting');
       (o as MonsterX).tier = 3;
       const r = until(u, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === o.id && x.roll.hits === 1 && !x.roll.perfect));

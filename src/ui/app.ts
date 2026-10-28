@@ -703,6 +703,10 @@ export class App {
           sfx.play('torch', { pitch: 1.4, gain: 0.6 });
           await this.dio.playEvent(e);
           continue;
+        // V5.0 (spec 32.10): a shield block: a clang; the engine's say line tells it. (G: a shield flash is under View needs.)
+        case 'blocked':
+          sfx.play('thud', { pitch: 1.6, gain: 0.5 });
+          continue;
         case 'swing':
           swingNext = true;
           sfx.play('whoosh', { pitch: 1.3, gain: 0.5 });

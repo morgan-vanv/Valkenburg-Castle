@@ -26,6 +26,7 @@ import { heroesInSight, nearestHero, rivalStats, shootingSpots } from './rivals'
 import { curePoison, isPoisoned, poison, poisonTakes } from './poison';
 import { bringCarried, carrierOf, downedCrew } from './common'; // V4.1 (spec 31.4)
 import { MEND_UP_HP, POTION_HEAL } from './data'; // V4.1 (spec 31.4)
+import { DODGE_SLOTS } from './data'; // V5.0 (spec 32.9)
 import { crewApproach, crewBudget, crewCharges, crewGo, crewWalk, heroNoticed, routeIntent, sapperWay, spendCrewCharge, tell, wantSneak, type CrewWay } from './crewmove';
 import { fireWard } from './village'; // V4.1 (spec 31.3): Dragonfire Porter
 import { POWER_KIT, castPlan, kiteFor, holdBack, likelyKill, powerAct, powerKit, powerPrefer, spotCost } from './crewpower'; // V4.1 (WS7, spec 31.9)
@@ -724,7 +725,8 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       c.ev.push({ type: 'thrown', by: r.id, kind, from: { ...r.at }, to: { ...t.at } });
       const at = { ...t.at };
       const adj = distance(r.at, t.at) <= 1 ? 1 : 0;
-      const hit = strike(c, r.id, t.id, Math.max(1, st.slots - adj), st.chance, st.dmg, 'Shot');
+      const dodge = heroNoticed(r, t.id) ? DODGE_SLOTS : 0; // V5.0 (spec 32.9), pillar 17
+      const hit = strike(c, r.id, t.id, Math.max(1, st.slots - adj - dodge), st.chance, st.dmg, 'Shot');
       crewLoosed(c, r, kind, t.id, at, hit === t.id);
       return true;
     }
@@ -1109,7 +1111,8 @@ export function hostileAct(c: Ctx, r: RivalX): void {
     // extra slot is the blindside slot `strike` adds from behind).
     const unnoticed = !heroNoticed(r, t.id);
     const stab = unnoticed && r.cls === 'burglar' && st.range === 1 && inRearHalf(t.hero, r.at);
-    const slots = st.slots + (unnoticed ? SNEAK_ATTACK_SLOTS : 0);
+    // V5.0 (spec 32.9, pillar 17): a hero who has noticed the archer ducks the arrow: −1 slot on a bow shot.
+    const slots = Math.max(1, st.slots + (unnoticed ? SNEAK_ATTACK_SLOTS : st.range > 1 ? -DODGE_SLOTS : 0));
     const dmgPer = stab ? st.dmg * BACKSTAB_DMG_MULT : st.dmg;
     if (stab) tell(c, r, `${r.name} slips behind ${heroName(c, t.id)} and backstabs.`, t.at);
     else if (unnoticed) tell(c, r, `${r.name} strikes before ${heroName(c, t.id)} sees it coming.`, t.at);

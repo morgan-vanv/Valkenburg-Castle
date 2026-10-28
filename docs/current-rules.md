@@ -478,6 +478,8 @@ Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLig
 
 ### 8.2 Hero attack modifiers
 
+- V5.0 (spec 32.9): **a bow shot at a target that has noticed the archer loses a slot** ("It saw you draw −1 slot"); unaware targets take the full draw and the sneak-attack slot. Attack and Overwatch; not Knockback or Hamstring. Crew Rangers the same against heroes who have noticed them.
+
 | Modifier | Effect | Applies to |
 | --- | --- | --- |
 | Brightness | 0 / −10 / −20 / −30 | every hero roll |
@@ -493,6 +495,8 @@ Code: light.ts (`lightTargets`, `doLight`, `burnLights`, `lightsOf`, `migrateLig
 Damage to a monster or crew member per hit: max(1, weapon damage − armor), minus 1 if the crew member is warded. Monster armor: Dragon 1, captain 1, plus 1 for an orc or archer adjacent to a captain (shield wall). Crew armor: class armor + armor tier. Being hit makes a monster hunt and notice the attacker (so sneak attack works once).
 
 ### 8.3 Enemy attacks on heroes
+
+- V5.0 (spec 32.10): **the shield block**, a reaction: a hit over 1 on a hero with the forge shield who has Focus asks: Block (1 Focus, the hit does 1) or Take it. Crew Sellswords block a hit of 3+ by policy.
 
 - Roll the enemy's slots at its chance (+1 slot blindsided; −15 if the hero is braced).
 - Damage per hit: max(0, max(1, damage − hero armor) − ward 1 − brace 1 − shield (ranged only: 1, or 2 braced)); Perfect +1.

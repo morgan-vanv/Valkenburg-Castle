@@ -308,12 +308,12 @@ export const SWING_BOW_SLOTS = 1;
  * V4.1 (spec 31.13): reactions. A hero's setting for each kind when they haven't chosen one: both ask (the castle's
  * turn pauses for the answer). Set to always / never per hero and the turn never stops for it.
  */
-export const REACTION_DEFAULTS: Record<ReactionKind, ReactionSetting> = { hiddenSwing: 'ask', overwatch: 'ask' };
+export const REACTION_DEFAULTS: Record<ReactionKind, ReactionSetting> = { hiddenSwing: 'ask', overwatch: 'ask', shieldBlock: 'ask' };
 /**
  * V4.1 (spec 31.13): the answer when a rules call runs with nobody to ask (a Ctx made outside `apply`, as unit tests
  * do): hidden heroes hold (stay hidden), overwatch shoots (the pre-31.13 behaviour of each).
  */
-export const REACTION_FALLBACK: Record<ReactionKind, ReactionChoice> = { hiddenSwing: 'no', overwatch: 'yes' };
+export const REACTION_FALLBACK: Record<ReactionKind, ReactionChoice> = { hiddenSwing: 'no', overwatch: 'yes', shieldBlock: 'no' };
 /** Dread (Shadowmancer): 1 mana, 2 Wits slots at range 5; 1+ hits = feared for 2 world phases. */
 export const DREAD_MANA = 1;
 export const DREAD_SLOTS = 2;
@@ -342,6 +342,14 @@ export const BRACE_CHANCE = -15;
 /** The forge shield: ranged hits do 1 less, 2 less while braced. 50 gold, needs the smith. */
 export const SHIELD_DMG = 1;
 export const SHIELD_BRACED_DMG = 2;
+/**
+ * V5.0 (P, spec 32.10, owner): the shield block, a reaction. A hero with the forge shield who is hit for more than
+ * `SHIELD_BLOCK_CAP` may take it on the shield for `SHIELD_BLOCK_FOCUS` Focus: the hit does `SHIELD_BLOCK_CAP`. Any hit
+ * (melee or ranged). Crew Sellswords carry a shield and block by policy (a hit of `SHIELD_BLOCK_CREW_AT` or more).
+ */
+export const SHIELD_BLOCK_CAP = 1;
+export const SHIELD_BLOCK_FOCUS = 1;
+export const SHIELD_BLOCK_CREW_AT = 3;
 export const SHIELD_PRICE = 50;
 /** Hamstring (anyone with a bow): 1 Finesse slot at −20, range 5 in sight; a hit roots 2 rounds. Noise 1. */
 export const HAMSTRING_SLOTS = 1;
@@ -473,6 +481,13 @@ export const BLAST_INNER_DMG = 4;
 export const BLAST_OUTER_DMG = 2;
 export const BLAST_NOISE = 8;
 export const BOW_RANGE = 6;
+/**
+ * V5.0 (P, spec 32.9, owner): a bow shot at a target that has noticed the shooter loses this many slots ("it saw you
+ * draw"); unaware targets (asleep, or not having noticed the shooter) take the full draw and the sneak-attack slot.
+ * Heroes and crew Rangers alike: Attack and Overwatch, and a crew's specialty-arrow shot. Not Knockback (it needs
+ * every slot to hit, so a lost slot would make it easier) nor Hamstring (1 slot already).
+ */
+export const DODGE_SLOTS = 1;
 export const OVERWATCH_RANGE = 6;
 export const KNOCKBACK_RANGE = 5;
 export const THROW_CHARGE_RANGE = 3;

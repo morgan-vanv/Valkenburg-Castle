@@ -58,7 +58,7 @@ function count(ev: { type: string; text?: string; attacker?: string; damage?: nu
 }
 // V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
 // enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
-const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
+const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : q.kind === 'shieldBlock' ? ((q.damage ?? 0) >= 3 ? 'yes' : 'no') : 'no') } // V5.0 (spec 32.10): block a hit of 3+);
 
 type PartyDef = {
   name: string; heroes: [HeroClass, number][]; weaponTier?: 0 | 1 | 2; armorTier?: 0 | 1 | 2; potions?: number;

@@ -3444,14 +3444,14 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
 
   // ------------------------------------------------------------ reactions (V4.1, spec 31.13)
 
-  /** The kinds of reaction this hero can be asked for: the hidden swing for everyone, overwatch for a Ranger. */
-  private reactionKinds(cls: HeroClass): ReactionKind[] {
-    return cls === 'ranger' ? ['hiddenSwing', 'overwatch'] : ['hiddenSwing'];
+  /** The kinds of reaction this hero can be asked for: the hidden swing for everyone, overwatch for a Ranger, the shield block with a shield (V5.0). */
+  private reactionKinds(cls: HeroClass, shield = false): ReactionKind[] {
+    return [...(cls === 'ranger' ? (['hiddenSwing', 'overwatch'] as ReactionKind[]) : (['hiddenSwing'] as ReactionKind[])), ...(shield ? (['shieldBlock'] as ReactionKind[]) : [])];
   }
 
   /** The small Reactions button beside the hero's name: opens the per-hero settings (Ask / Always / Never). */
   private reactionsButton(sel: HeroInDelve, def: Hero): HTMLElement {
-    const kinds = this.reactionKinds(def.cls);
+    const kinds = this.reactionKinds(def.cls, !!def.shield);
     const set = (k: ReactionKind) => sel.reactions?.[k] ?? 'ask';
     const custom = kinds.some((k) => set(k) !== 'ask');
     const lines = kinds.map((k) => `${REACT_NAME[k]}: ${SETTING_WORD[set(k)]}`).join('\n');
@@ -3509,7 +3509,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       { class: 'dl-reacts-pop', role: 'group', 'aria-label': `${def.name}'s reactions` },
       h('div', { class: 'dl-reacts-t' }, `Reactions · ${def.name}`),
       h('p', { class: 'dl-reacts-p' }, `When the castle's turn gives ${def.name} a chance to react: ask you, always do it, or never.`),
-      ...this.reactionKinds(def.cls).map(row),
+      ...this.reactionKinds(def.cls, !!def.shield).map(row),
     );
   }
 

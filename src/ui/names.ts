@@ -474,12 +474,13 @@ After moving, a second move (a dash, as far again: 4, Burglar 5) spends the acti
 };
 
 /** V4.1 (spec 31.13): the reactions a hero can be asked for in the castle's turn, by name. */
-export const REACT_NAME: Record<ReactionKind, string> = { hiddenSwing: 'Hidden swing', overwatch: 'Overwatch' };
+export const REACT_NAME: Record<ReactionKind, string> = { hiddenSwing: 'Hidden swing', overwatch: 'Overwatch', shieldBlock: 'Shield block' };
 export const SETTING_WORD: Record<ReactionSetting, string> = { ask: 'Ask', always: 'Always', never: 'Never' };
 /** What each reaction is, for the Reactions popover (the hero's name in). */
 export const REACT_HELP: Record<ReactionKind, (n: string) => string> = {
   hiddenSwing: (n) => `Hidden swing: an enemy steps away from ${n}'s side while ${n} is hidden from it (veiled, or it hasn't spotted them) and ${n}'s action is ready. ${n} may take the free swing, and give themselves away, or let it pass and stay hidden. An enemy that has spotted ${n} always draws the swing.`,
   overwatch: (n) => `Overwatch: ${n} is on overwatch and an enemy moves or acts within ${DATA.OVERWATCH_RANGE} in sight. ${n} may shoot it now, or hold for another (still armed until the castle's turn ends).`,
+  shieldBlock: (n) => `Shield block: a hit lands on ${n} for more than ${DATA.SHIELD_BLOCK_CAP} while ${n} has Focus. ${n} may take it on the shield for ${DATA.SHIELD_BLOCK_FOCUS} Focus (the hit does ${DATA.SHIELD_BLOCK_CAP}), or take the hit and keep the Focus.`,
 };
 export const REACT_SETTING_HELP: Record<ReactionKind, Record<ReactionSetting, (n: string) => string>> = {
   hiddenSwing: {
@@ -491,6 +492,11 @@ export const REACT_SETTING_HELP: Record<ReactionKind, Record<ReactionSetting, (n
     ask: () => `The castle's turn pauses and asks: shoot this one, or hold for another.`,
     always: (n) => `${n} shoots the first enemy to move in sight, without asking.`,
     never: (n) => `${n} never shoots from overwatch: it lapses unfired.`,
+  },
+  shieldBlock: {
+    ask: () => `The castle's turn pauses and asks: block, or take the hit.`,
+    always: (n) => `${n} blocks every hit over ${DATA.SHIELD_BLOCK_CAP} while they have Focus, without asking.`,
+    never: (n) => `${n} never blocks: the Focus is kept for attacks.`,
   },
 };
 

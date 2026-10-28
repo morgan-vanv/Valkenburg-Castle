@@ -41,7 +41,7 @@ import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
 import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
-import { CARRY_MOVE, PRISONER_HP } from './data';
+import { CARRY_MOVE, DODGE_SLOTS, PRISONER_HP } from './data';
 // V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
 import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, pairHome } from './data';
 import { bodyName, carryOut, carryable, checkCarries, closeTo, curePoison, endCarry, isPoisoned, poison, poisonTakes, startCarry, trapDamage } from './poison';
@@ -1338,6 +1338,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const stab = canBackstab(c, h, t.id!, unnoticed);
       if (stab) { slots += BACKSTAB_SLOTS; mods.push('Backstab: +1 slot, double damage'); }
       const ranged = !!weapon.range;
+      // V5.0 (spec 32.9): a target that has noticed the archer ducks the arrow: −1 slot. Unaware ones take the full draw.
+      if (ranged && !unnoticed && slots > 1) { slots -= DODGE_SLOTS; mods.push('It saw you draw −1 slot'); }
       if (ranged && c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
@@ -1363,6 +1365,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       const o = pushOutcome(c, pusherFor(h.at, f.at), f.at, t.id);
+      // (V5.0, spec 32.9: Knockback keeps its 2 slots: it needs both to hit, so a lost slot would make it easier.)
       const sp = base('finesse', 2, p, ['Miss', 'Miss', pushText(o, 0)], cls.weapon.noise ?? 1);
       sp.hexes = [o.dest];
       if (o.kind === 'fall' && o.fall) sp.warning = `${f.monster?.name ?? 'It'} would fall ${o.fall.levels === 1 ? '1 level' : `${o.fall.levels} levels`} into ${o.fall.levelName}.`;

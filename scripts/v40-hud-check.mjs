@@ -582,6 +582,16 @@ if (crewAt) {
       await p.keyboard.press('Escape');
       await p.waitForTimeout(100);
       check('...Esc closes it', !(await p.$('.dl-reacts-pop')));
+      // V5.0 (spec 32.10): a hero with the forge shield gets the Shield block row.
+      const shielded = await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.campaign.roster.find((x) => x.id === id); const before = !!h.shield; h.shield = true; window.vc.load(s); window.vc.hud.select(id); return before; }, scene.hero);
+      await p.waitForTimeout(150);
+      await p.click('.dl-hotbar .dl-react-b');
+      await p.waitForTimeout(150);
+      const rows2 = await p.evaluate(() => [...document.querySelectorAll('.dl-reacts-pop .dl-reacts-row .dl-reacts-k')].map((e) => e.textContent));
+      check('a hero with a shield has a "Shield block" reaction row', rows2.includes('Shield block'), rows2.join(','));
+      await p.keyboard.press('Escape');
+      await p.evaluate((x) => { const s = structuredClone(window.vc.state()); s.campaign.roster.find((h) => h.id === x.id).shield = x.before; window.vc.load(s); window.vc.hud.select(x.id); }, { id: scene.hero, before: shielded });
+      await p.waitForTimeout(150);
     }
     // End turn: the playback stops at the question with the card up.
     await p.evaluate(() => { window.__endDone = false; void window.vc.send({ type: 'endTurn' }).then(() => (window.__endDone = true)); });
