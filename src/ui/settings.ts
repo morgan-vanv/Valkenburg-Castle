@@ -14,9 +14,11 @@ export interface Settings {
   fullCards: boolean;
   /** V5.0 (P, spec 32.5): end the turn on its own when no hero can move, act or use anything. On by default. */
   autoEndTurn: boolean;
+  /** V5.0 (G): render quality. 'low' = no shadow, bloom or tilt-shift, pixel ratio 1 (headless checks use it). */
+  quality?: 'high' | 'low';
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, autoEndTurn: true };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, autoEndTurn: true, quality: 'high' };
 
 export function loadSettings(): Settings {
   try {

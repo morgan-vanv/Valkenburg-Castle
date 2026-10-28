@@ -11,6 +11,9 @@ import * as THREE from 'three';
 import { DIRS, add, distance, hexKey, hexToWorld, line, parseHexKey, posKey, range, type Hex, type Pos } from '../game/hex';
 import type { CastleDef, LevelDef, LightDef, Material, PropKind, TileDef } from '../game/types';
 import { addFogAttribute, fogMaterial, FOG_BELOW, MAT_ID, setMaterialFog } from './fog';
+import { FLOOR_LOOK, bevelGeometry, tileJitter, underGeometry } from './look/floors';
+import { LOOK_WALL_ROOMS, WALL_LOOK, buildLookWalls, wallGeometries, type LookWalls } from './look/walls';
+import { buildDressing } from './look/dressing';
 import { furnitureModel, winchDrum } from './furniture';
 import { glowTexture } from './sprites';
 import { COLORS, FLOOR_TOP, HEX, RAISED_TOP, WALL_HEIGHT, WALL_THICK, hash2, levelY } from './world';
@@ -194,6 +197,9 @@ export class LevelView {
   readonly min = new THREE.Vector2(Infinity, Infinity);
   readonly max = new THREE.Vector2(-Infinity, -Infinity);
   readonly y0: number;
+  /** V5.0 (G): the flat brick walls (look/walls.ts) and the dressing's candle flames to flicker. */
+  lookWalls!: LookWalls;
+  readonly dressingFlames: THREE.Object3D[] = [];
 
   constructor(
     readonly def: LevelDef,
@@ -236,25 +242,16 @@ export class LevelView {
     }
     this.bakeLights();
 
-    // Floors: one hex slab per tile (hairline engraved joints come from the shader).
-    this.batch(
-      prism(R, FLOOR_TOP, 1, 0.55),
-      floors,
-      (h) => this.floorColor(h),
-      (h) => [this.pk(h)],
-      () => 0,
-      0.22,
-      { floor: true },
-    );
-    this.batch(
-      prism(R, RAISED_TOP, 1.06, 0.5),
-      raised,
-      (h) => this.floorColor(h).offsetHSL(0, 0, 0.04),
-      (h) => [this.pk(h)],
-      () => 0,
-      0.24,
-      { floor: true },
-    );
+    // V5.0 (G, look/floors.ts): bevelled hex tiles with gaps, a dark under-tile showing through them.
+    const jittered = (hs: Hex[]) =>
+      hs.map((h) => {
+        const j = tileJitter(h, this.level);
+        return { h, rot: 0, dx: 0, dz: 0, dy: j.dy, tiltX: j.tiltX, tiltZ: j.tiltZ };
+      });
+    const lookColor = (h: Hex, base: THREE.Color) => base.multiplyScalar(tileJitter(h, this.level).shade);
+    this.batchItems(underGeometry(), [...floors, ...raised].map((h) => ({ h, rot: 0, dx: 0, dz: 0 })), () => new THREE.Color(FLOOR_LOOK.under), (h) => [this.pk(h)], (h) => (this.tile(h)?.raised ? RAISED_TOP : FLOOR_TOP) - 0.1, 0.02, { glowScale: 0.15, standard: true });
+    this.batchItems(bevelGeometry(), jittered(floors), (h) => lookColor(h, this.floorColor(h)), (h) => [this.pk(h)], () => FLOOR_TOP, 0.22, { floor: true, standard: true, edge: 0 });
+    this.batchItems(bevelGeometry(FLOOR_LOOK.topR, FLOOR_LOOK.bottomR, RAISED_TOP - FLOOR_TOP + FLOOR_LOOK.depth), jittered(raised), (h) => lookColor(h, this.floorColor(h).offsetHSL(0, 0, 0.04)), (h) => [this.pk(h)], () => RAISED_TOP, 0.24, { floor: true, standard: true, edge: 0 });
     // Pit ledges: a skirt under every floor next to a pit, so the edge reads as a drop.
     const ledge = [...floors, ...raised].filter((h) => DIRS.some((d) => this.isPit(add(h, d))));
     this.batch(
@@ -281,11 +278,24 @@ export class LevelView {
     // room), stay solid blocks so the castle keeps its mass. All of it can cut away near the camera
     // (Diorama.setCutaway; off by default since V3.4).
     const wallColor = (h: Hex) => new THREE.Color(COLORS.wallCap).offsetHSL(0, (hash2(h.q, h.r, 3) - 0.5) * 0.03, (hash2(h.r, h.q, 9) - 0.5) * 0.05);
+    // V5.0 (G, look/walls.ts): flat brick runs for the look rooms' walls; those hexes leave the old batches.
+    this.lookWalls = buildLookWalls({ level: this.level, tile: (h) => this.tile(h), open: (t) => this.wallOpen(t), rooms: LOOK_WALL_ROOMS }, walls);
+    {
+      const g = wallGeometries();
+      const lw = this.lookWalls;
+      const byItem = (_h: Hex, it?: { color?: THREE.Color }) => it?.color ?? new THREE.Color(0xffffff);
+      this.batchItems(g.plinth, lw.plinths, byItem, (h) => this.withNeighbours(h), () => 0, 0.2, { standard: true, roughness: 0.9, glowScale: 0.35, shadow: true });
+      this.batchItems(g.core, lw.cores, byItem, (h) => this.withNeighbours(h), () => 0, 0.12, { standard: true, roughness: 0.95, glowScale: 0.25, shadow: true, cutaway: true });
+      this.batchItems(g.brick, lw.bricks, byItem, (h) => this.withNeighbours(h), () => 0, 0.22, { standard: true, roughness: 0.88, glowScale: 0.35, shadow: true, cutaway: true });
+      this.batchItems(g.pillar, lw.pillars, byItem, (h) => this.withNeighbours(h), () => 0, 0.24, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true, cutaway: true });
+      this.batchItems(g.cap, lw.caps, byItem, (h) => this.withNeighbours(h), () => 0, 0.26, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true, cutaway: true });
+    }
     const solid: Hex[] = [];
     const thin: Hex[] = [];
     const panels: { h: Hex; rot: number; dx: number; dz: number }[] = [];
     const posts = new Map<string, { h: Hex; rot: number; dx: number; dz: number }>();
     for (const h of walls) {
+      if (this.lookWalls.hexes.has(hexKey(h))) continue;
       const opens = DIRS.map((d) => this.tile(add(h, d))).map((t) => this.wallOpen(t));
       const cave = opens.some((o, i) => o && this.isCave(this.tile(add(h, DIRS[i]!))));
       if (!opens.some(Boolean) || cave) {
@@ -376,6 +386,12 @@ export class LevelView {
     }
     this.addProps();
     this.addLights();
+    // V5.0 (G, look/dressing.ts): decoration on the look rooms' walls and plinths.
+    for (const piece of buildDressing({ level: this.level, y0: this.y0, has: (h) => !!this.tile(h), frame: (h, d) => this.lookWalls.frame(h, d) }, LOOK_WALL_ROOMS)) {
+      this.group.add(piece.obj);
+      this.extra(piece.hexes[0]!, piece.obj, piece.mats, piece.hexes.map((h) => this.pk(h)));
+      this.dressingFlames.push(...piece.flames);
+    }
     this.buildLabels();
   }
 
@@ -448,15 +464,15 @@ export class LevelView {
   /** One instanced mesh for many placed items: a hex each, plus a turn about y and an offset from its centre. */
   private batchItems(
     geo: THREE.BufferGeometry,
-    items: { h: Hex; rot: number; dx: number; dz: number }[],
-    color: (h: Hex) => THREE.Color,
+    items: { h: Hex; rot: number; dx: number; dz: number; dy?: number; tiltX?: number; tiltZ?: number; sx?: number; sy?: number; sz?: number; color?: THREE.Color }[],
+    color: (h: Hex, item?: { color?: THREE.Color }) => THREE.Color,
     sources: (h: Hex) => string[],
     lift: (h: Hex) => number,
     litFloor: number,
-    opts: { cutaway?: boolean; floor?: boolean; glowScale?: number } = {},
+    opts: { cutaway?: boolean; floor?: boolean; glowScale?: number; standard?: boolean; edge?: number; roughness?: number; shadow?: boolean } = {},
   ): void {
     if (!items.length) return;
-    const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, cutaway: opts.cutaway, glow: true, floor: opts.floor });
+    const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, cutaway: opts.cutaway, glow: true, floor: opts.floor, standard: opts.standard, edge: opts.edge, roughness: opts.roughness });
     const mesh = new THREE.InstancedMesh(geo, mat, items.length);
     const fog = addFogAttribute(mesh, items.length);
     const glow = new THREE.InstancedBufferAttribute(new Float32Array(items.length * 3), 3);
@@ -468,15 +484,17 @@ export class LevelView {
     }
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
+    const e = new THREE.Euler();
     const s = new THREE.Vector3(1, 1, 1);
     const srcs: string[][] = [];
-    items.forEach(({ h, rot, dx, dz }, i) => {
+    items.forEach((item, i) => {
+      const { h, rot, dx, dz, dy, tiltX, tiltZ, sx, sy, sz } = item;
       const w = hexToWorld(h, HEX);
-      q.setFromAxisAngle(up, rot);
-      m.compose(new THREE.Vector3(w.x + dx, this.y0 + lift(h), w.z + dz), q, s);
+      q.setFromEuler(e.set(tiltX ?? 0, rot, tiltZ ?? 0, 'YXZ'));
+      s.set(sx ?? 1, sy ?? 1, sz ?? 1);
+      m.compose(new THREE.Vector3(w.x + dx, this.y0 + lift(h) + (dy ?? 0), w.z + dz), q, s);
       mesh.setMatrixAt(i, m);
-      mesh.setColorAt(i, color(h));
+      mesh.setColorAt(i, color(h, item));
       const g = this.glow.get(hexKey(h));
       const gs = opts.glowScale ?? 1;
       if (g) glow.setXYZ(i, g.r * gs, g.g * gs, g.b * gs);
@@ -485,6 +503,9 @@ export class LevelView {
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = false;
+    mesh.receiveShadow = true;
+    mesh.castShadow = opts.shadow ?? false;
     this.group.add(mesh);
     this.batches.push({ mesh, fog, sources: srcs });
   }
@@ -592,6 +613,12 @@ export class LevelView {
             // On the wall's face (a thin panel's outer face sits on the edge, 0.5 of the way to the neighbour).
             holder.position.x = off.x * 0.49;
             holder.position.z = off.z * 0.49;
+            // V5.0 (G): on a brick run the face sits nearer the centre; hang the bracket on it.
+            const face = this.lookWalls.sconceAt(h, dir);
+            if (face) {
+              holder.position.x = face.x;
+              holder.position.z = face.z;
+            }
             view.at.set(w.x + off.x * 0.8, this.y0 + WALL_HEIGHT * 0.9, w.z + off.z * 0.8);
           } else {
             // Free-standing: a torch post.
@@ -808,14 +835,16 @@ export class LevelView {
   // ------------------------------------------------------------ fixtures
 
   private addPillar(h: Hex): void {
-    const stone = fogMaterial({ color: COLORS.wallCap, litFloor: 0.18 });
+    // V5.0 (G): stone in the look's pillar colour (flat-shaded standard), a little stouter.
+    const stone = fogMaterial({ color: WALL_LOOK.pillar, litFloor: 0.18, standard: true, roughness: 0.85 });
     const g = new THREE.Group();
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.5, 0.22, 8), stone);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.56, 0.22, 8), stone);
     base.position.y = FLOOR_TOP + 0.11;
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, WALL_HEIGHT + 0.6, 8), stone);
-    shaft.position.y = FLOOR_TOP + (WALL_HEIGHT + 0.6) / 2 + 0.2;
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.36, 0.2, 8), stone);
-    cap.position.y = FLOOR_TOP + WALL_HEIGHT + 0.85;
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, WALL_HEIGHT + 0.4, 8), stone);
+    shaft.position.y = FLOOR_TOP + (WALL_HEIGHT + 0.4) / 2 + 0.2;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.42, 0.2, 8), stone);
+    cap.position.y = FLOOR_TOP + WALL_HEIGHT + 0.65;
+    for (const m of [base, shaft, cap]) m.castShadow = m.receiveShadow = true;
     g.add(base, shaft, cap);
     this.place(h, g);
     this.extra(h, g, [stone], this.withNeighbours(h));

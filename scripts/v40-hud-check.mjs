@@ -36,7 +36,7 @@ const idle = () => p.waitForFunction(() => {
 const tip = (sel) => p.$eval(sel, (e) => e.dataset.tip ?? e.getAttribute('title') ?? '').catch(() => '');
 const text = (sel) => p.$eval(sel, (e) => e.innerText).catch(() => '');
 const shown = (sel) => p.$eval(sel, (e) => !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none').catch(() => false);
-const settings = (extra = {}) => p.evaluate((x) => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, ...x })), extra);
+const settings = (extra = {}) => p.evaluate((x) => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, quality: 'low', ...x })), extra);
 
 // Generous timeouts: the 3D view renders in software here; a busy machine makes a reload slow, not wrong.
 p.setDefaultNavigationTimeout(180000);
