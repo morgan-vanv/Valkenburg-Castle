@@ -205,7 +205,11 @@ if (orc) {
   await p.waitForTimeout(100);
   const after = await p.evaluate(() => ({ kill: document.querySelector('.dl-oc-kill')?.textContent ?? '', sure: document.querySelectorAll('.dl-die.sure').length, was: document.querySelector('.dl-roll-was')?.textContent ?? '' }));
   const k1 = parseInt(after.kill.match(/(\d+)%/)?.[1] ?? '0', 10);
-  check('a Focus diamond makes a die "sure" and raises the kill chance ("Was N% before Focus")', after.sure === 1 && k1 > k0 && new RegExp(`Was ${k0}% before Focus`).test(after.was), `${k0}% → ${k1}%, ${after.was}`);
+  check('a Focus diamond makes a die "sure" and raises the kill chance (the kill segment says "was N%")', after.sure === 1 && k1 > k0 && new RegExp(`was ${k0}%`).test(after.was), `${k0}% → ${k1}%, ${after.was}`);
+  // V5.0 (P, B4): a thicker bar, nothing under it, the numbers on hover.
+  const barLook = await p.evaluate(() => { const b = document.querySelector('.dl-ocbar'); const segs = [...b.querySelectorAll('.dl-oc')]; return { h: b.getBoundingClientRect().height, line: !!document.querySelector('.dl-roll-ocline'), tips: segs.every((s) => /\d+%/.test(s.dataset.tip ?? '')), barTip: b.dataset.tip ?? '' }; });
+  check('the outcome bar is thick (≥ 32px), has no line under it, and every segment\'s hover carries its number', barLook.h >= 32 && !barLook.line && barLook.tips && /(Kills it|Likely)/.test(barLook.barTip), JSON.stringify(barLook));
+  if (process.env.SHOTS) { const bb = await p.$eval('.dl-roll', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }); await p.screenshot({ path: `${process.env.SHOTS}/roll-panel.png`, clip: bb, timeout: 180000 }); }
   await p.click('.dl-roll-det');
   check('Details shows the per-hit table', (await p.$$('.dl-hits span')).length > 6);
   await p.keyboard.press('Escape');

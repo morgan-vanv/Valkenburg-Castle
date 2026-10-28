@@ -2833,14 +2833,13 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-dia:disabled { opacity: 0.3; cursor: not-allowed; }
 .dl-focus-help { font-size: 13px; color: var(--dl-ink-4); }
 .dl-roll-oc { display: flex; flex-direction: column; gap: 6px; }
-.dl-ocbar { display: flex; width: 100%; border-radius: 3px; overflow: hidden; gap: 1px; }
-.dl-oc { height: 22px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; color: var(--parchment); min-width: 3px; }
+/* V5.0 (P, B4): thicker, no line under it; numbers on hover. */
+.dl-ocbar { display: flex; width: 100%; border-radius: 4px; overflow: hidden; gap: 2px; }
+.dl-oc { height: 36px; display: flex; align-items: center; justify-content: center; gap: 4px; font-family: var(--mono); font-size: 13px; white-space: nowrap; overflow: hidden; color: var(--parchment); min-width: 4px; cursor: default; }
+.dl-oc .dl-roll-was { font-size: 11px; opacity: 0.75; white-space: nowrap; }
 .dl-oc-miss, .dl-oc-fail { background: #5a4c3f; }
 .dl-oc-hurt, .dl-oc-ok { background: var(--ember-dim); }
 .dl-oc-kill, .dl-oc-best { background: var(--ember); color: #1a1208; }
-.dl-roll-ocline { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: #b8ab94; }
-.dl-roll-headline { font-weight: 400; color: var(--dl-cream); font-size: 15px; }
-.dl-roll-was { white-space: nowrap; color: var(--dl-ink-3); }
 .dl-roll-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .dl-roll-plain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; color: var(--dl-ink-2); }
 .dl-roll-plain .bad { color: var(--dl-pink); }

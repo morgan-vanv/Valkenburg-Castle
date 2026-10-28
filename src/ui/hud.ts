@@ -26,7 +26,7 @@ import type { Settings } from './settings';
 import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
 import { Chronicle } from './hud-chronicle';
 import { Coach } from './coach';
-import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, pctText, readRoll, statName, type RollRead } from './hud-roll';
+import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, readRoll, statName, type RollRead } from './hud-roll';
 
 export { hitOdds } from './hud-roll';
 
@@ -2044,14 +2044,8 @@ export class Hud {
       el.append(h('div', { class: 'dl-roll-mid' }, dice, focus));
       // The outcome bar.
       const was = p.focus > 0 && read.kind === 'damage' && read.kill > 0 ? readRoll(pr, 0, this.hpOf(t), this.itWord(t)).kill : null;
-      el.append(
-        h(
-          'div',
-          { class: 'dl-roll-oc' },
-          outcomeBar(read),
-          h('div', { class: 'dl-roll-ocline' }, h('span', null, h('b', { class: 'dl-roll-headline' }, read.headline), ` · ${read.sub}`), was !== null && Math.abs(was - read.kill) > 0.004 ? h('span', { class: 'dl-roll-was' }, `Was ${pctText(was)} before Focus`) : ''),
-        ),
-      );
+      // V5.0 (P, B4): a thicker bar and nothing under it; the read and the numbers are on the segments' hover.
+      el.append(h('div', { class: 'dl-roll-oc' }, outcomeBar(read, was)));
       const chips = pr.modifiers.map((m) => modifierChip(m, name)).filter((c): c is NonNullable<typeof c> => !!c);
       if (chips.length) el.append(h('div', { class: 'dl-roll-chips' }, ...chips.map((c) => h('span', { class: `dl-chip ${c.good ? 'good' : 'bad'}`, 'data-tip': c.tip }, `${c.good ? '▲' : '▼'} ${c.text}`))));
     } else {
