@@ -1537,3 +1537,20 @@ The owner: "take a comprehensive fresh look at the balance bot such that we have
 **Found, not changed** (owner to decide; `docs/v5-difficulty.md`): a cutthroat toll is `max(50, half the carried value)` but gold can't be carried in from camp, so a fresh party can't pay and the demand is a forced fight against four level-5 members (5 of 16 Level 2 delves in one seed).
 
 **Numbers** (16 delves a cell; a 95% Wilson interval on done is about ±20 points at this size, so read the shape): the gap table in `docs/v5-difficulty.md`.
+
+### 32.15 The threshold: stairs and the lift (owner, 2026-10-28)
+
+Players: the stairs "feel cumbersome", "stepping on each other's toes". The owner wants quick elegance that removes the queue, keeps the stairs a threshold, and gives "some amount of warning, even if only slight": nobody stumbles blind into a big encounter, but the stairs are not safe either. "Take the stairs together" is parked (docs/ideas-later.md).
+
+_Written before building; the rules and tests are filled in as each piece lands._
+
+### 32.16 The toll a fresh party cannot pay (owner, 2026-10-28: option a)
+
+Found by the bot (32.14): a cutthroat crew demanded `max(50, half the carried value)`, but gold stays in camp, so a party that had looted nothing met the Gallows Choir with empty pockets and the only answer was a fight against four level-5 members (5 of 16 Level 2 delves in one seed; the careless Level 3 party's five forced Wake fights).
+
+- **Empty pockets are let by.** A waiting cutthroat crew that notices (or hears) a party whose carried value (`partyValue`: gold, gems, jewelry, heirlooms, hoard; never story items) is 0 stays `waiting`, is `spotted`, and says once: "<lead> looks you over. 'Nothing on you? Go on, then. <crew> will see you on the way out.'" (`RivalCrew.letBy`; event `rivalsStance: waiting`, the HUD plays a soft horn and lets the say line speak). It demands again the next time it notices or hears the party carrying anything.
+- **The toll never exceeds what the party carries:** `min(carried, max(TOLL_MIN 50, round5(carried / 2)))`. 30 carried: 30 (all of it); 80: 50; 200: 100. Payment is as before (gold first, then gems and jewelry smallest first, no change).
+- Unchanged: demanding → hostile at the next world phase if unpaid; refusing is a fight; a paid crew keeps the coin.
+- Tests: engine.test.ts ("noise of 4 or more…", "V5.0: a party carrying nothing is let by once…"); the 26.2 and crews.test premises now carry gold.
+- The bot: the Level 2 and 3 scenarios' forced fights are gone; `tolls refused for want of gold` should read 0.
+

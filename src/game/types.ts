@@ -721,8 +721,10 @@ export interface RivalCrew {
   goal: 'loot' | 'objective' | 'leave';
   /** Spec 18.6: what they're after, for the parley card ("the chapel chest", 3 rounds, ~60 gold). */
   aim?: { at: Pos; what: string; rounds: number; value: number };
-  /** Gold value of the toll asked while demanding. */
+  /** Gold value of the toll asked while demanding. V5.0 (spec 32.16): never more than the party carries. */
   toll?: number;
+  /** V5.0 (spec 32.16): a cutthroat crew that found the party carrying nothing let it by ("we'll see you on the way out"); it demands again when the party next shows with loot. */
+  letBy?: boolean;
   /** Rounds of sell-sword service left. */
   hiredRounds?: number;
   /** A job paid for and not yet done. */

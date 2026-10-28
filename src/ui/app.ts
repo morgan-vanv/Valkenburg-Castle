@@ -807,6 +807,9 @@ export class App {
           } else if (e.stance === 'hostile') {
             sfx.play('sword', { pitch: 0.8 });
             if (!dealt) this.hud.log(`${name} draw steel. They are hostile.`, 'log-enemy');
+          } else if (e.stance === 'waiting' && crew?.letBy) {
+            // V5.0 (spec 32.16): empty pockets let by; the engine's say line carries the words.
+            sfx.play('horn', { pitch: 0.8, gain: 0.3 });
           } else if (!dealt) this.hud.log(`${name}: ${st.name.toLowerCase()}. ${st.text}`, e.stance === 'hired' ? 'log-ally' : '');
           continue;
         }

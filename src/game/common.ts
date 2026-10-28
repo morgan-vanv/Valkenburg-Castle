@@ -646,9 +646,23 @@ export function round5(n: number): number {
 export function crewDemand(c: Ctx): void {
   const cr = c.d.rivals;
   if (!cr || cr.temperament !== 'cutthroat' || cr.stance !== 'waiting') return;
+  // V5.0 (spec 32.16, owner): gold stays in camp, so a party that has looted nothing can't pay. Empty pockets are let
+  // by, once, with a promise; the crew demands again when the party next shows with loot, and never asks more than
+  // the party carries (the floor TOLL_MIN applies when there's that much).
+  const carried = partyValue(c);
+  if (carried <= 0) {
+    if (!cr.letBy) {
+      cr.letBy = true;
+      cr.spotted = true;
+      const lead = rivalsOnMap(c)[0];
+      c.ev.push({ type: 'rivalsStance', stance: 'waiting' });
+      say(c, `${lead?.name ?? cr.name} looks you over. "Nothing on you? Go on, then. ${cr.name} will see you on the way out."`);
+    }
+    return;
+  }
   cr.stance = 'demanding';
   cr.spotted = true;
-  cr.toll = Math.max(TOLL_MIN, round5(partyValue(c) / 2));
+  cr.toll = Math.min(carried, Math.max(TOLL_MIN, round5(carried / 2)));
   cr.demandRound = c.d.round;
   c.ev.push({ type: 'rivalsStance', stance: 'demanding' });
   const lead = rivalsOnMap(c)[0];
