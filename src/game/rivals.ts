@@ -409,7 +409,7 @@ export function rivalOverwatchFire(c: Ctx, heroId: string): void {
     if (crewCounts(r) && !spendCrewArrow(r, 'plain')) continue;
     say(c, `${r.name} looses an arrow at ${heroName(c, heroId)}.`);
     c.ev.push({ type: 'cast', by: r.id, spell: 'overwatch', targetId: heroId, at: { ...h.at } });
-    strike(c, r.id, heroId, Math.max(1, st.slots - (!!r.seenBy?.includes(heroId) ? DODGE_SLOTS : 0)), st.chance, st.dmg, 'Overwatch'); // V5.0 (spec 32.9)
+    strike(c, r.id, heroId, Math.max(1, st.slots - DODGE_SLOTS), st.chance, st.dmg, 'Overwatch'); // V5.0 (spec 32.9): the party ducks a hostile crew's arrows
     return;
   }
 }

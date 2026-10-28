@@ -1480,3 +1480,25 @@ The owner approved the pitch's option 1 ("sounds perfect"): a counting tally wit
 - **Left behind** (room to do better, in the castle's voice): chests the party saw (in the delve's `explored` memory) and left shut, by room ("A chest in the library is still shut."); loot seen on the floor and not taken (gold, gems, jewelry, hoard; the piles' rooms and their worth); the fallen's packs ("Lost inside: … It waits where they fell.", moved here from Carried out). With nothing: "Nothing you saw was left behind." No engine change: the delve's explored set, chests and ground carry it.
 - The headline's line no longer mentions the lantern (gone since 31.5): the rounds inside, and the rounds of torchlight that came back.
 - Layout: two columns (Carried out | The party; Left behind | The castle remembers) with Won back spanning the row between. Checks: v40-hud-check.mjs (the tally waits, E skips, the boxes in order).
+
+### 32.12 Status visuals, the HUD side (P, 2026-10-28; UI only)
+
+From `docs/v5-status-visuals.md`, the party card's side (the owner approved the spec's three answers: the dark pulse only on Level 3, mood glyphs kept, the hunting monster's red ring joins the noticed popup; those are G's in-world work). hud.ts `statusIcons`, `railCard`, `darkLines`; style.css.
+
+- Each stance has its own mark and colour, ordered by priority: dozing (zz), **braced** (gold shield), **guarding X** (gold) and **guarded by X** (on the friend's card), **overwatch** (eye, with the hero's Ask / Always / Never), **veiled** (violet hood, rounds), **warded** (blue heart, rounds). "Protected" (one shield for three states) and "Also" (overwatch and guarding as prose) are gone; "Also" keeps only the passive shield, night-eye, escorting, Rally's cooldown and the ale.
+- The downed card's bleed count is the loud thing (a large numeral in the Down tag, `.dl-bleed[data-bleed]`) with a slow red pulse on the badge; the poisoned card's HP bar ends in a green stripe (what the tick costs); the dark card's badge is drained and its name goes cold blue.
+- The log names the dark once per hero per delve: "The dark closes on Keven." on Level 3, "Keven stands in the dark." elsewhere.
+- The Legend's status column lists the new marks. Figure tags (the strips over the figures) are G's in `diorama.ts`; their content is specified in `docs/v5-status-visuals.md`. Checks: v40-hud-check.mjs (the marks on two cards; the bleed count).
+
+### 32.13 A balance pass after 32.9 and 32.10 (owner, 2026-10-28)
+
+The owner: "tone it down a little... I still like it being really difficult when you get to the deeper levels... the game sometimes errs on being slightly too difficult." Measured in the arena (`SEED=1 PARTY=par,par4`, 20 fights a cell; the arena now gives a party with forge armor its Sellsword's and Keven's shields, `PARTY_SHIELD=0` turns it off; `LEVEL=n` sets the crew's level for a run):
+
+| Crew | Party | Before 32.9 | After 32.9 + 32.10, no shields | With shields (block at 3+) | Change made | After |
+| --- | --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (L4) | 3 × L2 / 4 × L2 | 45% / 55% | 60% / 65% | 60% / 65% (no armor at L2, no shield) | none | 60% / 65% |
+| Ferrymen (L4) | 3 × L3 / 4 × L3 | 55% / 65% | 50% / 25% | 100% / 85% | none (level 3 overshoots to 85% / 85%; Kees's darts and Brecht's second charge change nothing) | 50% / 25% without a shield, 100% / 85% with |
+| Gallows Choir (L5) | 3 × L3 / 4 × L3 | 75% / 60% | 55% / 65% | 85% / 75% | none | 55% / 65% |
+| The Wake | 4 × L4 | 40% | 35% | 40% | **level 6 → 5** | **45%** (no shields) |
+
+The shield is now the biggest single lever in a crew fight (three near-free blocks a hero, one Focus each), so a party that bought one at Gerda's meets the Level 2 crews as an easy fight and a party without one as a hard one: a tradeoff the player chooses, left as is. The crew Sellsword's own block threshold (3 or 4) changes nothing measurable. Crew Rangers now lose the dodge slot against any hero while the crew is hostile (not only one who has them in `seenBy`, which cleared whenever they stood out of sight: a crew archer in the dark kept the full draw plus the sneak slot); a hero who hasn't noticed her still gives the sneak slot (net the full draw). The Level 2 check in the sim (`SCENARIO=l2`) stays at 0 of 16 done for the crude bot and isn't used for this pass. Open for the next pass: the Ferrymen's four without shields (25%); the Choir's parity (55%, fine).

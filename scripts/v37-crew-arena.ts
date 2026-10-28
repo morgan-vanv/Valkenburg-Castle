@@ -58,7 +58,7 @@ function count(ev: { type: string; text?: string; attacker?: string; damage?: nu
 }
 // V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
 // enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
-const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : q.kind === 'shieldBlock' ? ((q.damage ?? 0) >= 3 ? 'yes' : 'no') : 'no') } // V5.0 (spec 32.10): block a hit of 3+);
+const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : q.kind === 'shieldBlock' ? ((q.damage ?? 0) >= 3 ? 'yes' : 'no') : 'no') }); // V5.0 (spec 32.10): block a hit of 3+
 
 type PartyDef = {
   name: string; heroes: [HeroClass, number][]; weaponTier?: 0 | 1 | 2; armorTier?: 0 | 1 | 2; potions?: number;
@@ -127,6 +127,9 @@ function setup(seed: number, pd: PartyDef, crewId: CrewId): GameState {
   });
   for (const h of s.campaign.roster) {
     h.weaponTier = pd.weaponTier ?? 0;
+    // V5.0 (spec 32.10): a party with armor from the forge has its Sellsword's shield too (the arena's Sellsword and
+    // Keven block as crews do); PARTY_SHIELD=0 turns it off for comparison.
+    if ((pd.armorTier ?? 0) >= 1 && (h.cls === 'sellsword' || h.cls === 'heir') && process.env.PARTY_SHIELD !== '0') h.shield = true;
     h.armorTier = pd.armorTier ?? 0;
   }
   const packs: Record<string, string[]> = {};
@@ -296,6 +299,7 @@ for (const crewId of CREW_LIST) {
   if (process.env.ARMOR) CREWS[crewId].armorTier = Number(process.env.ARMOR) as 0 | 1 | 2;
   // V4.1 (squads, tuning): DROP="name,name" sets the crew's drop order; PACK="Name=item+item;Name=item" a member's pack.
   if (process.env.DROP) CREWS[crewId].drop = process.env.DROP.split(',');
+  if (process.env.LEVEL) (CREWS[crewId] as { level: number }).level = Number(process.env.LEVEL); // V5.0 tuning: the crew's level
   for (const part of (process.env.PACK ?? '').split(';').filter(Boolean)) {
     const [who, items] = part.split('=');
     const m = CREWS[crewId].members.find((x) => x.name === who);

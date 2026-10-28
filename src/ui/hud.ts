@@ -2540,6 +2540,30 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     this.dio.setDarkHeroes(darks);
     this.renderGloam(darks);
     this.applyDark();
+    this.darkLines(darks);
+  }
+
+  /** V5.0 (spec 32.12): the log names it once per hero per delve when they first stand unlit ("The dark closes on Keven." on Level 3). */
+  private darkLogged = new Map<string, Set<string>>();
+  private darkLines(darks: string[]): void {
+    const s = this.state;
+    const d = s?.delve;
+    if (!s || !d) return;
+    const key = `${s.seed}:${s.campaign.delveCount}`;
+    let seen = this.darkLogged.get(key);
+    if (!seen) {
+      this.darkLogged.clear();
+      seen = new Set();
+      this.darkLogged.set(key, seen);
+    }
+    for (const id of darks) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const hd = d.heroes.find((x) => x.heroId === id);
+      const name = this.heroDef(id)?.name ?? id;
+      if (hd?.at.level === 3) this.log(`The dark closes on ${name}.`, 'log-enemy');
+      else this.log(`${name} stands in the dark.`, 'log-dim');
+    }
   }
 
   private railCard(hd: HeroInDelve, def: Hero, i: number, risk: { levels: number; damage: number; levelName: string } | null, dark: boolean): HTMLElement {
@@ -2560,7 +2584,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         'div',
         { class: `dl-rcard st-${hd.status} cls-${def.cls} ${sel ? 'sel' : ''}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}`, ...(this.crawler(hd) ? { onclick: () => this.select(hd.heroId) } : {}) },
         badge,
-        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
+        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, hd.status === 'downed' ? h('span', { class: 'dl-fate downed dl-bleed', 'data-bleed': `${hd.bleed}` }, 'Down · ', h('b', { class: 'num' }, `${hd.bleed}`)) : h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
       );
     }
     const pip = (on: boolean, what: string, tip: string) => h('span', { class: `dl-pip ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': `${what} ${on ? 'ready' : 'used'}` }, on ? icon(what === 'Move' ? 'move' : 'dot', 9) : '');
@@ -2616,16 +2640,18 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     else if ((hd.rooted ?? 0) > 0) add('bad rooted', 'chain', `Rooted · can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
     const dragger = d.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut);
     if (dragger) add('bad dragged', 'hand', `Dragged · ${dragger.name} is hauling ${name} toward the way out. Kill, down or fear ${dragger.name} to free them.`);
-    const guards: string[] = [];
-    if (hd.braced) guards.push(`Braced: hits do 1 less, enemies roll −${V37.bracePenalty}%`);
-    if (hd.ward > 0) guards.push(`Warded ${hd.ward} round${hd.ward === 1 ? '' : 's'}: 1 less per hit`);
-    if (hd.veil > 0) guards.push(`Veiled ${hd.veil} round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name} (attacking or noise ${VEIL_BREAK_NOISE}+ breaks it)`);
-    if (guards.length) add('guarded', 'shield', `Protected · ${guards.join('\n')}`);
+    // V5.0 (spec 32.12, docs/v5-status-visuals.md): stances each get their own mark; "Protected" and "Also" are gone.
+    if ((hd as HeroInDelve & { dozing?: boolean }).dozing) add('bad doze', 'zz', `Dozing · ${name} does nothing this turn and hears nothing; they wake next round.`);
+    if (hd.braced) add('braced', 'shield', `Braced · hits on ${name} do 1 less and enemies roll −${V37.bracePenalty}% against them, until their next turn.${this.heroDef(hd.heroId)?.shield ? ' With the shield: ranged hits do 2 less.' : ''}`);
+    if (hd.guarding) add('guarding', 'shield', `Guarding ${this.nameOf(hd.guarding)} · hits on them land on ${name} instead, while they stand beside each other.`);
+    const guardedBy = d.heroes.find((x) => x.guarding === hd.heroId && x.status === 'active');
+    if (guardedBy) add('guarded', 'shield', `Guarded by ${this.heroDef(guardedBy.heroId)?.name ?? guardedBy.heroId} · hits on ${name} land on them instead, while they stand beside each other.`);
+    if (hd.overwatch) add('overwatch', 'eye', `Overwatch · ${name} shoots the first enemy that moves or acts within ${OVERWATCH_RANGE} in sight${hd.reactions?.overwatch === 'always' ? ', without asking' : hd.reactions?.overwatch === 'never' ? ' (set to Never: it lapses)' : ' (asks first)'}.`);
+    if (hd.veil > 0) add('veiled', 'veil', `Veiled · ${hd.veil} round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}. Attacking, or noise ${VEIL_BREAK_NOISE}+, breaks it.`);
+    if (hd.ward > 0) add('warded', 'heart', `Warded · ${hd.ward} round${hd.ward === 1 ? '' : 's'}: 1 less per hit.`);
     const more: string[] = [];
-    if (this.heroDef(hd.heroId)?.shield) more.push('Shield: ranged hits do 1 less (2 while braced).');
-    if (hd.overwatch) more.push(`Overwatch: shoots the first enemy that moves or acts within ${OVERWATCH_RANGE}.`);
+    if (this.heroDef(hd.heroId)?.shield && !hd.braced) more.push('Shield: ranged hits do 1 less (2 while braced); a hit over 1 can be blocked for 1 Focus (the hit does 1).');
     if (hd.nightEyes && hd.nightEyes > 0) more.push(`Night-eye: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties.`);
-    if (hd.guarding) more.push(`Guarding ${this.nameOf(hd.guarding)}.`);
     if (hd.escorting) more.push(`${this.nameOf(hd.escorting)} follows ${name}. Leave with them next to you to get them out.`);
     if (hd.rallyCooldown > 0) more.push(`Rally ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
     if (hd.ale) {
@@ -4040,7 +4066,9 @@ function legend(): HTMLElement[] {
         li(svgEl('eyeOff', '#ff8a8f'), 'Back exposed'),
         li(svgEl('drop', '#ff8a8f'), 'By a drop'),
         li(svgEl('sword', '#ff8a8f'), 'Something means to strike them'),
-        li(svgEl('shield', '#9cc8ff'), 'Braced, warded or veiled'),
+        li(svgEl('shield', '#e8a33d'), 'Braced, or guarding a friend'),
+        li(svgEl('veil', '#b9a7ff'), 'Veiled'),
+        li(svgEl('eye', '#f0e6d2'), 'On overwatch'),
         li(svgEl('moon', '#9a8f7d'), 'Standing in the dark'),
       ),
       h(

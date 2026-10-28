@@ -3562,18 +3562,18 @@ describe('V3.7 crews', () => {
   it('builds members like heroes of their class at the crew\'s level, with tiers, a pack, mana and a purse', () => {
     const s = delve({ heroes: ['brann'] });
     const wake = buildCrew(s as GameStateX, 'the-wake', WAKE_SPOTS);
-    // V4.1 (WS7, spec 31.9): the Wake at level 6 (was 4).
+    // V4.1 (WS7, spec 31.9): the Wake at level 6 (was 4); V5.0 (spec 32.13): level 5.
     expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
-      ['sellsword', 20, 6, 2, 1], ['hedgewitch', 17, 6, 2, 1], ['shadowmancer', 16, 6, 2, 1], ['sapper', 19, 6, 2, 1],
+      ['sellsword', 18, 5, 2, 1], ['hedgewitch', 15, 5, 2, 1], ['shadowmancer', 14, 5, 2, 1], ['sapper', 17, 5, 2, 1],
     ]);
     expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['improvised-charge', 'charge', 'charge', 'charge']]); // V4.0 (spec 28.6): class kit
-    // V4.0 (spec 30.1, 30.2): Spade, a level 6 Sapper, brings 6 improvised explosives (and 3 bought); armor 0 + 1, Might 60 + 25 + 20.
-    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 6, slots: 0 });
-    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 19, chance: 105, armor: 1 });
+    // V4.0 (spec 30.1, 30.2): Spade, a level 5 Sapper (V5.0), brings 5 improvised explosives (and 3 bought); armor 0 + 1, Might 60 + 20 + 20.
+    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 5, slots: 0 });
+    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 17, chance: 100, armor: 1 });
     expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
     expect(wake.members.map((r) => r.focus)).toEqual([3, 3, 3, 3]); // V4.1 (WS7): Focus for key rolls
     // Sellsword: Sword 3 slots at Might 70 + 25 (five levels) + 20 (weapon 2); armor 1 + 1; move 4.
-    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 115, dmg: 2, armor: 2, move: 4, range: 1 });
+    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 110, dmg: 2, armor: 2, move: 4, range: 1 });
     // Hedgewitch: Staff 2 Might slots, Might isn't her main stat: 35 + 20.
     expect(rivalStats(wake.members[1]!)).toMatchObject({ slots: 2, chance: 55, dmg: 1, armor: 1 });
     expect(wake.members.every((r) => r.loot.length === 1 && r.loot[0]!.kind === 'gold' && r.loot[0]!.amount === 50)).toBe(true);

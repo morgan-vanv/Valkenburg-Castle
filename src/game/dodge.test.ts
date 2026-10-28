@@ -69,7 +69,7 @@ describe('V5.0 (spec 32.9): it saw you draw', () => {
     expect(e.preview(s, 'rae', 'knockback', { id: m.id }).slots).toBe(2);
   });
 
-  it('a crew Ranger loses the slot on a hero who has noticed her, and keeps the sneak slot on one who has not', () => {
+  it('a crew Ranger loses the slot against the party (hostile = noticed); a hero who has not noticed her still gives the sneak slot', () => {
     const s = delve([]);
     const k = hero(s, 'keven');
     k.at = at(2, 10, 8);
@@ -91,6 +91,6 @@ describe('V5.0 (spec 32.9): it saw you draw', () => {
       return shots[0]!.slots;
     };
     expect(shotWith(['keven'])).toBe(2); // Keven has noticed her: 3 − 1
-    expect(shotWith([])).toBe(4); // unnoticed: 3 + the sneak slot
+    expect(shotWith([])).toBe(3); // unnoticed: 3 + the sneak slot − the party's dodge (a hostile crew is a noticed crew)
   });
 });

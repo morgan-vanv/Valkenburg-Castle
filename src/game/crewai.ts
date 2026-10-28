@@ -725,7 +725,7 @@ export function useKit(c: Ctx, r: RivalX, it: Intent): boolean {
       c.ev.push({ type: 'thrown', by: r.id, kind, from: { ...r.at }, to: { ...t.at } });
       const at = { ...t.at };
       const adj = distance(r.at, t.at) <= 1 ? 1 : 0;
-      const dodge = heroNoticed(r, t.id) ? DODGE_SLOTS : 0; // V5.0 (spec 32.9), pillar 17
+      const dodge = DODGE_SLOTS; // V5.0 (spec 32.9), pillar 17: a hostile crew's archer is a noticed archer (as a hostile crew is to the party)
       const hit = strike(c, r.id, t.id, Math.max(1, st.slots - adj - dodge), st.chance, st.dmg, 'Shot');
       crewLoosed(c, r, kind, t.id, at, hit === t.id);
       return true;
@@ -1111,8 +1111,9 @@ export function hostileAct(c: Ctx, r: RivalX): void {
     // extra slot is the blindside slot `strike` adds from behind).
     const unnoticed = !heroNoticed(r, t.id);
     const stab = unnoticed && r.cls === 'burglar' && st.range === 1 && inRearHalf(t.hero, r.at);
-    // V5.0 (spec 32.9, pillar 17): a hero who has noticed the archer ducks the arrow: −1 slot on a bow shot.
-    const slots = Math.max(1, st.slots + (unnoticed ? SNEAK_ATTACK_SLOTS : st.range > 1 ? -DODGE_SLOTS : 0));
+    // V5.0 (spec 32.9, pillar 17): the party ducks a hostile crew's arrows (−1 slot on a bow shot), as a hostile crew ducks
+    // the party's; a hero who hasn't noticed the archer still gives the sneak-attack slot (net: the full draw).
+    const slots = Math.max(1, st.slots + (unnoticed ? SNEAK_ATTACK_SLOTS : 0) - (st.range > 1 ? DODGE_SLOTS : 0));
     const dmgPer = stab ? st.dmg * BACKSTAB_DMG_MULT : st.dmg;
     if (stab) tell(c, r, `${r.name} slips behind ${heroName(c, t.id)} and backstabs.`, t.at);
     else if (unnoticed) tell(c, r, `${r.name} strikes before ${heroName(c, t.id)} sees it coming.`, t.at);

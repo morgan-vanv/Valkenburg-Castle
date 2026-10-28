@@ -246,6 +246,25 @@ const SHOTS = process.env.SHOTS ?? '';
   const vcard = await p.evaluate((id) => { const e = document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`); return e ? { tip: e.dataset.tip ?? '', label: e.getAttribute('aria-label') ?? '' } : null; }, ids.f);
   check('poison: a green drop on the card ("Poisoned"), hover "Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out."', !!vcard && vcard.label === 'Poisoned' && /^Poisoned: −1 a turn, never below 1\. Antipoison, Mend, or get out\./.test(vcard.tip), JSON.stringify(vcard));
   if (SHOTS) await p.screenshot({ path: `${SHOTS}/poison-card.png`, clip: { x: 0, y: 80, width: 300, height: 320 }, timeout: 180000 });
+  // V5.0 (spec 32.12): stances each have their own mark on the card: braced (gold), veiled (violet), overwatch, guarding, dozing; the downed card's count is the loud thing.
+  {
+    const marks = await p.evaluate((x) => {
+      const s = structuredClone(window.vc.state());
+      const k = s.delve.heroes.find((h) => h.heroId === x.k);
+      const f = s.delve.heroes.find((h) => h.heroId === x.f);
+      k.braced = true; k.veil = 2; k.guarding = x.f; f.overwatch = true;
+      const g = s.delve.heroes.find((h) => h.heroId !== x.k && h.heroId !== x.f && h.status === 'active');
+      if (g) { g.status = 'downed'; g.hp = 0; g.bleed = 2; }
+      window.vc.load(s);
+      const cls = (id) => [...document.querySelectorAll(`.dl-rcard[data-hero="${id}"] .dl-si`)].map((e) => e.className.replace('dl-si', '').trim());
+      return { k: cls(x.k), f: cls(x.f), bleed: g ? document.querySelector(`.dl-rcard[data-hero="${g.heroId}"] .dl-bleed`)?.dataset.bleed : 'n/a', guardedTip: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-si.guarded`)?.dataset.tip ?? '' };
+    }, ids);
+    check('status marks: braced, veiled and guarding on one card; overwatch and "guarded by" on the other', marks.k.includes('braced') && marks.k.includes('veiled') && marks.k.includes('guarding') && marks.f.includes('overwatch') && marks.f.includes('guarded') && /Guarded by/.test(marks.guardedTip), JSON.stringify(marks));
+    check('a downed card carries its bleed count as the loud thing', marks.bleed === '2', marks.bleed);
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/status-cards.png`, clip: { x: 0, y: 80, width: 300, height: 420 }, timeout: 180000 });
+    await p.evaluate((x) => { const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.braced = undefined; h.veil = 0; h.guarding = undefined; h.overwatch = false; if (h.status === 'downed') { h.status = 'active'; h.hp = 5; h.bleed = 0; } } window.vc.load(s); window.vc.hud.select(x.k); }, ids);
+    await p.waitForTimeout(150);
+  }
   const slot = await p.evaluate(() => { const e = document.querySelector('.dl-pack-slots .dl-slot[data-action="antidote"]'); return e ? { usable: e.classList.contains('usable'), tip: e.dataset.tip ?? '' } : null; });
   check('the antipoison sits in the pack, usable ("Cures poison")', !!slot && slot.usable && /Antipoison/.test(slot.tip) && /[Cc]ures poison/.test(slot.tip), slot?.tip.split('\n')[0]);
   await p.click('.dl-pack-slots .dl-slot[data-action="antidote"]');

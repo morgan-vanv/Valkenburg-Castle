@@ -2594,14 +2594,30 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-hexb, .cbadge.dl-hexb { width: 36px; height: 36px; font-size: 17px; clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); display: flex; align-items: center; justify-content: center; }
 .dl-hexkey { position: absolute; right: -5px; bottom: -3px; font-size: 8px !important; padding: 0 2px !important; background: #120f0d; line-height: 1.2; }
 .dl-rcard-b { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.dl-rcard-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dl-rcard-n { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.dl-stat-icons { display: flex; align-items: center; gap: 3px; flex: none; }
+.dl-rcard-top { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 2px; }
+.dl-rcard-n { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 0 auto; }
+/* V5.0 (spec 32.12): more marks than before; the row wraps under the name rather than cutting it. */
+.dl-stat-icons { display: flex; align-items: center; gap: 3px; flex: none; flex-wrap: wrap; }
 .dl-si { display: inline-flex; align-items: center; justify-content: center; color: var(--dl-ink-3); line-height: 0; }
 .dl-si.lantern { color: var(--dl-cream); }
 .dl-si.lantern.shut { color: var(--dl-ink-4); }
 .dl-si.bad { color: var(--dl-red-soft); }
 .dl-si.guarded { color: #9cc8ff; }
+/* V5.0 (P, spec 32.12, docs/v5-status-visuals.md): each stance its own mark and colour (gold for guard and brace, violet for the veil, cold blue for the dark, green for poison, red for bleeding). */
+.dl-si.braced, .dl-si.guarding { color: #e8a33d; }
+.dl-si.veiled { color: #b9a7ff; }
+.dl-si.warded { color: #9cc8ff; }
+.dl-si.overwatch { color: var(--dl-cream); }
+.dl-si.doze { color: #c9c3b5; }
+.dl-rcard.dark:not(.sel) .dl-hexb { filter: saturate(0.35) brightness(0.8); }
+.dl-rcard.dark .dl-rcard-n { color: #a9a9c4; }
+.dl-rcard.poisoned .dl-hp { box-shadow: inset -6px 0 0 var(--venom-dim); }
+.dl-rcard.poisoned .dl-hp i { border-right: 2px solid var(--venom); }
+.dl-fate.dl-bleed { display: inline-flex; align-items: baseline; gap: 4px; }
+.dl-fate.dl-bleed b { font-size: 16px; line-height: 1; }
+.dl-rcard.st-downed .dl-hexb { animation: dl-bleed-pulse 1.6s ease-in-out infinite; }
+@keyframes dl-bleed-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(192, 71, 58, 0); } 50% { box-shadow: 0 0 0 3px rgba(192, 71, 58, 0.55); } }
+@media (prefers-reduced-motion: reduce) { .dl-rcard.st-downed .dl-hexb { animation: none; } }
 .dl-si.dark { color: #8a8aa8; }
 .dl-si.more { color: var(--dl-ink-4); }
 .dl-si.sneak { font-size: 11px; line-height: 1.2; padding: 1px 6px; border: 1px solid var(--line-hi); border-radius: 999px; color: var(--dl-ink-3); }

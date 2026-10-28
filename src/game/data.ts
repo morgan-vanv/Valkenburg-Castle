@@ -906,8 +906,9 @@ export const CREWS: Record<CrewId, CrewDef> = {
     hideout: { siteId: 'gallows-choir-hideout', where: 'the Tunnels' },
   },
   'the-wake': {
-    // V4.1 (WS7, spec 31.9): level 6 (was 4, MAX_LEVEL now): even with a party of four at level 4.
-    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 6, weaponTier: 2, armorTier: 1, contracts: [3], purse: 50,
+    // V4.1 (WS7, spec 31.9): level 6 (was 4, MAX_LEVEL now): even with a party of four at level 4. V5.0 (spec 32.13, owner's
+    // tone-down): level 5: the party of four at level 4 wins 45% (was 35% after 32.9 and 32.10).
+    id: 'the-wake', name: 'The Wake', temperament: 'cutthroat', level: 5, weaponTier: 2, armorTier: 1, contracts: [3], purse: 50,
     members: [
       { name: 'Mother Grave', cls: 'sellsword', pack: ['potion', 'potion'] },
       { name: 'Sexton', cls: 'hedgewitch', pack: ['potion', 'potion'] },
