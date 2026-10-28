@@ -27,7 +27,7 @@ import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
 import { Chronicle } from './hud-chronicle';
 import { Coach } from './coach';
 import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, readRoll, statName, type RollRead } from './hud-roll';
-import { partyDone } from './autoend'; // V5.0 (P, B5)
+import { heroDone, partyDone, stillCan } from './autoend'; // V5.0 (P, spec 32.5, 32.6)
 
 export { hitOdds } from './hud-roll';
 
@@ -277,7 +277,7 @@ export class Hud {
     // Clicking anywhere else closes the More menu and the game menu.
     addEventListener('pointerdown', (e) => {
       const t = e.target as Node;
-      this.cancelAutoEnd(); // V5.0 (P, B5): a click is the player's: the turn waits for them
+      this.cancelFlow(); // V5.0 (P): a click is the player's: the turn waits for them
       if (!this.moreEl.classList.contains('hidden') && !this.moreEl.contains(t) && !(t instanceof Element && t.closest('[data-more]'))) this.moreEl.classList.add('hidden');
       if (!this.menuEl.classList.contains('hidden') && !this.menuEl.contains(t) && !(t instanceof Element && t.closest('[data-menu]'))) this.menuEl.classList.add('hidden');
       // V4.1 (spec 31.13): the Reactions popover closes on a click elsewhere.
@@ -353,24 +353,38 @@ export class Hud {
     this.refresh();
   }
 
-  // ---- V5.0 (P, B5, spec 32.5): auto end turn
-  private autoEndTimer: ReturnType<typeof setTimeout> | null = null;
+  // ---- V5.0 (P, spec 32.5 and 32.6): the turn's flow. One test (autoend.ts `heroDone`) decides when the camera
+  // cycles to the next hero, when the question before End turn is asked, and when the turn ends on its own.
+  private flowTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * After a command: when the setting is on and nobody can move, act or use anything, end the turn after a short beat
-   * (long enough to read what just happened; cancelled by any input, panel or playback in between). Never while a
-   * reaction, a roll panel, a pick or a confirmation is open. Skips the idle question: nobody here could act.
+   * After a command. If the selected hero has nothing plausible left, wait a beat (long enough to read what just
+   * happened; any key, click, panel or playback cancels it), then cycle the selection and the camera to the next hero
+   * who still has something to do; with nobody left and the setting on, end the turn instead, with a toast and no
+   * idle question (nobody here could act). The camera is never taken away from a hero who can still open the chest
+   * beside them, take its loot, open a door, parley, or act.
    */
-  maybeAutoEnd(): void {
-    this.cancelAutoEnd();
+  scheduleFlow(): void {
+    this.cancelFlow();
     const s = this.state;
-    if (!s || !this.host.settings.autoEndTurn || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
-    if (!partyDone(this.engine, s)) return;
+    const d = s?.delve;
+    if (!s || !d || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+    const sel = this.selected();
+    if (!sel || sel.status !== 'active' || !heroDone(this.engine, s, sel.heroId)) return;
     const beat = this.host.settings.speed === 0 ? 220 : 700;
-    this.autoEndTimer = setTimeout(() => {
-      this.autoEndTimer = null;
+    this.flowTimer = setTimeout(() => {
+      this.flowTimer = null;
       const now = this.state;
-      if (!now || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+      const dn = now?.delve;
+      if (!now || !dn || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+      const cur = this.selected();
+      if (!cur || !heroDone(this.engine, now, cur.heroId)) return;
+      const ready = dn.heroes.filter((x) => x !== cur && able(x) && !heroDone(this.engine, now, x.heroId));
+      const next = ready.find((x) => x.at.level === this.dio.shownLevel) ?? ready[0];
+      if (next) {
+        this.select(next.heroId);
+        return;
+      }
       if (!this.host.settings.autoEndTurn || !partyDone(this.engine, now)) return;
       this.toast('Everyone has done what they can. Ending the turn.');
       this.coach.done(3);
@@ -379,25 +393,15 @@ export class Hud {
     }, beat);
   }
 
-  cancelAutoEnd(): void {
-    if (this.autoEndTimer !== null) {
-      clearTimeout(this.autoEndTimer);
-      this.autoEndTimer = null;
+  cancelFlow(): void {
+    if (this.flowTimer !== null) {
+      clearTimeout(this.flowTimer);
+      this.flowTimer = null;
     }
   }
 
-  /** After a command: if the selected hero is spent, select the next one with something left. */
-  autoAdvance(): void {
-    const d = this.state?.delve;
-    const sel = this.selected();
-    if (!d || !sel || sel.status !== 'active' || (able(sel) && !(sel.moved && sel.acted))) return;
-    const ready = d.heroes.filter((x) => able(x) && (!x.moved || !x.acted));
-    const next = ready.find((x) => x.at.level === this.dio.shownLevel) ?? (sel.at.level === this.dio.shownLevel ? undefined : ready[0]);
-    if (next) this.select(next.heroId);
-  }
-
   setBusy(b: boolean): void {
-    if (b) this.cancelAutoEnd();
+    if (b) this.cancelFlow();
     this.busy = b;
     this.root.classList.toggle('busy', b);
     if (b) {
@@ -3256,14 +3260,14 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
           st.reduceShake = v;
           save();
         }),
-        check('Ask before ending a turn with heroes idle', !st.noEndTurnAsk, (v) => {
+        check('Ask before ending a turn while someone can still act', !st.noEndTurnAsk, (v) => {
           st.noEndTurnAsk = !v;
           save();
         }),
         check('Auto end turn', st.autoEndTurn !== false, (v) => {
           st.autoEndTurn = v;
           save();
-          if (!v) this.cancelAutoEnd();
+          if (!v) this.cancelFlow();
         }, 'When nobody can move, act or use anything, the turn ends on its own after a moment. Any key or click keeps it open.'),
         check('Lower walls near the camera', !!st.cutaway, (v) => {
           st.cutaway = v;
@@ -3509,16 +3513,17 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
   private endTurn(): void {
     if (this.busy) return;
     this.cancel();
-    const d = this.state?.delve;
-    const waiting = d ? d.heroes.filter((x) => able(x) && !x.moved && !x.acted) : [];
+    const s = this.state;
     const go = () => {
       this.coach.done(3);
       this.coach.done(1);
       void this.host.send({ type: 'endTurn' });
     };
-    if (waiting.length && !this.host.settings.noEndTurnAsk) {
-      const names = waiting.map((x) => this.heroDef(x.heroId)?.name ?? x.heroId);
-      this.confirm(`${names.join(', ')} ${waiting.length === 1 ? 'has' : 'have'} done nothing this round. End the turn anyway?`, 'End turn', go, { title: `${waiting.length} idle`, cancel: 'Keep playing' });
+    // V5.0 (P, spec 32.6): the question means "someone can still do something", on the flow's own test.
+    const can = s ? stillCan(this.engine, s) : [];
+    if (can.length && !this.host.settings.noEndTurnAsk) {
+      const lines = can.map((x) => `${this.heroDef(x.heroId)?.name ?? x.heroId} can still ${listWords(x.left.slice(0, 3))}${x.left.length > 3 ? ' and more' : ''}`);
+      this.confirm(`${lines.join('. ')}. End the turn anyway?`, 'End turn', go, { title: `${can.length} can still act`, cancel: 'Keep playing' });
       return;
     }
     go();
@@ -3527,7 +3532,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
   private onKey(e: KeyboardEvent): void {
     const s = this.state;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
-    this.cancelAutoEnd(); // V5.0 (P, B5): any key is the player's: the turn waits for them
+    this.cancelFlow(); // V5.0 (P): any key is the player's: the turn waits for them
     // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
     // V5.0 (P, B3): E is deliberately inert here. The card has two real answers and comes up during the castle's turn,
     // right after the player pressed E to end theirs; a second E must not strike (and blow their cover) unread.
@@ -3664,6 +3669,12 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
 }
 
 // ------------------------------------------------------------ helpers
+
+/** "move, Attack or Take" */
+function listWords(xs: string[]): string {
+  if (xs.length <= 1) return xs[0] ?? '';
+  return `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}`;
+}
 
 const TILE_NAME: Record<string, string> = {
   floor: 'Floor',

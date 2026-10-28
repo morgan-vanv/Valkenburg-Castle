@@ -341,7 +341,7 @@ const SHOTS = process.env.SHOTS ?? '';
   await p.keyboard.press('e');
   await p.waitForTimeout(150);
   const modal = await p.evaluate(() => ({ open: !document.querySelector('.dl-modal')?.classList.contains('hidden'), text: document.querySelector('.dl-modal-box')?.innerText ?? '' }));
-  check('E with idle heroes raises the "done nothing" check, with Enter and E on its button', modal.open && /done nothing/.test(modal.text) && /Enter\s*E/.test(modal.text.replace(/\s+/g, ' ')), JSON.stringify(modal));
+  check('E while heroes can still act raises the "can still" question, with Enter and E on its button', modal.open && /can still (move|dash|Attack)/.test(modal.text) && /Enter\s*E/.test(modal.text.replace(/\s+/g, ' ')), JSON.stringify(modal));
   const r1 = await p.evaluate(() => window.vc.state().delve.round);
   await p.keyboard.press('e');
   await idle();
@@ -623,6 +623,22 @@ if (crewAt) {
   const rc = await p.evaluate(() => window.vc.state().delve.round);
   check('auto end turn on: everyone spent, the turn ends by itself after a beat', rc === rb + 1, `${rb} → ${rc}; ${JSON.stringify(nothingLeft)}`);
   check('...and a toast said so', /Ending the turn/.test(toastEarly), toastEarly);
+  // V5.0 (P, spec 32.6): the flow. A done hero hands the selection and the camera on after a beat; one with loot in
+  // reach keeps them.
+  {
+    const re = await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); const first = s.delve.heroes.find((h) => h.status === 'active'); window.vc.hud.select(first.heroId); return first.heroId; });
+    await p.waitForTimeout(150);
+    await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.heroId === id); h.moved = true; h.acted = true; h.dashed = true; window.vc.load(s); window.vc.hud.select(id); }, re);
+    await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.hud.selectedId, sneak: false }));
+    await p.waitForFunction((id) => window.vc.hud.selectedId !== id, re, { timeout: 5000 }).catch(() => {});
+    const selAfter = await p.evaluate(() => window.vc.hud.selectedId);
+    check('a done hero: after a beat the selection (and camera) cycles to a hero with something left', selAfter !== re, `${re} → ${selAfter}`);
+    await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.heroId === id); s.delve.ground.push({ at: { ...h.at }, items: [{ id: 'fl-g', kind: 'potion', name: 'Potion', amount: 1, slots: 1 }] }); window.vc.load(s); window.vc.hud.select(id); }, re);
+    await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.hud.selectedId, sneak: false }));
+    await p.waitForTimeout(1000);
+    check('...but a done hero with loot to take keeps the selection and the camera', (await p.evaluate(() => window.vc.hud.selectedId)) === re);
+    await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); });
+  }
   // Take in reach keeps it open.
   const rd = await spent();
   await p.evaluate(() => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.status === 'active'); s.delve.ground.push({ at: { ...h.at }, items: [{ id: 'ae-g', kind: 'potion', name: 'Potion', amount: 1, slots: 1 }] }); window.vc.load(s); });

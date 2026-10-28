@@ -1,5 +1,8 @@
-// V5.0 (P, B5, spec 32.5): auto end turn. When no able hero can move, act or use anything, the turn ends on its own
-// after a short beat (the "Auto end turn" setting, on by default). This is the rule; hud.ts does the timing.
+// V5.0 (P, spec 32.5 and 32.6): the turn's flow runs on one test. A hero is **done** when there is nothing plausible
+// left for them this turn: no move or dash, and nothing the engine lists but housekeeping. The same test decides
+// three things (owner, 2026-10-27): when the camera cycles to the next hero (after a tasteful delay), when the
+// question before End turn is asked ("someone can still do something"), and when the turn ends on its own.
+// This is the rule; hud.ts does the timing.
 
 import type { Engine } from '../game/api';
 import type { ActionKind, GameState } from '../game/types';
@@ -11,11 +14,20 @@ import type { ActionKind, GameState } from '../game/types';
  */
 export const HOUSEKEEPING: ReadonlySet<ActionKind> = new Set<ActionKind>(['drop', 'give', 'snuff', 'dropTorch', 'shutter', 'setDown']);
 
+/** What a hero could still plausibly do this turn, in words ("move", "dash", "Attack", "Take"); empty when done. */
+export function heroLeft(engine: Engine, s: GameState, heroId: string): string[] {
+  const out: string[] = [];
+  const walk = engine.reachable(s, heroId, false);
+  const sneak = walk.length ? [] : engine.reachable(s, heroId, true);
+  const reach = walk.length ? walk : sneak;
+  if (reach.length) out.push(reach[0]!.dash ? 'dash' : 'move');
+  for (const o of engine.actions(s, heroId)) if (!o.blocked && !HOUSEKEEPING.has(o.action)) out.push(o.label);
+  return out;
+}
+
 /** This hero has nothing left this turn: no move or dash, and no option but housekeeping. */
 export function heroDone(engine: Engine, s: GameState, heroId: string): boolean {
-  if (engine.reachable(s, heroId, false).length) return false;
-  if (engine.reachable(s, heroId, true).length) return false;
-  return engine.actions(s, heroId).every((o) => o.blocked || HOUSEKEEPING.has(o.action));
+  return heroLeft(engine, s, heroId).length === 0;
 }
 
 /**
@@ -28,4 +40,14 @@ export function partyDone(engine: Engine, s: GameState): boolean {
   const up = d.heroes.filter((h) => h.status === 'active' || h.status === 'downed');
   if (!up.some((h) => h.status === 'active')) return false;
   return up.every((h) => heroDone(engine, s, h.heroId));
+}
+
+/** The heroes who could still do something, with what, for the question before End turn. */
+export function stillCan(engine: Engine, s: GameState): { heroId: string; left: string[] }[] {
+  const d = s.delve;
+  if (!d || s.stage !== 'delve' || d.phase !== 'player') return [];
+  return d.heroes
+    .filter((h) => h.status === 'active' || h.status === 'downed')
+    .map((h) => ({ heroId: h.heroId, left: heroLeft(engine, s, h.heroId) }))
+    .filter((x) => x.left.length > 0);
 }

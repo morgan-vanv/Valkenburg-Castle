@@ -387,9 +387,9 @@ export class App {
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
-    if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
-    // V5.0 (P, B5, spec 32.5): with nothing left for anyone, the turn ends on its own after a beat.
-    if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.maybeAutoEnd();
+    // V5.0 (P, spec 32.5, 32.6): the flow. A done hero hands the camera on after a beat; with nothing left for anyone,
+    // the turn ends on its own.
+    if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.scheduleFlow();
     // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
   }

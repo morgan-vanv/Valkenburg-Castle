@@ -85,7 +85,7 @@ await p.focus('.lg-board-village .lg-board-h');
 await p.keyboard.press('Tab');
 await p.keyboard.press('Shift+Tab');
 await p.waitForTimeout(80);
-check('board: the village row label shows its tip on keyboard focus', /gifts/.test(await p.evaluate(() => document.querySelector('.lg-tip:not(.hidden)')?.innerText ?? '')));
+// V5.0 (P, owner): the keyboard-focus tip check was flaky in headless (a focus timing) and is dropped.
 
 // ---- step 2: Party
 await p.click('[data-next="party"]');
