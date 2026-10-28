@@ -716,9 +716,10 @@ export class App {
           sfx.play('torch', { pitch: 1.4, gain: 0.6 });
           await this.dio.playEvent(e);
           continue;
-        // V5.0 (spec 32.10): a shield block: a clang; the engine's say line tells it. (G: a shield flash is under View needs.)
+        // V5.0 (spec 32.10): a shield block: a clang; the engine's say line tells it; the diorama flashes the shield gold (G, W1).
         case 'blocked':
           sfx.play('thud', { pitch: 1.6, gain: 0.5 });
+          await this.dio.playEvent(e);
           continue;
         case 'swing':
           swingNext = true;
@@ -960,6 +961,8 @@ export class App {
       }
       case 'roll':
         return enemy(e.who) && d.canSee(d.unitPos(e.who)) ? d.unitPos(e.who) : null;
+      case 'blocked': // V5.0 (spec 32.10): the block precedes its hit; the camera goes where the hit's will
+        return this.isHero(e.id) ? d.unitPos(e.id) : d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
       case 'hit':
       case 'miss': {
         if (!enemy(e.attacker)) return null;

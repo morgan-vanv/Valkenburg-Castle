@@ -249,6 +249,14 @@ describe('V4.1 (spec 31.13): the castle\'s turn pauses for a reaction', () => {
     expect(ask(c, q)).toBe('no');
     expect(c.asked).toBe(1);
     expect(() => ask(c, { ...q, enemyId: 'm9' })).toThrow(Pause);
+    // V5.0 (review): a shield block remembers its answer per hit: the same damage again keeps it, a harder hit asks anew.
+    const cb = ctx(structuredClone(s));
+    cb.answers = ['no'];
+    const qb: ReactionQuestion = { ...q, kind: 'shieldBlock', damage: 2 };
+    expect(ask(cb, qb)).toBe('no');
+    expect(ask(cb, qb)).toBe('no');
+    expect(cb.asked).toBe(1);
+    expect(() => ask(cb, { ...qb, damage: 6 })).toThrow(Pause);
     // Nobody to ask (a rules call outside apply): hidden heroes hold, overwatch shoots.
     const lone = ctx(structuredClone(s));
     expect(ask(lone, q)).toBe('no');

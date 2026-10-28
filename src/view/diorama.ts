@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import type { MoveRisks, Visibility } from '../game/api';
 import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
-import type { Brightness, CastleDef, GameEvent, GameState, Intent, Item, LevelDef, Rival, RivalCrew } from '../game/types';
+import type { Brightness, CastleDef, GameEvent, GameState, HeroInDelve, Intent, Item, LevelDef, Rival, RivalCrew } from '../game/types';
 import { AnimClock } from './anim';
 import { CameraRig, DEFAULT_DISTANCE } from './camera';
 import type { ModelKey } from './figures';
@@ -1057,7 +1057,18 @@ export class Diorama {
     // V5.0 (G, W1): the black ring is gone; an unlit hero's figure goes cold instead, and on Level 3 the
     // Gloam's pulse breathes under it (look/status.ts, synced from the state).
     this.darkRings.clear();
-    if (this.state) this.syncStatus(this.state);
+    if (this.state) {
+      this.syncStatus(this.state);
+      // The tags carry the unlit chip (src/ui/tags.ts), and the HUD sets the dark heroes after the sync: refresh them.
+      const d = this.state.delve;
+      const carriers = new Set<string>();
+      for (const x of d?.heroes ?? []) if (x.carrying && x.status === 'active') carriers.add(x.carrying);
+      for (const h of d?.heroes ?? []) {
+        if (!this.units.has(h.heroId)) continue;
+        const hero = this.state.campaign.roster.find((r) => r.id === h.heroId);
+        this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, carriers.has(h.heroId), next.has(h.heroId)));
+      }
+    }
   }
 
   /** 16.2: open or shutter the lantern model and light. */
@@ -1416,7 +1427,7 @@ export class Diorama {
       v.crouch(h.status === 'active' && (h as { sneaked?: boolean }).sneaked === true); // V4.0 (spec 28.1)
       v.setOpacity(1);
       // V4.0 HUD: a hero's tag is health only; statuses live on the party card.
-      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, carriers.has(h.heroId)));
+      this.setTag(h.heroId, heroTag(h, hero?.maxHp ?? 10, carriers.has(h.heroId), this.darkHeroes.has(h.heroId))); // V5.0: the unlit chip (P's View need)
       // V3.9 (24.2): heroes turn to their facing too.
       if (h.facing !== undefined && !v.busy && h.status === 'active') {
         const a = facingAngle(h.facing);
@@ -1601,16 +1612,23 @@ export class Diorama {
         bleed: h.status === 'downed' && !carriers.has(h.heroId) ? h.bleed : undefined,
         braced: !!h.braced,
         veiled: (h.veil ?? 0) > 0,
+        // V5.0 (review): the status spec's priority-2 marks, on active heroes.
+        guards: h.status === 'active' && h.guarding && this.units.has(h.guarding) ? h.guarding : undefined,
+        overwatch: h.status === 'active' && !!h.overwatch,
+        warded: h.status === 'active' && (h.ward ?? 0) > 0,
+        bound: h.status !== 'active' ? undefined : h.grabbedBy ? 'held' : (h.rooted ?? 0) > 0 ? 'rooted' : h.webbed ? 'webbed' : undefined,
+        dozing: h.status === 'active' && !!(h as HeroInDelve & { dozing?: boolean }).dozing,
       });
     }
     for (const m of d.monsters) {
       if (!this.units.has(m.id)) continue;
-      states.set(m.id, { hunting: m.awareness === 'hunting', poisoned: !!m.poisoned, poisonBad: !!m.poisoned && m.hp <= 1, feared: (m.feared ?? 0) > 0 });
+      states.set(m.id, { hunting: m.awareness === 'hunting', poisoned: !!m.poisoned, poisonBad: !!m.poisoned && m.hp <= 1, feared: (m.feared ?? 0) > 0, bound: (m.stuck ?? 0) > 0 ? 'rooted' : undefined });
     }
     const crew = d.rivals;
     for (const r of crew?.members ?? []) {
       if (!this.units.has(r.id)) continue;
-      states.set(r.id, { hunting: crew?.stance === 'hostile', poisoned: !!r.poisoned, poisonBad: !!r.poisoned && r.hp <= 1, bleed: r.downed && !carriers.has(r.id) ? r.bleed : undefined, braced: !!r.braced, veiled: (r.veil ?? 0) > 0, feared: (r.feared ?? 0) > 0 });
+      // The hostile ring is the free-swing warning, so a downed member (no swing) goes without it.
+      states.set(r.id, { hunting: crew?.stance === 'hostile' && !r.downed, poisoned: !!r.poisoned, poisonBad: !!r.poisoned && r.hp <= 1, bleed: r.downed && !carriers.has(r.id) ? r.bleed : undefined, braced: !!r.braced, veiled: (r.veil ?? 0) > 0, feared: (r.feared ?? 0) > 0, overwatch: !r.downed && !!r.overwatch, bound: !r.downed && (r.stuck ?? 0) > 0 ? 'rooted' : undefined });
     }
     this.statusFx.sync(this.units, states);
   }

@@ -2922,6 +2922,8 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 
 /* ---- the Gloam's warning, above the bar */
 .dl-gloam { position: absolute; left: 50%; bottom: 170px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: #1a0810; border: 1px solid #8a2a4a; color: #ffb4cc; font-size: 14px; z-index: 6; pointer-events: none; }
+/* V5.0 (review): the first-delve coach mark sits over the hotbar at the same spot; the Gloam line steps above it. */
+.dl-hud:has(.dl-coach:not(.hidden)) .dl-gloam { bottom: 262px; }
 
 /* ---- coach marks */
 .dl-coach { position: fixed; left: 0; top: 0; width: 500px; max-width: calc(100vw - 24px); padding: 12px 16px; border: 1px solid var(--ember); border-radius: 4px; background: #2a1f12; display: flex; gap: 14px; align-items: center; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 35; }

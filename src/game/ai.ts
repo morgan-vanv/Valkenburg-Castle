@@ -384,7 +384,7 @@ function shieldBlockQuestion(c: Ctx, h: HeroInDelve, attacker: string, total: nu
     enemyId: attacker,
     at: { ...h.at },
     text: `${capital(it)}'s blow lands on ${who} for ${total}. Take it on the shield, or take the hit?`,
-    yes: { label: 'Block', line: `${SHIELD_BLOCK_FOCUS} Focus (${h.focus} left): the hit does ${SHIELD_BLOCK_CAP}.` },
+    yes: { label: 'Block', line: `${SHIELD_BLOCK_FOCUS} Focus (${h.focus - SHIELD_BLOCK_FOCUS} left after): the hit does ${SHIELD_BLOCK_CAP}.` },
     no: { label: 'Take it', line: `${who} takes ${total} and keeps the Focus.` },
     damage: total,
   };

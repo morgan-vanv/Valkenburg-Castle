@@ -6,9 +6,11 @@ Reviewed: `v5.0` at 1244003 (P's ship checkpoint 7cec9d1 merged), against `main`
 
 **Verdict: ship, after two one-line fixes (findings 1 and 2) and one look the owner must take himself (finding 3).** Nothing breaks an old save; both tracks survived the merge; the seams are small and all on the view side of a rule.
 
+**Resolution (2026-10-28, same day, owner's call):** findings 1, 2, 5, 6, 8 and 9 fixed on `v5.0` by the review session (see the "Fixed" notes below and docs/v3-changes.md); 3 is to be looked at on the live site after the ship; 4 and 7 accepted (7 is now stated in docs/current-rules.md 13.6); 10 moot (no revert planned). The owner waived the local play-test (ship step 5).
+
 ## Findings, by severity
 
-### 1. The shield block never reaches the diorama: G's gold flash is dead code · **P** · `src/ui/app.ts:720`
+### 1. The shield block never reaches the diorama: G's gold flash is dead code · **P** · `src/ui/app.ts:720` · **Fixed:** the event is forwarded and joins `enemyFocus`.
 
 `case 'blocked':` in `playEvents` plays a clang and `continue`s without `await this.dio.playEvent(e)`. The diorama's handler (`src/view/diorama.ts:2884`, G W1: the figure faces the attacker, flashes gold, floats "Blocked · 5 → 1") is therefore never called. P wrote the case before G landed the handler (the comment still says "a shield flash is under View needs") and neither saw the other. Every other event the diorama handles is forwarded (checked by script: `blocked` is the only one).
 
@@ -16,7 +18,7 @@ Repro: `scripts/v50-review-check.mjs` spies on `dio.playEvent`; a shield-block q
 
 Fix: `await this.dio.playEvent(e);` before the `continue` (and drop the stale comment). Optional: add `blocked` to `enemyFocus` so the world-phase camera treats it like the hit it precedes (the adjacent `hit` already pans, so this is cosmetic).
 
-### 2. The "unlit" tag chip never shows: `heroTag` is never given `unlit` · **G** · `src/view/diorama.ts:1419`
+### 2. The "unlit" tag chip never shows: `heroTag` is never given `unlit` · **G** · `src/view/diorama.ts:1419` · **Fixed:** passed from `darkHeroes`; tags refresh when the dark set changes.
 
 `heroTag(h, max, carried)` is called without the fourth argument, so the chip P built in `src/ui/tags.ts` (spec 32.12: "unlit · the dark hunts", red, on Level 3) never appears on any figure. The diorama already has the answer in `this.darkHeroes` (set from `engine.heroLit`). Still owed per docs/v5-ship.md step 1 and the status board.
 
@@ -32,12 +34,12 @@ In the headless High shots the main gate (the "Way out · you came in here" hex 
 
 456 draw calls (fine). Low is a quarter of that. Nothing to do unless the owner's framerate feel says so; the hall is the heaviest room (dressing + brick runs + three torches casting a shadow).
 
-### 5. Two stale strings after spec 32.10 and 32.15 · **P**
+### 5. Two stale strings after spec 32.10 and 32.15 · **P** · **Fixed.**
 
 - `src/ui/hud.ts:2825`: the Stairs/Lift button's tip says "· 1 movement"; the crossing now costs 0 (`STAIR_CROSS_COST`). Say "free" or drop the cost.
 - `src/game/ai.ts:388`: the shield block card's Block line reads "1 Focus (3 left): the hit does 1." with the Focus *before* spending (a hero at 3 who blocks ends at 2). Either `h.focus - SHIELD_BLOCK_FOCUS` or "(you have 3)".
 
-### 6. The first-delve coach mark covers the Gloam warning · **P** · `src/style.css:2924` vs `:2927`
+### 6. The first-delve coach mark covers the Gloam warning · **P** · `src/style.css:2924` vs `:2927` · **Fixed:** the line steps up while a coach mark shows.
 
 `.dl-gloam` sits at bottom 170 px centred; coach mark 1 ("Click a lit hex to move Keven") is anchored over the hotbar at the same spot and z-index 35. A first-delve party that falls to the Hollow unlit sees the coach mark, not "The dark here is awake. Stand in the light." Rare; move the Gloam line up when a coach mark is showing, or hide the coach mark on Level 3.
 
@@ -45,11 +47,11 @@ In the headless High shots the main gate (the "Way out · you came in here" hex 
 
 Standing on the tower stair added 26 Level 2 hexes to `delve.explored`: the Level 2 tab lights up as found before anyone has set foot there, and the return report's "Left behind" listed "A chest in the guard post is still shut" from a peek alone. Defensible (you did see it); say so in `docs/current-rules.md` 5.1 if intended, or keep peeked hexes in `visible` only.
 
-### 8. Statuses the card marks and the figure doesn't · **G, accepted scope** · `src/view/look/status.ts`
+### 8. Statuses the card marks and the figure doesn't · **G, accepted scope** · `src/view/look/status.ts` · **Built** (owner): guard link, overwatch ring, ward rim, held/rooted/webbed inner ring, dozing dim; no ring on a downed hostile member.
 
 Built in world: dark (+ the L3 pulse), poison, downed pool, hunting ring (monsters, hostile crew), braced rim, veiled, feared. On the card and tag but not on the figure: guarding/guarded (the gold link), overwatch (the drawn-bow pose), warded, rooted/webbed/held (the hex marks), dozing. These are the status spec's priority-2 asks the owner reviewed at W1; listed so the gap is known, not as a defect. The reverse (figure marks the card lacks) does not occur. The hostile-crew red ring is also drawn under a crew member who is downed (`crew.stance === 'hostile'` only); harmless.
 
-### 9. A shield-block answer is remembered per round and enemy · **P, note** · `src/game/react.ts:38`
+### 9. A shield-block answer is remembered per round and enemy · **P, note** · `src/game/react.ts:38` · **Fixed:** the key carries the damage; test in react.test.ts.
 
 The reaction memo key is `round:kind:hero:enemy`; a second hit from the same enemy on the same hero in one world phase (two swings, a free swing then an attack) reuses the first answer without asking, whatever the new damage. Fine for the hidden swing and overwatch; for the block it means "Take it" on a 2 silently applies to a 6 a moment later. Add `q.damage` to the key, or accept.
 
@@ -125,6 +127,6 @@ Flag: the hall at High is 1.7% over the ~1.5 M triangle line; draw calls are wel
 - Touch and mobile (known gap); a GitHub Pages preview of `v5.0`.
 - The 16-delve batches (per the owner); the crew arena.
 
-## Scripts used (uncommitted, in the review session)
+## Scripts used
 
-`scripts/v50-review-check.mjs` (the play-through: Level 1 torch, fight, shield block, the threshold, the toll, the return tally; Level 3 unlit with the Gloam; the four fixes; the settings rows; the renderer numbers) and `scripts/v50-review-saves.mjs` (V4.1 saves on v5.0). Both run against `npx vite preview --port 4185` (and main on 4186 for the saves). P may want them in `scripts/`; the review commits only this file.
+`scripts/v50-review-check.mjs` (the play-through: Level 1 torch, fight, shield block, the threshold, the toll, the return tally; Level 3 unlit with the Gloam; the four fixes; the settings rows; the renderer numbers) and `scripts/v50-review-saves.mjs` (V4.1 saves on v5.0). Both run against `npx vite preview --port 4185` (and main on 4186 for the saves). Committed to `scripts/` with the fixes.

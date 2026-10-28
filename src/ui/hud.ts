@@ -2822,7 +2822,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (link) {
       usedKeys.add('t');
       const l = link.info;
-      const btn = h('button', { type: 'button', class: `dl-ab glow ${link.reach.dash ? 'dash' : ''}`, 'data-action': 'link', 'data-key': 't', disabled: this.busy, 'data-tip': `${linkButton(l)} · 1 movement${link.reach.dash ? ' as a dash (uses the action)' : ''} · key T\n${l.kind === 'lift' ? 'The lift' : 'The stairs'} come out on Level ${l.to.level}.`, onclick: () => this.takeLink() }, h('span', { class: 'dl-kb' }, 'T'), icon(l.down ? 'down' : 'up', 20), h('span', { class: 'dl-ab-l' }, l.kind === 'lift' ? 'Lift' : 'Stairs'));
+      const btn = h('button', { type: 'button', class: `dl-ab glow ${link.reach.dash ? 'dash' : ''}`, 'data-action': 'link', 'data-key': 't', disabled: this.busy, 'data-tip': `${linkButton(l)} · the step across is free${link.reach.dash ? ' (as a dash: uses the action)' : ''} · key T\n${l.kind === 'lift' ? 'The lift' : 'The stairs'} come out on Level ${l.to.level}.`, onclick: () => this.takeLink() }, h('span', { class: 'dl-kb' }, 'T'), icon(l.down ? 'down' : 'up', 20), h('span', { class: 'dl-ab-l' }, l.kind === 'lift' ? 'Lift' : 'Stairs'));
       this.keyMap.set('t', () => btn.click());
       acts.append(btn);
     }
