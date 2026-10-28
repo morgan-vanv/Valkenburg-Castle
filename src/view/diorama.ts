@@ -754,6 +754,19 @@ export class Diorama {
     // V5.0 (G, W2): the look's walls are lowered to their plinth on the camera's side of the focus whenever the
     // walls are the new brick runs (the camera sits lower now); the old setting still forces it on elsewhere.
     CUTAWAY.height.value = this.cutaway || LOOK_CUTAWAY ? WALL_LOOK.plinthH : 99;
+    // Dressing hung on a cut wall goes with it (the same window as the shader's: ahead of the focus toward the camera).
+    const lv = this.levels.get(this.shownLevel);
+    if (lv && CUTAWAY.height.value < 50) {
+      const dir = CUTAWAY.dir.value;
+      for (const o of lv.wallHung) {
+        const rx = o.position.x - tgt.x;
+        const rz = o.position.z - tgt.z;
+        const ahead = rx * dir.x + rz * dir.z;
+        const side = Math.abs(-rx * dir.z + rz * dir.x);
+        const k = THREE.MathUtils.smoothstep(ahead, -1.3, -0.2) * (1 - THREE.MathUtils.smoothstep(side, 6, 9)) * (1 - THREE.MathUtils.smoothstep(ahead, 9, 13));
+        o.visible = k < 0.5 && (o.userData.fogShown ?? true);
+      }
+    }
   }
 
   /** Render one frame now (for screenshots in a throttled headless tab). */
@@ -3404,6 +3417,7 @@ export class Diorama {
           const tgt = this.worldOf(e.hexes[e.hexes.length - 1]!);
           src.face(tgt.x - src.root.position.x, tgt.z - src.root.position.z);
         }
+        src?.playClip?.('cast'); // V5.0 (G): the Dragon rears and drives its jaws forward
         this.onBreath?.();
         await this.fireJet(from, e.hexes);
         return;

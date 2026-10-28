@@ -11,6 +11,7 @@ import { COLORS } from '../world';
 import { HUMANOID_CLIPS, idle, walk } from './clips';
 import { HEAD_SHARE, humanoidBody, humanoidDims, humanoidRest, type HumanoidLook } from './keven';
 import { JointKit, RigFigure, type Clip, type ClipName, type RigMaterials, type RigSpec } from './rig';
+import { makeDragon } from './dragon';
 
 export type Hat = 'none' | 'crown' | 'kettle' | 'great' | 'hood' | 'hat' | 'horned' | 'band';
 export type Weapon = 'none' | 'sword' | 'daggers' | 'staff' | 'bow' | 'hammer' | 'axe' | 'spear' | 'club' | 'claws';
@@ -349,6 +350,10 @@ export function makeRigFigure(key: ModelKey, mats: RigMaterials): RigFigure | nu
       return spider(mats);
     case 'gloam':
       return gloam(mats);
+    case 'dragon':
+      return makeDragon(false, mats);
+    case 'dragonSleep':
+      return makeDragon(true, mats);
     default:
       return null;
   }

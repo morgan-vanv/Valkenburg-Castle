@@ -12,8 +12,6 @@ export const FLOOR_TOP = 0.18;
 export const RAISED_TOP = 0.62;
 /** V5.0 (G): walls are 2.3 over a 1.35 hero (owner's scale; V3.3 had 2.6 over 2.0). */
 export const WALL_HEIGHT = 2.3;
-/** Thickness of a thin wall panel (15.8). */
-export const WALL_THICK = 0.24;
 
 export function levelY(level: number): number {
   return -(level - 1) * LEVEL_GAP;
