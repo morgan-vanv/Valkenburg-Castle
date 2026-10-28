@@ -2303,6 +2303,16 @@ input.seed {
 .lg-cartbox-h .lg-sub { margin-left: auto; font-size: 14px; }
 .lg-cartbox-b { padding: 12px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
 .lg-cartbox .lg-gearlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* V5.0 (P, B1): a purchase lands on the cart (the row glows), and "Give to" packs it for any hero. */
+.lowgate .lg-cartgear.new { animation: lg-slotglow 1.4s ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .lowgate .lg-cartgear.new { animation: none; box-shadow: 0 0 0 2px var(--ember); } }
+.lg-cartrow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lg-cartrow .lg-row { width: 100%; }
+.lg-giveto { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
+.lowgate .lg-giveto-b { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 3px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--parch-dim); font-size: 13px; }
+.lowgate .lg-giveto-b:hover:not(.is-off) { border-color: var(--ember-dim); color: var(--parchment); }
+.lowgate .lg-giveto-b.on { color: var(--lg-cream); }
+.lowgate .lg-giveto-b.is-off { opacity: 0.45; }
 .lg-vendors { position: sticky; top: 0; max-height: calc(100vh - 88px - 80px - 50px); }
 .lg-vend-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px 4px; }
 .lg-buyfor { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; }

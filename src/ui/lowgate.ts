@@ -350,6 +350,8 @@ const ui = {
 interface Flash {
   row: string;
   itemId?: string;
+  /** V5.0 (P, B1): the kind just bought: its cart row glows. */
+  cart?: string;
   text: string;
 }
 
@@ -1051,7 +1053,7 @@ function outfitStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
       { class: 'lg-sh-l' },
       h('span', { class: 'lg-kick lg-kick-dim' }, 'Yours'),
       h('h2', { class: 'lg-h2' }, 'Pack for the castle'),
-      h('p', { class: 'lg-sub' }, l.heroIds.length > 1 ? 'Four slots each. Click a hero to pack for them: what you buy or take off the cart goes in their pack.' : 'Four slots each. What you buy or take off the cart goes in the pack marked Packing.'),
+      h('p', { class: 'lg-sub' }, l.heroIds.length > 1 ? 'Four slots each. What you buy lands on Keven\'s cart below; click a thing there to pack it for the hero marked Packing, or use its "Give to" buttons.' : 'Four slots each. What you buy lands on Keven\'s cart below; click a thing there to pack it.'),
     ),
   );
   if (!l.heroIds.length) left.append(h('p', { class: 'lg-empty' }, 'Nobody is going in yet. Pick a party first.'));
@@ -1067,7 +1069,7 @@ function outfitStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost)
     h('div', { class: 'lg-cartbox-h' }, cartIcon(), h('h3', { class: 'lg-h3' }, "Keven's cart"), h('span', { class: 'lg-sub' }, cartN ? `${numWord(cartN)} thing${cartN === 1 ? '' : 's'} not packed` : 'Nothing waiting')),
   );
   const cartIn = h('div', { class: 'lg-cartbox-b' });
-  cartBody(cartIn, s, l, host, 'outfit');
+  cartBody(cartIn, s, l, host, 'outfit', flash?.cart);
   cart.append(cartIn);
   left.append(cart);
   wrap.append(left, vendorsSide(s, l, host, flash));
@@ -1108,8 +1110,8 @@ function vendorsSide(s: GameState, l: Loadout, host: CampHost, flash: Flash | nu
       { class: 'lg-vend-top' },
       h('span', { class: 'lg-kick' }, 'Vendors'),
       who
-        ? h('span', { class: 'lg-buyfor', tabindex: 0, 'data-tip': `Buying for ${who.name} · Gear and ales are for them; wares go in their pack while it has room, else on Keven's cart.${l.heroIds.length > 1 ? '\nClick another hero on the left to buy for them.' : ''}` }, h('span', { class: 'lg-sub' }, 'Buying for'), hexBadge(who.cls, 'sm'), h('b', null, who.name))
-        : h('span', { class: 'lg-buyfor' }, h('span', { class: 'lg-sub' }, "Nobody to pack for: wares go on Keven's cart.")),
+        ? h('span', { class: 'lg-buyfor', tabindex: 0, 'data-tip': `Buying for ${who.name} · Gear and ales are for them. Wares go on Keven's cart; pack them from there.${l.heroIds.length > 1 ? '\nClick another hero on the left to forge or pour for them.' : ''}` }, h('span', { class: 'lg-sub' }, 'Buying for'), hexBadge(who.cls, 'sm'), h('b', null, who.name))
+        : h('span', { class: 'lg-buyfor' }, h('span', { class: 'lg-sub' }, "Wares go on Keven's cart. Pick a party to pack for.")),
     ),
   );
   const tabs = h('div', { class: 'lg-tabs lg-vtabs', role: 'tablist', 'aria-label': 'Vendors' });
@@ -1267,8 +1269,7 @@ function vendorRow(r: CatalogRow, st: RowStatus, s: GameState, l: Loadout, host:
   const nobody = 'Nobody to buy for. Pick a party first.';
   if (r.kind === 'ware') {
     const short = c.gold < st.price;
-    const fits = who ? slotsUsed(packItems(c, l, who.id)) + 1 <= PACK_SLOTS : false;
-    const where = who ? (fits ? `Goes in ${who.name}'s pack.` : `${who.name}'s pack is full: it goes on Keven's cart.`) : "Goes on Keven's cart.";
+    const where = "Goes on Keven's cart; pack it from there."; // V5.0 (P, B1)
     const rule = ITEM_EFFECT[itemBase(st.key!)] ?? st.text ?? '';
     return h(
       'div',
@@ -1285,20 +1286,15 @@ function vendorRow(r: CatalogRow, st: RowStatus, s: GameState, l: Loadout, host:
           off: short,
           tip: short ? `Buy · ${st.price} gold\nYou have ${c.gold} gold.` : `Buy ${st.name} · ${st.price} gold\n${rule}\n${where}`,
           onclick: async () => {
+            // V5.0 (P, B1): a purchase only ever lands on Keven's cart; packing it for a hero is a separate click on
+            // the cart (the Yours side). The cart row glows so the player sees where it went.
             const before = new Set(c.stash.map((i) => i.id));
             if (!(await host.send({ type: 'buy', kind: st.key as ShopOffer['kind'] }))) return;
             sfx.play('coin');
             const now = host.state();
             const it = now?.campaign.stash.find((i) => !before.has(i.id));
-            if (it && who && slotsUsed(packItems(now!.campaign, l, who.id)) + it.slots <= PACK_SLOTS) {
-              ui.flash = { row: r.id, itemId: it.id, text: `Into ${who.name}'s pack.` };
-              const next = structuredClone(l);
-              (next.packs[who.id] ??= []).push(it.id);
-              host.setDraft(next, 'outfit');
-            } else {
-              ui.flash = { row: r.id, text: who ? `${who.name}'s pack is full: it's on Keven's cart.` : "It's on Keven's cart." };
-              host.setPage('outfit');
-            }
+            ui.flash = { row: r.id, itemId: it?.id, cart: it?.kind, text: "On Keven's cart." };
+            host.setPage('outfit');
           },
         },
         'Buy · ',
@@ -1482,7 +1478,7 @@ function loadoutCard(hr: Hero, s: GameState, l: Loadout, host: CampHost, fresh?:
       hexBadge(hr.cls, 'md', statsTip(hr.cls, hr)),
       h('span', { class: 'lg-hero-n' }, hr.name, h('span', { class: 'lg-hero-c' }, classLine(hr))),
       bearer ? h('span', { class: 'lg-lantern', tabindex: 0, 'data-tip': `Lantern · ${hr.name} carries Gerda's lantern: 20 rounds, refilled in camp.\nIt burns down each round while open; the shutter is free. Lost if ${hr.name} falls.` }, lanternIcon(), 'Lantern') : '',
-      sel ? h('span', { class: 'lg-kick lg-packing', 'data-tip': `Packing · What you buy or take off the cart goes in ${hr.name}'s pack; gear and ales are for ${hr.name}.`, tabindex: 0 }, 'Packing') : btn({ class: 'lg-pickpack', k: `pack-${hr.id}`, data: { packfor: hr.id }, tip: `${hr.name} · What you buy or take off the cart goes in this pack.`, onclick: pick }, 'Pack for them'),
+      sel ? h('span', { class: 'lg-kick lg-packing', 'data-tip': `Packing · What you click on the cart goes in ${hr.name}'s pack; forge work and ales are for ${hr.name}.`, tabindex: 0 }, 'Packing') : btn({ class: 'lg-pickpack', k: `pack-${hr.id}`, data: { packfor: hr.id }, tip: `${hr.name} · What you click on the cart goes in this pack.`, onclick: pick }, 'Pack for them'),
     ),
     packSlots(c, l, hr, host, 'outfit', fresh),
     kitLine(hr),
@@ -1505,18 +1501,21 @@ function groupGear(items: Item[]): [Item, Item[]][] {
 
 const VAL_WORD: Record<string, string> = { gem: 'Gem', jewelry: 'Jewelry', heirloom: 'Heirloom', hoard: "From the Dragon's hoard" };
 
-function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, page: CampPage): void {
+function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, page: CampPage, justBought?: string): void {
   const c = s.campaign;
   const packed = packedIds(l);
   const who = ui.packFor ? heroOf(c, ui.packFor) : undefined;
   const whoUsed = who ? slotsUsed(packItems(c, l, who.id)) : PACK_SLOTS;
-  const pack = (it: Item) => {
-    if (!who) return;
+  // V5.0 (P, B1): packing is the explicit act: the row packs for the hero marked Packing; "Give to" packs for any hero.
+  const pack = (it: Item, forId = who?.id) => {
+    if (!forId) return;
     sfx.play('click');
     const next = structuredClone(l);
-    (next.packs[who.id] ??= []).push(it.id);
+    (next.packs[forId] ??= []).push(it.id);
+    ui.flash = { row: '', itemId: it.id, text: '' }; // the slot it lands in glows
     host.setDraft(next, page);
   };
+  const party = l.heroIds.map((id) => heroOf(c, id)).filter((x): x is NonNullable<typeof x> => !!x);
   const gear = c.stash.filter((i) => !isValuable(i) && i.kind !== 'gold' && !i.story && !packed.has(i.id));
   el.append(h('div', { class: 'lg-cart-h' }, h('span', { class: 'lg-kick' }, 'Gear · goes in packs'), h('span', { class: 'lg-sub' }, who ? `Click to pack it for ${who.name}` : 'Pick a party to pack for')));
   if (!gear.length) el.append(h('p', { class: 'lg-empty sm' }, packed.size ? 'Everything here is packed.' : 'No gear on the cart. The vendors have some.'));
@@ -1527,9 +1526,9 @@ function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, pag
         { class: 'lg-gearlist' },
         ...groupGear(gear).map(([it, all]) => {
           const full = whoUsed + it.slots > PACK_SLOTS;
-          return btn(
+          const main = btn(
             {
-              class: 'lg-row lg-cartgear',
+              class: `lg-row lg-cartgear ${justBought === it.kind ? 'new' : ''}`,
               k: `cart-${it.kind}`,
               data: { cart: it.kind },
               off: !who || full,
@@ -1540,6 +1539,15 @@ function cartBody(el: HTMLElement, s: GameState, l: Loadout, host: CampHost, pag
             h('span', { class: 'lg-row-n' }, it.name),
             h('span', { class: 'num lg-row-x' }, `×${all.length}`),
           );
+          if (party.length < 2) return main;
+          // V5.0 (P, B1): with several heroes, one small "Give to" button per hero on every cart row.
+          const give = h('span', { class: 'lg-giveto', 'aria-label': `Give ${it.name} to` });
+          for (const hr of party) {
+            const used = slotsUsed(packItems(c, l, hr.id));
+            const f = used + it.slots > PACK_SLOTS;
+            give.append(btn({ class: `lg-giveto-b ${hr.id === who?.id ? 'on' : ''}`, k: `give-${it.kind}-${hr.id}`, data: { giveto: hr.id, kind: it.kind }, off: f, tip: f ? `${hr.name}'s pack is full.` : `Give ${it.name} to ${hr.name} · ${PACK_SLOTS - used} slot${PACK_SLOTS - used === 1 ? '' : 's'} free`, onclick: () => pack(it, hr.id) }, hexBadge(hr.cls, 'sm'), h('span', { class: 'lg-giveto-n' }, hr.name.split(' ')[0]!)));
+          }
+          return h('div', { class: 'lg-cartrow' }, main, give);
         }),
       ),
     );
