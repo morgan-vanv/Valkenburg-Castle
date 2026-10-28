@@ -47,6 +47,9 @@ V5.0 is built by two tracks running side by side, each led by its own session. T
 Each line: date, what the player must see, where it comes from in the state or events.
 
 - 2026-10-27 · Darkness and status effects need strong in-world emphasis (owner feedback). Spec to come in `docs/v5-status-visuals.md` (P writes it first; G builds it in W1/W2).
+- 2026-10-27 (evening) · **The status spec is written: `docs/v5-status-visuals.md`.** Every hero, monster and crew status with its priority, the HUD treatment and the "In world" ask (the dark as a drained, blue-shifted figure with a breathing shadow pulse on Level 3 instead of the black ring; poison as a green tint, veins and a drip on the tick; downed as a red pool that grows as the count falls; braced/guarding as gold rim light and links; veils as a violet shimmer; a hunting monster's red hex ring). State: `HeroInDelve` (`poisoned`, `status`/`bleed`, `carrying`, `rooted`, `webbed`, `grabbedBy`, `dreaded`, `dozing`, `braced`, `guarding`, `ward`, `overwatch`, `veil`), `Monster` (`awareness`, `searchRounds`, `feared`, `stuck`, `holding`, `poisoned`), crew members likewise; darkness from `visibility.lit` and `lightTierAt`. Owner gate: the pitch (P6) before building.
+- 2026-10-27 (evening) · Request: the figure-tag content functions (`heroTag`, `monsterTag`, `venomMark`, `bleedMark`, `pipsHtml`) in `src/view/diorama.ts` could move to a P-owned `src/ui/tags.ts` so P can build the tag side of the spec without touching the diorama. G's call; P specs the content either way.
+- 2026-10-27 (evening) · Spec 32.5 auto end turn and 32.1 (a jump keeps the action) change nothing G animates. Spec 32.4: the roll panel's `.dl-roll-ocline` is gone (no in-world effect).
 
 ## Owner gates
 
