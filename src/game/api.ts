@@ -141,6 +141,18 @@ export interface Visibility {
   lit: Set<string>;
 }
 
+/** V5.0 (spec 32.15): what a hero on a stair hex (or a working lift) makes out on the other level (`Engine.peek`). */
+export interface Peek {
+  /** The level peeked at. */
+  level: number;
+  /** Down the stairs (a deeper level) or up. */
+  down: boolean;
+  /** The link hex over there is lit (castle light or the party's). Dark: little or nothing shows. */
+  lit: boolean;
+  /** Monsters and crew members seen within PEEK_RANGE of the link, nearest first: `dist` from the link, `mood` as the HUD names it. */
+  figures: { id: string; name: string; kind: string; dist: number; mood: 'asleep' | 'patrol' | 'alert' | 'hunting' | 'crew'; at: Pos }[];
+}
+
 /** V4.1 (spec 31.5): one light on the map (`Engine.lights`). */
 export interface LightInfo {
   at: Pos;
@@ -191,6 +203,8 @@ export interface Engine {
   actions(state: GameState, heroId: string): ActionOption[];
   preview(state: GameState, heroId: string, action: ActionKind, target: ActionTarget): RollPreview;
   visibility(state: GameState): Visibility;
+  /** V5.0 (spec 32.15): the peek from the hero's stair (or working lift) hex; null when they stand on neither. Optional so the view's fixture engines needn't carry it. */
+  peek?(state: GameState, heroId: string): Peek | null;
   /** V4.1 (spec 31.5): the light the first active hero stands in (bright: party light or daylight; dim: a castle light only; dark: unlit). */
   brightness(state: GameState): Brightness;
   /** V4.1 (spec 31.5): every light on the map now: torches and lanterns (carried: `holder`; dropped lit: none), Glowworm, crews, braziers. */

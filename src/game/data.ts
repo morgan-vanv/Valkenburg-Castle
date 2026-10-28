@@ -967,3 +967,11 @@ export const SCOUT_RANGE = 8;
 
 /** V5.0 (P, spec 32.7): a captive's most HP (a captive the crews took earlier starts at 1). */
 export const PRISONER_HP = 5;
+
+// ---------------------------------------------------------------- V5.0 (P, spec 32.15): the threshold
+
+/** A hero on a stair hex (or a working lift) sees this far round the linked hex on the other level, light permitting; monsters within it see up the stairs too. */
+export const PEEK_RANGE = 3;
+/** The step across the stairs (stair hex to its linked hex), and across a working lift. Was 1: a sneaking hero couldn't get on, across and off in one move. */
+export const STAIR_CROSS_COST = 0;
+

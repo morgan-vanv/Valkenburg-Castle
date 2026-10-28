@@ -13,10 +13,29 @@ export function pipsHtml(hp: number, max: number, cls: string): string {
   return s + '</span>';
 }
 
-/** V4.0 HUD: a hero's tag is their health only (lantern, braced, held and the rest are on the party card). */
-export function heroTag(h: HeroInDelve, max: number, carried = false): string {
+/**
+ * A hero's tag: health, then the marks that decide what you do next (docs/v5-status-visuals.md, V5.0 spec 32.12):
+ * the bleed count when down, the poison drop, and the priority-1 and -2 states that must read from the figure:
+ * held, rooted, webbed, dozing, braced, guarding, on overwatch, veiled, and the torch's rounds when under 5.
+ * `unlit` (the diorama knows the lit set) adds the "unlit" chip, red with "the dark hunts" on Level 3.
+ */
+export function heroTag(h: HeroInDelve, max: number, carried = false, unlit = false): string {
   // V4.1 (spec 31.4): the downed show their bleed-out count; the poisoned their drop.
-  return pipsHtml(h.hp, max, 'hero') + (h.status === 'downed' ? bleedMark(h.bleed, carried) : '') + venomMark(h);
+  let out = pipsHtml(h.hp, max, 'hero') + (h.status === 'downed' ? bleedMark(h.bleed, carried) : '') + venomMark(h);
+  if (h.status !== 'active') return out;
+  const x = h as HeroInDelve & { dozing?: boolean };
+  if (h.grabbedBy) out += '<b class="tag-held" title="Held: can\'t move. Break free, or kill it">held</b>';
+  else if ((h.rooted ?? 0) > 0) out += `<b class="tag-rooted" title="Rooted: can't move or dash for ${h.rooted} more round${h.rooted === 1 ? '' : 's'}; can still act">rooted · ${h.rooted}</b>`;
+  else if (h.webbed) out += '<b class="tag-rooted" title="Webbed: can\'t move this turn; clears next round">webbed</b>';
+  if (x.dozing) out += '<b class="tag-sleep" title="Dozing: does nothing this turn">z</b>';
+  if (unlit) out += h.at.level === 3 ? '<b class="tag-unlit l3" title="Unlit on Level 3: the dark hunts anyone standing in it">unlit · the dark hunts</b>' : '<b class="tag-unlit" title="Unlit: sees little, rolls at −20% or worse">unlit</b>';
+  if (h.braced) out += '<b class="tag-braced" title="Braced: hits do 1 less, enemies roll worse">braced</b>';
+  if (h.guarding) out += '<b class="tag-braced" title="Guarding a friend beside them: their hits land here">guards</b>';
+  if (h.overwatch) out += '<b class="tag-overwatch" title="Overwatch: shoots the first enemy to move in sight">overwatch</b>';
+  if (h.veil > 0) out += '<b class="tag-veiled" title="Veiled: monsters can\'t see them; attacking breaks it">veiled</b>';
+  const lit = h.pack.find((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit);
+  if (lit && (lit.rounds ?? 15) < 5) out += `<b class="tag-flame" title="${lit.kind === 'torch' ? 'Torch' : 'Lantern'}: ${lit.rounds} round${lit.rounds === 1 ? '' : 's'} of light left">${iconSvg('torch', 10)} ${lit.rounds}</b>`;
+  return out;
 }
 
 export function monsterTag(m: Monster): string {

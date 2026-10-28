@@ -2609,6 +2609,8 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-si.warded { color: #9cc8ff; }
 .dl-si.overwatch { color: var(--dl-cream); }
 .dl-si.doze { color: #c9c3b5; }
+/* V5.0 (P, spec 32.15): on the stairs: the peek (red when something waits at the foot). */
+.dl-si.peek { color: var(--dl-cream); }
 .dl-rcard.dark:not(.sel) .dl-hexb { filter: saturate(0.35) brightness(0.8); }
 .dl-rcard.dark .dl-rcard-n { color: #a9a9c4; }
 .dl-rcard.poisoned .dl-hp { box-shadow: inset -6px 0 0 var(--venom-dim); }
@@ -2695,20 +2697,23 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-fold-t { font-size: 16px; color: var(--dl-pink); }
 .dl-fold-n { font-size: 14px; color: var(--dl-ink-4); }
 .dl-fold-hurry { margin-left: auto; font-size: 14px; color: var(--dl-ink-3); }
-.dl-who { display: flex; flex-direction: column; gap: 6px; width: 150px; flex: none; }
+.dl-who { display: flex; flex-direction: column; gap: 6px; width: 176px; flex: none; } /* V5.0: room for the switch and its Shift badge */
 .dl-who-n { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-who-c { font-size: 13px; color: var(--dl-ink-4); }
 .dl-seg { display: flex; border: 1px solid var(--line-hi); border-radius: 4px; padding: 2px; width: max-content; }
 /* V5.0 (P, spec 32.8): the Walk / Sneak sliding switch (a tap of Shift flips it) and the key help card. */
-.dl-switch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-hi); border-radius: 999px; padding: 4px 10px 4px 12px; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 34px; font-size: 15px; }
+.dl-switch { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-hi); border-radius: 999px; padding: 3px 9px 3px 10px; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 30px; font-size: 14px; flex: none; }
 .dl-switch .dl-switch-l.walk { color: var(--dl-cream); }
 .dl-switch.on .dl-switch-l.walk { color: var(--dl-ink-4); }
 .dl-switch.on .dl-switch-l.sneak { color: var(--dl-cream); }
-.dl-switch-track { position: relative; width: 36px; height: 18px; border-radius: 999px; background: #3a2a12; border: 1px solid var(--line-hi); flex: none; }
-.dl-switch-knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--parchment); transition: left 160ms ease, background 160ms ease; }
+.dl-switch-track { position: relative; width: 30px; height: 16px; border-radius: 999px; background: #3a2a12; border: 1px solid var(--line-hi); flex: none; }
+.dl-switch-knob { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--parchment); transition: left 160ms ease, background 160ms ease; }
 .dl-switch.on .dl-switch-track { background: #2a2338; }
-.dl-switch.on .dl-switch-knob { left: 20px; background: #b9a7ff; }
-.dl-switch kbd { font-size: 9px; padding: 0 3px; }
+.dl-switch.on .dl-switch-knob { left: 16px; background: #b9a7ff; }
+/* V5.0 (owner's play-test): the Shift hint is a badge beside the pill, not inside it (it clipped). */
+.dl-switch-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.dl-switch-hint { font-size: 10px; line-height: 1; padding: 3px 5px; color: var(--dl-ink-4); border: 1px solid var(--line); border-radius: 3px; background: transparent; cursor: help; }
+.dl-switch-hint:focus-visible { outline: 1px solid var(--ember-dim); }
 .dl-kb.wide { min-width: 38px; }
 .dl-keys-box { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; }
 .dl-keys-head { display: flex; align-items: center; justify-content: space-between; }
@@ -2974,6 +2979,8 @@ div.dl-deal { cursor: default; }
 .dl-menu { position: absolute; right: 16px; top: 84px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; background: rgba(14, 11, 9, 0.97); border: 1px solid var(--line-hi); border-radius: 4px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); z-index: 45; }
 .dl-menu-sec { display: flex; flex-direction: column; gap: 8px; }
 .dl-menu-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* V5.0 (P): a row's label before its buttons (Quality High / Low). */
+.dl-menu-k { color: var(--dl-ink-3); font-size: 13px; margin-right: 2px; }
 .dl-menu-end { border-top: 1px solid var(--line); padding-top: 12px; }
 .dl-check { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--dl-ink-2); cursor: pointer; }
 .dl-check input { accent-color: var(--ember); width: 16px; height: 16px; }
@@ -3125,6 +3132,14 @@ div.dl-deal { cursor: default; }
 .tag-venom .ic { color: var(--venom); }
 .tag-bleed { color: var(--red); font-weight: 700; font-size: 0.72rem; }
 .tag-carried { color: #9ec8ff; font-size: 0.68rem; }
+/* V5.0 (P, spec 32.12): the hero tag's status chips (docs/v5-status-visuals.md): the colours match the party card's marks. */
+.tag-held, .tag-unlit.l3 { color: var(--red); font-weight: 700; font-size: 0.68rem; }
+.tag-unlit { color: #8a8aa8; font-size: 0.68rem; }
+.tag-braced { color: #e8a33d; font-size: 0.68rem; }
+.tag-overwatch { color: #f0e6d2; font-size: 0.68rem; }
+.tag-veiled { color: #b9a7ff; font-size: 0.68rem; }
+.tag-flame { display: inline-flex; align-items: center; gap: 1px; color: #ffcf86; font-weight: 700; font-size: 0.72rem; }
+.tag-flame .ic { color: #ffcf86; }
 /* V4.1 (spec 31.13): reactions. The per-hero settings button beside the name, its popover above the hotbar,
    and the reaction card the castle's turn waits on. */
 .dl-who-top { display: flex; align-items: center; gap: 6px; min-width: 0; }

@@ -1017,6 +1017,27 @@ export class Hud {
   }
 
   /** The mood words: "unaware, at its post", "searching", "hunting Corin". */
+  /**
+   * V5.0 (spec 32.15): the threshold's peek, in words: "Down the stairs: an orc on patrol, 2 hexes; an archer, 3 hexes."
+   * Null when the hero stands on neither a stair hex nor a working lift.
+   */
+  peekLine(heroId: string): { text: string; figures: number } | null {
+    const s = this.state;
+    if (!s || !this.engine.peek) return null;
+    const p = this.engine.peek(s, heroId);
+    if (!p) return null;
+    const where = p.down ? `Down the ${p.level === 3 && s.delve?.liftWorking ? 'lift' : 'stairs'}` : `Up the ${s.delve?.liftWorking && p.level === 2 ? 'lift' : 'stairs'}`;
+    const mood = (f: (typeof p.figures)[number]) => f.mood === 'crew' ? 'a crew member' : f.mood === 'asleep' ? 'asleep' : f.mood === 'hunting' ? 'hunting' : f.mood === 'alert' ? 'searching' : f.mood === 'patrol' ? 'on patrol' : 'at its post';
+    if (!p.figures.length) return { text: `${where} (${this.levelName(p.level)}): ${p.lit ? 'nothing moves in sight of the landing' : 'too dark to make anything out'}. What's there sees you on the stairs too.`, figures: 0 };
+    const list = p.figures.map((f) => `${f.name.toLowerCase()} ${f.mood === 'crew' ? '' : mood(f) + ', '}${f.dist} hex${f.dist === 1 ? '' : 'es'} from the foot`).join('; ');
+    return { text: `${where} (${this.levelName(p.level)}): ${list}. They can see you on the stairs too; a hunter will climb.`, figures: p.figures.length };
+  }
+
+  private levelName(level: number): string {
+    const n = this.engine.castle().levels.find((l) => l.level === level)?.name ?? `Level ${level}`;
+    return n.replace(/^The /, 'the ');
+  }
+
   private moodWords(m: Monster): string {
     if (m.kind === 'gloam') return 'the dark itself';
     if (m.awareness === 'asleep') return 'asleep';
@@ -2199,9 +2220,30 @@ export class Hud {
       dice[i]!.innerHTML = `<span class="dl-die-p">${hit ? 'hit' : 'miss'}</span>`;
       await wait(0.1);
     }
+    this.armCaption();
+  }
+
+  private captionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * V5.0 (owner's play-test, docs/v5-ship.md): a caption lives a few seconds after its roll resolves, then goes. In the
+   * castle's turn the next actor replaced it anyway; a free swing in the player's phase had stayed up until End turn.
+   * Each result line that lands restarts the clock.
+   */
+  private armCaption(): void {
+    if (this.captionTimer) clearTimeout(this.captionTimer);
+    const ms = this.host.settings.speed === 0 ? 1600 : 3200;
+    this.captionTimer = setTimeout(() => {
+      this.captionTimer = null;
+      this.caption.classList.add('hidden');
+    }, ms);
   }
 
   private captionStart(actor: string, title: string): void {
+    if (this.captionTimer) {
+      clearTimeout(this.captionTimer);
+      this.captionTimer = null;
+    }
     this.captionFor = actor;
     this.caption.replaceChildren(h('div', { class: 'dl-cap-t' }, title), h('div', { class: 'dl-cap-body' }));
     this.caption.classList.remove('hidden');
@@ -2266,6 +2308,7 @@ export class Hud {
       cls = 'down';
     } else if (e.type === 'grabbed') text = `${this.nameOf(e.id)} is held.`;
     if (text) body.append(h('div', { class: `dl-cap-res ${cls}` }, text));
+    if (text || e.type === 'miss') this.armCaption();
   }
 
   private isHeroId(id: string): boolean {
@@ -2509,10 +2552,10 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const coin = items.filter((i) => i.kind === 'gold').reduce((a, i) => a + i.amount, 0);
     const rest = items.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard');
     const words = [coin ? `${coin} gold` : '', ...rest.map((i) => (i.kind === 'heirloom' || i.kind === 'hoard' ? i.name : `${article(i.name)} ${i.name.toLowerCase()}`))].filter(Boolean);
-    const toll = Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5);
+    const toll = Math.min(value, Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5)); // V5.0 (spec 32.16): never more than you carry
     return h(
       'div',
-      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} (now ${toll}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
+      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} but never more than you carry (now ${value ? toll : 'nothing: empty pockets are let by, and taxed on the way out'}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
       h('span', { class: 'dl-kick dl-kick-dim' }, 'Carrying'),
       value > 0 ? h('span', { class: 'dl-carry-v' }, h('span', { class: `num dl-goldtxt ${value >= BETRAY_LOOT ? 'rich' : ''}` }, `${value}`), h('span', { class: 'dl-carry-w' }, ` · ${shortList(words)}`)) : h('span', { class: 'dl-carry-w' }, 'Nothing yet'),
     );
@@ -2625,7 +2668,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
     // V4.1 (spec 31.13): a hero set to strike from hiding without being asked.
     if (hd.reactions?.hiddenSwing === 'always') add('ambush', 'sword', `Strikes from hiding · ${name} takes the free swing at an enemy passing them that hasn't spotted them, without asking, and gives themselves away. Change it under Reactions (beside Walk/Sneak).`);
-    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
+    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and tap Shift to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
     const threats = Object.entries(this.intents).filter(([id, it]) => it.targetId === hd.heroId && seen.has(id) && ['attack', 'shove', 'grab', 'drag', 'web', 'firebolt', 'dart', 'venomdart', 'hamstring', 'rob', 'steal', 'dread', 'nightthorn', 'briar'].includes(it.kind));
@@ -2634,6 +2677,9 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
     const nightEye = (hd.nightEyes ?? 0) > 0 || hd.ale === 'nighteye'; // V4.1 (WS2): Night-eye Stout
     if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+    // V5.0 (spec 32.15): on the stairs (or the working lift): what the peek shows.
+    const pk = this.peekLine(hd.heroId);
+    if (pk) add(pk.figures ? 'bad peek' : 'peek', 'eye', pk.text);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
     else if (hd.dreaded) add('bad dread', 'flee', `Dread · ${name} can move this turn but not act (a crew Shadowmancer's Dread).`); // V4.1 (WS7)
@@ -2716,24 +2762,30 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.reactionsButton(sel, def),
       ),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
-      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero.
+      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero. Owner's
+      // play-test (docs/v5-ship.md): tidier: the two words sit in one pill with the slider between them, the Shift
+      // hint is a dim badge after it with its own short tip, and the switch's tip is one line plus the rule.
       h(
-        'button',
-        {
-          type: 'button',
-          role: 'switch',
-          class: `dl-switch ${this.sneak ? 'on' : ''}`,
-          'aria-checked': this.sneak ? 'true' : 'false',
-          'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}`,
-          disabled: this.busy,
-          'data-move-switch': this.sneak ? 'sneak' : 'walk',
-          'data-tip': `${this.sneak ? 'Sneak · silent' : 'Walk · noise 1 a hex'} · tap Shift to switch (this hero only)\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
-          onclick: () => this.setSneak(!this.sneak),
-        },
-        h('span', { class: 'dl-switch-l walk' }, 'Walk'),
-        h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
-        h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
-        h('kbd', null, 'Shift'),
+        'span',
+        { class: 'dl-switch-wrap' },
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'switch',
+            class: `dl-switch ${this.sneak ? 'on' : ''}`,
+            'aria-checked': this.sneak ? 'true' : 'false',
+            'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}. Shift switches.`,
+            disabled: this.busy,
+            'data-move-switch': this.sneak ? 'sneak' : 'walk',
+            'data-tip': `${this.sneak ? 'Sneaking · silent, moves ' + (def.cls === 'burglar' || sel.ale === 'smuggler' ? 4 : 2) : 'Walking · noise 1 a hex, moves ' + (def.cls === 'burglar' ? 5 : 4)}\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
+            onclick: () => this.setSneak(!this.sneak),
+          },
+          h('span', { class: 'dl-switch-l walk' }, 'Walk'),
+          h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
+          h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
+        ),
+        h('kbd', { class: 'dl-switch-hint', tabindex: 0, 'data-tip': `Shift · tap it to switch ${def.name} between Walk and Sneak (this hero only; each hero keeps their own).` }, 'Shift'),
       ),
     );
     // Actions: Attack (always), Shove, class abilities and spells, then whatever is in reach.
@@ -3350,10 +3402,18 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
           save();
           if (!v) this.cancelFlow();
         }, 'When nobody can move, act or use anything, the turn ends on its own after a moment. Any key or click keeps it open.'),
-        check('Lower walls near the camera', !!st.cutaway, (v) => {
-          st.cutaway = v;
+        // V5.0 (P, docs/v5-ship.md step 2): the look rows; "Lower walls near the camera" is retired (the cutaway is always on).
+        h('span', { class: 'dl-menu-row' }, h('span', { class: 'dl-menu-k' }, 'Quality'), ...(['high', 'low'] as const).map((q) => h('button', { type: 'button', class: `dl-btn dl-btn-s ${(st.quality ?? 'high') === q ? 'on' : ''}`, 'data-tip': q === 'high' ? 'High · shadows, bloom and the tilt-shift blur.' : 'Low · no shadows, bloom or blur; for slower machines.', onclick: () => { st.quality = q; save(); this.dio.setQuality(q); this.renderMenu(); } }, q === 'high' ? 'High' : 'Low'))),
+        check('Action camera', st.actionCamera !== false, (v) => {
+          st.actionCamera = v;
           save();
-        }, 'Walls between the camera and your heroes drop low so you can see past them.'),
+          this.dio.setActionCamera(v);
+        }, 'The camera pushes in on attacks, shots, spells and item use.'),
+        check('Tilt-shift blur', st.tiltShift !== false, (v) => {
+          st.tiltShift = v;
+          save();
+          this.dio.setTiltShift(v);
+        }, 'The diorama blur above and below the focus (High quality only).'),
         check('Full hover cards (as if Alt were held)', !!st.fullCards, (v) => {
           st.fullCards = v;
           save();

@@ -3,6 +3,8 @@
 // move preview's risks. Pure rules: no DOM, all dice through the seeded RNG.
 
 import { emitsLight } from './world'; // V4.1 (WS2)
+import { peekFrom } from './world'; // V5.0 (spec 32.15)
+import { PEEK_RANGE } from './data'; // V5.0 (spec 32.15)
 import { DIRS, distance, hexToWorld, posKey, posNeighbors, range, samePos, type Pos } from './hex';
 import type { Awareness, HeroInDelve, ReactionQuestion } from './types';
 import { ask, called, capital } from './react'; // V4.1 (spec 31.13)
@@ -189,6 +191,8 @@ export interface Sighted {
   at: Pos;
   sneaking: boolean;
   quiet: boolean;
+  /** V5.0 (spec 32.15): the figure stands on a stair hex on the other level; `at` is the linked hex, seen only within PEEK_RANGE. */
+  peek?: boolean;
 }
 
 /** V4.0 (spec 27): what a monster's eyes depend on (the monster itself, or the move preview's copy of it). */
@@ -205,6 +209,11 @@ export interface Look {
  */
 export function sightedHeroes(c: Ctx): Sighted[] {
   const out: Sighted[] = c.d.heroes.filter((h) => h.status === 'active' && h.veil <= 0).map((h) => ({ id: h.heroId, at: h.at, sneaking: isSneaking(h), quiet: quietFeet(c, h.heroId) }));
+  // V5.0 (spec 32.15): a hero on a stair hex is seen from the other level too, by monsters within PEEK_RANGE of the link.
+  for (const x of [...out]) {
+    const o = peekFrom(c.w, c.d, x.at);
+    if (o) out.push({ ...x, at: o, peek: true });
+  }
   for (const r of rivalsOnMap(c)) if ((r.veil ?? 0) <= 0) out.push({ id: r.id, at: r.at, sneaking: isSneaking(r), quiet: r.cls === 'burglar' });
   return out;
 }
@@ -222,7 +231,7 @@ export function lookRound(c: Ctx, look: Look, heroes: Sighted[], lit: Set<string
   let turnedTo: string | undefined;
   for (;;) {
     const eye = { at: look.at, facing: look.facing };
-    const now = heroes.filter((x) => !look.noticed.includes(x.id) && wouldNotice(c, eye, x.at, x.sneaking, lit, x.quiet, look.mood));
+    const now = heroes.filter((x) => !look.noticed.includes(x.id) && (!x.peek || distance(x.at, look.at) <= PEEK_RANGE) && wouldNotice(c, eye, x.at, x.sneaking, lit, x.quiet, look.mood));
     if (!now.length) break;
     now.sort((a, b) => Number(b.id === first) - Number(a.id === first) || distance(a.at, look.at) - distance(b.at, look.at) || heroes.indexOf(a) - heroes.indexOf(b));
     if (look.mood !== 'hunting') {
@@ -247,8 +256,22 @@ export function perceivable(c: Ctx, m: MonsterX, t: Target, lit: Set<string>, se
     return wouldNotice(c, m, t.at, isSneaking(t.rival), lit, t.rival.cls === 'burglar');
   }
   if (!t.hero) return sees(m.at, t.at, lit);
-  if ((m.noticedIds ?? []).includes(t.id)) return sees(m.at, t.at, lit);
-  return wouldNotice(c, m, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id));
+  const noticed = (m.noticedIds ?? []).includes(t.id);
+  if (noticed && sees(m.at, t.at, lit)) return true;
+  if (!noticed && wouldNotice(c, m, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id))) return true;
+  // V5.0 (spec 32.15): the stairs are a window both ways. A hero on a stair hex is made out from the other level by
+  // a monster within PEEK_RANGE of the link; a monster on a stair hex makes out heroes within PEEK_RANGE of its link
+  // on the other level. A hunting one then climbs (its path crosses the stairs, free).
+  const o = peekFrom(c.w, c.d, t.at);
+  if (o && o.level === m.at.level && distance(m.at, o) <= PEEK_RANGE) {
+    if (noticed ? sees(m.at, o, lit) : wouldNotice(c, m, o, isSneaking(t.hero), lit, quietFeet(c, t.id))) return true;
+  }
+  const om = peekFrom(c.w, c.d, m.at);
+  if (om && om.level === t.at.level && distance(om, t.at) <= PEEK_RANGE) {
+    const eye = { ...m, at: om };
+    return noticed ? sees(om, t.at, lit) : wouldNotice(c, eye, t.at, isSneaking(t.hero), lit, quietFeet(c, t.id));
+  }
+  return false;
 }
 
 /**

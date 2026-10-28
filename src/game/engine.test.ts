@@ -313,11 +313,16 @@ describe('movement', () => {
     expect(e.actions(dashed, 'brann').some((a) => a.action === 'attack')).toBe(false);
   });
 
-  it('stairs cost 1 and change level', () => {
+  it('stairs change level; V5.0 (spec 32.15): the step across is free, so on, across and off is 2', () => {
     const s = delve();
     put(s, 'brann', at(1, 2, 7));
     const down = e.reachable(s, 'brann', false).find((r) => r.to.level === 2 && samePos(r.to, at(2, 2, 4)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // from the stair hex itself
+    // A sneaking hero (2) standing beside the stairs gets on, across and off the far stair hex in one move.
+    put(s, 'brann', at(1, 2, 6));
+    const over = e.reachable(s, 'brann', true).filter((r) => r.to.level === 2);
+    expect(over.some((r) => !samePos(r.to, at(2, 2, 4)) && r.cost === 2)).toBe(true);
+    put(s, 'brann', at(1, 2, 7));
     const r = ok(s, { type: 'move', heroId: 'brann', path: down.path, sneak: false });
     expect(hero(r.state, 'brann').at.level).toBe(2);
     expect(r.events.some((x) => x.type === 'levelChanged')).toBe(true);
@@ -1142,7 +1147,7 @@ describe('lift and winch (14.6)', () => {
     s = r.state;
     expect(s.delve!.liftWorking).toBe(true);
     const down = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(3, 1, 6)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // V5.0 (spec 32.15): the crossing is free, as the stairs
     expect(e.actions(s, 'brann').some((o) => o.action === 'winch')).toBe(false);
   });
 
@@ -2733,15 +2738,33 @@ describe('V3.5', () => {
       expect(r3.state.delve!.rivals!.stance).toBe('hostile');
     });
 
-    it('noise of 4 or more they hear wakes them too; the toll is at least 50', () => {
+    it('noise of 4 or more they hear wakes them too; the toll is at least 50 when the party carries that much', () => {
       const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       // V4.1 (spec 31.10): the noise must reach a hero too, so Brann stands by it.
       put(s, 'brann', at(2, 10, 2));
+      hero(s, 'brann').pack.push(gold(80));
       const c = ctx(s);
       makeNoise(c, at(2, 12, 2), 3);
       expect(crewOf(s).stance).toBe('waiting');
       makeNoise(c, at(2, 12, 2), 6);
       expect(crewOf(s)).toMatchObject({ stance: 'demanding', toll: 50 });
+    });
+
+    // V5.0 (spec 32.16, owner): gold stays in camp, so empty pockets are let by and the toll never exceeds the carried value.
+    it('V5.0: a party carrying nothing is let by once ("on the way out"); with loot the toll is capped at what it carries', () => {
+      const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
+      put(s, 'brann', at(2, 10, 2));
+      const c = ctx(s);
+      makeNoise(c, at(2, 12, 2), 6);
+      expect(crewOf(s)).toMatchObject({ stance: 'waiting', letBy: true, spotted: true });
+      expect(s.delve!.log.some((l) => /Nothing on you\? Go on, then/.test(l))).toBe(true);
+      const lines = s.delve!.log.length;
+      makeNoise(c, at(2, 12, 2), 6); // still nothing on them: no second speech, still waiting
+      expect(crewOf(s).stance).toBe('waiting');
+      expect(s.delve!.log.length).toBe(lines);
+      hero(s, 'brann').pack.push(gold(30));
+      makeNoise(c, at(2, 12, 2), 6);
+      expect(crewOf(s)).toMatchObject({ stance: 'demanding', toll: 30 }); // all of it, not the 50 floor
     });
 
     it('sellsword: shows a shove when a hero stands at an unrailed edge, then shoves', () => {
@@ -5062,7 +5085,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
   /** A Level 2 scene: Keven (the lantern) far off on Level 1, so Level 2 is lit only by the forge. */
   function scene(extra: [string, string, HeroClass][] = [], heroes = ['keven', 'brann']) {
     const s = delve({ heroes, extra });
-    put(s, 'keven', at(1, 2, 7));
+    put(s, 'keven', at(1, 2, 6)); // V5.0 (spec 32.15): not on the stair hex, or Level 2's orcs would see him up the stairs
     setLantern(s, { rounds: 20 });
     setLantern(s, { bearer: 'keven' });
     return s;
@@ -5200,6 +5223,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
     it('a waiting cutthroat crew demands its toll on the step that brings a hero within 6 in its sight', () => {
       const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       put(s, 'brann', at(2, 8, 1));
+      hero(s, 'brann').pack.push(gold(60)); // V5.0 (spec 32.16): empty pockets would be let by
       look(s, 'brann', at(2, 9, 1));
       const walk = [at(2, 9, 1), at(2, 10, 1), at(2, 11, 1), at(2, 12, 1)];
       const r = ok(s, { type: 'move', heroId: 'brann', path: walk, sneak: false });

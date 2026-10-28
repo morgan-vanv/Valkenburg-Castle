@@ -1357,6 +1357,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? (ak === 'whistlearrows' ? 'Miss: it shrieks there' : ak === 'glowarrows' ? 'Miss: lights its hex' : 'Miss') : `${i * dmg + (i === slots ? 1 : 0) + fire} dmg${tail}`);
       const sp = base(weapon.stat, slots, p, outcomes, weapon.noise ?? 2, dmg);
       if (ak === 'whistlearrows') sp.warning = `Whistling arrow: noise ${WHISTLE_NOISE} where it lands.`;
+      // V5.0 (spec 32.14): a crew member while the crew is at peace: the warning says what the swing costs.
+      if (f.rival && c.d.rivals && c.d.rivals.stance !== 'hostile') {
+        const paid = c.d.rivals.stance === 'truce' || c.d.rivals.stance === 'bribed' || c.d.rivals.stance === 'hired';
+        sp.warning = `${c.d.rivals.name} are not your enemy yet: this makes them hostile${paid ? ', and they keep what you paid' : ''}.`;
+        if (paid) sp.confirm = true; // a paid crew: the panel asks first
+      }
       return sp;
     }
     case 'knockback': {
