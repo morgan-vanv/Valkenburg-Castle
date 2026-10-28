@@ -2855,6 +2855,19 @@ export class Diorama {
         }
         return;
       }
+      case 'blocked': {
+        // V5.0 (G, spec 32.10): the hit landed on the shield: a gold flash on the figure (the brace colour) and a label.
+        const v = this.units.get(e.id);
+        if (!v || !v.root.visible) return;
+        const a = this.units.get(e.attacker);
+        if (a) v.face(a.root.position.x - v.root.position.x, a.root.position.z - v.root.position.z);
+        v.flash(new THREE.Color(1.0, 0.75, 0.2), 0.9);
+        this.flash(v.root.position.clone().add(new THREE.Vector3(0, v.height * 0.6, 0)), 0xffd060, 2);
+        this.floatText(v.root.position.clone().add(new THREE.Vector3(0, v.height + 0.2, 0)), `Blocked · ${e.from} → ${e.to}`, 'info', 1.1);
+        await clock.wait(0.2);
+        v.flash(new THREE.Color(0, 0, 0), 0);
+        return;
+      }
       case 'downed': {
         const v = this.units.get(e.id);
         if (!v) return;

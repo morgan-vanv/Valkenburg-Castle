@@ -350,7 +350,8 @@ export class App {
         }
         return campScreen(this.screen, s, this.campHost(s));
       case 'summary':
-        return returnScreen(this.screen, s, host);
+        // V5.0 (spec 32.11): the tally runs when the report first comes up; the instant playback setting skips it.
+        return returnScreen(this.screen, s, host, { tally: stageChanged && this.settings.speed !== 0 });
       case 'over':
         return overScreen(this.screen, s, host);
     }
@@ -388,7 +389,9 @@ export class App {
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
-    if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
+    // V5.0 (P, spec 32.5, 32.6): the flow. A done hero hands the camera on after a beat; with nothing left for anyone,
+    // the turn ends on its own.
+    if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.scheduleFlow();
     // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
   }
@@ -702,6 +705,10 @@ export class App {
           sfx.play('torch', { pitch: 1.4, gain: 0.6 });
           await this.dio.playEvent(e);
           continue;
+        // V5.0 (spec 32.10): a shield block: a clang; the engine's say line tells it. (G: a shield flash is under View needs.)
+        case 'blocked':
+          sfx.play('thud', { pitch: 1.6, gain: 0.5 });
+          continue;
         case 'swing':
           swingNext = true;
           sfx.play('whoosh', { pitch: 1.3, gain: 0.5 });
@@ -1000,6 +1007,8 @@ export class App {
       dio: this.dio,
       hud: this.hud,
       busy: () => this.busy,
+      /** The live settings object (checks flip a setting without reloading). */
+      settings: this.settings,
       /** Play a list of events through the HUD as if the engine sent them (DOM checks only). */
       play: (events: GameEvent[], before: GameState) => this.playEvents(events, before),
       posKey,

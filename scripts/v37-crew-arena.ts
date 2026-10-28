@@ -38,13 +38,27 @@ const VERBS: [string, RegExp][] = [
   ['carry', /hoists .* onto their shoulders/], ['called off', /call the fight off/],
 ];
 const tally: Record<string, number> = {};
-function count(ev: { type: string; text?: string }[]): void {
+/** V5.0 (P, the pitch's P3): damage dealt per class, heroes ("hero:ranger") and crew members ("crew:ranger"), per crew. */
+const dmg: Record<string, { hits: number; dmg: number }> = {};
+function count(ev: { type: string; text?: string; attacker?: string; damage?: number }[], s?: GameState): void {
+  if (s?.delve) {
+    for (const x of ev) {
+      if (x.type !== 'hit' || !x.attacker) continue;
+      const h = s.campaign.roster.find((r) => r.id === x.attacker);
+      const m = s.delve.rivals?.members.find((r) => r.id === x.attacker);
+      const key = h ? `hero:${h.cls}` : m ? `crew:${m.cls}` : null;
+      if (!key) continue;
+      const row = (dmg[key] ??= { hits: 0, dmg: 0 });
+      row.hits++;
+      row.dmg += x.damage ?? 0;
+    }
+  }
   if (!TALLY) return;
   for (const x of ev) if (x.type === 'say') for (const [k, re] of VERBS) if (re.test(x.text ?? '')) tally[k] = (tally[k] ?? 0) + 1;
 }
 // V4.1 (spec 31.13): the bot answers reactions by policy, so the castle's turn never waits: a hidden hero lets the
 // enemy pass (stays hidden), a Ranger on overwatch shoots the first enemy that moves in sight.
-const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : 'no') });
+const e = createEngine(testCastle, { react: (q) => (q.kind === 'overwatch' ? 'yes' : q.kind === 'shieldBlock' ? ((q.damage ?? 0) >= 3 ? 'yes' : 'no') : 'no') }); // V5.0 (spec 32.10): block a hit of 3+
 
 type PartyDef = {
   name: string; heroes: [HeroClass, number][]; weaponTier?: 0 | 1 | 2; armorTier?: 0 | 1 | 2; potions?: number;
@@ -113,6 +127,9 @@ function setup(seed: number, pd: PartyDef, crewId: CrewId): GameState {
   });
   for (const h of s.campaign.roster) {
     h.weaponTier = pd.weaponTier ?? 0;
+    // V5.0 (spec 32.10): a party with armor from the forge has its Sellsword's shield too (the arena's Sellsword and
+    // Keven block as crews do); PARTY_SHIELD=0 turns it off for comparison.
+    if ((pd.armorTier ?? 0) >= 1 && (h.cls === 'sellsword' || h.cls === 'heir') && process.env.PARTY_SHIELD !== '0') h.shield = true;
     h.armorTier = pd.armorTier ?? 0;
   }
   const packs: Record<string, string[]> = {};
@@ -156,7 +173,7 @@ function heroTurn(s: GameState, id: string): GameState {
       if (VERBOSE) console.log('  refused', cmd.type, r.error);
       return s;
     }
-    count(r.events as never);
+    count(r.events as never, s);
     if (VERBOSE) for (const x of r.events) if (x.type === 'say') console.log('  +', x.text); else if (x.type === 'roll') console.log('  +', x.who, x.what, `${x.roll.hits}/${x.roll.slots}@${x.roll.chance}${x.roll.focus ? ` f${x.roll.focus}` : ''}`);
     return r.state;
   };
@@ -242,7 +259,7 @@ function fight(seed: number, pd: PartyDef, crewId: CrewId, i = 0): Result {
   if (first === 'crew' || (first === 'alt' && i % 2 === 1)) {
     const r = e.apply(s, { type: 'endTurn' });
     downed += r.events.filter((x) => x.type === 'downed').length;
-    count(r.events as never);
+    count(r.events as never, s);
     s = r.state;
   }
   for (let round = 0; round < 30 && s.stage === 'delve'; round++) {
@@ -256,7 +273,7 @@ function fight(seed: number, pd: PartyDef, crewId: CrewId, i = 0): Result {
     if (!members.length) break;
     const r = e.apply(s, { type: 'endTurn' });
     downed += r.events.filter((x) => x.type === 'downed').length;
-    count(r.events as never);
+    count(r.events as never, s);
     if (VERBOSE) for (const x of r.events) if (x.type === 'say') console.log('   ', x.text); else if (x.type === 'roll') console.log('    ', x.who, x.what, `${x.roll.hits}/${x.roll.slots}@${x.roll.chance}${x.roll.focus ? ` f${x.roll.focus}` : ''}`);
     s = r.state;
     if (VERBOSE && s.delve) console.log('   intents', s.delve.rivals!.members.filter((m) => m.hp > 0).map((m) => `${m.cls}@${m.at.q},${m.at.r}:${m.intent?.kind ?? '-'}`).join(' '), '| heroes', s.delve.heroes.map((h) => `${h.heroId}@${h.at.q},${h.at.r}`).join(' '));
@@ -282,12 +299,14 @@ for (const crewId of CREW_LIST) {
   if (process.env.ARMOR) CREWS[crewId].armorTier = Number(process.env.ARMOR) as 0 | 1 | 2;
   // V4.1 (squads, tuning): DROP="name,name" sets the crew's drop order; PACK="Name=item+item;Name=item" a member's pack.
   if (process.env.DROP) CREWS[crewId].drop = process.env.DROP.split(',');
+  if (process.env.LEVEL) (CREWS[crewId] as { level: number }).level = Number(process.env.LEVEL); // V5.0 tuning: the crew's level
   for (const part of (process.env.PACK ?? '').split(';').filter(Boolean)) {
     const [who, items] = part.split('=');
     const m = CREWS[crewId].members.find((x) => x.name === who);
     if (m) m.pack = (items ?? '').split('+').filter(Boolean) as typeof m.pack;
   }
   for (const k of Object.keys(tally)) delete tally[k];
+  for (const k of Object.keys(dmg)) delete dmg[k];
   console.log(`\n${CREWS[crewId].name} (level ${CREWS[crewId].level}, W${CREWS[crewId].weaponTier} A${CREWS[crewId].armorTier}, ${CREWS[crewId].members.map((m) => m.cls).join('/')})`);
   const cells = crewCells(crewId);
   for (const pk of PARTY_LIST) {
@@ -303,6 +322,7 @@ for (const crewId of CREW_LIST) {
     );
   }
   if (TALLY) console.log(`  verbs: ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
+  console.log(`  damage by class (all cells): ${Object.entries(dmg).sort((a, b) => b[1].dmg - a[1].dmg).map(([k, v]) => `${k} ${v.dmg} (${v.hits} hits)`).join(', ') || 'none'}`);
 }
 void posKey;
 void TALLY;

@@ -11,32 +11,39 @@ Pillars that matter most here (claude/design-pillars.md): 2 never slow fast play
 ## Build now
 
 ### B1. Shop: buying fills the cart; equipping is a separate act
+**Shipped (spec 32.2).**
 Feedback: buying is confusing because bought items auto-equip to a hero.
 Today: the engine already puts a purchase on Keven's cart (`case 'buy'` in `src/game/camp.ts`, `C.stash.push`). The Outfit screen's Buy button then moves it into the selected hero's pack (`src/ui/lowgate.ts` ~1280–1300, "Into X's pack"). This is UI-only.
 Do: buying only ever puts the item on the cart (show it landing there); equipping happens on the "Yours" side by an explicit act (give to a hero, drag, or a per-item "Give to" menu). Make the cart read as the inventory. Supersedes the 2026-10-26 decision "a purchase goes into the selected hero's pack only if it fits"; log the new decision. Update `scripts/v40-lowgate-check.mjs` and the vendor tests.
 
 ### B2. Items that can't be used: the torch after jumping to the bottom level
+**Shipped (spec 32.1).** The cause: the jump was a whole-turn action, so the hero landed with no action and Light (an action) came only next round. A jump is now the hero's move (no dash after), the action stays. Audit in `src/game/itemuse.test.ts`.
 Feedback: players couldn't light their torch after jumping down to the bottom level. Find the cause first; don't guess.
 Places to look: `src/game/falls.ts` (the drop), `src/game/light.ts` (`torchesToLight` needs an unlit torch with rounds left and no torch already burning; `lightTargets`, `doLight`), whether the jump spends the hero's action, and the HUD's "only usable actions shown" filter in `src/ui/hud.ts`.
 Do: reproduce in a unit test (jump or fall to Level 3 with an unlit torch, try to light it), fix, and keep the test. Then audit item use in odd states (after a fall or jump, carrying or being carried, on a raised floor, in the dark, with a full pack, the turn after a reaction) with a table-driven test. The owner's note "Also lets make sure that using items …" was cut off: ask him what he meant.
 
 ### B3. E also confirms
+**Shipped (spec 32.3; E stays inert on the reaction card).**
 Feedback: if E ends the turn, it should also confirm dice rolls and other confirmation windows.
 Today: `onKey` in `src/ui/hud.ts` (~3491; `k === 'e'` ends the turn ~3599); the reaction card takes its keys first.
 Do: while a roll panel or confirmation is open, E confirms it (Enter and Space too), and never ends the turn underneath. Decide what E means on the reaction card (it has two answers; E should pick the first only if that's obvious, otherwise leave it to the number keys) and note it. Update the HUD check.
 
 ### B4. The probability bar: thicker, no text under it
+**Shipped (spec 32.4).**
 Feedback: remove the text under the probability bar and make the bar thicker.
 Today: `outcomeBar` in `src/ui/hud-roll.ts` (~209, class `dl-ocbar`) and its CSS in `src/style.css`.
 Do: drop the lines under the bar, make the bar clearly thicker, keep labels inside the segments where they fit and full numbers on hover (pillar 15). Update `hud-roll.test.ts`.
 
 ### B5. Auto end turn
+**Shipped (spec 32.5).**
 Feedback: if no party member can do anything (no move, no action, no usable item), end the turn automatically; allow opting out in settings.
 Do: after each command, if every able hero has nothing left (use `engine.actions(state, heroId)` from `src/game/api.ts`; ignore free toggles like Walk/Sneak and reaction settings), end the turn after a short beat. Add "Auto end turn" (on by default) to `src/ui/settings.ts` (append only; G also adds lines there). Don't fire while a reaction or roll is pending, or while a loot panel is open. Keep the existing "ending a turn with heroes who did nothing" check sensible: auto end only when they truly can't act.
 
 ## Pitch first (one pitch doc, then stop for the owner)
 
 Write one pitch (a Claude Doc, like V4.1's "Classroom and Check") covering P1–P6, each with: what players hit, two or three options with their costs, a recommendation, and numbers where they matter. Keep it skimmable.
+
+**Written (2026-10-27 evening): "V5.0 play pitch: Reactions, the Return, the Ranger, Controls, the Camera, Status"** https://claude.ai/artifact/TNGjrZ54oitgRP4fe2B6iA. Recommendations: P1 Hold, Shield block, Flame ward, Potion a friend; P2 a counting tally with story-gift reveals and a "left behind" list, no grade; P3 "dodging targets" (−1 slot on a bow shot at a target that has noticed the shooter; crew Rangers too); P4 WASD camera, sneak on Shift, Attack on Space, E stays End turn, a `?` overlay; P5 advance the selection, never the camera, and no advance while free things (Take, an open door) remain; P6 the spec `docs/v5-status-visuals.md` with three open questions. **Answered 2026-10-27 (the owner's column in the pitch) and built 2026-10-28:** P5 → spec 32.6 (the flow on one test; the camera cycles after a beat, the End turn question says what's left, auto end; "advance the selection, not the camera" rejected as deceptive), items → 32.7, P4 → 32.8 (plus a sliding Walk / Sneak switch on Shift), P3 → 32.9 (option 1), P1 → 32.10 (the shield block only; the rest in ideas-later for the meta-progression pass), P2 → 32.11 (option 1). P6: the owner's column was empty; the three questions stand (the HUD side of the status spec waits on them).
 
 ### P1. Reactions: more of them, for melee, mages and items
 Owner: keep Brace proactive (it rewards foresight: you brace before the hit). He likes reactions (overwatch, the hidden swing) and wants melee fighters to have one, and more for mages, items and the shield.
