@@ -2220,9 +2220,30 @@ export class Hud {
       dice[i]!.innerHTML = `<span class="dl-die-p">${hit ? 'hit' : 'miss'}</span>`;
       await wait(0.1);
     }
+    this.armCaption();
+  }
+
+  private captionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * V5.0 (owner's play-test, docs/v5-ship.md): a caption lives a few seconds after its roll resolves, then goes. In the
+   * castle's turn the next actor replaced it anyway; a free swing in the player's phase had stayed up until End turn.
+   * Each result line that lands restarts the clock.
+   */
+  private armCaption(): void {
+    if (this.captionTimer) clearTimeout(this.captionTimer);
+    const ms = this.host.settings.speed === 0 ? 1600 : 3200;
+    this.captionTimer = setTimeout(() => {
+      this.captionTimer = null;
+      this.caption.classList.add('hidden');
+    }, ms);
   }
 
   private captionStart(actor: string, title: string): void {
+    if (this.captionTimer) {
+      clearTimeout(this.captionTimer);
+      this.captionTimer = null;
+    }
     this.captionFor = actor;
     this.caption.replaceChildren(h('div', { class: 'dl-cap-t' }, title), h('div', { class: 'dl-cap-body' }));
     this.caption.classList.remove('hidden');
@@ -2287,6 +2308,7 @@ export class Hud {
       cls = 'down';
     } else if (e.type === 'grabbed') text = `${this.nameOf(e.id)} is held.`;
     if (text) body.append(h('div', { class: `dl-cap-res ${cls}` }, text));
+    if (text || e.type === 'miss') this.armCaption();
   }
 
   private isHeroId(id: string): boolean {
@@ -2646,7 +2668,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
     // V4.1 (spec 31.13): a hero set to strike from hiding without being asked.
     if (hd.reactions?.hiddenSwing === 'always') add('ambush', 'sword', `Strikes from hiding · ${name} takes the free swing at an enemy passing them that hasn't spotted them, without asking, and gives themselves away. Change it under Reactions (beside Walk/Sneak).`);
-    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
+    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and tap Shift to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
     const threats = Object.entries(this.intents).filter(([id, it]) => it.targetId === hd.heroId && seen.has(id) && ['attack', 'shove', 'grab', 'drag', 'web', 'firebolt', 'dart', 'venomdart', 'hamstring', 'rob', 'steal', 'dread', 'nightthorn', 'briar'].includes(it.kind));
@@ -2740,24 +2762,30 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.reactionsButton(sel, def),
       ),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
-      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero.
+      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero. Owner's
+      // play-test (docs/v5-ship.md): tidier: the two words sit in one pill with the slider between them, the Shift
+      // hint is a dim badge after it with its own short tip, and the switch's tip is one line plus the rule.
       h(
-        'button',
-        {
-          type: 'button',
-          role: 'switch',
-          class: `dl-switch ${this.sneak ? 'on' : ''}`,
-          'aria-checked': this.sneak ? 'true' : 'false',
-          'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}`,
-          disabled: this.busy,
-          'data-move-switch': this.sneak ? 'sneak' : 'walk',
-          'data-tip': `${this.sneak ? 'Sneak · silent' : 'Walk · noise 1 a hex'} · tap Shift to switch (this hero only)\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
-          onclick: () => this.setSneak(!this.sneak),
-        },
-        h('span', { class: 'dl-switch-l walk' }, 'Walk'),
-        h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
-        h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
-        h('kbd', null, 'Shift'),
+        'span',
+        { class: 'dl-switch-wrap' },
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'switch',
+            class: `dl-switch ${this.sneak ? 'on' : ''}`,
+            'aria-checked': this.sneak ? 'true' : 'false',
+            'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}. Shift switches.`,
+            disabled: this.busy,
+            'data-move-switch': this.sneak ? 'sneak' : 'walk',
+            'data-tip': `${this.sneak ? 'Sneaking · silent, moves ' + (def.cls === 'burglar' || sel.ale === 'smuggler' ? 4 : 2) : 'Walking · noise 1 a hex, moves ' + (def.cls === 'burglar' ? 5 : 4)}\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
+            onclick: () => this.setSneak(!this.sneak),
+          },
+          h('span', { class: 'dl-switch-l walk' }, 'Walk'),
+          h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
+          h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
+        ),
+        h('kbd', { class: 'dl-switch-hint', tabindex: 0, 'data-tip': `Shift · tap it to switch ${def.name} between Walk and Sneak (this hero only; each hero keeps their own).` }, 'Shift'),
       ),
     );
     // Actions: Attack (always), Shove, class abilities and spells, then whatever is in reach.

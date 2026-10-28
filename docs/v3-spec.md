@@ -1567,3 +1567,10 @@ Found by the bot (32.14): a cutthroat crew demanded `max(50, half the carried va
 - Tests: engine.test.ts ("noise of 4 or more…", "V5.0: a party carrying nothing is let by once…"); the 26.2 and crews.test premises now carry gold.
 - The bot: the Level 2 and 3 scenarios' forced fights are gone; `tolls refused for want of gold` should read 0.
 
+### 32.17 Shipping V5.0: the owner's first play-test, P's items (docs/v5-ship.md, 2026-10-28)
+
+- **Captions live a few seconds.** A caption (an enemy's roll beside it: "Orc strikes Keven", the dice, the result) now goes 3.2 s after its roll resolves (1.6 s at Instant); each result line that lands restarts the clock (`Hud.armCaption`). In the castle's turn the next actor had always replaced it; a free swing in the player's phase had stayed up until End turn (`captionStart` was never cleared).
+- **The Walk / Sneak switch, tidier** (32.8): the two words and the slider in one pill (14 px, a 30 px track), the Shift hint a dim badge beside it with its own one-line tip, the switch's tip one line ("Walking · noise 1 a hex, moves 4") plus the rule; the hotbar's hero column 150 → 176 px so nothing clips. The sneak mark's "press S" became "tap Shift" (32.8 moved S to the camera).
+- **Settings** gets the look rows (G's setters): Quality High / Low (`dio.setQuality`), Action camera (`dio.setActionCamera`), Tilt-shift blur (`dio.setTiltShift`); "Lower walls near the camera" is retired (the cutaway is always on in the new look; the `cutaway` key stays in settings.ts, ignored).
+- **Saves:** nothing in spec 32 changes the shape of a saved `GameState` in a way an old save can't carry: new fields are optional (`letBy`, `reactions.shieldBlock` with a default, `HeroInDelve` unchanged), `squadSlots` was already optional, settings merge over `DEFAULTS`. The key stays `vc.save.v39`.
+
