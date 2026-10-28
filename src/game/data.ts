@@ -948,3 +948,6 @@ export const HIRE_KEEP = 2;
 export const BETRAY_LOOT = 150;
 export const BETRAY_CHANCE = 25;
 export const SCOUT_RANGE = 8;
+
+/** V5.0 (P, spec 32.7): a captive's most HP (a captive the crews took earlier starts at 1). */
+export const PRISONER_HP = 5;

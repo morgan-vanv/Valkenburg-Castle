@@ -1427,3 +1427,11 @@ One test, `src/ui/autoend.ts` (tested): `heroLeft(engine, s, id)` lists what a h
 3. **Auto end turn** (32.5) fires from the same timer when the party is done and no hero is left to cycle to, with its toast and no question.
 
 Checks: `scripts/v40-hud-check.mjs` (the question's wording; a done hero cycles after a beat; a done hero with loot in reach keeps the selection). The Lowgate check's keyboard-focus tip assertion (flaky in headless) is dropped (owner).
+
+### 32.7 Items between people (owner, 2026-10-27)
+
+The owner's note, completed: "ensure that items are able to be given to other party members, are able to be taken from the inventory of downed party members (or enemies like other squads who are downed), and the items where it makes sense are usable on others (use potion on person you are rescuing)." Give (free, to an active neighbour with room) and potions and antipoison on a hurt, poisoned or downed friend next to you (or on your back) already existed. New (delve.ts `takeSource`, `takeBodies`, `targetsFor('take' | 'potion')`, `doAct`):
+
+- **Take from a downed friend's pack** (free, as Take is): a downed hero next to you, or on your back, is a Take target (`{ id, at }`) for everything in their pack but their kit and loaners; the preview says "Takes X from Keven's pack", the log "Brann takes a potion from Keven's pack." Clicking the downed figure offers Take.
+- **Take from a downed crew member** the same way (a killed one already dropped everything): their pack minus kit, while nobody carries them. Pillar 17: crews already loot downed heroes' gold and gems (rob); this is the party's side of it.
+- **A potion on the captive** (`PRISONER_HP` 5; a captive the crews took earlier starts at 1): a potion or greater potion on the shackled or freed captive next to you (or on your back) while hurt: "Wim drinks it: +5", capped at 5. Tests: itemuse.test.ts.

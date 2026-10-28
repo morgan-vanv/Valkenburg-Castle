@@ -217,3 +217,34 @@ describe('V5.0 (spec 32.1): item use in odd states (audit)', () => {
     expect(hero(s, 'keven').status).toBe('active');
   });
 });
+
+describe('V5.0 (spec 32.7, owner): items between people', () => {
+  it('Take from a downed friend\'s pack next to you (never their kit), and from a downed crew member\'s', () => {
+    let s = delve();
+    const b = hero(s, 'brann');
+    const k = hero(s, 'keven');
+    k.at = posNeighbors(b.at).find((p) => w.tile(p)?.kind === 'floor')!;
+    k.status = 'downed';
+    k.hp = 0;
+    k.pack.push(item('kp', 'potion'), { ...item('kq', 'quiver'), kit: true } as Item);
+    const take = e.actions(s, 'brann').find((o) => o.action === 'take')!;
+    expect(take.targets.some((t) => t.id === 'keven')).toBe(true);
+    expect(e.preview(s, 'brann', 'take', { id: 'keven', at: k.at }).outcomes.join()).toMatch(/from Keven's pack/);
+    s = act(s, 'brann', 'take', { id: 'keven', at: k.at }).state;
+    expect(hero(s, 'brann').pack.some((i) => i.id === 'kp')).toBe(true);
+    expect(hero(s, 'keven').pack.map((i) => i.id)).toEqual(['kq']);
+    expect(e.actions(s, 'brann').find((o) => o.action === 'take')?.targets.some((t) => t.id === 'keven') ?? false).toBe(false);
+  });
+
+  it('a potion on the captive you are rescuing, hurt and next to you', () => {
+    let s = delve();
+    const b = hero(s, 'brann');
+    const at = posNeighbors(b.at).find((p) => w.tile(p)?.kind === 'floor')!;
+    s.delve!.prisoner = { id: 'cap', name: 'Wim', at: { ...at }, hp: 1, freed: false, out: false, dead: false };
+    const pot = e.actions(s, 'brann').find((o) => o.action === 'potion')!;
+    expect(pot.targets.some((t) => t.id === 'cap')).toBe(true);
+    s = act(s, 'brann', 'potion', { id: 'cap', itemId: 'p1' }).state;
+    expect(s.delve!.prisoner!.hp).toBe(5);
+    expect(e.actions(s, 'brann').find((o) => o.action === 'potion')?.targets.some((t) => t.id === 'cap') ?? false).toBe(false);
+  });
+});
