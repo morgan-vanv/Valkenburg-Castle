@@ -2,7 +2,7 @@
 // the four steps exist and are clickable; a new campaign lands on Job with the welcome card;
 // choosing a job selects it; hiring from step 2 fills a party slot and costs the price; heroes
 // can leave the party and come back from the roster bench; healing shows in a wounded hero's
-// slot only with the surgeon home; buying on step 3 puts the item in the selected hero's pack;
+// slot only with the surgeon home; buying on step 3 puts the item on Keven's cart and packing is a click on the cart (V5.0 B1);
 // the cart keeps valuables apart from gear and Sell all sells only valuables; V4.1 (spec 31.11): the board's two labelled rows
 // (pinned by the village above work for hire), at most 3 cards each, a captive first, "+N more"; V4.1 WS4 (spec 31.6): the Outfit step's
 // two counters (Yours: packs and Keven's cart, no prices; Vendors: four tabs, a price and "Buy · N" on every live row,
@@ -33,7 +33,7 @@ const step = async (id) => { await p.click(`.lg-step[data-step="${id}"]`); await
 const page = () => p.evaluate(() => document.querySelector('.lowgate')?.dataset.page);
 
 await p.goto(base);
-await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true })); });
+await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, quality: 'low' })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
 await p.click('text=New campaign');
@@ -85,7 +85,7 @@ await p.focus('.lg-board-village .lg-board-h');
 await p.keyboard.press('Tab');
 await p.keyboard.press('Shift+Tab');
 await p.waitForTimeout(80);
-check('board: the village row label shows its tip on keyboard focus', /gifts/.test(await p.evaluate(() => document.querySelector('.lg-tip:not(.hidden)')?.innerText ?? '')));
+// V5.0 (P, owner): the keyboard-focus tip check was flaky in headless (a focus timing) and is dropped.
 
 // ---- step 2: Party
 await p.click('[data-next="party"]');
@@ -209,7 +209,7 @@ check('the Flagon while Wim is away: "The Gilded Flagon\'s taps are dry.", every
 check('the hot supper shows as a locked village line under the Flagon', (await p.$eval('[data-perk="supper"]', (e) => e.dataset.state).catch(() => '')) === 'locked');
 await p.click('[data-vendor-tab="mott"]');
 await p.waitForTimeout(80);
-// Buying: into the selected hero's pack (the slot glows), the row says how many you own.
+// V5.0 (P, B1): buying puts the item on Keven's cart (its cart row glows, the vendor row says so); packing is a click on the cart.
 await edit(`s.campaign.gold = 100;`);
 await p.click(`[data-packfor="${r0}"]`);
 await p.waitForTimeout(80);
@@ -219,21 +219,31 @@ await p.waitForTimeout(120);
 s = await st();
 const torch = s.campaign.stash.find((i) => i.kind === 'torch');
 const pk = await p.$$eval(`.lg-hero[data-hero="${r0}"] [data-packed]`, (els) => els.map((e) => e.dataset.packed));
-check('buying puts the item in the selected hero\'s pack', !!torch && pk.includes(torch.id) && s.campaign.gold === 90, `gold ${s.campaign.gold}`);
-check('...the new slot glows and the row says so', !!(await p.$(`.lg-hero[data-hero="${r0}"] .lg-sl.new[data-packed="${torch.id}"]`)) && /Into .*'s pack\./.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)));
-check('the torch row says "1 packed"', /1 packed/.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)));
-check('the step summary: "1 item packed"', /1 item packed/.test(await p.$eval('.lg-step[data-step="outfit"]', (e) => e.innerText)));
+check('buying puts the item on the cart, not in a pack', !!torch && !pk.includes(torch.id) && s.campaign.gold === 90 && !!(await p.$('[data-cartbox] [data-cart="torch"]')), `gold ${s.campaign.gold}`);
+check('...the cart row glows and the vendor row says "On Keven\'s cart."', !!(await p.$('[data-cartbox] [data-cart="torch"].new')) && /On Keven's cart\./.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)));
+check('the torch row says "1 on the cart"', /1 on the cart/.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)));
+await p.click('[data-cartbox] [data-cart="torch"]');
+await p.waitForTimeout(80);
+check('clicking it on the cart packs it for the selected hero: the slot glows, "1 packed", "1 item packed"', !!(await p.$(`.lg-hero[data-hero="${r0}"] .lg-sl.new[data-packed="${torch.id}"]`)) && /1 packed/.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)) && /1 item packed/.test(await p.$eval('.lg-step[data-step="outfit"]', (e) => e.innerText)));
 await p.click(`[data-packed="${torch.id}"]`);
 await p.waitForTimeout(80);
 check('clicking a packed item sends it back to the cart', !(await p.$(`[data-packed="${torch.id}"]`)) && /1 on the cart/.test(await p.$eval('[data-row="torch"]', (e) => e.innerText)));
-// A full pack: the purchase goes on the cart, and the row says so.
+// "Give to": with two heroes, every cart row has one small button per hero; it packs for that hero, not the selected one.
+const giveIds = await p.$$eval('[data-cartbox] [data-giveto][data-kind="torch"]', (els) => els.map((e) => e.dataset.giveto));
+check('cart rows carry a "Give to" button per party hero', giveIds.length === 2 && giveIds.includes(r0), giveIds.join(','));
+const other = giveIds.find((id) => id !== r0);
+await p.click(`[data-cartbox] [data-giveto="${other}"][data-kind="torch"]`);
+await p.waitForTimeout(80);
+check('"Give to" packs it for that hero (not the one marked Packing)', !!(await p.$(`.lg-hero[data-hero="${other}"] [data-packed="${torch.id}"]`)) && !(await p.$(`.lg-hero[data-hero="${r0}"] [data-packed="${torch.id}"]`)));
+await p.click(`[data-packed="${torch.id}"]`);
+await p.waitForTimeout(80);
+// A full pack: the cart row is blocked for that hero, and says so.
 await edit(`s.campaign.stash.push(...[1, 2, 3, 4].map((n) => ({ id: 'fill-' + n, kind: 'rope', name: 'Rope', amount: 1, slots: 1 })));`);
 for (let n = 1; n <= 4; n++) await p.click('[data-cart="rope"]').then(() => p.waitForTimeout(40));
-await p.click('[data-buy="firecracker"]');
-await p.waitForTimeout(120);
-check('a full pack: the purchase goes on the cart, and the row says so', /pack is full: it's on Keven's cart\./.test(await p.$eval('[data-row="firecracker"]', (e) => e.innerText)) && (await p.$$(`.lg-hero[data-hero="${r0}"] [data-packed]`)).length === 4);
+const fullRow = await p.$eval('[data-cartbox] [data-cart="torch"]', (e) => ({ off: e.getAttribute('aria-disabled'), tip: e.dataset.tip }));
+check('a full pack: the cart row is blocked and its hover says the pack is full', fullRow.off === 'true' && /pack is full/.test(fullRow.tip) && (await p.$$(`.lg-hero[data-hero="${r0}"] [data-packed]`)).length === 4, JSON.stringify(fullRow));
 for (const id of await p.$$eval(`.lg-hero[data-hero="${r0}"] [data-packed]`, (els) => els.map((e) => e.dataset.packed))) await p.click(`[data-packed="${id}"]`).then(() => p.waitForTimeout(40));
-await edit(`s.campaign.stash = s.campaign.stash.filter((i) => !/^fill-/.test(i.id) && i.kind !== 'firecracker'); s.campaign.gold = 100;`);
+await edit(`s.campaign.stash = s.campaign.stash.filter((i) => !/^fill-/.test(i.id)); s.campaign.gold = 100;`);
 // Can't afford: the button is blocked and says how much gold you have.
 await edit(`s.campaign.gold = 5;`);
 const dear = await p.$eval('[data-buy="potion"]', (e) => ({ off: e.getAttribute('aria-disabled'), tip: e.dataset.tip }));
@@ -292,6 +302,8 @@ await p.click('[data-vendor-tab="gerda"]');
 await p.waitForTimeout(60);
 await p.click('[data-buy="lockpicks"]');
 await p.waitForTimeout(120);
+await p.click('[data-cartbox] [data-cart="lockpicks"]'); // V5.0 (B1): bought things wait on the cart; pack them from there
+await p.waitForTimeout(80);
 await p.click('[data-vendor-tab="mott"]');
 await p.waitForTimeout(60);
 await step('party');

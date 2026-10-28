@@ -16,6 +16,7 @@ import { returnScreen } from './return';
 import { campScreen, freshLoadout, type CampHost, type CampPage, type Loadout } from './lowgate';
 import { CREW, STANCE, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
+import { DEFAULT_DISTANCE } from '../view/camera'; // V5.0 G: camera default
 
 export const SAVE_KEY = 'vc.save.v39';
 
@@ -70,7 +71,7 @@ const LOADOUT_KEY = 'vc.loadout.v33';
 /** V4.0: the first-visit welcome card was dismissed (per browser). */
 const WELCOME_KEY = 'vc.welcome.v40';
 /** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
-const DELVE_DISTANCE = 19;
+const DELVE_DISTANCE = DEFAULT_DISTANCE; // V5.0 G: camera default (camera.ts), was 19
 
 export class App {
   private state: GameState | null = null;
@@ -189,10 +190,8 @@ export class App {
     const sp = this.settings.speed;
     this.dio.clock.speed = this.hurry ? Math.max(6, sp * 4) : sp === 0 ? 1000 : sp;
     this.dio.reduceShake = this.settings.reduceShake;
-    // V3.4: "Lower walls near the camera" (the view agent's setCutaway; older dioramas: the field).
-    const dio = this.dio as Diorama & { setCutaway?: (on: boolean) => void };
-    if (typeof dio.setCutaway === 'function') dio.setCutaway(this.settings.cutaway);
-    else dio.cutaway = this.settings.cutaway;
+    // V5.0 (P, docs/v5-ship.md step 2): "Lower walls near the camera" is retired: the cutaway is always on in the new
+    // look (`LOOK_CUTAWAY`); the setting key `cutaway` stays in settings.ts (append-only) and is ignored.
   }
 
   // ------------------------------------------------------------ saving
@@ -349,7 +348,8 @@ export class App {
         }
         return campScreen(this.screen, s, this.campHost(s));
       case 'summary':
-        return returnScreen(this.screen, s, host);
+        // V5.0 (spec 32.11): the tally runs when the report first comes up; the instant playback setting skips it.
+        return returnScreen(this.screen, s, host, { tally: stageChanged && this.settings.speed !== 0 });
       case 'over':
         return overScreen(this.screen, s, host);
     }
@@ -386,8 +386,23 @@ export class App {
       sfx.play('levelup', { gain: 0.8 });
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
+    // V5.0 (spec 32.15): the selected hero crossed while others still have to: hand the selection to the next able
+    // hero on the level shown, before the render looks at anyone.
+    if (this.stayOn !== null && this.state?.delve) {
+      const lvl = this.stayOn;
+      this.stayOn = null;
+      const next = this.state.delve.heroes.find((x) => x.status === 'active' && x.at.level === lvl && !(x.moved && x.acted));
+      if (next) this.hud.select(next.heroId);
+    }
     this.render(cmd.type === 'startDelve');
-    if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
+    // V5.0 (spec 32.15): the threshold's peek, said once as a hero stops on the stairs (the status mark keeps it).
+    if (cmd.type === 'move' && this.state?.stage === 'delve') {
+      const pk = this.hud.peekLine(cmd.heroId);
+      if (pk) this.hud.log(pk.text, pk.figures ? 'log-enemy' : '');
+    }
+    // V5.0 (P, spec 32.5, 32.6): the flow. A done hero hands the camera on after a beat; with nothing left for anyone,
+    // the turn ends on its own.
+    if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.scheduleFlow();
     // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
   }
@@ -701,6 +716,11 @@ export class App {
           sfx.play('torch', { pitch: 1.4, gain: 0.6 });
           await this.dio.playEvent(e);
           continue;
+        // V5.0 (spec 32.10): a shield block: a clang; the engine's say line tells it; the diorama flashes the shield gold (G, W1).
+        case 'blocked':
+          sfx.play('thud', { pitch: 1.6, gain: 0.5 });
+          await this.dio.playEvent(e);
+          continue;
         case 'swing':
           swingNext = true;
           sfx.play('whoosh', { pitch: 1.3, gain: 0.5 });
@@ -799,6 +819,9 @@ export class App {
           } else if (e.stance === 'hostile') {
             sfx.play('sword', { pitch: 0.8 });
             if (!dealt) this.hud.log(`${name} draw steel. They are hostile.`, 'log-enemy');
+          } else if (e.stance === 'waiting' && crew?.letBy) {
+            // V5.0 (spec 32.16): empty pockets let by; the engine's say line carries the words.
+            sfx.play('horn', { pitch: 0.8, gain: 0.3 });
           } else if (!dealt) this.hud.log(`${name}: ${st.name.toLowerCase()}. ${st.text}`, e.stance === 'hired' ? 'log-ally' : '');
           continue;
         }
@@ -905,6 +928,18 @@ export class App {
           this.hud.log(`${this.hud.nameOf(e.id)} is out.`);
           await this.dio.playEvent(e);
           continue;
+        case 'levelChanged': {
+          // V5.0 (spec 32.15): the selected hero took the stairs while another able hero who hasn't finished their
+          // turn is still on the level they left: after the command the selection goes to that hero (`stayOn`), so
+          // the view comes back to the level with work left on it. (The diorama follows the crossing itself; not
+          // following while `stayOn` is set is on G's list.)
+          const d = this.state?.delve;
+          const stay = !!d && e.id === this.hud.selectedId && e.to !== e.from
+            && d.heroes.some((x) => x.heroId !== e.id && x.status === 'active' && x.at.level === e.from && !(x.moved && x.acted));
+          if (stay) this.stayOn = e.from;
+          await this.dio.playEvent(e);
+          continue;
+        }
         default:
           await this.dio.playEvent(e);
       }
@@ -926,6 +961,8 @@ export class App {
       }
       case 'roll':
         return enemy(e.who) && d.canSee(d.unitPos(e.who)) ? d.unitPos(e.who) : null;
+      case 'blocked': // V5.0 (spec 32.10): the block precedes its hit; the camera goes where the hit's will
+        return this.isHero(e.id) ? d.unitPos(e.id) : d.canSee(d.unitPos(e.id)) ? d.unitPos(e.id) : null;
       case 'hit':
       case 'miss': {
         if (!enemy(e.attacker)) return null;
@@ -984,6 +1021,9 @@ export class App {
   }
 
   /** End of the world phase: back to the selected hero. */
+  /** V5.0 (spec 32.15): the level the view is to stay on after the selected hero took the stairs (null: follow). */
+  private stayOn: number | null = null;
+
   private returnToSelected(): void {
     const s = this.state;
     const id = this.hud.selectedId;
@@ -999,6 +1039,8 @@ export class App {
       dio: this.dio,
       hud: this.hud,
       busy: () => this.busy,
+      /** The live settings object (checks flip a setting without reloading). */
+      settings: this.settings,
       /** Play a list of events through the HUD as if the engine sent them (DOM checks only). */
       play: (events: GameEvent[], before: GameState) => this.playEvents(events, before),
       posKey,

@@ -313,11 +313,16 @@ describe('movement', () => {
     expect(e.actions(dashed, 'brann').some((a) => a.action === 'attack')).toBe(false);
   });
 
-  it('stairs cost 1 and change level', () => {
+  it('stairs change level; V5.0 (spec 32.15): the step across is free, so on, across and off is 2', () => {
     const s = delve();
     put(s, 'brann', at(1, 2, 7));
     const down = e.reachable(s, 'brann', false).find((r) => r.to.level === 2 && samePos(r.to, at(2, 2, 4)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // from the stair hex itself
+    // A sneaking hero (2) standing beside the stairs gets on, across and off the far stair hex in one move.
+    put(s, 'brann', at(1, 2, 6));
+    const over = e.reachable(s, 'brann', true).filter((r) => r.to.level === 2);
+    expect(over.some((r) => !samePos(r.to, at(2, 2, 4)) && r.cost === 2)).toBe(true);
+    put(s, 'brann', at(1, 2, 7));
     const r = ok(s, { type: 'move', heroId: 'brann', path: down.path, sneak: false });
     expect(hero(r.state, 'brann').at.level).toBe(2);
     expect(r.events.some((x) => x.type === 'levelChanged')).toBe(true);
@@ -833,7 +838,7 @@ describe('falls (14.2)', () => {
     expect(b.hp).toBe(3);
     const fell = r.events.find((x) => x.type === 'fell');
     expect(fell).toMatchObject({ type: 'fell', id: 'brann', levels: 2, damage: 7 });
-    expect(b.moved && b.acted).toBe(true);
+    expect([b.moved, b.acted, b.dashed]).toEqual([true, false, true]); // V5.0 (spec 32.1): the jump is the move; the action stays
   });
 
   it('rope and climb: down to where a fall would land, no damage, and back up', () => {
@@ -1142,7 +1147,7 @@ describe('lift and winch (14.6)', () => {
     s = r.state;
     expect(s.delve!.liftWorking).toBe(true);
     const down = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(3, 1, 6)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // V5.0 (spec 32.15): the crossing is free, as the stairs
     expect(e.actions(s, 'brann').some((o) => o.action === 'winch')).toBe(false);
   });
 
@@ -1344,15 +1349,16 @@ describe('15.3 classes', () => {
     const m = monster(t, 'orc', at(3, 7, 8), 'hunting');
     const p = e.preview(t, 'rae', 'attack', { id: m.id });
     expect(p.ok).toBe(true);
-    expect(p.slots).toBe(3);
+    expect(p.slots).toBe(2); // V5.0 (spec 32.9): the hunting orc has noticed her: it saw her draw, −1 slot
+    expect(p.modifiers).toContain('It saw you draw −1 slot');
     expect(p.stat).toBe('finesse');
     expect(p.noise).toBe(1);
     // Out of range at 7.
     m.at = at(3, 8, 8);
     expect(option(t, 'rae', 'attack')).toBeUndefined();
-    // Adjacent: 2 slots.
+    // Adjacent: another slot off, never below 1.
     m.at = at(3, 2, 8);
-    expect(e.preview(t, 'rae', 'attack', { id: m.id }).slots).toBe(2);
+    expect(e.preview(t, 'rae', 'attack', { id: m.id }).slots).toBe(1);
     // Behind a wall: no.
     m.at = at(3, 14, 8);
     expect(option(t, 'rae', 'attack')).toBeUndefined();
@@ -1374,7 +1380,8 @@ describe('15.3 classes', () => {
     const r = until(ow, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'cast' && x.spell === 'overwatch') && ev.some((x) => x.type === 'hit' && x.attacker === 'rae'));
     expect(r.state.delve!.monsters.find((x) => x.id === m.id)!.hp).toBeLessThan(20);
     expect(hero(r.state, 'rae').overwatch).toBe(false);
-    expect(rolls(r.events).filter((x) => x.slots === 3).length).toBeGreaterThanOrEqual(1);
+    // V5.0 (spec 32.9): 3 slots while the orc hasn't noticed her, 2 once it has (it walked into her light).
+    expect(rolls(r.events).filter((x) => x.slots === 3 || x.slots === 2).length).toBeGreaterThanOrEqual(1);
   });
 
   it('ranger: knockback shot pushes a monster away from the ranger along the line (into the pit)', () => {
@@ -2731,15 +2738,33 @@ describe('V3.5', () => {
       expect(r3.state.delve!.rivals!.stance).toBe('hostile');
     });
 
-    it('noise of 4 or more they hear wakes them too; the toll is at least 50', () => {
+    it('noise of 4 or more they hear wakes them too; the toll is at least 50 when the party carries that much', () => {
       const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       // V4.1 (spec 31.10): the noise must reach a hero too, so Brann stands by it.
       put(s, 'brann', at(2, 10, 2));
+      hero(s, 'brann').pack.push(gold(80));
       const c = ctx(s);
       makeNoise(c, at(2, 12, 2), 3);
       expect(crewOf(s).stance).toBe('waiting');
       makeNoise(c, at(2, 12, 2), 6);
       expect(crewOf(s)).toMatchObject({ stance: 'demanding', toll: 50 });
+    });
+
+    // V5.0 (spec 32.16, owner): gold stays in camp, so empty pockets are let by and the toll never exceeds the carried value.
+    it('V5.0: a party carrying nothing is let by once ("on the way out"); with loot the toll is capped at what it carries', () => {
+      const s = crewDelve('gallows-choir', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
+      put(s, 'brann', at(2, 10, 2));
+      const c = ctx(s);
+      makeNoise(c, at(2, 12, 2), 6);
+      expect(crewOf(s)).toMatchObject({ stance: 'waiting', letBy: true, spotted: true });
+      expect(s.delve!.log.some((l) => /Nothing on you\? Go on, then/.test(l))).toBe(true);
+      const lines = s.delve!.log.length;
+      makeNoise(c, at(2, 12, 2), 6); // still nothing on them: no second speech, still waiting
+      expect(crewOf(s).stance).toBe('waiting');
+      expect(s.delve!.log.length).toBe(lines);
+      hero(s, 'brann').pack.push(gold(30));
+      makeNoise(c, at(2, 12, 2), 6);
+      expect(crewOf(s)).toMatchObject({ stance: 'demanding', toll: 30 }); // all of it, not the 50 floor
     });
 
     it('sellsword: shows a shove when a hero stands at an unrailed edge, then shoves', () => {
@@ -3560,18 +3585,18 @@ describe('V3.7 crews', () => {
   it('builds members like heroes of their class at the crew\'s level, with tiers, a pack, mana and a purse', () => {
     const s = delve({ heroes: ['brann'] });
     const wake = buildCrew(s as GameStateX, 'the-wake', WAKE_SPOTS);
-    // V4.1 (WS7, spec 31.9): the Wake at level 6 (was 4).
+    // V4.1 (WS7, spec 31.9): the Wake at level 6 (was 4); V5.0 (spec 32.13): level 5.
     expect(wake.members.map((r) => [r.cls, r.hp, r.level, r.weaponTier, r.armorTier])).toEqual([
-      ['sellsword', 20, 6, 2, 1], ['hedgewitch', 17, 6, 2, 1], ['shadowmancer', 16, 6, 2, 1], ['sapper', 19, 6, 2, 1],
+      ['sellsword', 18, 5, 2, 1], ['hedgewitch', 15, 5, 2, 1], ['shadowmancer', 14, 5, 2, 1], ['sapper', 17, 5, 2, 1],
     ]);
     expect(wake.members.map((r) => r.pack!.map((i) => i.kind))).toEqual([['potion', 'potion'], ['potion', 'potion'], ['smoke', 'firecracker'], ['improvised-charge', 'charge', 'charge', 'charge']]); // V4.0 (spec 28.6): class kit
-    // V4.0 (spec 30.1, 30.2): Spade, a level 6 Sapper, brings 6 improvised explosives (and 3 bought); armor 0 + 1, Might 60 + 25 + 20.
-    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 6, slots: 0 });
-    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 19, chance: 105, armor: 1 });
+    // V4.0 (spec 30.1, 30.2): Spade, a level 5 Sapper (V5.0), brings 5 improvised explosives (and 3 bought); armor 0 + 1, Might 60 + 20 + 20.
+    expect(wake.members[3]!.pack![0]).toMatchObject({ kind: 'improvised-charge', amount: 5, slots: 0 });
+    expect(rivalStats(wake.members[3]!)).toMatchObject({ hp: 17, chance: 100, armor: 1 });
     expect(wake.members.map((r) => r.charges)).toEqual([undefined, 3, 3, undefined]);
     expect(wake.members.map((r) => r.focus)).toEqual([3, 3, 3, 3]); // V4.1 (WS7): Focus for key rolls
     // Sellsword: Sword 3 slots at Might 70 + 25 (five levels) + 20 (weapon 2); armor 1 + 1; move 4.
-    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 115, dmg: 2, armor: 2, move: 4, range: 1 });
+    expect(rivalStats(wake.members[0]!)).toMatchObject({ slots: 3, chance: 110, dmg: 2, armor: 2, move: 4, range: 1 });
     // Hedgewitch: Staff 2 Might slots, Might isn't her main stat: 35 + 20.
     expect(rivalStats(wake.members[1]!)).toMatchObject({ slots: 2, chance: 55, dmg: 1, armor: 1 });
     expect(wake.members.every((r) => r.loot.length === 1 && r.loot[0]!.kind === 'gold' && r.loot[0]!.amount === 50)).toBe(true);
@@ -4330,6 +4355,7 @@ describe('V3.7 kit and calm', () => {
       const u = delve({ heroes: ['brann'] });
       (u.campaign.roster.find((h) => h.id === 'brann')!).shield = true;
       put(u, 'brann', GATE);
+      hero(u, 'brann').reactions = { shieldBlock: 'never' }; // V5.0 (spec 32.10): the block is a reaction; this tests the passive shield
       const o = monster(u, 'orc', at(1, 5, 7), 'hunting');
       (o as MonsterX).tier = 3;
       const r = until(u, { type: 'endTurn' }, (ev) => ev.some((x) => x.type === 'roll' && x.who === o.id && x.roll.hits === 1 && !x.roll.perfect));
@@ -5059,7 +5085,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
   /** A Level 2 scene: Keven (the lantern) far off on Level 1, so Level 2 is lit only by the forge. */
   function scene(extra: [string, string, HeroClass][] = [], heroes = ['keven', 'brann']) {
     const s = delve({ heroes, extra });
-    put(s, 'keven', at(1, 2, 7));
+    put(s, 'keven', at(1, 2, 6)); // V5.0 (spec 32.15): not on the stair hex, or Level 2's orcs would see him up the stairs
     setLantern(s, { rounds: 20 });
     setLantern(s, { bearer: 'keven' });
     return s;
@@ -5197,6 +5223,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
     it('a waiting cutthroat crew demands its toll on the step that brings a hero within 6 in its sight', () => {
       const s = crewDelve('ferrymen', [at(2, 16, 4), at(2, 17, 4), at(2, 18, 4)]);
       put(s, 'brann', at(2, 8, 1));
+      hero(s, 'brann').pack.push(gold(60)); // V5.0 (spec 32.16): empty pockets would be let by
       look(s, 'brann', at(2, 9, 1));
       const walk = [at(2, 9, 1), at(2, 10, 1), at(2, 11, 1), at(2, 12, 1)];
       const r = ok(s, { type: 'move', heroId: 'brann', path: walk, sneak: false });

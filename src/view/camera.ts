@@ -4,26 +4,44 @@
 
 import * as THREE from 'three';
 
+/** V5.0 (G): the delve camera's default distance (owner: 16, was 19) and field of view (30°, was 40°). */
+export const DEFAULT_DISTANCE = 16;
+export const DEFAULT_FOV = 30;
+/**
+ * V5.0 (G): the pitch eases lower as you zoom in (a figurine's-eye view up close, a board view pulled back).
+ * Between distances 7 and 34 it runs from 34° to 60°; a right-drag adds a bias on top (clamped).
+ */
+export function pitchFor(distance: number): number {
+  const k = THREE.MathUtils.smoothstep(distance, 7, 34);
+  return THREE.MathUtils.degToRad(34 + (60 - 34) * k);
+}
+const PITCH_BIAS = 0.32;
+
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   /** Desired values; current values ease toward them. */
   target = new THREE.Vector3();
   yaw = 0;
-  pitch = 0.92;
-  distance = 15;
-  private cur = { target: new THREE.Vector3(), yaw: 0, pitch: 0.95, distance: 15 };
+  /** Desired pitch: pitchFor(distance) + pitchBias, kept here so readers see the number the rig aims at. */
+  pitch = pitchFor(DEFAULT_DISTANCE);
+  /** V5.0 (G): the player's own tilt on top of the zoom-eased pitch (right-drag up and down). */
+  pitchBias = 0;
+  distance = DEFAULT_DISTANCE;
+  private cur = { target: new THREE.Vector3(), yaw: 0, pitch: pitchFor(DEFAULT_DISTANCE), distance: DEFAULT_DISTANCE };
   private keys = new Set<string>();
   private drag: { button: number; x: number; y: number } | null = null;
   /** Limits for the target, set from the shown level's bounds. */
   bounds = new THREE.Box3(new THREE.Vector3(-100, -100, -100), new THREE.Vector3(100, 100, 100));
   shake = 0;
+  /** How fast the current values chase the desired ones (8 = snappy; the action cam lowers it while it moves). */
+  easeRate = 8;
   private shakeOffset = new THREE.Vector3();
   /** True if the last pointer gesture moved enough to count as a drag. */
   dragged = false;
   enabled = true;
 
   constructor(dom: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 300);
+    this.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, 1, 0.1, 300);
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
       if (e.button === 1 || e.button === 2) {
@@ -42,7 +60,7 @@ export class CameraRig {
       if (Math.abs(dx) + Math.abs(dy) > 2) this.dragged = true;
       if (this.drag.button === 2 && !e.shiftKey) {
         this.yaw -= dx * 0.006;
-        this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.004, 0.45, 1.45);
+        this.pitchBias = THREE.MathUtils.clamp(this.pitchBias + dy * 0.004, -PITCH_BIAS, PITCH_BIAS);
       } else {
         this.panScreen(-dx, -dy);
       }
@@ -61,12 +79,14 @@ export class CameraRig {
       },
       { passive: false },
     );
+    // ---- keyboard block (V5.0: owned by the play track; G leaves it alone) ----
     addEventListener('keydown', (e) => {
-      if (isTyping(e)) return;
+      if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return; // V5.0 (P): Ctrl+S and the like are the browser's
       this.keys.add(e.key.toLowerCase());
     });
     addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
     addEventListener('blur', () => this.keys.clear());
+    // ---- end keyboard block ----
   }
 
   resize(w: number, h: number): void {
@@ -101,19 +121,23 @@ export class CameraRig {
   }
 
   update(dt: number, time: number): void {
+    this.pitch = THREE.MathUtils.clamp(pitchFor(this.distance) + this.pitchBias, 0.4, 1.45);
+    // ---- keyboard block (V5.0: owned by the play track; G leaves it alone) ----
     if (this.enabled) {
       const k = this.keys;
       const pan = 9 * dt * (this.distance / 13);
       const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
       // Camera looks along -fwd (it sits at target + fwd * distance).
-      if (k.has('arrowup')) this.target.addScaledVector(fwd, -pan);
-      if (k.has('arrowdown')) this.target.addScaledVector(fwd, pan);
-      if (k.has('arrowleft')) this.target.addScaledVector(right, -pan);
-      if (k.has('arrowright')) this.target.addScaledVector(right, pan);
+      // V5.0 (P, spec 32.8): W A S D pan beside the arrows. This keyboard block is the play track's (docs/v5-plan.md).
+      if (k.has('arrowup') || k.has('w')) this.target.addScaledVector(fwd, -pan);
+      if (k.has('arrowdown') || k.has('s')) this.target.addScaledVector(fwd, pan);
+      if (k.has('arrowleft') || k.has('a')) this.target.addScaledVector(right, -pan);
+      if (k.has('arrowright') || k.has('d')) this.target.addScaledVector(right, pan);
       this.clampTarget();
     }
-    const a = 1 - Math.exp(-dt * 8);
+    // ---- end keyboard block ----
+    const a = 1 - Math.exp(-dt * this.easeRate);
     this.cur.target.lerp(this.target, a);
     this.cur.yaw += (this.yaw - this.cur.yaw) * a;
     this.cur.pitch += (this.pitch - this.cur.pitch) * a;

@@ -41,7 +41,7 @@ import { makeItem, rootFigure } from './common';
 import { calmWalk, isCalm } from './calm';
 import { noticeOnMove } from './world-phase';
 import { checkWays, isGateKey, wayAtEntrance, wayOpen } from './ways';
-import { CARRY_MOVE } from './data';
+import { CARRY_MOVE, DODGE_SLOTS, PRISONER_HP } from './data';
 // V4.1 (WS3, spec 31.4): poison, downed, carry and unshackle.
 import { CARRIED_OUT_HP, CRAWL_MOVE, MEND_UP_HP, UNSHACKLE_IMPROVISED_NOISE, pairHome } from './data';
 import { bodyName, carryOut, carryable, checkCarries, closeTo, curePoison, endCarry, isPoisoned, poison, poisonTakes, startCarry, trapDamage } from './poison';
@@ -612,10 +612,42 @@ export function grappleTop(c: Ctx, at: Pos, self: string): { pit: Pos; to: Pos }
 }
 
 /** What `take` at pile `at` would pick up for hero `h`, in order: the contract item first. */
-export function takePlan(c: Ctx, h: HeroInDelve, at: Pos): { items: Item[]; blocked?: string } {
-  const g = c.d.ground.find((x) => samePos(x.at, at));
-  if (!g || !g.items.length) return { items: [] };
-  const ordered = [...g.items].sort((a, b) => Number(!!b.contractId) - Number(!!a.contractId) || Number(b.kind === 'heirloom' || b.kind === 'hoard') - Number(a.kind === 'heirloom' || a.kind === 'hoard'));
+/**
+ * V5.0 (P, spec 32.7, owner): where Take takes from. A pile on the floor (`at`), or the pack of a downed friend or a
+ * downed crew member (`id`): everything but their kit and loaners. Returns the items and a way to write back what's left.
+ */
+export function takeSource(c: Ctx, t: ActionTarget): { items: Item[]; who?: string; put: (left: Item[]) => void } | null {
+  if (t.id) {
+    const o = hd(c, t.id);
+    if (o && o.status === 'downed') return { items: o.pack.filter((i) => !isKit(i) && !i.loaner), who: o.heroId, put: (left) => void (o.pack = [...o.pack.filter((i) => isKit(i) || i.loaner), ...left]) };
+    const r = downedCrew(c).find((x) => x.id === t.id);
+    if (r) return { items: (r.pack ?? []).filter((i) => !isKit(i)), who: r.id, put: (left) => void (r.pack = [...(r.pack ?? []).filter((i) => isKit(i)), ...left]) };
+    return null;
+  }
+  if (!t.at) return null;
+  const g = c.d.ground.find((x) => samePos(x.at, t.at!));
+  if (!g) return null;
+  return { items: g.items, put: (left) => void (g.items = left) };
+}
+
+/** Downed friends and downed crew members within reach of `h` with something to take (V5.0, spec 32.7). */
+function takeBodies(c: Ctx, h: HeroInDelve): ActionTarget[] {
+  const out: ActionTarget[] = [];
+  for (const o of c.d.heroes) {
+    if (o === h || o.status !== 'downed' || !closeTo(o.at, h.at)) continue;
+    if (o.pack.some((i) => !isKit(i) && !i.loaner)) out.push({ id: o.heroId, at: o.at });
+  }
+  for (const r of downedCrew(c)) {
+    if (!closeTo(r.at, h.at) || carrierOf(c, r.id)) continue;
+    if ((r.pack ?? []).some((i) => !isKit(i))) out.push({ id: r.id, at: r.at });
+  }
+  return out;
+}
+
+export function takePlan(c: Ctx, h: HeroInDelve, t: ActionTarget): { items: Item[]; blocked?: string } {
+  const src = takeSource(c, t);
+  if (!src || !src.items.length) return { items: [] };
+  const ordered = [...src.items].sort((a, b) => Number(!!b.contractId) - Number(!!a.contractId) || Number(b.kind === 'heirloom' || b.kind === 'hoard') - Number(a.kind === 'heirloom' || a.kind === 'hoard'));
   const contract = ordered.find((i) => i.contractId);
   const room = PACK_SLOTS - packUsed(h.pack);
   if (contract && contract.slots > room) return { items: [], blocked: `${contract.name} needs ${contract.slots} pack slots. Drop something first.` };
@@ -879,7 +911,8 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
     }
     case 'take':
       // Every pile in reach; a pile nothing can be taken from is a blocked target (spec 15.7).
-      return c.d.ground.filter((g) => within(g.at, h.at, 1) && g.items.length).map((g) => ({ at: g.at }));
+      // V5.0 (spec 32.7): and the packs of downed friends and downed crew members in reach.
+      return [...c.d.ground.filter((g) => within(g.at, h.at, 1) && g.items.length).map((g) => ({ at: g.at })), ...takeBodies(c, h)];
     case 'drop':
       return h.pack.filter((i) => !isKit(i)).map((i) => ({ itemId: i.id }));
     case 'give': {
@@ -913,6 +946,9 @@ export function targetsFor(c: Ctx, h: HeroInDelve, action: ActionKind, anyArrows
           const od = heroDef(c, o.heroId)!;
           if (o.status === 'downed' || (o.status === 'active' && o.hp < od.maxHp)) out.push({ id: o.heroId, itemId: pot.id });
         }
+        // V5.0 (spec 32.7, owner): the captive you are rescuing, hurt, next to you or on your back.
+        const pr = c.d.prisoner;
+        if (pr && !pr.dead && !pr.out && pr.hp < PRISONER_HP && closeTo(pr.at, h.at)) out.push({ id: pr.id, at: pr.at, itemId: pot.id });
       }
       return out;
     }
@@ -1047,8 +1083,13 @@ const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke:
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
 /** Attacks break a Veil (spec 15.3). */
 const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash', 'hamstring', 'nightthorn', 'briar', 'smashProp'];
-/** Whole-turn actions: need both move and action. */
-const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
+/** Whole-turn actions: need both move and action. V5.0 (spec 32.1): a jump is the hero's move, not their action. */
+const WHOLE_TURN: ActionKind[] = ['climb', 'grapple'];
+/**
+ * V5.0 (spec 32.1, the torch after a jump): jumping into a pit takes the hero's move (no dash after it: they land hard),
+ * and leaves the action: light a torch where you land, drink, attack. Climb and grapple still take the whole turn.
+ */
+const MOVE_ONLY: ActionKind[] = ['jump'];
 
 /** V4.1 (spec 31.4): what a hero carrying a body may still do: the free actions (and Set down). */
 const CARRY_OK: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'parley', 'setDown', 'shutter'];
@@ -1059,6 +1100,7 @@ function canDo(h: HeroInDelve, action: ActionKind): boolean {
   if (h.status === 'downed') return action === 'leave';
   if (h.carrying && !CARRY_OK.includes(action)) return false;
   if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted && !((h.rooted ?? 0) > 0);
+  if (MOVE_ONLY.includes(action)) return !h.moved && !((h.rooted ?? 0) > 0);
   if (FREE.includes(action)) return true;
   return !h.acted;
 }
@@ -1104,7 +1146,7 @@ export function actions(c: Ctx, heroId: string): ActionOption[] {
     if (MANA_COST[a]) opt.mana = MANA_COST[a];
     // Blocked options (spec 15.7): listed, with the reason, when none of the targets can be done now.
     if (a === 'take') {
-      const plans = t.map((x) => takePlan(c, h, x.at!));
+      const plans = t.map((x) => takePlan(c, h, x));
       if (plans.every((p) => p.blocked)) opt.blocked = plans[0]!.blocked;
     } else if (a === 'grapple') {
       const g = grappleTop(c, h.at, h.heroId);
@@ -1256,7 +1298,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
   if (h.dreaded && !FREE.includes(action)) return no(`${heroName(c, heroId)} is gripped by dread this turn: they can move, but not act.`); // V4.1 (WS7)
   if (h.carrying && !CARRY_OK.includes(action)) return no(`${heroName(c, heroId)} is carrying ${bodyName(c, h.carrying)}: free actions only. Set them down first.`);
-  if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
+  if (!canDo(h, action)) return no(action === 'climb' || action === 'grapple' ? 'Needs both move and action.' : action === 'jump' ? `${heroName(c, heroId)} has already moved.` : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
   if (!t) return no('No valid target.');
   const def = heroDef(c, heroId)!;
@@ -1296,6 +1338,8 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       const stab = canBackstab(c, h, t.id!, unnoticed);
       if (stab) { slots += BACKSTAB_SLOTS; mods.push('Backstab: +1 slot, double damage'); }
       const ranged = !!weapon.range;
+      // V5.0 (spec 32.9): a target that has noticed the archer ducks the arrow: −1 slot. Unaware ones take the full draw.
+      if (ranged && !unnoticed && slots > 1) { slots -= DODGE_SLOTS; mods.push('It saw you draw −1 slot'); }
       if (ranged && c.w.tile(h.at)?.raised) { p += 10; mods.push('Raised +10%'); }
       if (ranged && adjacent(h.at, f.at)) { slots -= 1; mods.push('Adjacent −1 slot'); }
       const across = { level: f.at.level, q: 2 * f.at.q - h.at.q, r: 2 * f.at.r - h.at.r };
@@ -1313,6 +1357,12 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       for (let i = 0; i <= slots; i++) outcomes.push(i === 0 ? (ak === 'whistlearrows' ? 'Miss: it shrieks there' : ak === 'glowarrows' ? 'Miss: lights its hex' : 'Miss') : `${i * dmg + (i === slots ? 1 : 0) + fire} dmg${tail}`);
       const sp = base(weapon.stat, slots, p, outcomes, weapon.noise ?? 2, dmg);
       if (ak === 'whistlearrows') sp.warning = `Whistling arrow: noise ${WHISTLE_NOISE} where it lands.`;
+      // V5.0 (spec 32.14): a crew member while the crew is at peace: the warning says what the swing costs.
+      if (f.rival && c.d.rivals && c.d.rivals.stance !== 'hostile') {
+        const paid = c.d.rivals.stance === 'truce' || c.d.rivals.stance === 'bribed' || c.d.rivals.stance === 'hired';
+        sp.warning = `${c.d.rivals.name} are not your enemy yet: this makes them hostile${paid ? ', and they keep what you paid' : ''}.`;
+        if (paid) sp.confirm = true; // a paid crew: the panel asks first
+      }
       return sp;
     }
     case 'knockback': {
@@ -1321,6 +1371,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (def.weaponTier) { p += 10 * def.weaponTier; mods.push(`Weapon ${sign(10 * def.weaponTier)}`); }
       if (f.asleep) { p += 20; mods.push('Asleep +20%'); }
       const o = pushOutcome(c, pusherFor(h.at, f.at), f.at, t.id);
+      // (V5.0, spec 32.9: Knockback keeps its 2 slots: it needs both to hit, so a lost slot would make it easier.)
       const sp = base('finesse', 2, p, ['Miss', 'Miss', pushText(o, 0)], cls.weapon.noise ?? 1);
       sp.hexes = [o.dest];
       if (o.kind === 'fall' && o.fall) sp.warning = `${f.monster?.name ?? 'It'} would fall ${o.fall.levels === 1 ? '1 level' : `${o.fall.levels} levels`} into ${o.fall.levelName}.`;
@@ -1478,9 +1529,10 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
       if (t.id) return simple('Opens the chest');
       return simple(doorAt(c.d, t.at!)?.open ? 'Closes the door' : 'Opens the door');
     case 'take': {
-      const plan = takePlan(c, h, t.at!);
+      const plan = takePlan(c, h, t);
       if (plan.blocked) return no(plan.blocked);
-      return simple(`Takes ${plan.items.map((i) => i.name).join(', ')}`);
+      const from = t.id ? ` from ${nameOfAny(c, t.id)}'s pack` : '';
+      return simple(`Takes ${plan.items.map((i) => i.name).join(', ')}${from}`);
     }
     case 'drop': return simple('Drop it here');
     case 'give': return simple(`Hand to ${heroName(c, t.id!)}`);
@@ -1490,8 +1542,9 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
     case 'dropTorch': return simple(lightSpecText(c, h, action, t));
     case 'nightsight': return no('The old night-eye draught has gone flat. Night-eye Stout is poured at the Flagon now.');
     case 'potion': {
-      const o = hd(c, t.id!)!;
       const heal = POTION_HEAL[h.pack.find((i) => i.id === t.itemId)?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3)
+      if (c.d.prisoner && c.d.prisoner.id === t.id) return simple(`${c.d.prisoner.name} drinks it: +${heal}`); // V5.0 (spec 32.7)
+      const o = hd(c, t.id!)!;
       return simple(o.status === 'downed' ? `Back up with ${heal} HP` : `Heal ${heal}`);
     }
     case 'charge': return blastSpec(c, h, t.at!, 1);
@@ -1690,10 +1743,14 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     setFacing(c, h, dirIndex(h.at, aim));
     if (!c.visCache) refreshSight(c);
   }
-  if (!FREE.includes(action)) h.acted = true;
+  if (!FREE.includes(action) && !MOVE_ONLY.includes(action)) h.acted = true;
   if (action === 'carry') h.acted = true;
   if (action === 'open' && t.id && def.cls !== 'burglar') h.acted = true;
   if (WHOLE_TURN.includes(action)) h.moved = true;
+  if (MOVE_ONLY.includes(action)) {
+    h.moved = true;
+    h.dashed = true; // V5.0 (spec 32.1): the jump is the move; no dash after landing
+  }
   if (MANA_COST[action]) h.mana -= MANA_COST[action]!;
   // Attacking or making a loud noise breaks a Veil (spec 15.3).
   if (h.veil > 0 && (VEIL_BREAKERS.includes(action) || sp.noise >= VEIL_BREAK_NOISE)) {
@@ -2109,11 +2166,11 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       break;
     }
     case 'take': {
-      const g = c.d.ground.find((x) => samePos(x.at, t.at!))!;
+      const src = takeSource(c, t)!; // V5.0 (spec 32.7): a pile, or a downed friend's or crew member's pack
       const got: Item[] = [];
       const left: Item[] = [];
-      const plan = takePlan(c, h, t.at!);
-      const rest0 = g.items.filter((i) => !plan.items.includes(i));
+      const plan = takePlan(c, h, t);
+      const rest0 = src.items.filter((i) => !plan.items.includes(i));
       for (const it of [...plan.items, ...rest0]) {
         const before = it.amount;
         const rest = addToPack(c, h.pack, it);
@@ -2123,9 +2180,10 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
           left.push(rest);
         }
       }
-      g.items = left;
+      src.put(left);
       cleanGround(c);
       if (got.length) c.ev.push({ type: 'looted', id: heroId, items: got });
+      if (got.length && src.who) say(c, `${name} takes ${got.map((i) => i.name.toLowerCase()).join(', ')} from ${nameOfAny(c, src.who)}'s pack.`);
       if (got.some((i) => i.kind === 'heirloom')) say(c, `${name} has the heirloom. Now get out.`);
       break;
     }
@@ -2176,6 +2234,13 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
       // V4.1 (spec 31.4): on a downed hero next to you (or on your back): up at the potion's heal (5; a greater potion 8).
       const pot = useItem(h, t.itemId);
       const heal = POTION_HEAL[pot?.kind === 'greaterpotion' ? 'greaterpotion' : 'potion']; // V4.1 (spec 31.3): 5, a greater potion 8
+      if (c.d.prisoner && c.d.prisoner.id === t.id) {
+        // V5.0 (spec 32.7, owner): a potion on the captive you are rescuing.
+        const pr = c.d.prisoner;
+        pr.hp = Math.min(PRISONER_HP, pr.hp + heal);
+        say(c, `${name} gives ${pr.name} a potion (${pr.hp} of ${PRISONER_HP}).`);
+        break;
+      }
       const o = hd(c, t.id!)!;
       const od = heroDef(c, o.heroId)!;
       if (o.status === 'downed') {

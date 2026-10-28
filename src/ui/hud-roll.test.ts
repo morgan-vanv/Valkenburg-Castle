@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { RollPreview } from '../game/api';
-import { bonusSlots, hitOdds, lightWords, oddsWords, oftenWords, readRoll } from './hud-roll';
+import { barSegments, bonusSlots, hitOdds, lightWords, oddsWords, oftenWords, readRoll } from './hud-roll';
 
 const attack = (slots: number, chance: number, dmg: number, mods: string[] = []): RollPreview => ({
   ok: true,
@@ -58,5 +58,33 @@ describe('V4.0 HUD: reading a roll', () => {
     expect(bonusSlots(['Sneak attack +1 slot', 'Flanked +1 slot', 'Dim −10%'])).toEqual(['sneak', 'flanked']);
     expect(lightWords(['Dim −10%'])).toBe('dim light, −10%');
     expect(lightWords([])).toBe('good light, no penalty');
+  });
+});
+
+describe('V5.0 (P, B4): the outcome bar carries the read on its own', () => {
+  it('the kill segment shows its chance; small segments show no words; every hover has the full number', () => {
+    const r = readRoll(attack(3, 65, 2), 0, 5);
+    const segs = barSegments(r);
+    const kill = segs.find((s) => s.cls === 'kill')!;
+    expect(kill.text).toMatch(/^kills it · \d+%$/);
+    expect(kill.tip).toContain(r.headline);
+    expect(kill.was).toBeUndefined();
+    for (const s of segs) {
+      expect(s.flex).toBeGreaterThanOrEqual(0.02);
+      expect(s.tip).toMatch(/\d+%/);
+      const p = r.segments.find((x) => x.cls === s.cls)!.p;
+      if (s.cls !== 'kill') expect(s.text === '' || p >= 0.12).toBe(true);
+    }
+  });
+
+  it('after Focus, the kill segment says what it was ("was N%") and its hover says why', () => {
+    const pr = attack(3, 65, 2);
+    const before = readRoll(pr, 0, 5).kill;
+    const r = readRoll(pr, 2, 5);
+    const kill = barSegments(r, before).find((s) => s.cls === 'kill')!;
+    expect(r.kill).toBeGreaterThan(before);
+    expect(kill.was).toMatch(/^was \d+%$/);
+    expect(kill.tip).toMatch(/Was \d+% before Focus\./);
+    expect(barSegments(r, r.kill).find((s) => s.cls === 'kill')!.was).toBeUndefined();
   });
 });

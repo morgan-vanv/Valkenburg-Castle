@@ -36,7 +36,7 @@ const idle = () => p.waitForFunction(() => {
 const tip = (sel) => p.$eval(sel, (e) => e.dataset.tip ?? e.getAttribute('title') ?? '').catch(() => '');
 const text = (sel) => p.$eval(sel, (e) => e.innerText).catch(() => '');
 const shown = (sel) => p.$eval(sel, (e) => !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none').catch(() => false);
-const settings = (extra = {}) => p.evaluate((x) => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, ...x })), extra);
+const settings = (extra = {}) => p.evaluate((x) => localStorage.setItem('vc.settings', JSON.stringify({ speed: 0, reduceShake: true, noEndTurnAsk: true, quality: 'low', ...x })), extra);
 
 // Generous timeouts: the 3D view renders in software here; a busy machine makes a reload slow, not wrong.
 p.setDefaultNavigationTimeout(180000);
@@ -120,24 +120,34 @@ const keven = rail[0].id;
 await p.evaluate((id) => window.vc.hud.select(id), keven);
 const bar = await p.evaluate(() => ({
   who: document.querySelector('.dl-who-n')?.textContent ?? '',
-  seg: [...document.querySelectorAll('.dl-seg button')].map((e) => `${e.textContent.trim().split(' ')[0]}:${e.getAttribute('aria-checked')}`),
+  seg: (() => { const sw = document.querySelector('.dl-switch'); return sw ? `${sw.dataset.moveSwitch}:${sw.getAttribute('aria-checked')}` : ''; })(), // V5.0 (spec 32.8): a sliding switch
   attack: document.querySelector('.dl-hotbar [data-action="attack"]')?.dataset.tip ?? '',
   slots: [...document.querySelectorAll('.dl-pack-slots .dl-slot')].map((e) => ({ action: e.dataset.action ?? '', usable: e.classList.contains('usable'), empty: e.classList.contains('empty') })),
   more: [...document.querySelectorAll('.dl-more [data-action]')].map((e) => e.dataset.action),
   end: document.querySelectorAll('.dl-end-dots i').length,
   endRight: (() => { const h = document.querySelector('.dl-hotbar').getBoundingClientRect(); const e = document.querySelector('.dl-end').getBoundingClientRect(); return h.right - e.right; })(),
 }));
-check('hotbar: the selected hero\'s name and Walk/Sneak', /Keven/.test(bar.who) && bar.seg.join() === 'Walk:true,Sneak:false', `${bar.who} ${bar.seg}`);
+check('hotbar: the selected hero\'s name and the Walk / Sneak switch (off = walk)', /Keven/.test(bar.who) && bar.seg === 'walk:false', `${bar.who} ${bar.seg}`);
 check('no Attack button when nobody is in reach (V4.0 spec 30.4: only what the hero can do)', bar.attack === '', bar.attack.split('\n')[0]);
 check('the pack: 4 slots, the torch and the potion usable, 2 empty', bar.slots.length === 4 && bar.slots[0].action === 'torch' && bar.slots[0].usable && bar.slots.filter((x) => x.empty).length === 2, JSON.stringify(bar.slots));
 check('End turn at the right of the bar, one dot per hero who can still act (4)', bar.end === 4 && bar.endRight < 20, `${bar.end} dots, ${bar.endRight}px from the edge`);
-// Sneak per hero: S sets only the selected hero.
+// Sneak per hero: a tap of Shift flips only the selected hero (V5.0, spec 32.8); S pans the camera and sets nothing.
 await p.keyboard.press('s');
+await p.waitForTimeout(150);
+check('S no longer touches sneaking', (await p.evaluate(() => window.vc.state().delve.heroes[0].moveMode ?? 'walk')) === 'walk');
+await p.keyboard.press('Shift');
 await p.waitForTimeout(150);
 const modes = await p.evaluate(() => window.vc.state().delve.heroes.map((h) => h.moveMode ?? 'walk'));
-check('S sets only the selected hero to sneak; its card says "sneak"', modes[0] === 'sneak' && modes.slice(1).every((m) => m === 'walk' || m === 'sneak') && !!(await p.$(`.dl-rcard[data-hero="${keven}"] .dl-si.sneak`)), modes.join());
-await p.keyboard.press('s');
+check('a tap of Shift sets only the selected hero to sneak; the switch slides on; its card says "sneak"', modes[0] === 'sneak' && modes.slice(1).every((m) => m === 'walk' || m === 'sneak') && (await p.$eval('.dl-switch', (e) => e.getAttribute('aria-checked'))) === 'true' && !!(await p.$(`.dl-rcard[data-hero="${keven}"] .dl-si.sneak`)), modes.join());
+await p.keyboard.down('Shift');
+await p.keyboard.press('Tab');
+await p.keyboard.up('Shift');
 await p.waitForTimeout(150);
+check('Shift held for Shift+Tab does not flip the switch', (await p.evaluate(() => window.vc.state().delve.heroes[0].moveMode)) === 'sneak');
+await p.evaluate((id) => window.vc.hud.select(id), keven);
+await p.keyboard.press('Shift');
+await p.waitForTimeout(150);
+check('the key help: ? opens a card with the camera, turn and action keys; Esc closes it', await (async () => { await p.keyboard.press('?'); await p.waitForTimeout(80); const open = await p.$eval('.dl-keys', (e) => !e.classList.contains('hidden') && /W\s*A\s*S\s*D/.test(e.innerText.replace(/\n/g, ' ')) && /Shift/.test(e.innerText)); await p.keyboard.press('Escape'); await p.waitForTimeout(80); return open && (await p.$eval('.dl-keys', (e) => e.classList.contains('hidden'))); })());
 // More: Give and Drop (stand two heroes together so Give has someone to give to).
 await p.evaluate(() => { const s = structuredClone(window.vc.state()); const [a, c] = s.delve.heroes; c.at = { ...a.at, q: a.at.q + 1 }; window.vc.load(s); window.vc.hud.select(a.heroId); });
 await p.click('.dl-hotbar [data-more]');
@@ -205,7 +215,11 @@ if (orc) {
   await p.waitForTimeout(100);
   const after = await p.evaluate(() => ({ kill: document.querySelector('.dl-oc-kill')?.textContent ?? '', sure: document.querySelectorAll('.dl-die.sure').length, was: document.querySelector('.dl-roll-was')?.textContent ?? '' }));
   const k1 = parseInt(after.kill.match(/(\d+)%/)?.[1] ?? '0', 10);
-  check('a Focus diamond makes a die "sure" and raises the kill chance ("Was N% before Focus")', after.sure === 1 && k1 > k0 && new RegExp(`Was ${k0}% before Focus`).test(after.was), `${k0}% → ${k1}%, ${after.was}`);
+  check('a Focus diamond makes a die "sure" and raises the kill chance (the kill segment says "was N%")', after.sure === 1 && k1 > k0 && new RegExp(`was ${k0}%`).test(after.was), `${k0}% → ${k1}%, ${after.was}`);
+  // V5.0 (P, B4): a thicker bar, nothing under it, the numbers on hover.
+  const barLook = await p.evaluate(() => { const b = document.querySelector('.dl-ocbar'); const segs = [...b.querySelectorAll('.dl-oc')]; return { h: b.getBoundingClientRect().height, line: !!document.querySelector('.dl-roll-ocline'), tips: segs.every((s) => /\d+%/.test(s.dataset.tip ?? '')), barTip: b.dataset.tip ?? '' }; });
+  check('the outcome bar is thick (≥ 32px), has no line under it, and every segment\'s hover carries its number', barLook.h >= 32 && !barLook.line && barLook.tips && /(Kills it|Likely)/.test(barLook.barTip), JSON.stringify(barLook));
+  if (process.env.SHOTS) { const bb = await p.$eval('.dl-roll', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }); await p.screenshot({ path: `${process.env.SHOTS}/roll-panel.png`, clip: bb, timeout: 180000 }); }
   await p.click('.dl-roll-det');
   check('Details shows the per-hit table', (await p.$$('.dl-hits span')).length > 6);
   await p.keyboard.press('Escape');
@@ -232,6 +246,25 @@ const SHOTS = process.env.SHOTS ?? '';
   const vcard = await p.evaluate((id) => { const e = document.querySelector(`.dl-rcard[data-hero="${id}"] .dl-si.venom`); return e ? { tip: e.dataset.tip ?? '', label: e.getAttribute('aria-label') ?? '' } : null; }, ids.f);
   check('poison: a green drop on the card ("Poisoned"), hover "Poisoned: −1 a turn, never below 1. Antipoison, Mend, or get out."', !!vcard && vcard.label === 'Poisoned' && /^Poisoned: −1 a turn, never below 1\. Antipoison, Mend, or get out\./.test(vcard.tip), JSON.stringify(vcard));
   if (SHOTS) await p.screenshot({ path: `${SHOTS}/poison-card.png`, clip: { x: 0, y: 80, width: 300, height: 320 }, timeout: 180000 });
+  // V5.0 (spec 32.12): stances each have their own mark on the card: braced (gold), veiled (violet), overwatch, guarding, dozing; the downed card's count is the loud thing.
+  {
+    const marks = await p.evaluate((x) => {
+      const s = structuredClone(window.vc.state());
+      const k = s.delve.heroes.find((h) => h.heroId === x.k);
+      const f = s.delve.heroes.find((h) => h.heroId === x.f);
+      k.braced = true; k.veil = 2; k.guarding = x.f; f.overwatch = true;
+      const g = s.delve.heroes.find((h) => h.heroId !== x.k && h.heroId !== x.f && h.status === 'active');
+      if (g) { g.status = 'downed'; g.hp = 0; g.bleed = 2; }
+      window.vc.load(s);
+      const cls = (id) => [...document.querySelectorAll(`.dl-rcard[data-hero="${id}"] .dl-si`)].map((e) => e.className.replace('dl-si', '').trim());
+      return { k: cls(x.k), f: cls(x.f), bleed: g ? document.querySelector(`.dl-rcard[data-hero="${g.heroId}"] .dl-bleed`)?.dataset.bleed : 'n/a', guardedTip: document.querySelector(`.dl-rcard[data-hero="${x.f}"] .dl-si.guarded`)?.dataset.tip ?? '' };
+    }, ids);
+    check('status marks: braced, veiled and guarding on one card; overwatch and "guarded by" on the other', marks.k.includes('braced') && marks.k.includes('veiled') && marks.k.includes('guarding') && marks.f.includes('overwatch') && marks.f.includes('guarded') && /Guarded by/.test(marks.guardedTip), JSON.stringify(marks));
+    check('a downed card carries its bleed count as the loud thing', marks.bleed === '2', marks.bleed);
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/status-cards.png`, clip: { x: 0, y: 80, width: 300, height: 420 }, timeout: 180000 });
+    await p.evaluate((x) => { const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.braced = undefined; h.veil = 0; h.guarding = undefined; h.overwatch = false; if (h.status === 'downed') { h.status = 'active'; h.hp = 5; h.bleed = 0; } } window.vc.load(s); window.vc.hud.select(x.k); }, ids);
+    await p.waitForTimeout(150);
+  }
   const slot = await p.evaluate(() => { const e = document.querySelector('.dl-pack-slots .dl-slot[data-action="antidote"]'); return e ? { usable: e.classList.contains('usable'), tip: e.dataset.tip ?? '' } : null; });
   check('the antipoison sits in the pack, usable ("Cures poison")', !!slot && slot.usable && /Antipoison/.test(slot.tip) && /[Cc]ures poison/.test(slot.tip), slot?.tip.split('\n')[0]);
   await p.click('.dl-pack-slots .dl-slot[data-action="antidote"]');
@@ -290,6 +323,18 @@ const SHOTS = process.env.SHOTS ?? '';
     return { k: k.heroId, f: f.heroId, orcs: orcs.map((o) => ({ id: o.id, at: o.at })) };
   }, { k: ax(16, 14), f: ax(14, 12) });
   await p.waitForTimeout(400);
+  // V5.0 (spec 32.8): Space is Attack; with the pick open, Tab marks and Space takes the mark.
+  check('the Attack button shows Space as its key', (await p.$eval('.dl-hotbar [data-action="attack"] .dl-kb', (e) => e.textContent)) === 'Space');
+  await p.keyboard.press(' ');
+  await p.waitForTimeout(120);
+  check('Space arms the attack pick', await p.evaluate(() => !!window.vc.hud.pending && window.vc.hud.pending.action === 'attack'));
+  await p.keyboard.press('Tab');
+  await p.keyboard.press(' ');
+  await p.waitForTimeout(200);
+  check('...Tab marks a target and Space takes it (the roll panel opens)', await shown('.dl-roll'));
+  await p.keyboard.press('Escape');
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(100);
   await p.click('.dl-hotbar [data-action="attack"]');
   await p.waitForTimeout(150);
   const armed = await p.evaluate(() => ({ pill: !document.querySelector('.dl-pill').classList.contains('hidden'), keys: document.querySelector('.dl-pill-keys')?.innerText ?? '' }));
@@ -323,6 +368,27 @@ const SHOTS = process.env.SHOTS ?? '';
   await p.keyboard.press('Enter');
   await p.waitForTimeout(200);
   check('Enter takes the marked one (the roll panel opens)', await shown('.dl-roll'));
+  // V5.0 (P, B3): E confirms the roll panel (and never ends the turn underneath it); the button says Enter and E.
+  check('the roll panel\'s Go button shows Enter and E', /Enter\s*E/.test(await p.$eval('.dl-roll .dl-go', (e) => e.innerText.replace(/\s+/g, ' '))));
+  const r0 = await p.evaluate(() => window.vc.state().delve.round);
+  const hero0 = await p.evaluate(() => window.vc.hud.selectedId);
+  await p.keyboard.press('e');
+  await idle();
+  const afterE = await p.evaluate((id) => ({ round: window.vc.state().delve.round, phase: window.vc.state().delve.phase, acted: window.vc.state().delve.heroes.find((h) => h.heroId === id)?.acted, roll: !!document.querySelector('.dl-roll') && !document.querySelector('.dl-roll').classList.contains('hidden') }), hero0);
+  check('E confirms the roll (the hero acted, the panel closed) and the turn did not end', afterE.acted === true && !afterE.roll && afterE.round === r0 && afterE.phase === 'player', JSON.stringify(afterE));
+  // E on a confirmation window confirms it too: the idle check before ending a turn.
+  await p.evaluate(() => { window.vc.settings.noEndTurnAsk = false; const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.moved = false; h.acted = false; } window.vc.load(s); });
+  await p.waitForTimeout(150);
+  await p.keyboard.press('e');
+  await p.waitForTimeout(150);
+  const modal = await p.evaluate(() => ({ open: !document.querySelector('.dl-modal')?.classList.contains('hidden'), text: document.querySelector('.dl-modal-box')?.innerText ?? '' }));
+  check('E while heroes can still act raises the "can still" question, with Enter and E on its button', modal.open && /can still (move|dash|Attack)/.test(modal.text) && /Enter\s*E/.test(modal.text.replace(/\s+/g, ' ')), JSON.stringify(modal));
+  const r1 = await p.evaluate(() => window.vc.state().delve.round);
+  await p.keyboard.press('e');
+  await idle();
+  check('...and a second E confirms it: the turn ends', (await p.evaluate(() => window.vc.state().delve.round)) === r1 + 1);
+  await p.evaluate(() => { window.vc.settings.noEndTurnAsk = true; });
+  await p.evaluate(() => window.vc.hud.onHover(null, null));
   await p.keyboard.press('Escape');
   await p.keyboard.press('Escape');
   check('Esc clears the mark', await p.evaluate(() => !window.vc.dio.picked.at && document.querySelectorAll('.unit-tag.tag-picked').length === 0));
@@ -535,6 +601,16 @@ if (crewAt) {
       await p.keyboard.press('Escape');
       await p.waitForTimeout(100);
       check('...Esc closes it', !(await p.$('.dl-reacts-pop')));
+      // V5.0 (spec 32.10): a hero with the forge shield gets the Shield block row.
+      const shielded = await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.campaign.roster.find((x) => x.id === id); const before = !!h.shield; h.shield = true; window.vc.load(s); window.vc.hud.select(id); return before; }, scene.hero);
+      await p.waitForTimeout(150);
+      await p.click('.dl-hotbar .dl-react-b');
+      await p.waitForTimeout(150);
+      const rows2 = await p.evaluate(() => [...document.querySelectorAll('.dl-reacts-pop .dl-reacts-row .dl-reacts-k')].map((e) => e.textContent));
+      check('a hero with a shield has a "Shield block" reaction row', rows2.includes('Shield block'), rows2.join(','));
+      await p.keyboard.press('Escape');
+      await p.evaluate((x) => { const s = structuredClone(window.vc.state()); s.campaign.roster.find((h) => h.id === x.id).shield = x.before; window.vc.load(s); window.vc.hud.select(x.id); }, { id: scene.hero, before: shielded });
+      await p.waitForTimeout(150);
     }
     // End turn: the playback stops at the question with the card up.
     await p.evaluate(() => { window.__endDone = false; void window.vc.send({ type: 'endTurn' }).then(() => (window.__endDone = true)); });
@@ -568,6 +644,63 @@ if (crewAt) {
 }
 
 // ---- the return report
+// V5.0 (P, B5, spec 32.5): auto end turn. Everyone spent, nothing in reach: after a beat the turn ends by itself (a toast
+// says so). With the setting off, or with Take in reach, it waits.
+{
+  const spent = () => p.evaluate(() => {
+    const s = structuredClone(window.vc.state());
+    s.delve.ground = [];
+    s.delve.monsters = [];
+    s.delve.rivals = null;
+    s.delve.prisoner = null;
+    s.delve.pending = undefined;
+    for (const h of s.delve.heroes) { if (h.status === 'active') { h.moved = true; h.acted = true; h.dashed = true; h.pack = h.pack.filter((i) => i.kind !== 'potion'); } }
+    window.vc.load(s);
+    return s.delve.round;
+  });
+  await p.evaluate(() => { window.vc.settings.autoEndTurn = false; });
+  const ra = await spent();
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForTimeout(700);
+  check('auto end turn off: everyone spent, the turn stays open', (await p.evaluate(() => window.vc.state().delve.round)) === ra);
+  await p.evaluate(() => { window.vc.settings.autoEndTurn = true; });
+  const rb = await spent();
+  const nothingLeft = await p.evaluate(() => { const s = window.vc.state(); const E = window.vcEngine; return s.delve.heroes.filter((h) => h.status === 'active').map((h) => ({ id: h.heroId, reach: E.reachable(s, h.heroId, false).length, acts: E.actions(s, h.heroId).filter((o) => !o.blocked).map((o) => o.action) })); });
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForFunction(() => /Ending the turn/.test(document.querySelector('.hud-toast')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
+  const toastEarly = await p.evaluate(() => document.querySelector('.hud-toast')?.textContent ?? '');
+  await p.waitForFunction((r) => window.vc.state().delve && window.vc.state().delve.round === r + 1 && !window.vc.busy(), rb, { timeout: 20000 }).catch(() => {});
+  await idle();
+  const rc = await p.evaluate(() => window.vc.state().delve.round);
+  check('auto end turn on: everyone spent, the turn ends by itself after a beat', rc === rb + 1, `${rb} → ${rc}; ${JSON.stringify(nothingLeft)}`);
+  check('...and a toast said so', /Ending the turn/.test(toastEarly), toastEarly);
+  // V5.0 (P, spec 32.6): the flow. A done hero hands the selection and the camera on after a beat; one with loot in
+  // reach keeps them.
+  {
+    const re = await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); const first = s.delve.heroes.find((h) => h.status === 'active'); window.vc.hud.select(first.heroId); return first.heroId; });
+    await p.waitForTimeout(150);
+    await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.heroId === id); h.moved = true; h.acted = true; h.dashed = true; window.vc.load(s); window.vc.hud.select(id); }, re);
+    await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.hud.selectedId, sneak: false }));
+    await p.waitForFunction((id) => window.vc.hud.selectedId !== id, re, { timeout: 5000 }).catch(() => {});
+    const selAfter = await p.evaluate(() => window.vc.hud.selectedId);
+    check('a done hero: after a beat the selection (and camera) cycles to a hero with something left', selAfter !== re, `${re} → ${selAfter}`);
+    await p.evaluate((id) => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.heroId === id); s.delve.ground.push({ at: { ...h.at }, items: [{ id: 'fl-g', kind: 'potion', name: 'Potion', amount: 1, slots: 1 }] }); window.vc.load(s); window.vc.hud.select(id); }, re);
+    await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.hud.selectedId, sneak: false }));
+    await p.waitForTimeout(1000);
+    check('...but a done hero with loot to take keeps the selection and the camera', (await p.evaluate(() => window.vc.hud.selectedId)) === re);
+    await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); });
+  }
+  // Take in reach keeps it open.
+  const rd = await spent();
+  await p.evaluate(() => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.status === 'active'); s.delve.ground.push({ at: { ...h.at }, items: [{ id: 'ae-g', kind: 'potion', name: 'Potion', amount: 1, slots: 1 }] }); window.vc.load(s); });
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForTimeout(700);
+  check('auto end turn on, but loot to take: the turn stays open', (await p.evaluate(() => window.vc.state().delve.round)) === rd);
+  await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); });
+}
+
+// V5.0 (spec 32.11): the report is a tally at normal speed (stages land one at a time; E skips to the end).
+await p.evaluate(() => { window.vc.settings.speed = 1; });
 await p.evaluate(async () => {
   const E = window.vcEngine;
   const exit = E.castle().entrances[0];
@@ -582,7 +715,15 @@ await p.evaluate(async () => {
   if (window.vc.state().stage === 'delve') await window.vc.send({ type: 'abandon' });
 });
 await idle();
-await p.waitForTimeout(500);
+await p.waitForFunction(() => window.vc.state().stage === 'summary' && !!document.querySelector('.dl-return'), null, { timeout: 20000 }).catch(() => {});
+const tallyStart = await p.evaluate(() => ({ tallying: !!document.querySelector('.dl-return.tallying'), pending: document.querySelectorAll('.dl-return [data-stage].pending').length, stages: document.querySelectorAll('.dl-return [data-stage]').length }));
+check('the report arrives as a tally: stages wait their turn', tallyStart.tallying && tallyStart.pending > 0 && tallyStart.pending < tallyStart.stages, JSON.stringify(tallyStart));
+await p.keyboard.press('e');
+await p.waitForTimeout(200);
+const tallyEnd = await p.evaluate(() => ({ tallying: !!document.querySelector('.dl-return.tallying'), pending: document.querySelectorAll('.dl-return [data-stage].pending').length, gold: document.querySelector('.lg-gold-n')?.textContent, to: document.querySelector('.lg-gold-n')?.dataset.goldTo }));
+check('...E skips to the end: every stage shown, the strongbox at its final number', !tallyEnd.tallying && tallyEnd.pending === 0 && String(parseInt(tallyEnd.gold.replace(/\D/g, ''), 10)) === tallyEnd.to, JSON.stringify(tallyEnd));
+await p.evaluate(() => { window.vc.settings.speed = 0; });
+await p.waitForTimeout(100);
 const rep = await p.evaluate(() => ({
   stage: window.vc.state().stage,
   boxes: [...document.querySelectorAll('.dl-return .dl-rt-box')].map((e) => e.getAttribute('aria-label')),
@@ -594,8 +735,8 @@ const rep = await p.evaluate(() => ({
   castle: document.querySelector('[aria-label="The castle remembers"]')?.innerText ?? '',
   go: document.querySelector('.dl-rt-go')?.innerText ?? '',
 }));
-check('the return report replaces the summary: three boxes', rep.stage === 'summary' && rep.boxes.join('|') === 'Carried out|The party|The castle remembers', rep.boxes.join('|'));
-check('...a headline and a line with the rounds and the lantern', rep.h1.length > 5 && /round/.test(rep.line), `${rep.h1} / ${rep.line}`);
+check('the return report replaces the summary: the boxes in order (V5.0: Left behind between the party and the castle)', rep.stage === 'summary' && rep.boxes.join('|') === 'Carried out|The party|Left behind|The castle remembers', rep.boxes.join('|'));
+check('...a headline and a line with the rounds', rep.h1.length > 5 && /round/.test(rep.line), `${rep.h1} / ${rep.line}`);
 check('...the strongbox with what this delve adds ("+N"), the loose gold carried out', /\+\d+/.test(rep.gold) && /Loose gold\s*\+\d+/.test(rep.carried), rep.gold.replace(/\n/g, ' '));
 check('...every hero of the party, the rooms mapped', rep.heroes === 4 && /You mapped/.test(rep.castle), `${rep.heroes} heroes; ${rep.castle.split('\n')[1]}`);
 check('..."Back to Lowgate →" or "Continue"', /Back to Lowgate|Continue/.test(rep.go), rep.go);

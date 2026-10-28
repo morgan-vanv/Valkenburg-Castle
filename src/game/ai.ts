@@ -5,7 +5,7 @@ import { CLASH_HEAR, DOWNED_HEAR, FORCED_DOOR_HEAR, hearLoud, hearStep, isEnemy,
 import { distance, posKey, posNeighbors, samePos, type Pos } from './hex';
 import type { HeroInDelve, Intent, ReactionQuestion } from './types';
 import { ask, called, capital } from './react'; // V4.1 (spec 31.13)
-import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE } from './data';
+import { BLINDSIDE_SLOTS, CALTROPS_DMG, CLASSES, DODGE_SLOTS, HAMSTRING_NOISE, HAMSTRING_PENALTY, HAMSTRING_RANGE, HAMSTRING_ROUNDS, HAMSTRING_SLOTS, OVERWATCH_RANGE, SHIELD_BLOCK_CAP, SHIELD_BLOCK_CREW_AT, SHIELD_BLOCK_FOCUS } from './data';
 import { say, type Ctx, type MonsterX, type RivalX } from './state';
 import {
   armorOf, clampChance, guardMods, hd, heroDef, heroName, hurtAny, hurtHero, hurtPrisoner, lightPenaltyFor, makeNoise, monsterArmor, nameOf, occupant,
@@ -14,7 +14,7 @@ import {
 import { canEnter, dijkstra, distField, doorAt, kindAt, litSet, los, monsterSees, pathTo, seesHex, visibleSet, within } from './world';
 import { figure } from './falls';
 import { wayAtEntrance, wayOpen } from './ways';
-import { dirIndex, faceToward, heroSwings, inRearHalf } from './stealth';
+import { dirIndex, faceToward, hasNoticed, heroSwings, inRearHalf } from './stealth';
 import { rivalStats } from './rivals';
 import { poison } from './poison';
 import { bowClass, spendArrow } from './arrows'; // V4.1 (WS6)
@@ -249,7 +249,17 @@ export function strikeDetailed(c: Ctx, attacker: string, targetId: string, slots
     return { hit: null, hits: 0, damage: 0 };
   }
   const armor = h ? armorOf(heroDef(c, tid)!) : 0;
-  const total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h) - gm.dmg) + (r.perfect ? 1 : 0);
+  let total = r.hits * Math.max(0, Math.max(1, dmg - armor) - wardOf(h) - gm.dmg) + (r.perfect ? 1 : 0);
+  // V5.0 (spec 32.10, owner): the shield block. A hero with the forge shield, Focus to spend, hit for more than the cap:
+  // take it on the shield (1 Focus, the hit does 1), or take the hit. A reaction: the castle's turn asks.
+  if (h && h.status === 'active' && heroDef(c, tid)?.shield && h.focus >= SHIELD_BLOCK_FOCUS && total > SHIELD_BLOCK_CAP) {
+    if (ask(c, shieldBlockQuestion(c, h, attacker, total)) === 'yes') {
+      h.focus -= SHIELD_BLOCK_FOCUS;
+      say(c, `${heroName(c, tid)} takes it on the shield (${total} to ${SHIELD_BLOCK_CAP}, ${SHIELD_BLOCK_FOCUS} Focus).`);
+      c.ev.push({ type: 'blocked', id: tid, attacker, from: total, to: SHIELD_BLOCK_CAP });
+      total = SHIELD_BLOCK_CAP;
+    }
+  }
   const wasUp = h?.status === 'active';
   if (h) hurtHero(c, h, total, attacker, r.perfect);
   else hurtPrisoner(c, total, attacker);
@@ -275,7 +285,14 @@ function strikeCrew(c: Ctx, attacker: string, r: RivalX, slots: number, p: numbe
     return { hit: null, hits: 0, damage: 0 };
   }
   const st = rivalStats(r);
-  const total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0) - bm.dmg) + (rr.perfect ? 1 : 0);
+  let total = rr.hits * Math.max(0, Math.max(1, dmg - st.armor) - ((r.ward ?? 0) > 0 ? 1 : 0) - bm.dmg) + (rr.perfect ? 1 : 0);
+  // V5.0 (spec 32.10, pillar 17): a crew Sellsword carries a shield and blocks a hard hit by policy (1 Focus, the hit does 1).
+  if (r.cls === 'sellsword' && !r.downed && (r.focus ?? 0) >= SHIELD_BLOCK_FOCUS && total >= SHIELD_BLOCK_CREW_AT) {
+    r.focus = (r.focus ?? 0) - SHIELD_BLOCK_FOCUS;
+    say(c, `${r.name} takes it on the shield (${total} to ${SHIELD_BLOCK_CAP}).`);
+    c.ev.push({ type: 'blocked', id: r.id, attacker, from: total, to: SHIELD_BLOCK_CAP });
+    total = SHIELD_BLOCK_CAP;
+  }
   hurtAny(c, r.id, total, attacker, { crit: rr.perfect });
   turnOnHit(c, r.id, attacker);
   if (spiderBite(c, attacker)) poison(c, r.id, attacker); // V4.1 (spec 31.4): crew members too (pillar 17)
@@ -357,6 +374,22 @@ function figurePosOf(c: Ctx, id: string): Pos | undefined {
  * An enemy `id` at `at` moves or acts: the first Ranger on overwatch who can see it within 6 shoots
  * (full bow roll). Returns true if the enemy died.
  */
+/** V5.0 (spec 32.10): "The orc's blow lands on Brann for 4. Take it on the shield, or take the hit?" */
+function shieldBlockQuestion(c: Ctx, h: HeroInDelve, attacker: string, total: number): ReactionQuestion {
+  const who = heroName(c, h.heroId);
+  const it = called(c, attacker);
+  return {
+    kind: 'shieldBlock',
+    heroId: h.heroId,
+    enemyId: attacker,
+    at: { ...h.at },
+    text: `${capital(it)}'s blow lands on ${who} for ${total}. Take it on the shield, or take the hit?`,
+    yes: { label: 'Block', line: `${SHIELD_BLOCK_FOCUS} Focus (${h.focus - SHIELD_BLOCK_FOCUS} left after): the hit does ${SHIELD_BLOCK_CAP}.` },
+    no: { label: 'Take it', line: `${who} takes ${total} and keeps the Focus.` },
+    damage: total,
+  };
+}
+
 /** V4.1 (spec 31.13): "Fenna's on overwatch. The orc moves 4 hexes away: shoot it now, or hold for another?" */
 function overwatchQuestion(c: Ctx, h: HeroInDelve, id: string, at: Pos, slots: number, p: number): ReactionQuestion {
   const who = heroName(c, h.heroId);
@@ -394,6 +427,9 @@ export function overwatchCheck(c: Ctx, id: string, at: Pos): boolean {
     let p = def.stats[cls.weapon.stat] + 10 * def.weaponTier + lightPenaltyFor(c.w, c, h, lit);
     const m = c.d.monsters.find((x) => x.id === id);
     if (m?.awareness === 'asleep') p += 20;
+    // V5.0 (spec 32.9): a mover that has noticed the Ranger ducks the arrow (a hostile crew member always has).
+    const noticed = m ? m.awareness !== 'asleep' && hasNoticed(m as MonsterX, h.heroId) : true;
+    if (noticed && slots > 1) slots -= DODGE_SLOTS;
     // V4.1 (spec 31.13, owner): the Ranger chooses (a reaction): shoot this one, or hold for another (still armed).
     if (ask(c, overwatchQuestion(c, h, id, at, slots, p)) === 'no') continue;
     h.overwatch = false;

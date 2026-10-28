@@ -1385,3 +1385,192 @@ The owner: "I'd like for the castle's turn to be interruptible/pausable if we wa
 **Bots.** The sim (scripts/v3-engine-sim.ts), the crew arena and the stairs walk answer by policy (hidden swing: let it pass; overwatch: shoot); the sim throws if a turn ever pauses.
 
 Code: react.ts (`ask`, `Pause`, `reactionSetting`), engine.ts (`apply`, `run`, `resume`, `EngineOptions`), stealth.ts (`hiddenFrom`, `heroSwings`, `revealTo`, `hiddenSwingQuestion`), ai.ts (`overwatchCheck`, `overwatchQuestion`), delve.ts (`doSetReaction`), data.ts (`REACTION_DEFAULTS`, `REACTION_FALLBACK`), state.ts (`Ctx.answers`, `asked`, `reacted`, `policy`); ui/app.ts (`playEvents` on `react`, `answerReaction`, `resumePending`), ui/hud.ts (`askReaction`, `reactionsButton`, `reactionsPop`), ui/names.ts (`REACT_*`). Tests: react.test.ts.
+
+## 32. V5.0 play track (owner play-test feedback, 2026-10-27)
+
+V5.0 is built as two tracks (docs/v5-plan.md): the graphics overhaul (view-only, no rules) and the play track (docs/v5-play-plan.md: the owner's play-test feedback with new players). Sections are added here as each play item ships; the design items (reactions for melee, mages and items; the return report; the Ranger's curve; controls; the camera after a hero is done; status visuals) wait on the owner's answer to the pitch.
+
+### 32.1 A jump is the move, not the action (P, 2026-10-27)
+
+The play-test bug: a hero who jumped into the Hollow could not light their torch. The cause: `jump` was a whole-turn action (both move and action, like climb and grapple), so the hero landed in the dark with nothing left, the Gloam woke (section 31.5), and Light (an action) came only the next round. Pillars 16 (a rule you can guess: you jumped, your hands are free) and "flexibility with tradeoffs" (the jump hurts and lands you where it will; the rope is safe but slow).
+
+- **Jump takes the hero's move and no more.** `canDo`: jump needs `!moved` (and not rooted); a hero who has acted may still jump. After it: `moved = true`, `dashed = true` (no second move: they land hard), `acted` untouched. So a hero who jumps can light a torch, drink, give, attack or take where they land.
+- Climb and grapple still take the whole turn (`WHOLE_TURN`); the rope is the slow, safe way down. `MOVE_ONLY` (delve.ts) holds the jump; names.ts `MOVE_ACTIONS` words the cost "uses the move".
+- The refusal reads "X has already moved." (was "Needs both move and action."). Crews don't jump (they rope down), so nothing mirrors.
+
+Audit (`src/game/itemuse.test.ts`, table-driven): what a hero can do with a torch, a potion and Give after a fall from a shove (nothing spent), after a jump, carrying a body (free actions only, spec 31.4), on a raised floor, in the dark, with a full pack (lighting needs no slot; Give offers a friend with room), and the turn after answering a reaction (the new round starts clean). Items on friends: a potion or an antipoison on a hurt, poisoned or downed hero next to you (or on your back), Give to an active neighbour with room; darts, caltrops and smoke already reach enemies. Nothing else needed fixing.
+
+### 32.2 The shop fills the cart; packing is explicit (P, 2026-10-27; UI only)
+
+Play-test: buying confused new players because the bought thing went straight into a hero's pack. The engine's `buy` already puts the item on the cart (`C.stash`); the Outfit screen's Buy then packed it for the selected hero when it fit. Now (lowgate.ts): **Buy only ever lands the item on Keven's cart**, the vendor row says "On Keven's cart." and the cart row glows (`.lg-cartgear.new`). Packing is a click on the cart: the row packs for the hero marked Packing (as before), and with two or more heroes every cart row carries a small **Give to** button per party hero (`data-giveto`, `data-kind`; blocked with "X's pack is full."). The slot a packed thing lands in glows. Forge work and ales are still bought for the selected hero ("Buying for"). Supersedes the 2026-10-26 decision (decisions.md). Checks: `scripts/v40-lowgate-check.mjs` (buy → cart, cart row → pack, Give to, full pack blocked).
+
+### 32.3 E confirms (P, 2026-10-27; UI only)
+
+Play-test: "if E ends the turn, it should also confirm dice rolls and other confirmation windows." hud.ts `onKey`: while a confirmation window (`confirmBox`: the idle-heroes check before End turn, a long jump, abandoning) or a roll panel (`pv`) is open, **E, Enter and Space all confirm it**, and E never reaches End turn underneath. A held key never confirms a window it just raised (`KeyboardEvent.repeat` is ignored), so E held through the idle check doesn't end the turn by itself. The Go button and the confirm button show `Enter` `E`. **The reaction card is the exception:** it has two real answers (Strike / Let it pass, Shoot / Hold), comes up during the castle's turn right after the player pressed E, and a second E must not strike unread, so E stays inert there; 1 / Enter and 2 / Esc as in 31.13. Check: `scripts/v40-hud-check.mjs` (E confirms a roll without ending the turn; E raises the idle check and a second E confirms it).
+
+### 32.4 The probability bar (P, 2026-10-27; UI only)
+
+Play-test: "remove the text under the probability bar and make the bar thicker." hud-roll.ts `barSegments` (tested) and `outcomeBar`; the roll panel (hud.ts) appends only the bar. The bar is 36px (was 22) with 2px seams; the line under it (headline · sub, "Was N% before Focus") is gone. The kill segment says "kills it · 72%" and, after Focus raised it, "(was 56%)" in the segment (`.dl-roll-was`); other segments show their label where they fit (≥ 12%), nothing otherwise. Every segment's hover carries its label and full chance; the kill segment's adds the headline, the sub-line and the before-Focus chance; the bar's own hover is the headline (pillar 15: the number that decides is in view, the rest a hover away). Checks: hud-roll.test.ts (segments), v40-hud-check.mjs (height ≥ 32, no line, hovers).
+
+### 32.5 Auto end turn (P, 2026-10-27; UI only)
+
+Play-test: "if no party member can do anything, end the turn automatically; allow opting out." UI only; the engine's turn is unchanged. `src/ui/autoend.ts` (tested): a hero is **done** when they can neither walk nor dash (`engine.reachable` empty, sneaking or not) and the engine lists nothing for them but housekeeping (`HOUSEKEEPING`: Drop, Give, Snuff, Drop torch, Shutter, Set down; blocked options don't count). Anything else keeps the turn open: an attack, a spell, an item (Light, a potion), Take beside loot, Open by a door or chest, Leave on an exit, Parley with a crew in reach, Carry, Unshackle, Brace. The **party is done** when it is the player phase with no reaction waiting, someone is still up, and every hero up or crawling is done. hud.ts `scheduleFlow` (32.6; was `maybeAutoEnd`) runs after every command but End turn and the reaction answer: with the setting on and the party done, the turn ends after a beat (700 ms; 220 at the instant speed) with the toast "Everyone has done what they can. Ending the turn.", skipping the idle question (nobody could act). Any key or click, a panel (roll, pick, confirmation, parley, reaction) or playback cancels the beat, and the next command arms it again. Setting: **Auto end turn** (settings.ts `autoEndTurn`, on by default; saved settings without it read as on). Checks: `src/ui/autoend.test.ts`, `scripts/v40-hud-check.mjs` (off: stays open; on: ends with the toast; loot in reach: stays open).
+
+### 32.6 The turn's flow: one test for the camera, the question and the end (owner, 2026-10-27; UI only)
+
+The owner, answering the pitch's P5: "we don't want the camera (or controls) ripped away when there are still things a party member would presumably do... I like having the camera cycle through each member of the crew, it keeps the pace up. The auto-end is also an important part of that... the idle question should effectively mean 'hey, there is still something one of your party members can do'". Changing the selection without moving the camera (the pitch's recommendation) was rejected as deceptive.
+
+One test, `src/ui/autoend.ts` (tested): `heroLeft(engine, s, id)` lists what a hero could still plausibly do this turn (a move or dash, and every unblocked option the engine lists but housekeeping: Drop, Give, Snuff, Drop torch, Shutter, Set down); **done** = nothing left. It decides three things, all in hud.ts:
+
+1. **The camera cycles** (`scheduleFlow`, after every command but End turn and a reaction answer): when the selected hero is done, after a beat (700 ms; 220 at the instant speed) the selection and the camera go to the next hero with something left (same level first). A hero who can still take the loot of the chest they just opened, open a door, parley, or act keeps the selection and the camera. Any key, click, panel (roll, pick, confirmation, parley, reaction) or playback cancels the beat; the next command arms it again. Replaces V4.0's `autoAdvance` (which moved on as soon as a hero had moved and acted).
+2. **The question before End turn** asks only when someone can still do something, and says what: "Keven can still move, Attack or Brace. Fenna can still move or Jump down. End the turn anyway?" (title "N can still act"; the first three things each, then "and more"). Replaces "X has done nothing this round". Setting "Ask before ending a turn while someone can still act" (`noEndTurnAsk`, unchanged key).
+3. **Auto end turn** (32.5) fires from the same timer when the party is done and no hero is left to cycle to, with its toast and no question.
+
+Checks: `scripts/v40-hud-check.mjs` (the question's wording; a done hero cycles after a beat; a done hero with loot in reach keeps the selection). The Lowgate check's keyboard-focus tip assertion (flaky in headless) is dropped (owner).
+
+### 32.7 Items between people (owner, 2026-10-27)
+
+The owner's note, completed: "ensure that items are able to be given to other party members, are able to be taken from the inventory of downed party members (or enemies like other squads who are downed), and the items where it makes sense are usable on others (use potion on person you are rescuing)." Give (free, to an active neighbour with room) and potions and antipoison on a hurt, poisoned or downed friend next to you (or on your back) already existed. New (delve.ts `takeSource`, `takeBodies`, `targetsFor('take' | 'potion')`, `doAct`):
+
+- **Take from a downed friend's pack** (free, as Take is): a downed hero next to you, or on your back, is a Take target (`{ id, at }`) for everything in their pack but their kit and loaners; the preview says "Takes X from Keven's pack", the log "Brann takes a potion from Keven's pack." Clicking the downed figure offers Take.
+- **Take from a downed crew member** the same way (a killed one already dropped everything): their pack minus kit, while nobody carries them. Pillar 17: crews already loot downed heroes' gold and gems (rob); this is the party's side of it.
+- **A potion on the captive** (`PRISONER_HP` 5; a captive the crews took earlier starts at 1): a potion or greater potion on the shackled or freed captive next to you (or on your back) while hurt: "Wim drinks it: +5", capped at 5. Tests: itemuse.test.ts.
+
+### 32.8 Controls, with intention (owner, 2026-10-27; UI only)
+
+The owner approved the pitch's keymap (option 1: W A S D for the camera, E stays End turn, Attack on Space, sneaking off S) and asked for the Walk / Sneak switch to be a sliding toggle that Shift flips. The map:
+
+| Group | Keys | Does |
+| --- | --- | --- |
+| Camera | W A S D, arrows (held) | Pan (camera.ts, the play track's keyboard block; Ctrl/Alt/Meta combinations are the browser's) |
+| Camera | `[` `]`, right-drag, wheel | Rotate a sixth of a turn, orbit, zoom (unchanged) |
+| Camera | F, Home (C was) | Center on the selected hero |
+| Heroes | 1–4, Tab / Shift+Tab | Select; next / previous hero with something left (unchanged) |
+| Move mode | Shift, a tap (down and up with no other key between) | Flips the selected hero's Walk / Sneak switch (`setMoveMode`); Shift+Tab, Shift+drag and Shift with anything else don't |
+| Turn | E | End turn, or confirm what is open (32.3) |
+| Actions | Space | Attack; with a pick open, takes the marked target (as Enter) |
+| Actions | the letter on each button | As before, minus the camera letters: Disarm and Dig N (was D), charges and the winch C (was W), Pass lantern Y (was N) |
+| Help | ? or F1 | The key card: camera, heroes and the turn, the bar's actions as they stand, reactions; Esc closes it |
+
+Code: names.ts `ACTION_KEY`, `keyName` (' ' reads "Space"); hud.ts `onKey`, `onKeyUp` (the Shift tap), `toggleKeys`, the `.dl-switch` in the hero block; camera.ts `update` (the keys); the Legend's key lines. Rebinding waits (pitch). Checks: v40-hud-check.mjs (S sets nothing; a Shift tap flips the switch; Shift+Tab doesn't; Space arms Attack and takes the mark; the key card opens and closes).
+
+### 32.9 The Ranger's power curve: it saw you draw (owner, 2026-10-27)
+
+The owner approved the pitch's option 1 ("Dodging targets"): **a bow shot at a target that has noticed the shooter loses a slot** (`DODGE_SLOTS` 1, data.ts); unaware targets (asleep, or not having noticed the shooter) take the full draw and the sneak-attack slot. The modifier line: "It saw you draw −1 slot". Never below 1 slot (adjacent takes another, as before).
+
+- Heroes (delve.ts `attack`): any ranged weapon (the longbow; the knife is melee); Attack only. Overwatch (ai.ts `overwatchCheck`): the mover has noticed the Ranger (`hasNoticed`; a hostile crew member always has). Knockback keeps its 2 slots (it needs both to hit, so a lost slot would make it easier); Hamstring is 1 slot already.
+- Crews (pillar 17): a crew Ranger's shot at a hero who has noticed her (`seenBy`) loses the slot (crewai.ts the attack and the specialty-arrow shot; rivals.ts the crew overwatch); on a hero who hasn't, the sneak-attack slot as before.
+- By the numbers: a Ranger's expected damage a shot on an aware target 4.5 → 3.0 (2 × 75% × 2); on an unaware one 6.0 (4 slots). Measured (`SEED=1 POLICY=prepared SCENARIO=l2`, 16 delves): the Ranger's damage per attack 4.60 → 3.47, attacks 47 → 34 (the bot shoots less); Keven, the Sellsword and the Burglar unchanged. Crew arena (`SEED=1 PARTY=par,par4,lvl-1`, 20 fights; this run also carries 32.10's crew shield block): the Sisters' parity 45% → 60% party wins (par4 55% → 65%; the crew Ranger's damage 1,694 → 1,436, still their top), the Ferrymen 55% → 50% (par4 65% → 25%, their Sellsword now blocks), the Choir 75% → 55%, the Wake 40% → 35%. Tuning the Sisters (a potion back on Maud) and the Ferrymen's four is left for the owner with the next arena pass. Tests: dodge.test.ts; engine.test.ts (the Ranger cases).
+
+### 32.10 The shield block, a reaction (owner, 2026-10-27)
+
+The owner, answering the pitch's P1: reactions stay limited to attacks of opportunity for now, except the shield: "give party members with a shield the opportunity to react with a block for a focus point (and nearly block all damage, maybe it's capped at 1)". The rest of the pitch's reactions are saved in docs/ideas-later.md for the meta-progression pass (Focus or mana costs, class-specific, trainer-locked).
+
+- **The block** (ai.ts `strikeDetailed`): a hit lands on a hero with the forge shield (`Hero.shield`) for more than `SHIELD_BLOCK_CAP` (1) while they have Focus: a reaction (`ReactionKind` 'shieldBlock', default Ask): "The orc's blow lands on Brann for 4. Take it on the shield, or take the hit?" **Block**: `SHIELD_BLOCK_FOCUS` (1) Focus, the hit does 1 (after the passive shield, armor, Brace and wards), a `blocked` event, "Brann takes it on the shield (4 to 1, 1 Focus)." **Take it**: the hit as rolled, the Focus kept. Any hit that goes through `strikeDetailed` (melee, bow, firebolt, free swings, overwatch); not the Dragon's breath, blasts or falls. Per-hero Ask / Always / Never like the others (the Reactions popover shows the row to heroes with a shield); fallback 'no'.
+- **Crews** (pillar 17): a crew Sellsword carries a shield and blocks by policy (`strikeCrew`): a hit of `SHIELD_BLOCK_CREW_AT` (3) or more, with Focus, is taken on the shield for 1 Focus. Crews gain no passive shield soak.
+- Bots (sim, arena): block a hit of 3 or more. The `blocked` event plays as a clang; the in-world flash is under "View needs" for G.
+- Tests: shieldblock.test.ts; engine.test.ts (the passive shield case now sets the reaction to Never). Checks: v40-hud-check.mjs (the popover row).
+
+### 32.11 The return report is a tally (owner, 2026-10-27; UI only)
+
+The owner approved the pitch's option 1 ("sounds perfect"): a counting tally with story-gift reveals and a "left behind" list, no grade. return.ts (`runTally`, `wonBackBox`, `leftBehindBox`; `returnScreen(el, s, host, { tally })`), style.css `.dl-return [data-stage].pending`, `.dl-rt-won`, `.dl-rt-left`.
+
+- **Stages** (`STAGES`), each landing with a short rise and a sound: the headline (0 ms) → **Carried out** (+550 ms; the strongbox in the header counts up from the old number to the new over 900 ms, a coin) → **The party** (+1100; the XP bars fill from where each hero stood to where they are now, a level-up card punches in, the level-up fanfare) → **Won back for Lowgate** (+1100, a horn; only for a done story contract) → **Left behind** (+1000) → **The castle remembers** and the footer (+500). About 4.3 s unskipped. **Skip:** a click anywhere, E, Space, Enter or Esc shows everything at once; the instant playback setting (speed 0) shows it at once; a re-render shows it at once (the tally runs only when the report first comes up).
+- **Won back for Lowgate** (the part players missed): a full-width box with the villager's home line in large type ("Brother Aldric is home."), who is on the way and what reopened (`STORY.home`, `homeLine`), the gift in the villager's voice (`GIFTS.line`) with the items as rows ("2 × Potion · to Keven's cart", the ale round, the free shield), and the renown pips with what went up on the post (the renown line moves here from the header when there is a won-back box).
+- **Left behind** (room to do better, in the castle's voice): chests the party saw (in the delve's `explored` memory) and left shut, by room ("A chest in the library is still shut."); loot seen on the floor and not taken (gold, gems, jewelry, hoard; the piles' rooms and their worth); the fallen's packs ("Lost inside: … It waits where they fell.", moved here from Carried out). With nothing: "Nothing you saw was left behind." No engine change: the delve's explored set, chests and ground carry it.
+- The headline's line no longer mentions the lantern (gone since 31.5): the rounds inside, and the rounds of torchlight that came back.
+- Layout: two columns (Carried out | The party; Left behind | The castle remembers) with Won back spanning the row between. Checks: v40-hud-check.mjs (the tally waits, E skips, the boxes in order).
+
+### 32.12 Status visuals, the HUD side (P, 2026-10-28; UI only)
+
+From `docs/v5-status-visuals.md`, the party card's side (the owner approved the spec's three answers: the dark pulse only on Level 3, mood glyphs kept, the hunting monster's red ring joins the noticed popup; those are G's in-world work). hud.ts `statusIcons`, `railCard`, `darkLines`; style.css.
+
+- Each stance has its own mark and colour, ordered by priority: dozing (zz), **braced** (gold shield), **guarding X** (gold) and **guarded by X** (on the friend's card), **overwatch** (eye, with the hero's Ask / Always / Never), **veiled** (violet hood, rounds), **warded** (blue heart, rounds). "Protected" (one shield for three states) and "Also" (overwatch and guarding as prose) are gone; "Also" keeps only the passive shield, night-eye, escorting, Rally's cooldown and the ale.
+- The downed card's bleed count is the loud thing (a large numeral in the Down tag, `.dl-bleed[data-bleed]`) with a slow red pulse on the badge; the poisoned card's HP bar ends in a green stripe (what the tick costs); the dark card's badge is drained and its name goes cold blue.
+- The log names the dark once per hero per delve: "The dark closes on Keven." on Level 3, "Keven stands in the dark." elsewhere.
+- The Legend's status column lists the new marks. The figure tags' content is `src/ui/tags.ts` (P's; G moved it out of the diorama): the hero tag adds the spec's chips (held / rooted · N / webbed, z, unlit (red "unlit · the dark hunts" on Level 3; needs the diorama to pass `unlit`), braced, guards, overwatch, veiled, the torch's rounds under 5); monster tags keep their glyphs (owner). Tests: tags.test.ts. Checks: v40-hud-check.mjs (the marks on two cards; the bleed count).
+
+### 32.13 A balance pass after 32.9 and 32.10 (owner, 2026-10-28)
+
+The owner: "tone it down a little... I still like it being really difficult when you get to the deeper levels... the game sometimes errs on being slightly too difficult." Measured in the arena (`SEED=1 PARTY=par,par4`, 20 fights a cell; the arena now gives a party with forge armor its Sellsword's and Keven's shields, `PARTY_SHIELD=0` turns it off; `LEVEL=n` sets the crew's level for a run):
+
+| Crew | Party | Before 32.9 | After 32.9 + 32.10, no shields | With shields (block at 3+) | Change made | After |
+| --- | --- | --- | --- | --- | --- | --- |
+| Lantern Sisters (L4) | 3 × L2 / 4 × L2 | 45% / 55% | 60% / 65% | 60% / 65% (no armor at L2, no shield) | none | 60% / 65% |
+| Ferrymen (L4) | 3 × L3 / 4 × L3 | 55% / 65% | 50% / 25% | 100% / 85% | none (level 3 overshoots to 85% / 85%; Kees's darts and Brecht's second charge change nothing) | 50% / 25% without a shield, 100% / 85% with |
+| Gallows Choir (L5) | 3 × L3 / 4 × L3 | 75% / 60% | 55% / 65% | 85% / 75% | none | 55% / 65% |
+| The Wake | 4 × L4 | 40% | 35% | 40% | **level 6 → 5** | **45%** (no shields) |
+
+The shield is now the biggest single lever in a crew fight (three near-free blocks a hero, one Focus each), so a party that bought one at Gerda's meets the Level 2 crews as an easy fight and a party without one as a hard one: a tradeoff the player chooses, left as is. The crew Sellsword's own block threshold (3 or 4) changes nothing measurable. Crew Rangers now lose the dodge slot against any hero while the crew is hostile (not only one who has them in `seenBy`, which cleared whenever they stood out of sight: a crew archer in the dark kept the full draw plus the sneak slot); a hero who hasn't noticed her still gives the sneak slot (net the full draw). The Level 2 check in the sim (`SCENARIO=l2`) stays at 0 of 16 done for the crude bot and isn't used for this pass. Open for the next pass: the Ferrymen's four without shields (25%); the Choir's parity (55%, fine).
+
+### 32.14 The balance bot, made into an instrument (owner, 2026-10-28)
+
+The owner: "take a comprehensive fresh look at the balance bot such that we have usable balancing metrics... actual data on difficulty." The Level 2 check (31.10) read 0 of 16 done, 46 deaths, and a trace showed why that number said more about the bot than the castle: the scenario fielded three heroes where it promised four (the 31.12 squad cap applied to the bot), the party fought beside a pit and was shoved into the Hollow, walked into the dark tower passage blind and met its two posted orcs already hunting, split up on the stairs, sent a Burglar to backstab a barracks, let a Ranger chase a wounded orc into it, swung at 1 HP, and bled out with potions in its packs. `scripts/v3-engine-sim.ts`, POLICY=prepared (v41); careless is untouched, so it stays the floor.
+
+**The scenario:** `squadSlots = 4` (four heroes, levels 3, 3, 2, 2, as 31.10 intended).
+
+**Unforced errors removed** (each a rule a new player learns on delve one or two; each counted):
+- *Light before the dark* (L1-2's lesson): the lead lights its torch before stepping into a dark way (`lightAhead`: three or more unlit floor hexes ahead within 4), lights on Level 1 too when unlit, and keeps to lit hexes until it has (`darkEdge`: the free walk, the budgeted move and the dash all stop at the light's edge). Snuffs again in castle light, as before.
+- *The lure* (L1-3's lesson): a firecracker is bought for Level 2+ jobs (10 gold) and thrown (`lureCheck`) when two or more awake enemies that haven't noticed the party stand within 6 in sight and nobody is engaged, at the hex in sight farthest from the party and away from the goal.
+- *Edges*: with an awake enemy within 3, a hex beside an unrailed drop is never a move's end when there is another choice, and a hero standing on one steps off before it fights (`atEdge`).
+- *Cohesion*: nobody takes the stairs ahead of the light; a hero left on the bearer's old level only follows it; a hero already beyond cohesion (the bearer stopped to fight) never moves farther from it; bow heroes never close in on a hunter; nobody chases past cohesion.
+- *Low HP*: at 3 HP or less with no potion, a hero backs away from enemies in reach toward the party (or the exit when alone) instead of trading blows, and braces rather than swings when it can't get away (unless a swing kills). Potions are drunk at 40% when an enemy is in reach (half otherwise). A downed friend's potion is taken from their pack (spec 32.7) and used on them.
+- *No backstab in company*: a Burglar backstabs only a lone sleeper (none within 3) it can kill with every try; no loot sweep within 3 of a known monster.
+- *Retreat* (`shouldRetreat`): the party turns for the way out when a hero has died, when its HP pool is under 40% with no potion left, or when half of it is down with nothing to get them up (`RETREAT=0` turns it off). Counted, so a retreat reads apart from a wipe.
+
+**The report** (after the per-level table): per contract type, done% with a 95% Wilson interval, retreated / lost / wiped / ran out (`Row.outcome`: wiped = the heir dead or taken; lost = a hero dead or taken, the job undone), damage taken as a share of the party's HP pool at the start (`hurtShare`), the round of the first down and how many delves had one, deaths; then **the bot's own mistakes**: retreats called, lures thrown (firecrackers bought), shoved or knocked off an edge, died holding a potion (potions taken from the downed), swung at ≤3 HP with no potion, edge hexes avoided, backed off low on HP. Read a difficulty number against that line: a death that follows an unforced error is the bot's.
+
+**The second pass (the same day, after the owner's note that the bot "isn't exactly reflective of mine or other players' experiences"; the intent is in `docs/v5-difficulty.md`):**
+- *No deliberate crew fights.* The V3.7 habit of refusing the toll on every third crew delve (to exercise crew fights) is off unless `PICKFIGHT=1`: a prepared party pays. In one seed it had been 7 fights lost of 7 against the Choir and 17 of 33 deaths.
+- *A crew at peace is not a target.* `option()` drops crew members from every hostile action while the crew isn't hostile, so "an enemy in reach" means one the bot would strike (it had been paying the toll and shooting the burglar two rounds later; and a hero with only a truce member "in reach" neither attacked nor moved).
+- *A crew at peace is a wall.* The move's distance field paths round their hexes (`distField` takes `blocked`): the Choir under truce had stood on the east bridge end for fifteen rounds with the party waiting to walk through them.
+- *The bearer goes to a straggler who can't come* (rooted, webbed, held) instead of waiting: an archer in the dark kept a rooted Ranger rooted for sixty rounds.
+- *Torches:* 3 for Level 2, 4 for Level 3 (one more when rich); was 1 and 3. A Level 2 delve runs 25 rounds; one torch left the party in the dark by round 20.
+- *Low HP before the swing:* at 3 HP or less with no potion and no kill in reach, no attack before the move has had its chance to back off (the counter "backed off low on HP" had read 0: the swing came first).
+- *`CAREFUL`* gates all of the above discipline (and 32.14's first pass) so `POLICY=careless` keeps none of it: it buys nothing, never sneaks, ignores light, edges, cohesion, the lure, low HP and retreat, and still fights, loots and uses kit. The gap between careless and prepared on one level is the measure that matches the owner's heuristic (`docs/v5-difficulty.md`).
+- *`SCENARIO=l1|l2|l3`*: every delve a fresh campaign with a party built for the level (`SCENARIOS`: Level 1 three heroes at level 1, 120 gold; Level 2 four at 3, 3, 2, 2, 300 gold, Aldric and Wim home; Level 3 four at 4, 4, 3, 3, 500 gold, the smith and alchemist home) and a regular contract there.
+- *The report* also splits outcomes by "crew hostile / no crew fight" and counts crew fights picked and tolls refused for want of gold among the bot's own mistakes.
+- *Traced afterwards, each a death in a trace:* a careful hero **stands and fights when engaged** (an adjacent awake enemy that has noticed it, or a hostile crew member) instead of attacking and walking off toward the goal into its free swing (spec 31.11; the bot had been taking twelve a delve; counted as "free swings given" and "stood and fought"); **the Sapper holds a charge** whose blast (noise 8, heard on the level above and below by straight distance) would wake a sleeper, since a prepared party knows the castle (the first charge at the top of the tower stair had been waking the barracks squad below; counted); **no move, calm walk, dash or catch-up ends on an unrailed edge** with an awake monster within 3, from an edge hex too, and a hero already on one steps off even after acting (the hall patrol had been shoving the Sapper two levels into the Gloam); **the dark edge** only holds when three or more unlit floor hexes lie ahead (a stair or a doorway's hex of dark is walked; the party had stood at the foot of the stairs unable to leave).
+
+**A rule from the measurement** (engine): the attack preview on a crew member while the crew isn't hostile carries a warning ("The Ferrymen are not your enemy yet: this makes them hostile, and they keep what you paid"), and when the crew was paid (truce, bribed, hired) the preview asks for a confirm (`RollPreview.confirm`), as a long jump does. `src/game/peace.test.ts`.
+
+**Found, not changed** (owner to decide; `docs/v5-difficulty.md`): a cutthroat toll is `max(50, half the carried value)` but gold can't be carried in from camp, so a fresh party can't pay and the demand is a forced fight against four level-5 members (5 of 16 Level 2 delves in one seed).
+
+**Numbers** (16 delves a cell; a 95% Wilson interval on done is about ±20 points at this size, so read the shape): the gap table in `docs/v5-difficulty.md`.
+
+### 32.15 The threshold: stairs and the lift (owner, 2026-10-28)
+
+Players: the stairs "feel cumbersome", "stepping on each other's toes". The owner wants quick elegance that removes the queue, keeps the stairs a threshold, and gives "some amount of warning, even if only slight": nobody stumbles blind into a big encounter, but the stairs are not safe either. "Take the stairs together" is parked (docs/ideas-later.md).
+
+**Today (to V5.0):** a staircase is one hex on each level, linked to the same coordinates on the other; the step across costs 1; one figure a hex; nobody ends a move on anyone. So a party of four takes the stairs one at a time; the hero on the far stair hex blocks the next arrival unless they can get on, across and off (3 of a walk's 4; a sneaking hero with 2 can't, so sneaking the stairs is two turns a hero with the stairs blocked between); each crossing flips the view; the tower stair lands in the guard post in the patrol's sight, so the first hero down meets it alone.
+
+**The rules (built 2026-10-28):**
+
+1. **The crossing is free** (`STAIR_CROSS_COST` 0, was 1; `steps()` in world.ts). On costs 1, across 0, off 1: a walking hero gets on, across and off with movement to spare; a sneaking hero (2) does it in one move. The lift the same once the winch is worked. Monsters and crews cross free too (they use stairs while hunting, as before). The engine's `reachable` already lets a hero path through a friend on the far stair hex and end beside them, so nobody standing on the stairs blocks the next arrival any more; the "landing" of the pitch needed no rule of its own.
+2. **The peek** (`PEEK_RANGE` 3; `peekFrom(w, d, p)` in world.ts: a stair hex's link, or a working lift's). A hero on a stair hex sees the other level round the link: hexes within 3 of it in the link's line of sight and in whatever light is there (`sightRangeAt` at the link, the far-lit test as usual), no facing (`visibleSet`). The stairs are a window both ways: a monster within 3 of the link makes out a hero on the stair hex (`sightedHeroes` adds the hero at the link, flagged `peek`, capped at `PEEK_RANGE` in `lookRound`; `perceivable` the same), and a monster standing on a stair hex makes out heroes within 3 of its link on the other level (`lookAll`, `perceivable`). The noticing rules (mood, bearing, the hero's light and move mode) apply at the link as they would on the level. A hunting monster then comes for the stairs and climbs when the stair hex is free; a hero standing on the stair hex holds it (nothing passes through them), so holding the top of the stairs keeps what's below from coming up, and stepping off lets it. Crews don't peek (hooded lights, the ambush: they'd rather not be seen). `Engine.peek(state, heroId)` (api.ts, optional on the contract so the view's fixture engines needn't carry it): `{ level, down, lit, figures: [{ id, name, kind, dist, mood, at }] }`, nearest first.
+3. **The HUD** (`Hud.peekLine`): a status mark on the stairs (an eye; red with something at the foot) whose tip says what's there: "Down the stairs (the Crossing): orc on patrol, 2 hexes from the foot; orc archer at its post, 3 hexes from the foot. They can see you on the stairs too; a hunter will climb." or "nothing moves in sight of the landing" / "too dark to make anything out". The same line goes to the log (red when something's there) as the hero stops on the stairs. This is the owner's "some amount of warning": you look, then you choose.
+4. **The view stays put** (app.ts `moved`): when the selected hero crosses and another able hero who hasn't finished their turn is still on the level shown, the view doesn't follow across; the flow (32.6) then picks the next hero on the shown level. It follows when the last one crosses, or when you select a hero on the other side.
+
+**Not changed:** the guard's patrol through the tower stair's landing (owner: decide after the peek is played), the barracks squad's sleep through a landing fight.
+
+**Tests:** `src/game/threshold.test.ts` (the peek's reach; a monster within 3 of the link notices the hero up the stairs, comes to the foot, and climbs once the hero steps off; one farther away doesn't; `engine.peek` for the HUD, the lift too); engine.test.ts stair and lift cost tests updated; the 26.2 fixture's Keven moved off the stair hex (Level 2's orcs would now see him).
+
+**View needs** (G): the peeked hexes are in `visibility().visible` under the other level's keys; drawing the far landing as a ghosted inset or cutaway while a hero stands on the stairs is theirs, when it fits.
+
+### 32.16 The toll a fresh party cannot pay (owner, 2026-10-28: option a)
+
+Found by the bot (32.14): a cutthroat crew demanded `max(50, half the carried value)`, but gold stays in camp, so a party that had looted nothing met the Gallows Choir with empty pockets and the only answer was a fight against four level-5 members (5 of 16 Level 2 delves in one seed; the careless Level 3 party's five forced Wake fights).
+
+- **Empty pockets are let by.** A waiting cutthroat crew that notices (or hears) a party whose carried value (`partyValue`: gold, gems, jewelry, heirlooms, hoard; never story items) is 0 stays `waiting`, is `spotted`, and says once: "<lead> looks you over. 'Nothing on you? Go on, then. <crew> will see you on the way out.'" (`RivalCrew.letBy`; event `rivalsStance: waiting`, the HUD plays a soft horn and lets the say line speak). It demands again the next time it notices or hears the party carrying anything.
+- **The toll never exceeds what the party carries:** `min(carried, max(TOLL_MIN 50, round5(carried / 2)))`. 30 carried: 30 (all of it); 80: 50; 200: 100. Payment is as before (gold first, then gems and jewelry smallest first, no change).
+- Unchanged: demanding → hostile at the next world phase if unpaid; refusing is a fight; a paid crew keeps the coin.
+- Tests: engine.test.ts ("noise of 4 or more…", "V5.0: a party carrying nothing is let by once…"); the 26.2 and crews.test premises now carry gold.
+- The bot: the Level 2 and 3 scenarios' forced fights are gone; `tolls refused for want of gold` should read 0.
+
+### 32.17 Shipping V5.0: the owner's first play-test, P's items (docs/v5-ship.md, 2026-10-28)
+
+- **Captions live a few seconds.** A caption (an enemy's roll beside it: "Orc strikes Keven", the dice, the result) now goes 3.2 s after its roll resolves (1.6 s at Instant); each result line that lands restarts the clock (`Hud.armCaption`). In the castle's turn the next actor had always replaced it; a free swing in the player's phase had stayed up until End turn (`captionStart` was never cleared).
+- **The Walk / Sneak switch, tidier** (32.8): the two words and the slider in one pill (14 px, a 30 px track), the Shift hint a dim badge beside it with its own one-line tip, the switch's tip one line ("Walking · noise 1 a hex, moves 4") plus the rule; the hotbar's hero column 150 → 176 px so nothing clips. The sneak mark's "press S" became "tap Shift" (32.8 moved S to the camera).
+- **Settings** gets the look rows (G's setters): Quality High / Low (`dio.setQuality`), Action camera (`dio.setActionCamera`), Tilt-shift blur (`dio.setTiltShift`); "Lower walls near the camera" is retired (the cutaway is always on in the new look; the `cutaway` key stays in settings.ts, ignored).
+- **Saves:** nothing in spec 32 changes the shape of a saved `GameState` in a way an old save can't carry: new fields are optional (`letBy`, `reactions.shieldBlock` with a default, `HeroInDelve` unchanged), `squadSlots` was already optional, settings merge over `DEFAULTS`. The key stays `vc.save.v39`.
+

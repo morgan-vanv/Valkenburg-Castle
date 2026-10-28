@@ -39,3 +39,15 @@ Crews play by the party's rules (spec 28 did movement, sneaking, noise and wake 
 - Rival crews fleshed out (parley, prospectors on Level 1, cutthroats on Level 2) → V3.5.
 - The Gilded Flagon, a Deep Rock-style pub with ales, opened by rescuing Old Wim and recovering the copper and the cask book → V3.5.
 - Thin walls, the look → V3.2.
+
+## Reactions, round two (owner, 2026-10-27, answering the V5.0 play pitch)
+
+Saved from the pitch's P1 and the owner's notes for a later pass on meta-progression. Built in V5.0: the shield block (spec 32.10). Shelved: "Hellish Rebuke" (the pitch's Flame ward, renamed): the Pyromancer breathes fire back at a melee attacker for a Focus point plus a mana point; Hold (the melee overwatch: strike the first enemy that steps beside you, bought with the action you saved); Potion a friend who goes down beside you, at once; Riposte on a miss; Fade (a Shadowmancer veils as a monster notices them); Guard as a reaction; caltrops under a charger. The owner's direction for all of them: be restrictive about who gets them and what they do; powerful or useful ones cost Focus (or Focus plus mana); likely class-specific; and locked behind progression: unlocked at a level, or taught by a trainer who must be rescued (tie them to the villagers we rescue, or add a dedicated trainer). Each needs a cost, a guessable rule, a crew mirror (pillar 17) and a bot policy; questions must stay rare (pillar 2). The conversation "is gonna be a big one".
+
+## The End turn question's threshold (owner, 2026-10-28)
+
+Spec 32.6 asks whenever any hero can still do something plausible (move, act, take, open, parley). A player who moved everyone and chose not to attack sees it every turn until they turn the setting off. The owner: not worried, the toggle is for that; revisit with player feedback. The softer variant, if wanted: ask only when a hero could still move or act (not merely loot or open), one line in hud.ts `endTurn`.
+
+## Take the stairs together (owner, 2026-10-28: tabled for a future session)
+
+Pitched with the stairs rework (spec 32.15): with a hero on a stair hex, one command walks every hero within 3 who hasn't moved to the stairs and across, placed around the landing in party order, each spending their move (not their action); one click, the party arrives as a group, the view flips once. The shelved "follow" idea (docs/shelved/exploration-mode.md) brought back for the one place it matters. The owner wants the quick, elegant fixes first (the landing, the free crossing, the view staying put, the peek) and this explored later.

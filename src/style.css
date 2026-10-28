@@ -2303,6 +2303,16 @@ input.seed {
 .lg-cartbox-h .lg-sub { margin-left: auto; font-size: 14px; }
 .lg-cartbox-b { padding: 12px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
 .lg-cartbox .lg-gearlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* V5.0 (P, B1): a purchase lands on the cart (the row glows), and "Give to" packs it for any hero. */
+.lowgate .lg-cartgear.new { animation: lg-slotglow 1.4s ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .lowgate .lg-cartgear.new { animation: none; box-shadow: 0 0 0 2px var(--ember); } }
+.lg-cartrow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lg-cartrow .lg-row { width: 100%; }
+.lg-giveto { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
+.lowgate .lg-giveto-b { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 3px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--parch-dim); font-size: 13px; }
+.lowgate .lg-giveto-b:hover:not(.is-off) { border-color: var(--ember-dim); color: var(--parchment); }
+.lowgate .lg-giveto-b.on { color: var(--lg-cream); }
+.lowgate .lg-giveto-b.is-off { opacity: 0.45; }
 .lg-vendors { position: sticky; top: 0; max-height: calc(100vh - 88px - 80px - 50px); }
 .lg-vend-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px 4px; }
 .lg-buyfor { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; }
@@ -2584,14 +2594,32 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-hexb, .cbadge.dl-hexb { width: 36px; height: 36px; font-size: 17px; clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); display: flex; align-items: center; justify-content: center; }
 .dl-hexkey { position: absolute; right: -5px; bottom: -3px; font-size: 8px !important; padding: 0 2px !important; background: #120f0d; line-height: 1.2; }
 .dl-rcard-b { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.dl-rcard-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dl-rcard-n { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.dl-stat-icons { display: flex; align-items: center; gap: 3px; flex: none; }
+.dl-rcard-top { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 2px; }
+.dl-rcard-n { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 0 auto; }
+/* V5.0 (spec 32.12): more marks than before; the row wraps under the name rather than cutting it. */
+.dl-stat-icons { display: flex; align-items: center; gap: 3px; flex: none; flex-wrap: wrap; }
 .dl-si { display: inline-flex; align-items: center; justify-content: center; color: var(--dl-ink-3); line-height: 0; }
 .dl-si.lantern { color: var(--dl-cream); }
 .dl-si.lantern.shut { color: var(--dl-ink-4); }
 .dl-si.bad { color: var(--dl-red-soft); }
 .dl-si.guarded { color: #9cc8ff; }
+/* V5.0 (P, spec 32.12, docs/v5-status-visuals.md): each stance its own mark and colour (gold for guard and brace, violet for the veil, cold blue for the dark, green for poison, red for bleeding). */
+.dl-si.braced, .dl-si.guarding { color: #e8a33d; }
+.dl-si.veiled { color: #b9a7ff; }
+.dl-si.warded { color: #9cc8ff; }
+.dl-si.overwatch { color: var(--dl-cream); }
+.dl-si.doze { color: #c9c3b5; }
+/* V5.0 (P, spec 32.15): on the stairs: the peek (red when something waits at the foot). */
+.dl-si.peek { color: var(--dl-cream); }
+.dl-rcard.dark:not(.sel) .dl-hexb { filter: saturate(0.35) brightness(0.8); }
+.dl-rcard.dark .dl-rcard-n { color: #a9a9c4; }
+.dl-rcard.poisoned .dl-hp { box-shadow: inset -6px 0 0 var(--venom-dim); }
+.dl-rcard.poisoned .dl-hp i { border-right: 2px solid var(--venom); }
+.dl-fate.dl-bleed { display: inline-flex; align-items: baseline; gap: 4px; }
+.dl-fate.dl-bleed b { font-size: 16px; line-height: 1; }
+.dl-rcard.st-downed .dl-hexb { animation: dl-bleed-pulse 1.6s ease-in-out infinite; }
+@keyframes dl-bleed-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(192, 71, 58, 0); } 50% { box-shadow: 0 0 0 3px rgba(192, 71, 58, 0.55); } }
+@media (prefers-reduced-motion: reduce) { .dl-rcard.st-downed .dl-hexb { animation: none; } }
 .dl-si.dark { color: #8a8aa8; }
 .dl-si.more { color: var(--dl-ink-4); }
 .dl-si.sneak { font-size: 11px; line-height: 1.2; padding: 1px 6px; border: 1px solid var(--line-hi); border-radius: 999px; color: var(--dl-ink-3); }
@@ -2669,10 +2697,31 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-fold-t { font-size: 16px; color: var(--dl-pink); }
 .dl-fold-n { font-size: 14px; color: var(--dl-ink-4); }
 .dl-fold-hurry { margin-left: auto; font-size: 14px; color: var(--dl-ink-3); }
-.dl-who { display: flex; flex-direction: column; gap: 6px; width: 150px; flex: none; }
+.dl-who { display: flex; flex-direction: column; gap: 6px; width: 176px; flex: none; } /* V5.0: room for the switch and its Shift badge */
 .dl-who-n { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-who-c { font-size: 13px; color: var(--dl-ink-4); }
 .dl-seg { display: flex; border: 1px solid var(--line-hi); border-radius: 4px; padding: 2px; width: max-content; }
+/* V5.0 (P, spec 32.8): the Walk / Sneak sliding switch (a tap of Shift flips it) and the key help card. */
+.dl-switch { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-hi); border-radius: 999px; padding: 3px 9px 3px 10px; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 30px; font-size: 14px; flex: none; }
+.dl-switch .dl-switch-l.walk { color: var(--dl-cream); }
+.dl-switch.on .dl-switch-l.walk { color: var(--dl-ink-4); }
+.dl-switch.on .dl-switch-l.sneak { color: var(--dl-cream); }
+.dl-switch-track { position: relative; width: 30px; height: 16px; border-radius: 999px; background: #3a2a12; border: 1px solid var(--line-hi); flex: none; }
+.dl-switch-knob { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--parchment); transition: left 160ms ease, background 160ms ease; }
+.dl-switch.on .dl-switch-track { background: #2a2338; }
+.dl-switch.on .dl-switch-knob { left: 16px; background: #b9a7ff; }
+/* V5.0 (owner's play-test): the Shift hint is a badge beside the pill, not inside it (it clipped). */
+.dl-switch-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.dl-switch-hint { font-size: 10px; line-height: 1; padding: 3px 5px; color: var(--dl-ink-4); border: 1px solid var(--line); border-radius: 3px; background: transparent; cursor: help; }
+.dl-switch-hint:focus-visible { outline: 1px solid var(--ember-dim); }
+.dl-kb.wide { min-width: 38px; }
+.dl-keys-box { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; }
+.dl-keys-head { display: flex; align-items: center; justify-content: space-between; }
+.dl-keys-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; }
+.dl-keys-g { display: flex; flex-direction: column; gap: 6px; }
+.dl-keys-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; font-size: 14px; color: var(--parchment); }
+.dl-keys-k { display: flex; flex-wrap: wrap; gap: 3px; }
+.dl-keys-k kbd { font-size: 11px; }
 .dl-seg-b { font-size: 15px; padding: 6px 12px; border: 0; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 34px; border-radius: 3px; display: inline-flex; align-items: center; gap: 6px; }
 .dl-seg-b.on { background: #3a2a12; color: var(--dl-cream); }
 .dl-seg-b kbd { font-size: 9px; padding: 0 3px; }
@@ -2823,14 +2872,13 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-dia:disabled { opacity: 0.3; cursor: not-allowed; }
 .dl-focus-help { font-size: 13px; color: var(--dl-ink-4); }
 .dl-roll-oc { display: flex; flex-direction: column; gap: 6px; }
-.dl-ocbar { display: flex; width: 100%; border-radius: 3px; overflow: hidden; gap: 1px; }
-.dl-oc { height: 22px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; color: var(--parchment); min-width: 3px; }
+/* V5.0 (P, B4): thicker, no line under it; numbers on hover. */
+.dl-ocbar { display: flex; width: 100%; border-radius: 4px; overflow: hidden; gap: 2px; }
+.dl-oc { height: 36px; display: flex; align-items: center; justify-content: center; gap: 4px; font-family: var(--mono); font-size: 13px; white-space: nowrap; overflow: hidden; color: var(--parchment); min-width: 4px; cursor: default; }
+.dl-oc .dl-roll-was { font-size: 11px; opacity: 0.75; white-space: nowrap; }
 .dl-oc-miss, .dl-oc-fail { background: #5a4c3f; }
 .dl-oc-hurt, .dl-oc-ok { background: var(--ember-dim); }
 .dl-oc-kill, .dl-oc-best { background: var(--ember); color: #1a1208; }
-.dl-roll-ocline { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: #b8ab94; }
-.dl-roll-headline { font-weight: 400; color: var(--dl-cream); font-size: 15px; }
-.dl-roll-was { white-space: nowrap; color: var(--dl-ink-3); }
 .dl-roll-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .dl-roll-plain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; color: var(--dl-ink-2); }
 .dl-roll-plain .bad { color: var(--dl-pink); }
@@ -2874,6 +2922,8 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 
 /* ---- the Gloam's warning, above the bar */
 .dl-gloam { position: absolute; left: 50%; bottom: 170px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: #1a0810; border: 1px solid #8a2a4a; color: #ffb4cc; font-size: 14px; z-index: 6; pointer-events: none; }
+/* V5.0 (review): the first-delve coach mark sits over the hotbar at the same spot; the Gloam line steps above it. */
+.dl-hud:has(.dl-coach:not(.hidden)) .dl-gloam { bottom: 262px; }
 
 /* ---- coach marks */
 .dl-coach { position: fixed; left: 0; top: 0; width: 500px; max-width: calc(100vw - 24px); padding: 12px 16px; border: 1px solid var(--ember); border-radius: 4px; background: #2a1f12; display: flex; gap: 14px; align-items: center; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 35; }
@@ -2931,6 +2981,8 @@ div.dl-deal { cursor: default; }
 .dl-menu { position: absolute; right: 16px; top: 84px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; background: rgba(14, 11, 9, 0.97); border: 1px solid var(--line-hi); border-radius: 4px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); z-index: 45; }
 .dl-menu-sec { display: flex; flex-direction: column; gap: 8px; }
 .dl-menu-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* V5.0 (P): a row's label before its buttons (Quality High / Low). */
+.dl-menu-k { color: var(--dl-ink-3); font-size: 13px; margin-right: 2px; }
 .dl-menu-end { border-top: 1px solid var(--line); padding-top: 12px; }
 .dl-check { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--dl-ink-2); cursor: pointer; }
 .dl-check input { accent-color: var(--ember); width: 16px; height: 16px; }
@@ -3013,6 +3065,26 @@ div.dl-deal { cursor: default; }
 .dl-rt-renown .lg-pips i.fresh { box-shadow: 0 0 10px rgba(232, 163, 61, 0.8); }
 .lg-cream { color: #ffcf86; }
 .dl-rt-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+/* V5.0 (P, spec 32.11): the tally. Stages land one at a time; "Won back" spans the row; XP bars fill. */
+.dl-rt-boxes.with-won { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dl-rt-boxes.with-won .dl-rt-won { grid-column: 1 / -1; }
+.dl-rt-boxes:not(.with-won) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dl-rt-boxes:not(.with-won) .dl-rt-left { grid-column: 1; }
+.dl-return [data-stage].pending { opacity: 0; transform: translateY(10px); pointer-events: none; }
+.dl-return [data-stage] { transition: opacity 320ms ease, transform 320ms ease; }
+.dl-return.tallying .dl-rt-foot .lg-foot-hint { visibility: hidden; }
+.dl-rt-xp-fill { transition: width 900ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dl-return:not(.pending) [data-punch]:not(.pending) { animation: dl-rt-punch 480ms cubic-bezier(0.2, 1.4, 0.4, 1) 1; }
+@keyframes dl-rt-punch { 0% { transform: scale(0.92); opacity: 0.4; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .dl-return [data-stage] { transition: none; } .dl-rt-xp-fill { transition: none; } .dl-return [data-punch] { animation: none; } }
+.dl-rt-won { border-color: var(--ember); background: #1a140d; }
+.dl-rt-won-h { display: flex; flex-direction: column; gap: 4px; }
+.dl-rt-won-t { font-family: var(--display); font-size: 30px; color: #ffcf86; line-height: 1.1; }
+.dl-rt-won-l { font-size: 16px; color: #d8ccb4; }
+.dl-rt-won-gift { margin: 4px 0 0; font-size: 16px; color: #ffcf86; font-style: italic; line-height: 1.4; }
+.dl-rt-won-items { display: flex; flex-direction: column; gap: 6px; }
+.dl-rt-left .dl-rt-glyph { color: #9a8f7d; }
+.dl-rt-left .dl-rt-row { font-size: 15px; color: #d8ccb4; }
 .dl-rt-box { border: 1px solid var(--line); border-radius: 4px; background: #14110f; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dl-rt-row { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .dl-rt-grow { flex: 1; min-width: 0; }
@@ -3062,6 +3134,14 @@ div.dl-deal { cursor: default; }
 .tag-venom .ic { color: var(--venom); }
 .tag-bleed { color: var(--red); font-weight: 700; font-size: 0.72rem; }
 .tag-carried { color: #9ec8ff; font-size: 0.68rem; }
+/* V5.0 (P, spec 32.12): the hero tag's status chips (docs/v5-status-visuals.md): the colours match the party card's marks. */
+.tag-held, .tag-unlit.l3 { color: var(--red); font-weight: 700; font-size: 0.68rem; }
+.tag-unlit { color: #8a8aa8; font-size: 0.68rem; }
+.tag-braced { color: #e8a33d; font-size: 0.68rem; }
+.tag-overwatch { color: #f0e6d2; font-size: 0.68rem; }
+.tag-veiled { color: #b9a7ff; font-size: 0.68rem; }
+.tag-flame { display: inline-flex; align-items: center; gap: 1px; color: #ffcf86; font-weight: 700; font-size: 0.72rem; }
+.tag-flame .ic { color: #ffcf86; }
 /* V4.1 (spec 31.13): reactions. The per-hero settings button beside the name, its popover above the hotbar,
    and the reaction card the castle's turn waits on. */
 .dl-who-top { display: flex; align-items: center; gap: 6px; min-width: 0; }

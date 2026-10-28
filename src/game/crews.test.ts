@@ -439,6 +439,7 @@ describe('V4.1 (spec 31.10): a waiting crew demands its toll only for noise the 
     // The same noise made where a hero stands and reaching the crew: they demand.
     const near = floor.find((p) => distance(p, spots[0]!) === 3)!;
     k.at = { ...near };
+    k.pack.push({ id: 'g-toll', kind: 'gold', name: '60 gold', amount: 60, slots: 1 }); // V5.0 (spec 32.16): empty pockets are let by
     const c2 = ctx(s, 'player');
     makeNoise(c2, near, 5);
     expect(s.delve!.rivals!.stance).toBe('demanding');

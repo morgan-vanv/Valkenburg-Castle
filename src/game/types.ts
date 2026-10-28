@@ -721,8 +721,10 @@ export interface RivalCrew {
   goal: 'loot' | 'objective' | 'leave';
   /** Spec 18.6: what they're after, for the parley card ("the chapel chest", 3 rounds, ~60 gold). */
   aim?: { at: Pos; what: string; rounds: number; value: number };
-  /** Gold value of the toll asked while demanding. */
+  /** Gold value of the toll asked while demanding. V5.0 (spec 32.16): never more than the party carries. */
   toll?: number;
+  /** V5.0 (spec 32.16): a cutthroat crew that found the party carrying nothing let it by ("we'll see you on the way out"); it demands again when the party next shows with loot. */
+  letBy?: boolean;
   /** Rounds of sell-sword service left. */
   hiredRounds?: number;
   /** A job paid for and not yet done. */
@@ -1102,6 +1104,8 @@ export type GameEvent =
   | { type: 'thrown'; by: string; kind: ItemKind; from: Pos; to: Pos }
   /** A spell or ability went off. `hexes` = the area (fireball, gust, smoke, glue). Overwatch firing = spell 'overwatch'. */
   | { type: 'cast'; by: string; spell: ActionKind; at?: Pos; targetId?: string; hexes?: Pos[] }
+  /** V5.0 (spec 32.10): a shield block: `id` took `attacker`'s hit on the shield, `from` damage down to `to`. */
+  | { type: 'blocked'; id: string; attacker: string; from: number; to: number }
   /** Blink: teleport, no path. */
   | { type: 'blinked'; id: string; from: Pos; to: Pos }
   /** Dig: rubble or a cracked wall at `at` is now floor (it's in Delve.blown). */
@@ -1131,7 +1135,7 @@ export type GameEvent =
 // ---------------------------------------------------------------- reactions (V4.1, spec 31.13)
 
 /** The reactions a hero can be asked for: a free swing at an enemy passing them while they're hidden from it; the overwatch shot. */
-export type ReactionKind = 'hiddenSwing' | 'overwatch';
+export type ReactionKind = 'hiddenSwing' | 'overwatch' | 'shieldBlock'; // V5.0 (spec 32.10): the shield block
 /** A hero's standing answer to one kind: ask each time, always yes, never (always no). */
 export type ReactionSetting = 'ask' | 'always' | 'never';
 /** 'yes': the first option (Strike, Shoot); 'no': the second (Let it pass, Hold). */
@@ -1151,6 +1155,8 @@ export interface ReactionQuestion {
   no: { label: string; line: string };
   /** The roll the yes answer makes (slots, per-slot chance 0..100). */
   roll?: { slots: number; chance: number };
+  /** V5.0 (spec 32.10, the shield block): the damage the hit would do if taken. */
+  damage?: number;
 }
 
 /**

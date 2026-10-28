@@ -26,7 +26,7 @@ export function reactionSetting(h: HeroInDelve, kind: ReactionKind): ReactionSet
 
 /**
  * A reaction point: the hero's answer to `q`. Setting always / never answers at once; then a question already
- * answered this castle's turn (same kind, hero and enemy) keeps its answer; then a bot's policy; then the player's
+ * answered this castle's turn (same kind, hero and enemy; for a block, the same hit) keeps its answer; then a bot's policy; then the player's
  * answers in order; with none left, the turn pauses (throws `Pause`). With nobody to ask (a Ctx made outside
  * `apply`), the kind's fallback answer.
  */
@@ -35,7 +35,8 @@ export function ask(c: Ctx, q: ReactionQuestion): ReactionChoice {
   const set = h ? reactionSetting(h, q.kind) : 'ask';
   if (set === 'always') return 'yes';
   if (set === 'never') return 'no';
-  const key = `${c.d.round}:${q.kind}:${q.heroId}:${q.enemyId}`;
+  // V5.0 (review): a block is a decision about one hit, so a second, harder hit from the same enemy asks again.
+  const key = `${c.d.round}:${q.kind}:${q.heroId}:${q.enemyId}${q.damage !== undefined ? `:${q.damage}` : ''}`;
   const memo = (c.reacted ??= new Map());
   const seen = memo.get(key);
   if (seen) return seen;

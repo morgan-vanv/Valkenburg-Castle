@@ -13,7 +13,7 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, REACT_NAME, REACT_HELP, REACT_SETTING_HELP, SETTING_WORD, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, REACT_NAME, REACT_HELP, REACT_SETTING_HELP, SETTING_WORD, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, keyName } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE } from '../game/data';
@@ -26,7 +26,8 @@ import type { Settings } from './settings';
 import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
 import { Chronicle } from './hud-chronicle';
 import { Coach } from './coach';
-import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, pctText, readRoll, statName, type RollRead } from './hud-roll';
+import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, readRoll, statName, type RollRead } from './hud-roll';
+import { heroDone, partyDone, stillCan } from './autoend'; // V5.0 (P, spec 32.5, 32.6)
 
 export { hitOdds } from './hud-roll';
 
@@ -228,6 +229,8 @@ export class Hud {
   private bannerEl = h('div', { class: 'dl-banner hidden' });
   private toastEl = h('div', { class: 'hud-toast hidden' });
   private modal = h('div', { class: 'dl-modal hidden' });
+  /** V5.0 (spec 32.8): the key help overlay (? or F1). */
+  private keysEl = h('div', { class: 'dl-modal dl-keys hidden' });
   /** V4.1 (spec 31.13): the reaction card, up while the castle's turn waits for an answer (`reactWait`). */
   private reactEl = h('div', { class: 'dl-react hidden', role: 'dialog', 'aria-label': 'A hero can react', tabindex: -1 });
   private reactWait: { q: ReactionQuestion; done: (c: ReactionChoice) => void } | null = null;
@@ -248,13 +251,14 @@ export class Hud {
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.reactEl, this.card, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.reactEl, this.card, this.tip, this.modal, this.keysEl, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
       if (!this.card.classList.contains('hidden')) this.placeCard();
     });
     addEventListener('keydown', (e) => this.onKey(e));
+    addEventListener('keyup', (e) => this.onKeyUp(e));
     addEventListener('keyup', (e) => {
       if (e.key === 'Alt') this.setAlt(false);
     });
@@ -276,6 +280,8 @@ export class Hud {
     // Clicking anywhere else closes the More menu and the game menu.
     addEventListener('pointerdown', (e) => {
       const t = e.target as Node;
+      this.cancelFlow(); // V5.0 (P): a click is the player's: the turn waits for them
+      this.shiftArmed = false;
       if (!this.moreEl.classList.contains('hidden') && !this.moreEl.contains(t) && !(t instanceof Element && t.closest('[data-more]'))) this.moreEl.classList.add('hidden');
       if (!this.menuEl.classList.contains('hidden') && !this.menuEl.contains(t) && !(t instanceof Element && t.closest('[data-menu]'))) this.menuEl.classList.add('hidden');
       // V4.1 (spec 31.13): the Reactions popover closes on a click elsewhere.
@@ -351,17 +357,55 @@ export class Hud {
     this.refresh();
   }
 
-  /** After a command: if the selected hero is spent, select the next one with something left. */
-  autoAdvance(): void {
-    const d = this.state?.delve;
+  // ---- V5.0 (P, spec 32.5 and 32.6): the turn's flow. One test (autoend.ts `heroDone`) decides when the camera
+  // cycles to the next hero, when the question before End turn is asked, and when the turn ends on its own.
+  private flowTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * After a command. If the selected hero has nothing plausible left, wait a beat (long enough to read what just
+   * happened; any key, click, panel or playback cancels it), then cycle the selection and the camera to the next hero
+   * who still has something to do; with nobody left and the setting on, end the turn instead, with a toast and no
+   * idle question (nobody here could act). The camera is never taken away from a hero who can still open the chest
+   * beside them, take its loot, open a door, parley, or act.
+   */
+  scheduleFlow(): void {
+    this.cancelFlow();
+    const s = this.state;
+    const d = s?.delve;
+    if (!s || !d || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
     const sel = this.selected();
-    if (!d || !sel || sel.status !== 'active' || (able(sel) && !(sel.moved && sel.acted))) return;
-    const ready = d.heroes.filter((x) => able(x) && (!x.moved || !x.acted));
-    const next = ready.find((x) => x.at.level === this.dio.shownLevel) ?? (sel.at.level === this.dio.shownLevel ? undefined : ready[0]);
-    if (next) this.select(next.heroId);
+    if (!sel || sel.status !== 'active' || !heroDone(this.engine, s, sel.heroId)) return;
+    const beat = this.host.settings.speed === 0 ? 220 : 700;
+    this.flowTimer = setTimeout(() => {
+      this.flowTimer = null;
+      const now = this.state;
+      const dn = now?.delve;
+      if (!now || !dn || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+      const cur = this.selected();
+      if (!cur || !heroDone(this.engine, now, cur.heroId)) return;
+      const ready = dn.heroes.filter((x) => x !== cur && able(x) && !heroDone(this.engine, now, x.heroId));
+      const next = ready.find((x) => x.at.level === this.dio.shownLevel) ?? ready[0];
+      if (next) {
+        this.select(next.heroId);
+        return;
+      }
+      if (!this.host.settings.autoEndTurn || !partyDone(this.engine, now)) return;
+      this.toast('Everyone has done what they can. Ending the turn.');
+      this.coach.done(3);
+      this.coach.done(1);
+      void this.host.send({ type: 'endTurn' });
+    }, beat);
+  }
+
+  cancelFlow(): void {
+    if (this.flowTimer !== null) {
+      clearTimeout(this.flowTimer);
+      this.flowTimer = null;
+    }
   }
 
   setBusy(b: boolean): void {
+    if (b) this.cancelFlow();
     this.busy = b;
     this.root.classList.toggle('busy', b);
     if (b) {
@@ -973,6 +1017,27 @@ export class Hud {
   }
 
   /** The mood words: "unaware, at its post", "searching", "hunting Corin". */
+  /**
+   * V5.0 (spec 32.15): the threshold's peek, in words: "Down the stairs: an orc on patrol, 2 hexes; an archer, 3 hexes."
+   * Null when the hero stands on neither a stair hex nor a working lift.
+   */
+  peekLine(heroId: string): { text: string; figures: number } | null {
+    const s = this.state;
+    if (!s || !this.engine.peek) return null;
+    const p = this.engine.peek(s, heroId);
+    if (!p) return null;
+    const where = p.down ? `Down the ${p.level === 3 && s.delve?.liftWorking ? 'lift' : 'stairs'}` : `Up the ${s.delve?.liftWorking && p.level === 2 ? 'lift' : 'stairs'}`;
+    const mood = (f: (typeof p.figures)[number]) => f.mood === 'crew' ? 'a crew member' : f.mood === 'asleep' ? 'asleep' : f.mood === 'hunting' ? 'hunting' : f.mood === 'alert' ? 'searching' : f.mood === 'patrol' ? 'on patrol' : 'at its post';
+    if (!p.figures.length) return { text: `${where} (${this.levelName(p.level)}): ${p.lit ? 'nothing moves in sight of the landing' : 'too dark to make anything out'}. What's there sees you on the stairs too.`, figures: 0 };
+    const list = p.figures.map((f) => `${f.name.toLowerCase()} ${f.mood === 'crew' ? '' : mood(f) + ', '}${f.dist} hex${f.dist === 1 ? '' : 'es'} from the foot`).join('; ');
+    return { text: `${where} (${this.levelName(p.level)}): ${list}. They can see you on the stairs too; a hunter will climb.`, figures: p.figures.length };
+  }
+
+  private levelName(level: number): string {
+    const n = this.engine.castle().levels.find((l) => l.level === level)?.name ?? `Level ${level}`;
+    return n.replace(/^The /, 'the ');
+  }
+
   private moodWords(m: Monster): string {
     if (m.kind === 'gloam') return 'the dark itself';
     if (m.awareness === 'asleep') return 'asleep';
@@ -1536,7 +1601,7 @@ export class Hud {
     const crew = this.state?.delve?.rivals;
     const isRival = !!unitId && !!crew?.members.some((m) => m.id === unitId);
     // 18.6: clicking a crew member that isn't fighting you opens the deal card, not an attack.
-    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley'] : ['attack', 'firebolt', 'potion', 'carry', 'unshackle', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'smashProp', 'winch', 'leave', 'dig', 'jump'];
+    const order: ActionKind[] = unitId ? (isRival && crew!.stance !== 'hostile' ? ['parley'] : ['attack', 'firebolt', 'potion', 'take', 'carry', 'unshackle', 'parley', 'bribe', 'shove']) : ['open', 'pick', 'take', 'light', 'disarm', 'smash', 'smashProp', 'winch', 'leave', 'dig', 'jump'];
     for (const kind of order) {
       const o = this.options.find((x) => x.action === kind);
       const t = o?.targets.find(match);
@@ -1640,6 +1705,10 @@ export class Hud {
   private cancel(): void {
     this.fusePicked = false;
     this.hideTip();
+    if (!this.keysEl.classList.contains('hidden')) {
+      this.keysEl.classList.add('hidden');
+      return;
+    }
     if (this.reactOpen) {
       this.reactOpen = false;
       this.renderBar();
@@ -2044,14 +2113,8 @@ export class Hud {
       el.append(h('div', { class: 'dl-roll-mid' }, dice, focus));
       // The outcome bar.
       const was = p.focus > 0 && read.kind === 'damage' && read.kill > 0 ? readRoll(pr, 0, this.hpOf(t), this.itWord(t)).kill : null;
-      el.append(
-        h(
-          'div',
-          { class: 'dl-roll-oc' },
-          outcomeBar(read),
-          h('div', { class: 'dl-roll-ocline' }, h('span', null, h('b', { class: 'dl-roll-headline' }, read.headline), ` · ${read.sub}`), was !== null && Math.abs(was - read.kill) > 0.004 ? h('span', { class: 'dl-roll-was' }, `Was ${pctText(was)} before Focus`) : ''),
-        ),
-      );
+      // V5.0 (P, B4): a thicker bar and nothing under it; the read and the numbers are on the segments' hover.
+      el.append(h('div', { class: 'dl-roll-oc' }, outcomeBar(read, was)));
       const chips = pr.modifiers.map((m) => modifierChip(m, name)).filter((c): c is NonNullable<typeof c> => !!c);
       if (chips.length) el.append(h('div', { class: 'dl-roll-chips' }, ...chips.map((c) => h('span', { class: `dl-chip ${c.good ? 'good' : 'bad'}`, 'data-tip': c.tip }, `${c.good ? '▲' : '▼'} ${c.text}`))));
     } else {
@@ -2072,7 +2135,7 @@ export class Hud {
         'span',
         { class: 'dl-roll-btns' },
         h('button', { type: 'button', class: 'dl-btn dl-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
-        h('button', { type: 'button', class: `dl-btn ${p.option.action === 'jump' ? 'dl-danger' : 'dl-primary'} dl-go`, onclick: () => this.confirmPreview() }, `${verb} `, h('kbd', null, 'Enter')),
+        h('button', { type: 'button', class: `dl-btn ${p.option.action === 'jump' ? 'dl-danger' : 'dl-primary'} dl-go`, onclick: () => this.confirmPreview() }, `${verb} `, h('kbd', null, 'Enter'), h('kbd', null, 'E')),
       ),
     );
     el.append(foot);
@@ -2157,9 +2220,30 @@ export class Hud {
       dice[i]!.innerHTML = `<span class="dl-die-p">${hit ? 'hit' : 'miss'}</span>`;
       await wait(0.1);
     }
+    this.armCaption();
+  }
+
+  private captionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * V5.0 (owner's play-test, docs/v5-ship.md): a caption lives a few seconds after its roll resolves, then goes. In the
+   * castle's turn the next actor replaced it anyway; a free swing in the player's phase had stayed up until End turn.
+   * Each result line that lands restarts the clock.
+   */
+  private armCaption(): void {
+    if (this.captionTimer) clearTimeout(this.captionTimer);
+    const ms = this.host.settings.speed === 0 ? 1600 : 3200;
+    this.captionTimer = setTimeout(() => {
+      this.captionTimer = null;
+      this.caption.classList.add('hidden');
+    }, ms);
   }
 
   private captionStart(actor: string, title: string): void {
+    if (this.captionTimer) {
+      clearTimeout(this.captionTimer);
+      this.captionTimer = null;
+    }
     this.captionFor = actor;
     this.caption.replaceChildren(h('div', { class: 'dl-cap-t' }, title), h('div', { class: 'dl-cap-body' }));
     this.caption.classList.remove('hidden');
@@ -2224,6 +2308,7 @@ export class Hud {
       cls = 'down';
     } else if (e.type === 'grabbed') text = `${this.nameOf(e.id)} is held.`;
     if (text) body.append(h('div', { class: `dl-cap-res ${cls}` }, text));
+    if (text || e.type === 'miss') this.armCaption();
   }
 
   private isHeroId(id: string): boolean {
@@ -2467,10 +2552,10 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const coin = items.filter((i) => i.kind === 'gold').reduce((a, i) => a + i.amount, 0);
     const rest = items.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard');
     const words = [coin ? `${coin} gold` : '', ...rest.map((i) => (i.kind === 'heirloom' || i.kind === 'hoard' ? i.name : `${article(i.name)} ${i.name.toLowerCase()}`))].filter(Boolean);
-    const toll = Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5);
+    const toll = Math.min(value, Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5)); // V5.0 (spec 32.16): never more than you carry
     return h(
       'div',
-      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} (now ${toll}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
+      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} but never more than you carry (now ${value ? toll : 'nothing: empty pockets are let by, and taxed on the way out'}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
       h('span', { class: 'dl-kick dl-kick-dim' }, 'Carrying'),
       value > 0 ? h('span', { class: 'dl-carry-v' }, h('span', { class: `num dl-goldtxt ${value >= BETRAY_LOOT ? 'rich' : ''}` }, `${value}`), h('span', { class: 'dl-carry-w' }, ` · ${shortList(words)}`)) : h('span', { class: 'dl-carry-w' }, 'Nothing yet'),
     );
@@ -2498,6 +2583,30 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     this.dio.setDarkHeroes(darks);
     this.renderGloam(darks);
     this.applyDark();
+    this.darkLines(darks);
+  }
+
+  /** V5.0 (spec 32.12): the log names it once per hero per delve when they first stand unlit ("The dark closes on Keven." on Level 3). */
+  private darkLogged = new Map<string, Set<string>>();
+  private darkLines(darks: string[]): void {
+    const s = this.state;
+    const d = s?.delve;
+    if (!s || !d) return;
+    const key = `${s.seed}:${s.campaign.delveCount}`;
+    let seen = this.darkLogged.get(key);
+    if (!seen) {
+      this.darkLogged.clear();
+      seen = new Set();
+      this.darkLogged.set(key, seen);
+    }
+    for (const id of darks) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const hd = d.heroes.find((x) => x.heroId === id);
+      const name = this.heroDef(id)?.name ?? id;
+      if (hd?.at.level === 3) this.log(`The dark closes on ${name}.`, 'log-enemy');
+      else this.log(`${name} stands in the dark.`, 'log-dim');
+    }
   }
 
   private railCard(hd: HeroInDelve, def: Hero, i: number, risk: { levels: number; damage: number; levelName: string } | null, dark: boolean): HTMLElement {
@@ -2518,7 +2627,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         'div',
         { class: `dl-rcard st-${hd.status} cls-${def.cls} ${sel ? 'sel' : ''}`, 'data-hero': hd.heroId, tabindex: 0, 'data-tip': `${def.name} · ${fate.tag.toLowerCase()}\n${fate.line}`, ...(this.crawler(hd) ? { onclick: () => this.select(hd.heroId) } : {}) },
         badge,
-        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
+        h('span', { class: 'dl-rcard-b' }, h('span', { class: 'dl-rcard-top' }, h('span', { class: 'dl-rcard-n' }, def.name), drag, poisonMark, hd.status === 'downed' ? h('span', { class: 'dl-fate downed dl-bleed', 'data-bleed': `${hd.bleed}` }, 'Down · ', h('b', { class: 'num' }, `${hd.bleed}`)) : h('span', { class: `dl-fate ${hd.status}` }, fate.tag)), h('span', { class: 'dl-rcard-fate' }, fate.line)),
       );
     }
     const pip = (on: boolean, what: string, tip: string) => h('span', { class: `dl-pip ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': `${what} ${on ? 'ready' : 'used'}` }, on ? icon(what === 'Move' ? 'move' : 'dot', 9) : '');
@@ -2559,7 +2668,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (hd.carrying) add('carry', 'carry', `Carrying ${this.nameOf(hd.carrying)} · moves ${CARRY_MOVE} at most, free actions only (doors, Take, Drop, Give, Leave, Parley). Leave by an exit and ${this.nameOf(hd.carrying)} comes out too${this.state?.delve?.heroes.some((x) => x.heroId === hd.carrying) ? ' (alive, at 1 HP)' : ''}. Set down (free) puts them down.`);
     // V4.1 (spec 31.13): a hero set to strike from hiding without being asked.
     if (hd.reactions?.hiddenSwing === 'always') add('ambush', 'sword', `Strikes from hiding · ${name} takes the free swing at an enemy passing them that hasn't spotted them, without asking, and gives themselves away. Change it under Reactions (beside Walk/Sneak).`);
-    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and press S to change it.`, 'sneak');
+    if (hd.moveMode === 'sneak') add('sneak', null, `Sneak · ${name} is set to sneak: moves ${this.heroDef(hd.heroId)?.cls === 'burglar' || hd.ale === 'smuggler' ? 4 : 2}, silently.\nEach hero keeps their own Walk/Sneak: select ${name} and tap Shift to change it.`, 'sneak');
     // Something a seen enemy means to strike at them.
     const seen = this.seenEnemies();
     const threats = Object.entries(this.intents).filter(([id, it]) => it.targetId === hd.heroId && seen.has(id) && ['attack', 'shove', 'grab', 'drag', 'web', 'firebolt', 'dart', 'venomdart', 'hamstring', 'rob', 'steal', 'dread', 'nightthorn', 'briar'].includes(it.kind));
@@ -2568,22 +2677,27 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
     const nightEye = (hd.nightEyes ?? 0) > 0 || hd.ale === 'nighteye'; // V4.1 (WS2): Night-eye Stout
     if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+    // V5.0 (spec 32.15): on the stairs (or the working lift): what the peek shows.
+    const pk = this.peekLine(hd.heroId);
+    if (pk) add(pk.figures ? 'bad peek' : 'peek', 'eye', pk.text);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
     else if (hd.dreaded) add('bad dread', 'flee', `Dread · ${name} can move this turn but not act (a crew Shadowmancer's Dread).`); // V4.1 (WS7)
     else if ((hd.rooted ?? 0) > 0) add('bad rooted', 'chain', `Rooted · can't move or dash for ${hd.rooted} more round${hd.rooted === 1 ? '' : 's'}. ${name} can still act.`);
     const dragger = d.rivals?.members.find((r) => r.dragging === hd.heroId && r.hp > 0 && !r.goneOut);
     if (dragger) add('bad dragged', 'hand', `Dragged · ${dragger.name} is hauling ${name} toward the way out. Kill, down or fear ${dragger.name} to free them.`);
-    const guards: string[] = [];
-    if (hd.braced) guards.push(`Braced: hits do 1 less, enemies roll −${V37.bracePenalty}%`);
-    if (hd.ward > 0) guards.push(`Warded ${hd.ward} round${hd.ward === 1 ? '' : 's'}: 1 less per hit`);
-    if (hd.veil > 0) guards.push(`Veiled ${hd.veil} round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name} (attacking or noise ${VEIL_BREAK_NOISE}+ breaks it)`);
-    if (guards.length) add('guarded', 'shield', `Protected · ${guards.join('\n')}`);
+    // V5.0 (spec 32.12, docs/v5-status-visuals.md): stances each get their own mark; "Protected" and "Also" are gone.
+    if ((hd as HeroInDelve & { dozing?: boolean }).dozing) add('bad doze', 'zz', `Dozing · ${name} does nothing this turn and hears nothing; they wake next round.`);
+    if (hd.braced) add('braced', 'shield', `Braced · hits on ${name} do 1 less and enemies roll −${V37.bracePenalty}% against them, until their next turn.${this.heroDef(hd.heroId)?.shield ? ' With the shield: ranged hits do 2 less.' : ''}`);
+    if (hd.guarding) add('guarding', 'shield', `Guarding ${this.nameOf(hd.guarding)} · hits on them land on ${name} instead, while they stand beside each other.`);
+    const guardedBy = d.heroes.find((x) => x.guarding === hd.heroId && x.status === 'active');
+    if (guardedBy) add('guarded', 'shield', `Guarded by ${this.heroDef(guardedBy.heroId)?.name ?? guardedBy.heroId} · hits on ${name} land on them instead, while they stand beside each other.`);
+    if (hd.overwatch) add('overwatch', 'eye', `Overwatch · ${name} shoots the first enemy that moves or acts within ${OVERWATCH_RANGE} in sight${hd.reactions?.overwatch === 'always' ? ', without asking' : hd.reactions?.overwatch === 'never' ? ' (set to Never: it lapses)' : ' (asks first)'}.`);
+    if (hd.veil > 0) add('veiled', 'veil', `Veiled · ${hd.veil} round${hd.veil === 1 ? '' : 's'}: monsters can't see ${name}. Attacking, or noise ${VEIL_BREAK_NOISE}+, breaks it.`);
+    if (hd.ward > 0) add('warded', 'heart', `Warded · ${hd.ward} round${hd.ward === 1 ? '' : 's'}: 1 less per hit.`);
     const more: string[] = [];
-    if (this.heroDef(hd.heroId)?.shield) more.push('Shield: ranged hits do 1 less (2 while braced).');
-    if (hd.overwatch) more.push(`Overwatch: shoots the first enemy that moves or acts within ${OVERWATCH_RANGE}.`);
+    if (this.heroDef(hd.heroId)?.shield && !hd.braced) more.push('Shield: ranged hits do 1 less (2 while braced); a hit over 1 can be blocked for 1 Focus (the hit does 1).');
     if (hd.nightEyes && hd.nightEyes > 0) more.push(`Night-eye: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties.`);
-    if (hd.guarding) more.push(`Guarding ${this.nameOf(hd.guarding)}.`);
     if (hd.escorting) more.push(`${this.nameOf(hd.escorting)} follows ${name}. Leave with them next to you to get them out.`);
     if (hd.rallyCooldown > 0) more.push(`Rally ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
     if (hd.ale) {
@@ -2628,8 +2742,8 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.bar.append(h('span', { class: 'dl-fold-t' }, 'Nobody left to move.'), this.endButton(d));
       return;
     }
-    const usedKeys = new Set<string>(['s', 'e', 'c']);
-    if (FACING.faceCommand) usedKeys.add('f');
+    // V5.0 (spec 32.8): W A S D are the camera's, E ends the turn, F centers; nothing on the bar takes them.
+    const usedKeys = new Set<string>(['w', 'a', 's', 'd', 'e', 'f']);
     const keyFor = (action: string, preferred?: string): string | undefined => {
       let key = preferred;
       if (key && usedKeys.has(key)) key = undefined;
@@ -2648,11 +2762,30 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.reactionsButton(sel, def),
       ),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
+      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero. Owner's
+      // play-test (docs/v5-ship.md): tidier: the two words sit in one pill with the slider between them, the Shift
+      // hint is a dim badge after it with its own short tip, and the switch's tip is one line plus the rule.
       h(
         'span',
-        { class: 'dl-seg', role: 'radiogroup', 'aria-label': `${def.name} moves by` },
-        h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${!this.sneak ? 'on' : ''}`, 'aria-checked': !this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Walk · noise 1 a hex\n${MOVE_HELP.walk}`, onclick: () => this.setSneak(false) }, 'Walk'),
-        h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${this.sneak ? 'on' : ''}`, 'aria-checked': this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Sneak · silent · key S (this hero only)\n${MOVE_HELP.sneak}${def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`, onclick: () => this.setSneak(true) }, 'Sneak ', h('kbd', null, 'S')),
+        { class: 'dl-switch-wrap' },
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'switch',
+            class: `dl-switch ${this.sneak ? 'on' : ''}`,
+            'aria-checked': this.sneak ? 'true' : 'false',
+            'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}. Shift switches.`,
+            disabled: this.busy,
+            'data-move-switch': this.sneak ? 'sneak' : 'walk',
+            'data-tip': `${this.sneak ? 'Sneaking · silent, moves ' + (def.cls === 'burglar' || sel.ale === 'smuggler' ? 4 : 2) : 'Walking · noise 1 a hex, moves ' + (def.cls === 'burglar' ? 5 : 4)}\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
+            onclick: () => this.setSneak(!this.sneak),
+          },
+          h('span', { class: 'dl-switch-l walk' }, 'Walk'),
+          h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
+          h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
+        ),
+        h('kbd', { class: 'dl-switch-hint', tabindex: 0, 'data-tip': `Shift · tap it to switch ${def.name} between Walk and Sneak (this hero only; each hero keeps their own).` }, 'Shift'),
       ),
     );
     // Actions: Attack (always), Shove, class abilities and spells, then whatever is in reach.
@@ -2689,7 +2822,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (link) {
       usedKeys.add('t');
       const l = link.info;
-      const btn = h('button', { type: 'button', class: `dl-ab glow ${link.reach.dash ? 'dash' : ''}`, 'data-action': 'link', 'data-key': 't', disabled: this.busy, 'data-tip': `${linkButton(l)} · 1 movement${link.reach.dash ? ' as a dash (uses the action)' : ''} · key T\n${l.kind === 'lift' ? 'The lift' : 'The stairs'} come out on Level ${l.to.level}.`, onclick: () => this.takeLink() }, h('span', { class: 'dl-kb' }, 'T'), icon(l.down ? 'down' : 'up', 20), h('span', { class: 'dl-ab-l' }, l.kind === 'lift' ? 'Lift' : 'Stairs'));
+      const btn = h('button', { type: 'button', class: `dl-ab glow ${link.reach.dash ? 'dash' : ''}`, 'data-action': 'link', 'data-key': 't', disabled: this.busy, 'data-tip': `${linkButton(l)} · the step across is free${link.reach.dash ? ' (as a dash: uses the action)' : ''} · key T\n${l.kind === 'lift' ? 'The lift' : 'The stairs'} come out on Level ${l.to.level}.`, onclick: () => this.takeLink() }, h('span', { class: 'dl-kb' }, 'T'), icon(l.down ? 'down' : 'up', 20), h('span', { class: 'dl-ab-l' }, l.kind === 'lift' ? 'Lift' : 'Stairs'));
       this.keyMap.set('t', () => btn.click());
       acts.append(btn);
     }
@@ -2754,10 +2887,10 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         disabled: this.busy,
         'data-action': o.action,
         'data-key': key ?? '',
-        'data-tip': `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}${key ? ` · key ${key.toUpperCase()}` : ''}${o.blocked ? `\nCan't now: ${o.blocked}` : o.targets.length > 1 ? `\n${o.targets.length} targets in reach.` : ''}\n${actionHelp(o.action, cls)}`,
+        'data-tip': `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}${key ? ` · key ${keyName(key)}` : ''}${o.blocked ? `\nCan't now: ${o.blocked}` : o.targets.length > 1 ? `\n${o.targets.length} targets in reach.` : ''}\n${actionHelp(o.action, cls)}`,
         onclick: () => this.startAction(o),
       },
-      key ? h('span', { class: 'dl-kb' }, key.toUpperCase()) : '',
+      key ? h('span', { class: `dl-kb ${key === ' ' ? 'wide' : ''}` }, keyName(key)) : '',
       ic ? icon(o.action === 'attack' && CLASSES[cls as keyof typeof CLASSES]?.weapon.range && bowReady(this.selected()?.pack ?? []) ? 'shoot' : ic, 20) : h('span', { class: 'dl-ab-g' }, ACTION_GLYPH[o.action] ?? '•'),
       h('span', { class: 'dl-ab-l' }, label),
       o.mana ? h('span', { class: 'dl-ab-mana', 'aria-label': `${o.mana} mana` }, ...Array.from({ length: o.mana }, () => h('i', null))) : '',
@@ -3179,12 +3312,47 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
             okLabel,
             ' ',
             h('kbd', null, 'Enter'),
+            h('kbd', null, 'E'),
           ),
         ),
       ),
     );
     this.modal.classList.remove('hidden');
     this.modal.querySelector<HTMLElement>('.dl-primary, .dl-danger')?.focus();
+  }
+
+  /** V5.0 (spec 32.8): every key on one card, grouped; the Actions group reads the bar as it stands. */
+  toggleKeys(): void {
+    if (!this.keysEl.classList.contains('hidden')) {
+      this.keysEl.classList.add('hidden');
+      return;
+    }
+    const kb = (...ks: string[]) => h('span', { class: 'dl-keys-k' }, ...ks.map((k) => h('kbd', null, k)));
+    const row = (keys: string[], what: string) => h('div', { class: 'dl-keys-row' }, kb(...keys), h('span', null, what));
+    const group = (title: string, ...rows: HTMLElement[]) => h('div', { class: 'dl-keys-g' }, h('span', { class: 'dl-kick dl-kick-dim' }, title), ...rows);
+    const acts: HTMLElement[] = [];
+    for (const b of this.bar.querySelectorAll<HTMLElement>('button[data-action]')) {
+      const k = b.querySelector('.dl-kb')?.textContent;
+      const l = b.querySelector('.dl-ab-l')?.textContent;
+      if (k && l) acts.push(row([k], l));
+    }
+    clear(this.keysEl);
+    this.keysEl.append(
+      h(
+        'div',
+        { class: 'dl-modal-box dl-keys-box', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Keys' },
+        h('div', { class: 'dl-keys-head' }, h('span', { class: 'dl-modal-t' }, 'Keys'), h('button', { type: 'button', class: 'dl-btn dl-ghost dl-btn-s', onclick: () => this.keysEl.classList.add('hidden') }, 'Close ', h('kbd', null, 'Esc'))),
+        h(
+          'div',
+          { class: 'dl-keys-cols' },
+          group('Camera', row(['W', 'A', 'S', 'D'], 'pan (or the arrows)'), row(['[', ']'], 'rotate a sixth of a turn'), row(['wheel'], 'zoom'), row(['F'], 'center on the selected hero'), row(['right drag'], 'orbit'), row(['middle drag'], 'pan')),
+          group('Heroes and the turn', row(['1', '2', '3', '4'], 'select a hero'), row(['Tab'], 'next hero with something left'), row(['Shift'], 'walk or sneak (a tap; this hero only)'), row(['E'], 'end the turn, or confirm what is open'), row(['Enter', 'Space'], 'confirm; Space also attacks, or takes the marked target'), row(['Esc'], 'cancel, or close this'), row(['Alt'], 'hold: the numbers behind every card'), row(['Space'], "hold: hurry the castle's turn")),
+          group('Actions on the bar now', ...(acts.length ? acts : [h('span', { class: 'dim' }, 'Nobody selected.')]), row(['L'], 'lantern shutter'), row(['B'], 'parley'), row(['T'], 'stairs or lift'), row(['Q'], 'leave'), row([',', '.'], 'which arrow to loose')),
+          group('Reactions', row(['1', 'Enter'], 'the first answer'), row(['2', 'Esc'], 'the second')),
+        ),
+      ),
+    );
+    this.keysEl.classList.remove('hidden');
   }
 
   private closeConfirm(): void {
@@ -3225,14 +3393,27 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
           st.reduceShake = v;
           save();
         }),
-        check('Ask before ending a turn with heroes idle', !st.noEndTurnAsk, (v) => {
+        check('Ask before ending a turn while someone can still act', !st.noEndTurnAsk, (v) => {
           st.noEndTurnAsk = !v;
           save();
         }),
-        check('Lower walls near the camera', !!st.cutaway, (v) => {
-          st.cutaway = v;
+        check('Auto end turn', st.autoEndTurn !== false, (v) => {
+          st.autoEndTurn = v;
           save();
-        }, 'Walls between the camera and your heroes drop low so you can see past them.'),
+          if (!v) this.cancelFlow();
+        }, 'When nobody can move, act or use anything, the turn ends on its own after a moment. Any key or click keeps it open.'),
+        // V5.0 (P, docs/v5-ship.md step 2): the look rows; "Lower walls near the camera" is retired (the cutaway is always on).
+        h('span', { class: 'dl-menu-row' }, h('span', { class: 'dl-menu-k' }, 'Quality'), ...(['high', 'low'] as const).map((q) => h('button', { type: 'button', class: `dl-btn dl-btn-s ${(st.quality ?? 'high') === q ? 'on' : ''}`, 'data-tip': q === 'high' ? 'High · shadows, bloom and the tilt-shift blur.' : 'Low · no shadows, bloom or blur; for slower machines.', onclick: () => { st.quality = q; save(); this.dio.setQuality(q); this.renderMenu(); } }, q === 'high' ? 'High' : 'Low'))),
+        check('Action camera', st.actionCamera !== false, (v) => {
+          st.actionCamera = v;
+          save();
+          this.dio.setActionCamera(v);
+        }, 'The camera pushes in on attacks, shots, spells and item use.'),
+        check('Tilt-shift blur', st.tiltShift !== false, (v) => {
+          st.tiltShift = v;
+          save();
+          this.dio.setTiltShift(v);
+        }, 'The diorama blur above and below the focus (High quality only).'),
         check('Full hover cards (as if Alt were held)', !!st.fullCards, (v) => {
           st.fullCards = v;
           save();
@@ -3349,14 +3530,14 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
 
   // ------------------------------------------------------------ reactions (V4.1, spec 31.13)
 
-  /** The kinds of reaction this hero can be asked for: the hidden swing for everyone, overwatch for a Ranger. */
-  private reactionKinds(cls: HeroClass): ReactionKind[] {
-    return cls === 'ranger' ? ['hiddenSwing', 'overwatch'] : ['hiddenSwing'];
+  /** The kinds of reaction this hero can be asked for: the hidden swing for everyone, overwatch for a Ranger, the shield block with a shield (V5.0). */
+  private reactionKinds(cls: HeroClass, shield = false): ReactionKind[] {
+    return [...(cls === 'ranger' ? (['hiddenSwing', 'overwatch'] as ReactionKind[]) : (['hiddenSwing'] as ReactionKind[])), ...(shield ? (['shieldBlock'] as ReactionKind[]) : [])];
   }
 
   /** The small Reactions button beside the hero's name: opens the per-hero settings (Ask / Always / Never). */
   private reactionsButton(sel: HeroInDelve, def: Hero): HTMLElement {
-    const kinds = this.reactionKinds(def.cls);
+    const kinds = this.reactionKinds(def.cls, !!def.shield);
     const set = (k: ReactionKind) => sel.reactions?.[k] ?? 'ask';
     const custom = kinds.some((k) => set(k) !== 'ask');
     const lines = kinds.map((k) => `${REACT_NAME[k]}: ${SETTING_WORD[set(k)]}`).join('\n');
@@ -3414,7 +3595,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       { class: 'dl-reacts-pop', role: 'group', 'aria-label': `${def.name}'s reactions` },
       h('div', { class: 'dl-reacts-t' }, `Reactions · ${def.name}`),
       h('p', { class: 'dl-reacts-p' }, `When the castle's turn gives ${def.name} a chance to react: ask you, always do it, or never.`),
-      ...this.reactionKinds(def.cls).map(row),
+      ...this.reactionKinds(def.cls, !!def.shield).map(row),
     );
   }
 
@@ -3473,25 +3654,46 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
   private endTurn(): void {
     if (this.busy) return;
     this.cancel();
-    const d = this.state?.delve;
-    const waiting = d ? d.heroes.filter((x) => able(x) && !x.moved && !x.acted) : [];
+    const s = this.state;
     const go = () => {
       this.coach.done(3);
       this.coach.done(1);
       void this.host.send({ type: 'endTurn' });
     };
-    if (waiting.length && !this.host.settings.noEndTurnAsk) {
-      const names = waiting.map((x) => this.heroDef(x.heroId)?.name ?? x.heroId);
-      this.confirm(`${names.join(', ')} ${waiting.length === 1 ? 'has' : 'have'} done nothing this round. End the turn anyway?`, 'End turn', go, { title: `${waiting.length} idle`, cancel: 'Keep playing' });
+    // V5.0 (P, spec 32.6): the question means "someone can still do something", on the flow's own test.
+    const can = s ? stillCan(this.engine, s) : [];
+    if (can.length && !this.host.settings.noEndTurnAsk) {
+      const lines = can.map((x) => `${this.heroDef(x.heroId)?.name ?? x.heroId} can still ${listWords(x.left.slice(0, 3))}${x.left.length > 3 ? ' and more' : ''}`);
+      this.confirm(`${lines.join('. ')}. End the turn anyway?`, 'End turn', go, { title: `${can.length} can still act`, cancel: 'Keep playing' });
       return;
     }
     go();
   }
 
+  /** V5.0 (spec 32.8): a tap of Shift (down and up with no other key between) flips the selected hero's Walk / Sneak. */
+  private shiftArmed = false;
+  private onKeyUp(e: KeyboardEvent): void {
+    if (e.key !== 'Shift') return;
+    const armed = this.shiftArmed;
+    this.shiftArmed = false;
+    if (!armed || !this.state?.delve || this.root.classList.contains('hidden') || this.busy || this.reactWait || this.confirmBox || this.parleyHero) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    this.setSneak(!this.sneak);
+  }
+
   private onKey(e: KeyboardEvent): void {
     const s = this.state;
+    if (e.key === 'Shift') {
+      if (!e.repeat) this.shiftArmed = true;
+      return;
+    }
+    this.shiftArmed = false;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
+    this.cancelFlow(); // V5.0 (P): any key is the player's: the turn waits for them
     // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
+    // V5.0 (P, B3): E is deliberately inert here. The card has two real answers and comes up during the castle's turn,
+    // right after the player pressed E to end theirs; a second E must not strike (and blow their cover) unread.
     if (this.reactWait) {
       const w = this.reactWait;
       if (e.key === 'Enter' || e.key === '1') {
@@ -3505,6 +3707,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     }
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    const k0 = e.key.toLowerCase();
     if (e.key === 'Alt') {
       e.preventDefault();
       this.setAlt(true);
@@ -3514,8 +3717,11 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.cancel();
       return;
     }
+    // V5.0 (P, B3): E confirms too. While a confirmation or a roll panel is open, E, Enter and Space all confirm it,
+    // and E never ends the turn underneath. A held key (auto-repeat) never confirms a window it just raised.
+    const confirms = (e.key === 'Enter' || e.key === ' ' || k0 === 'e') && !e.repeat;
     if (this.confirmBox) {
-      if (e.key === 'Enter') {
+      if (confirms) {
         e.preventDefault();
         const ok = this.confirmBox.ok;
         this.closeConfirm();
@@ -3534,7 +3740,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.repickArrow(ids[(i + (e.key === '.' ? 1 : ids.length - 1)) % ids.length] ?? null);
         return;
       }
-      if (e.key === 'Enter') {
+      if (confirms) {
         e.preventDefault();
         this.confirmPreview();
       } else if (e.key === '+' || e.key === '=' || e.key === 'ArrowUp') {
@@ -3565,7 +3771,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.stepHot(e.key === 'ArrowLeft' || e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1);
         return;
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === ' ') {
         const hot = this.hotTarget();
         if (hot && !(t instanceof HTMLButtonElement && t.classList.contains('dl-pill-opt'))) {
           e.preventDefault();
@@ -3594,18 +3800,24 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.select(next.heroId);
       return;
     }
-    if (k === 's') return this.setSneak(!this.sneak);
-    if (k === 'f' && FACING.faceCommand) return this.setFacing(!this.facing);
+    // V5.0 (spec 32.8): W A S D belong to the camera (camera.ts polls them); S no longer toggles sneaking.
+    if (k === 'w' || k === 'a' || k === 's' || k === 'd') return;
     if (k === 'e') return this.endTurn();
     if (k === '[') return this.dio.rig.snapRotate(1);
     if (k === ']') return this.dio.rig.snapRotate(-1);
-    if (k === 'c') {
+    if (k === 'f' || k === 'home') {
       const sel = this.selected();
       if (sel) this.dio.lookAt(sel.at);
       return;
     }
+    if (e.key === '?' || e.key === 'F1') {
+      e.preventDefault();
+      this.toggleKeys();
+      return;
+    }
     if (this.pending && e.key === 'Enter') return;
-    const fn = this.keyMap.get(k);
+    // Space: the marked target of an open pick, else the hero's attack (the keyMap holds ' ' for it).
+    const fn = this.keyMap.get(k === ' ' ? ' ' : k);
     if (fn) {
       e.preventDefault();
       fn();
@@ -3621,6 +3833,12 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
 }
 
 // ------------------------------------------------------------ helpers
+
+/** "move, Attack or Take" */
+function listWords(xs: string[]): string {
+  if (xs.length <= 1) return xs[0] ?? '';
+  return `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}`;
+}
 
 const TILE_NAME: Record<string, string> = {
   floor: 'Floor',
@@ -3908,15 +4126,17 @@ function legend(): HTMLElement[] {
         li(svgEl('eyeOff', '#ff8a8f'), 'Back exposed'),
         li(svgEl('drop', '#ff8a8f'), 'By a drop'),
         li(svgEl('sword', '#ff8a8f'), 'Something means to strike them'),
-        li(svgEl('shield', '#9cc8ff'), 'Braced, warded or veiled'),
+        li(svgEl('shield', '#e8a33d'), 'Braced, or guarding a friend'),
+        li(svgEl('veil', '#b9a7ff'), 'Veiled'),
+        li(svgEl('eye', '#f0e6d2'), 'On overwatch'),
         li(svgEl('moon', '#9a8f7d'), 'Standing in the dark'),
       ),
       h(
         'div',
         { class: 'dl-leg-col' },
         h('span', { class: 'dl-leg-h' }, 'Keys'),
-        h('span', { class: 'dl-leg-keys' }, h('kbd', null, '1–4'), ' pick a hero · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' walk or sneak (this hero) · ', h('kbd', null, 'A'), ' attack · every other button shows its key · ', h('kbd', null, 'L'), ' lantern · ', h('kbd', null, 'B'), ' parley · ', h('kbd', null, 'T'), ' stairs · ', h('kbd', null, 'Q'), ' leave · ', h('kbd', null, 'E'), ' end turn · ', h('kbd', null, 'Esc'), ' cancel · ', h('kbd', null, 'Alt'), ' numbers'),
-        h('span', { class: 'dl-leg-keys' }, 'Camera: right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate · wheel zoom · middle-drag or arrows pan · ', h('kbd', null, 'C'), ' center · hold ', h('kbd', null, 'Space'), " to hurry the castle's turn"),
+        h('span', { class: 'dl-leg-keys' }, h('kbd', null, '1–4'), ' pick a hero · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'Shift'), ' walk or sneak (this hero) · ', h('kbd', null, 'Space'), ' attack, or take the marked target · every other button shows its key · ', h('kbd', null, 'L'), ' lantern · ', h('kbd', null, 'B'), ' parley · ', h('kbd', null, 'T'), ' stairs · ', h('kbd', null, 'Q'), ' leave · ', h('kbd', null, 'E'), ' end turn, or confirm · ', h('kbd', null, 'Esc'), ' cancel · ', h('kbd', null, 'Alt'), ' numbers · ', h('kbd', null, '?'), ' all the keys'),
+        h('span', { class: 'dl-leg-keys' }, 'Camera: ', h('kbd', null, 'W'), h('kbd', null, 'A'), h('kbd', null, 'S'), h('kbd', null, 'D'), ' or arrows pan · right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate · wheel zoom · ', h('kbd', null, 'F'), ' center on the hero · hold ', h('kbd', null, 'Space'), " to hurry the castle's turn"),
       ),
     ),
   ];
