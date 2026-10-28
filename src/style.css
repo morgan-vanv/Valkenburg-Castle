@@ -3125,6 +3125,14 @@ div.dl-deal { cursor: default; }
 .tag-venom .ic { color: var(--venom); }
 .tag-bleed { color: var(--red); font-weight: 700; font-size: 0.72rem; }
 .tag-carried { color: #9ec8ff; font-size: 0.68rem; }
+/* V5.0 (P, spec 32.12): the hero tag's status chips (docs/v5-status-visuals.md): the colours match the party card's marks. */
+.tag-held, .tag-unlit.l3 { color: var(--red); font-weight: 700; font-size: 0.68rem; }
+.tag-unlit { color: #8a8aa8; font-size: 0.68rem; }
+.tag-braced { color: #e8a33d; font-size: 0.68rem; }
+.tag-overwatch { color: #f0e6d2; font-size: 0.68rem; }
+.tag-veiled { color: #b9a7ff; font-size: 0.68rem; }
+.tag-flame { display: inline-flex; align-items: center; gap: 1px; color: #ffcf86; font-weight: 700; font-size: 0.72rem; }
+.tag-flame .ic { color: #ffcf86; }
 /* V4.1 (spec 31.13): reactions. The per-hero settings button beside the name, its popover above the hotbar,
    and the reaction card the castle's turn waits on. */
 .dl-who-top { display: flex; align-items: center; gap: 6px; min-width: 0; }

@@ -1488,7 +1488,7 @@ From `docs/v5-status-visuals.md`, the party card's side (the owner approved the 
 - Each stance has its own mark and colour, ordered by priority: dozing (zz), **braced** (gold shield), **guarding X** (gold) and **guarded by X** (on the friend's card), **overwatch** (eye, with the hero's Ask / Always / Never), **veiled** (violet hood, rounds), **warded** (blue heart, rounds). "Protected" (one shield for three states) and "Also" (overwatch and guarding as prose) are gone; "Also" keeps only the passive shield, night-eye, escorting, Rally's cooldown and the ale.
 - The downed card's bleed count is the loud thing (a large numeral in the Down tag, `.dl-bleed[data-bleed]`) with a slow red pulse on the badge; the poisoned card's HP bar ends in a green stripe (what the tick costs); the dark card's badge is drained and its name goes cold blue.
 - The log names the dark once per hero per delve: "The dark closes on Keven." on Level 3, "Keven stands in the dark." elsewhere.
-- The Legend's status column lists the new marks. Figure tags (the strips over the figures) are G's in `diorama.ts`; their content is specified in `docs/v5-status-visuals.md`. Checks: v40-hud-check.mjs (the marks on two cards; the bleed count).
+- The Legend's status column lists the new marks. The figure tags' content is `src/ui/tags.ts` (P's; G moved it out of the diorama): the hero tag adds the spec's chips (held / rooted · N / webbed, z, unlit (red "unlit · the dark hunts" on Level 3; needs the diorama to pass `unlit`), braced, guards, overwatch, veiled, the torch's rounds under 5); monster tags keep their glyphs (owner). Tests: tags.test.ts. Checks: v40-hud-check.mjs (the marks on two cards; the bleed count).
 
 ### 32.13 A balance pass after 32.9 and 32.10 (owner, 2026-10-28)
 
