@@ -66,3 +66,4 @@ Both tracks share the owner's rate limit. Each lead works mostly alone, with at 
 | Date | Track | Branch @ commit | What landed | Next |
 | --- | --- | --- | --- | --- |
 | 2026-10-27 | — | `v5.0` @ plans | V5.0 plans: graphics, play, this file | G: W0 · P: quick wins + pitch |
+| 2026-10-27 (evening) | P | `v5.0-play` @ B1–B5 + spec + pitch | Spec 32.1–32.5 (a jump keeps the action; the shop fills the cart; E confirms; the thicker bar; auto end turn), `docs/v5-status-visuals.md`, damage by class in the sim and the arena, the pitch https://claude.ai/artifact/TNGjrZ54oitgRP4fe2B6iA | Owner answers the pitch; then P5, P4, P6 (HUD side), P3, P1, P2 in that order. Not merged into `v5.0` yet |
