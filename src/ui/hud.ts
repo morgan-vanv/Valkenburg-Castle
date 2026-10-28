@@ -13,7 +13,7 @@ import { propName } from '../view/level';
 import { clear, h, icon } from './dom';
 import { exitAt, exitShut, exitTooltip, exitWhere, linkAt, linkButton, linkReach, linkTooltip, nearestExit, prizeInHand, type ExitInfo, type LinkInfo } from '../view/links';
 import { heardIcon, heardTitle } from '../view/sounds';
-import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, REACT_NAME, REACT_HELP, REACT_SETTING_HELP, SETTING_WORD, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine } from './names';
+import { ACTION_GLYPH, ACTION_KEY, ALE_EFFECT, CLASS_KIT, AWARENESS_TEXT, CLASS_ROLE, CREW, CREW_KIT, JOB_NAME, MONSTER_NOTE, FACING_HELP, MOVE_HELP, STANCE, TEMPERAMENT, V37, V39, REACT_NAME, REACT_HELP, REACT_SETTING_HELP, SETTING_WORD, actionCost, actionHelp, className, classGlyph, crewMemberLine, itemBase, itemClickLine, itemGlyph, itemLabel, itemTip, itemUseLine, keyName } from './names';
 import { backExposed, backstabFrom, backstabSpots, blastPreview, breakableWall, collapsible, dirIndexOf, dirToward, facingOf, fuseAt, fuseSide, fuseWords, pathEndFacing } from '../view/stealth';
 import { longPath, stepsToTurn } from '../view/pathing';
 import { CARRY_MOVE } from '../game/data';
@@ -229,6 +229,8 @@ export class Hud {
   private bannerEl = h('div', { class: 'dl-banner hidden' });
   private toastEl = h('div', { class: 'hud-toast hidden' });
   private modal = h('div', { class: 'dl-modal hidden' });
+  /** V5.0 (spec 32.8): the key help overlay (? or F1). */
+  private keysEl = h('div', { class: 'dl-modal dl-keys hidden' });
   /** V4.1 (spec 31.13): the reaction card, up while the castle's turn waits for an answer (`reactWait`). */
   private reactEl = h('div', { class: 'dl-react hidden', role: 'dialog', 'aria-label': 'A hero can react', tabindex: -1 });
   private reactWait: { q: ReactionQuestion; done: (c: ReactionChoice) => void } | null = null;
@@ -249,13 +251,14 @@ export class Hud {
     private readonly host: HudHost,
     private readonly dio: Diorama,
   ) {
-    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.reactEl, this.card, this.tip, this.modal, this.menuEl);
+    this.root = h('div', { class: 'hud dl-hud' }, this.vignette, this.emptyEl, this.strip, this.rail, h('div', { class: 'dl-right' }, this.chron.el, this.crewEl), this.camBox, this.gloamEl, this.coach.el, this.pill, this.moreEl, this.bar, this.previewEl, this.parleyEl, this.rollEl, this.caption, this.castleEl, this.bannerEl, this.toastEl, this.reactEl, this.card, this.tip, this.modal, this.keysEl, this.menuEl);
     this.buildCamBox();
     addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
       if (!this.card.classList.contains('hidden')) this.placeCard();
     });
     addEventListener('keydown', (e) => this.onKey(e));
+    addEventListener('keyup', (e) => this.onKeyUp(e));
     addEventListener('keyup', (e) => {
       if (e.key === 'Alt') this.setAlt(false);
     });
@@ -278,6 +281,7 @@ export class Hud {
     addEventListener('pointerdown', (e) => {
       const t = e.target as Node;
       this.cancelFlow(); // V5.0 (P): a click is the player's: the turn waits for them
+      this.shiftArmed = false;
       if (!this.moreEl.classList.contains('hidden') && !this.moreEl.contains(t) && !(t instanceof Element && t.closest('[data-more]'))) this.moreEl.classList.add('hidden');
       if (!this.menuEl.classList.contains('hidden') && !this.menuEl.contains(t) && !(t instanceof Element && t.closest('[data-menu]'))) this.menuEl.classList.add('hidden');
       // V4.1 (spec 31.13): the Reactions popover closes on a click elsewhere.
@@ -1680,6 +1684,10 @@ export class Hud {
   private cancel(): void {
     this.fusePicked = false;
     this.hideTip();
+    if (!this.keysEl.classList.contains('hidden')) {
+      this.keysEl.classList.add('hidden');
+      return;
+    }
     if (this.reactOpen) {
       this.reactOpen = false;
       this.renderBar();
@@ -2662,8 +2670,8 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.bar.append(h('span', { class: 'dl-fold-t' }, 'Nobody left to move.'), this.endButton(d));
       return;
     }
-    const usedKeys = new Set<string>(['s', 'e', 'c']);
-    if (FACING.faceCommand) usedKeys.add('f');
+    // V5.0 (spec 32.8): W A S D are the camera's, E ends the turn, F centers; nothing on the bar takes them.
+    const usedKeys = new Set<string>(['w', 'a', 's', 'd', 'e', 'f']);
     const keyFor = (action: string, preferred?: string): string | undefined => {
       let key = preferred;
       if (key && usedKeys.has(key)) key = undefined;
@@ -2682,11 +2690,24 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.reactionsButton(sel, def),
       ),
       this.calmState().calm && d.phase === 'player' ? h('span', { class: 'dl-who-calm', 'data-tip': `Free move · ${MOVE_HELP.calm}` }, `Free move · the castle turns in ${stepsToTurn(d.calmSteps, V37.calmSteps)} step${stepsToTurn(d.calmSteps, V37.calmSteps) === 1 ? '' : 's'}`) : '',
+      // V5.0 (spec 32.8, owner): Walk / Sneak is a sliding switch; a tap of Shift flips it for this hero.
       h(
-        'span',
-        { class: 'dl-seg', role: 'radiogroup', 'aria-label': `${def.name} moves by` },
-        h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${!this.sneak ? 'on' : ''}`, 'aria-checked': !this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Walk · noise 1 a hex\n${MOVE_HELP.walk}`, onclick: () => this.setSneak(false) }, 'Walk'),
-        h('button', { type: 'button', role: 'radio', class: `dl-seg-b ${this.sneak ? 'on' : ''}`, 'aria-checked': this.sneak ? 'true' : 'false', disabled: this.busy, 'data-tip': `Sneak · silent · key S (this hero only)\n${MOVE_HELP.sneak}${def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`, onclick: () => this.setSneak(true) }, 'Sneak ', h('kbd', null, 'S')),
+        'button',
+        {
+          type: 'button',
+          role: 'switch',
+          class: `dl-switch ${this.sneak ? 'on' : ''}`,
+          'aria-checked': this.sneak ? 'true' : 'false',
+          'aria-label': `${def.name} moves by: ${this.sneak ? 'sneaking' : 'walking'}`,
+          disabled: this.busy,
+          'data-move-switch': this.sneak ? 'sneak' : 'walk',
+          'data-tip': `${this.sneak ? 'Sneak · silent' : 'Walk · noise 1 a hex'} · tap Shift to switch (this hero only)\n${this.sneak ? MOVE_HELP.sneak : MOVE_HELP.walk}${this.sneak && def.cls === 'burglar' ? `\n${FACING_HELP.quietFeet}` : ''}`,
+          onclick: () => this.setSneak(!this.sneak),
+        },
+        h('span', { class: 'dl-switch-l walk' }, 'Walk'),
+        h('span', { class: 'dl-switch-track' }, h('span', { class: 'dl-switch-knob' })),
+        h('span', { class: 'dl-switch-l sneak' }, 'Sneak'),
+        h('kbd', null, 'Shift'),
       ),
     );
     // Actions: Attack (always), Shove, class abilities and spells, then whatever is in reach.
@@ -2788,10 +2809,10 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         disabled: this.busy,
         'data-action': o.action,
         'data-key': key ?? '',
-        'data-tip': `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}${key ? ` · key ${key.toUpperCase()}` : ''}${o.blocked ? `\nCan't now: ${o.blocked}` : o.targets.length > 1 ? `\n${o.targets.length} targets in reach.` : ''}\n${actionHelp(o.action, cls)}`,
+        'data-tip': `${o.label} · ${actionCost(o.action, o.mana, o.rolls)}${key ? ` · key ${keyName(key)}` : ''}${o.blocked ? `\nCan't now: ${o.blocked}` : o.targets.length > 1 ? `\n${o.targets.length} targets in reach.` : ''}\n${actionHelp(o.action, cls)}`,
         onclick: () => this.startAction(o),
       },
-      key ? h('span', { class: 'dl-kb' }, key.toUpperCase()) : '',
+      key ? h('span', { class: `dl-kb ${key === ' ' ? 'wide' : ''}` }, keyName(key)) : '',
       ic ? icon(o.action === 'attack' && CLASSES[cls as keyof typeof CLASSES]?.weapon.range && bowReady(this.selected()?.pack ?? []) ? 'shoot' : ic, 20) : h('span', { class: 'dl-ab-g' }, ACTION_GLYPH[o.action] ?? '•'),
       h('span', { class: 'dl-ab-l' }, label),
       o.mana ? h('span', { class: 'dl-ab-mana', 'aria-label': `${o.mana} mana` }, ...Array.from({ length: o.mana }, () => h('i', null))) : '',
@@ -3222,6 +3243,40 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     this.modal.querySelector<HTMLElement>('.dl-primary, .dl-danger')?.focus();
   }
 
+  /** V5.0 (spec 32.8): every key on one card, grouped; the Actions group reads the bar as it stands. */
+  toggleKeys(): void {
+    if (!this.keysEl.classList.contains('hidden')) {
+      this.keysEl.classList.add('hidden');
+      return;
+    }
+    const kb = (...ks: string[]) => h('span', { class: 'dl-keys-k' }, ...ks.map((k) => h('kbd', null, k)));
+    const row = (keys: string[], what: string) => h('div', { class: 'dl-keys-row' }, kb(...keys), h('span', null, what));
+    const group = (title: string, ...rows: HTMLElement[]) => h('div', { class: 'dl-keys-g' }, h('span', { class: 'dl-kick dl-kick-dim' }, title), ...rows);
+    const acts: HTMLElement[] = [];
+    for (const b of this.bar.querySelectorAll<HTMLElement>('button[data-action]')) {
+      const k = b.querySelector('.dl-kb')?.textContent;
+      const l = b.querySelector('.dl-ab-l')?.textContent;
+      if (k && l) acts.push(row([k], l));
+    }
+    clear(this.keysEl);
+    this.keysEl.append(
+      h(
+        'div',
+        { class: 'dl-modal-box dl-keys-box', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Keys' },
+        h('div', { class: 'dl-keys-head' }, h('span', { class: 'dl-modal-t' }, 'Keys'), h('button', { type: 'button', class: 'dl-btn dl-ghost dl-btn-s', onclick: () => this.keysEl.classList.add('hidden') }, 'Close ', h('kbd', null, 'Esc'))),
+        h(
+          'div',
+          { class: 'dl-keys-cols' },
+          group('Camera', row(['W', 'A', 'S', 'D'], 'pan (or the arrows)'), row(['[', ']'], 'rotate a sixth of a turn'), row(['wheel'], 'zoom'), row(['F'], 'center on the selected hero'), row(['right drag'], 'orbit'), row(['middle drag'], 'pan')),
+          group('Heroes and the turn', row(['1', '2', '3', '4'], 'select a hero'), row(['Tab'], 'next hero with something left'), row(['Shift'], 'walk or sneak (a tap; this hero only)'), row(['E'], 'end the turn, or confirm what is open'), row(['Enter', 'Space'], 'confirm; Space also attacks, or takes the marked target'), row(['Esc'], 'cancel, or close this'), row(['Alt'], 'hold: the numbers behind every card'), row(['Space'], "hold: hurry the castle's turn")),
+          group('Actions on the bar now', ...(acts.length ? acts : [h('span', { class: 'dim' }, 'Nobody selected.')]), row(['L'], 'lantern shutter'), row(['B'], 'parley'), row(['T'], 'stairs or lift'), row(['Q'], 'leave'), row([',', '.'], 'which arrow to loose')),
+          group('Reactions', row(['1', 'Enter'], 'the first answer'), row(['2', 'Esc'], 'the second')),
+        ),
+      ),
+    );
+    this.keysEl.classList.remove('hidden');
+  }
+
   private closeConfirm(): void {
     this.confirmBox = null;
     this.modal.classList.add('hidden');
@@ -3529,8 +3584,25 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     go();
   }
 
+  /** V5.0 (spec 32.8): a tap of Shift (down and up with no other key between) flips the selected hero's Walk / Sneak. */
+  private shiftArmed = false;
+  private onKeyUp(e: KeyboardEvent): void {
+    if (e.key !== 'Shift') return;
+    const armed = this.shiftArmed;
+    this.shiftArmed = false;
+    if (!armed || !this.state?.delve || this.root.classList.contains('hidden') || this.busy || this.reactWait || this.confirmBox || this.parleyHero) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    this.setSneak(!this.sneak);
+  }
+
   private onKey(e: KeyboardEvent): void {
     const s = this.state;
+    if (e.key === 'Shift') {
+      if (!e.repeat) this.shiftArmed = true;
+      return;
+    }
+    this.shiftArmed = false;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
     this.cancelFlow(); // V5.0 (P): any key is the player's: the turn waits for them
     // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
@@ -3613,7 +3685,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.stepHot(e.key === 'ArrowLeft' || e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1);
         return;
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === ' ') {
         const hot = this.hotTarget();
         if (hot && !(t instanceof HTMLButtonElement && t.classList.contains('dl-pill-opt'))) {
           e.preventDefault();
@@ -3642,18 +3714,24 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.select(next.heroId);
       return;
     }
-    if (k === 's') return this.setSneak(!this.sneak);
-    if (k === 'f' && FACING.faceCommand) return this.setFacing(!this.facing);
+    // V5.0 (spec 32.8): W A S D belong to the camera (camera.ts polls them); S no longer toggles sneaking.
+    if (k === 'w' || k === 'a' || k === 's' || k === 'd') return;
     if (k === 'e') return this.endTurn();
     if (k === '[') return this.dio.rig.snapRotate(1);
     if (k === ']') return this.dio.rig.snapRotate(-1);
-    if (k === 'c') {
+    if (k === 'f' || k === 'home') {
       const sel = this.selected();
       if (sel) this.dio.lookAt(sel.at);
       return;
     }
+    if (e.key === '?' || e.key === 'F1') {
+      e.preventDefault();
+      this.toggleKeys();
+      return;
+    }
     if (this.pending && e.key === 'Enter') return;
-    const fn = this.keyMap.get(k);
+    // Space: the marked target of an open pick, else the hero's attack (the keyMap holds ' ' for it).
+    const fn = this.keyMap.get(k === ' ' ? ' ' : k);
     if (fn) {
       e.preventDefault();
       fn();
@@ -3969,8 +4047,8 @@ function legend(): HTMLElement[] {
         'div',
         { class: 'dl-leg-col' },
         h('span', { class: 'dl-leg-h' }, 'Keys'),
-        h('span', { class: 'dl-leg-keys' }, h('kbd', null, '1–4'), ' pick a hero · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'S'), ' walk or sneak (this hero) · ', h('kbd', null, 'A'), ' attack · every other button shows its key · ', h('kbd', null, 'L'), ' lantern · ', h('kbd', null, 'B'), ' parley · ', h('kbd', null, 'T'), ' stairs · ', h('kbd', null, 'Q'), ' leave · ', h('kbd', null, 'E'), ' end turn · ', h('kbd', null, 'Esc'), ' cancel · ', h('kbd', null, 'Alt'), ' numbers'),
-        h('span', { class: 'dl-leg-keys' }, 'Camera: right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate · wheel zoom · middle-drag or arrows pan · ', h('kbd', null, 'C'), ' center · hold ', h('kbd', null, 'Space'), " to hurry the castle's turn"),
+        h('span', { class: 'dl-leg-keys' }, h('kbd', null, '1–4'), ' pick a hero · ', h('kbd', null, 'Tab'), ' next hero · ', h('kbd', null, 'Shift'), ' walk or sneak (this hero) · ', h('kbd', null, 'Space'), ' attack, or take the marked target · every other button shows its key · ', h('kbd', null, 'L'), ' lantern · ', h('kbd', null, 'B'), ' parley · ', h('kbd', null, 'T'), ' stairs · ', h('kbd', null, 'Q'), ' leave · ', h('kbd', null, 'E'), ' end turn, or confirm · ', h('kbd', null, 'Esc'), ' cancel · ', h('kbd', null, 'Alt'), ' numbers · ', h('kbd', null, '?'), ' all the keys'),
+        h('span', { class: 'dl-leg-keys' }, 'Camera: ', h('kbd', null, 'W'), h('kbd', null, 'A'), h('kbd', null, 'S'), h('kbd', null, 'D'), ' or arrows pan · right-drag orbit · ', h('kbd', null, '['), h('kbd', null, ']'), ' rotate · wheel zoom · ', h('kbd', null, 'F'), ' center on the hero · hold ', h('kbd', null, 'Space'), " to hurry the castle's turn"),
       ),
     ),
   ];

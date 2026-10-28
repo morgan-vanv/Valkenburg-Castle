@@ -2683,6 +2683,24 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-who-n { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-who-c { font-size: 13px; color: var(--dl-ink-4); }
 .dl-seg { display: flex; border: 1px solid var(--line-hi); border-radius: 4px; padding: 2px; width: max-content; }
+/* V5.0 (P, spec 32.8): the Walk / Sneak sliding switch (a tap of Shift flips it) and the key help card. */
+.dl-switch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-hi); border-radius: 999px; padding: 4px 10px 4px 12px; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 34px; font-size: 15px; }
+.dl-switch .dl-switch-l.walk { color: var(--dl-cream); }
+.dl-switch.on .dl-switch-l.walk { color: var(--dl-ink-4); }
+.dl-switch.on .dl-switch-l.sneak { color: var(--dl-cream); }
+.dl-switch-track { position: relative; width: 36px; height: 18px; border-radius: 999px; background: #3a2a12; border: 1px solid var(--line-hi); flex: none; }
+.dl-switch-knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--parchment); transition: left 160ms ease, background 160ms ease; }
+.dl-switch.on .dl-switch-track { background: #2a2338; }
+.dl-switch.on .dl-switch-knob { left: 20px; background: #b9a7ff; }
+.dl-switch kbd { font-size: 9px; padding: 0 3px; }
+.dl-kb.wide { min-width: 38px; }
+.dl-keys-box { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; }
+.dl-keys-head { display: flex; align-items: center; justify-content: space-between; }
+.dl-keys-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; }
+.dl-keys-g { display: flex; flex-direction: column; gap: 6px; }
+.dl-keys-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; font-size: 14px; color: var(--parchment); }
+.dl-keys-k { display: flex; flex-wrap: wrap; gap: 3px; }
+.dl-keys-k kbd { font-size: 11px; }
 .dl-seg-b { font-size: 15px; padding: 6px 12px; border: 0; background: transparent; color: var(--dl-ink-4); cursor: pointer; min-height: 34px; border-radius: 3px; display: inline-flex; align-items: center; gap: 6px; }
 .dl-seg-b.on { background: #3a2a12; color: var(--dl-cream); }
 .dl-seg-b kbd { font-size: 9px; padding: 0 3px; }

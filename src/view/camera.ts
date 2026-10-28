@@ -62,7 +62,7 @@ export class CameraRig {
       { passive: false },
     );
     addEventListener('keydown', (e) => {
-      if (isTyping(e)) return;
+      if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return; // V5.0 (P): Ctrl+S and the like are the browser's
       this.keys.add(e.key.toLowerCase());
     });
     addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
@@ -107,10 +107,11 @@ export class CameraRig {
       const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
       // Camera looks along -fwd (it sits at target + fwd * distance).
-      if (k.has('arrowup')) this.target.addScaledVector(fwd, -pan);
-      if (k.has('arrowdown')) this.target.addScaledVector(fwd, pan);
-      if (k.has('arrowleft')) this.target.addScaledVector(right, -pan);
-      if (k.has('arrowright')) this.target.addScaledVector(right, pan);
+      // V5.0 (P, spec 32.8): W A S D pan beside the arrows. This keyboard block is the play track's (docs/v5-plan.md).
+      if (k.has('arrowup') || k.has('w')) this.target.addScaledVector(fwd, -pan);
+      if (k.has('arrowdown') || k.has('s')) this.target.addScaledVector(fwd, pan);
+      if (k.has('arrowleft') || k.has('a')) this.target.addScaledVector(right, -pan);
+      if (k.has('arrowright') || k.has('d')) this.target.addScaledVector(right, pan);
       this.clampTarget();
     }
     const a = 1 - Math.exp(-dt * 8);

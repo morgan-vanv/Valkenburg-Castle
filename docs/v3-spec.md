@@ -1435,3 +1435,21 @@ The owner's note, completed: "ensure that items are able to be given to other pa
 - **Take from a downed friend's pack** (free, as Take is): a downed hero next to you, or on your back, is a Take target (`{ id, at }`) for everything in their pack but their kit and loaners; the preview says "Takes X from Keven's pack", the log "Brann takes a potion from Keven's pack." Clicking the downed figure offers Take.
 - **Take from a downed crew member** the same way (a killed one already dropped everything): their pack minus kit, while nobody carries them. Pillar 17: crews already loot downed heroes' gold and gems (rob); this is the party's side of it.
 - **A potion on the captive** (`PRISONER_HP` 5; a captive the crews took earlier starts at 1): a potion or greater potion on the shackled or freed captive next to you (or on your back) while hurt: "Wim drinks it: +5", capped at 5. Tests: itemuse.test.ts.
+
+### 32.8 Controls, with intention (owner, 2026-10-27; UI only)
+
+The owner approved the pitch's keymap (option 1: W A S D for the camera, E stays End turn, Attack on Space, sneaking off S) and asked for the Walk / Sneak switch to be a sliding toggle that Shift flips. The map:
+
+| Group | Keys | Does |
+| --- | --- | --- |
+| Camera | W A S D, arrows (held) | Pan (camera.ts, the play track's keyboard block; Ctrl/Alt/Meta combinations are the browser's) |
+| Camera | `[` `]`, right-drag, wheel | Rotate a sixth of a turn, orbit, zoom (unchanged) |
+| Camera | F, Home (C was) | Center on the selected hero |
+| Heroes | 1–4, Tab / Shift+Tab | Select; next / previous hero with something left (unchanged) |
+| Move mode | Shift, a tap (down and up with no other key between) | Flips the selected hero's Walk / Sneak switch (`setMoveMode`); Shift+Tab, Shift+drag and Shift with anything else don't |
+| Turn | E | End turn, or confirm what is open (32.3) |
+| Actions | Space | Attack; with a pick open, takes the marked target (as Enter) |
+| Actions | the letter on each button | As before, minus the camera letters: Disarm and Dig N (was D), charges and the winch C (was W), Pass lantern Y (was N) |
+| Help | ? or F1 | The key card: camera, heroes and the turn, the bar's actions as they stand, reactions; Esc closes it |
+
+Code: names.ts `ACTION_KEY`, `keyName` (' ' reads "Space"); hud.ts `onKey`, `onKeyUp` (the Shift tap), `toggleKeys`, the `.dl-switch` in the hero block; camera.ts `update` (the keys); the Legend's key lines. Rebinding waits (pitch). Checks: v40-hud-check.mjs (S sets nothing; a Shift tap flips the switch; Shift+Tab doesn't; Space arms Attack and takes the mark; the key card opens and closes).

@@ -607,8 +607,10 @@ export function itemTip(i: Item, withUse = true): string {
 }
 
 /** Hotkey per action (letters not used by the global keys). */
+// V5.0 (P, spec 32.8): the camera has W A S D, so no action sits on those; Attack is Space, Disarm / Dig N,
+// charges and the winch C. ' ' is shown as "Space".
 export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
-  attack: 'a',
+  attack: ' ',
   firebolt: 'v', // V3.9: F is Face
   pick: 'p',
   smash: 'x',
@@ -624,22 +626,22 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   kindle: 'k',
   mend: 'm',
   leave: 'q',
-  disarm: 'd',
+  disarm: 'n',
   shove: 'z',
   bribe: 'b',
   parley: 'b',
-  charge: 'w',
-  passLantern: 'n',
+  charge: 'c',
+  passLantern: 'y',
   rope: 'y',
   climb: 'y',
   jump: 'j',
   give: 'i',
   drop: 'u',
-  winch: 'w',
+  winch: 'c',
   overwatch: 'o',
   knockback: 'k',
-  throwCharge: 'w',
-  dig: 'd',
+  throwCharge: 'c',
+  dig: 'n',
   fireball: 'b',
   veil: 'v',
   sleep: 'z',
@@ -656,8 +658,8 @@ export const ACTION_KEY: Partial<Record<ActionKind, string>> = {
   grapple: 'y',
   shutter: 'l',
   escape: 'x',
-  nightsight: 'n',
-  setCharge: 'w',
+  nightsight: 'y',
+  setCharge: 'c',
   setTripwire: 'w', // V4.1 (spec 31.3): Set charge's key; the bar gives it to whichever comes first
   dread: 'k', // V3.9: F is Face
   brace: 'x',
@@ -1154,3 +1156,9 @@ export const ENTRANCE_LINE: Record<string, string> = {
   'Sally port': 'A side door in the west wall.',
   'East breach': 'A gap in the east wall.',
 };
+
+/** A key as the player reads it on a button or in the help (V5.0, spec 32.8). */
+export function keyName(k: string): string {
+  if (k === ' ') return 'Space';
+  return k.length === 1 ? k.toUpperCase() : k;
+}

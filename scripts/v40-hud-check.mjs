@@ -120,24 +120,34 @@ const keven = rail[0].id;
 await p.evaluate((id) => window.vc.hud.select(id), keven);
 const bar = await p.evaluate(() => ({
   who: document.querySelector('.dl-who-n')?.textContent ?? '',
-  seg: [...document.querySelectorAll('.dl-seg button')].map((e) => `${e.textContent.trim().split(' ')[0]}:${e.getAttribute('aria-checked')}`),
+  seg: (() => { const sw = document.querySelector('.dl-switch'); return sw ? `${sw.dataset.moveSwitch}:${sw.getAttribute('aria-checked')}` : ''; })(), // V5.0 (spec 32.8): a sliding switch
   attack: document.querySelector('.dl-hotbar [data-action="attack"]')?.dataset.tip ?? '',
   slots: [...document.querySelectorAll('.dl-pack-slots .dl-slot')].map((e) => ({ action: e.dataset.action ?? '', usable: e.classList.contains('usable'), empty: e.classList.contains('empty') })),
   more: [...document.querySelectorAll('.dl-more [data-action]')].map((e) => e.dataset.action),
   end: document.querySelectorAll('.dl-end-dots i').length,
   endRight: (() => { const h = document.querySelector('.dl-hotbar').getBoundingClientRect(); const e = document.querySelector('.dl-end').getBoundingClientRect(); return h.right - e.right; })(),
 }));
-check('hotbar: the selected hero\'s name and Walk/Sneak', /Keven/.test(bar.who) && bar.seg.join() === 'Walk:true,Sneak:false', `${bar.who} ${bar.seg}`);
+check('hotbar: the selected hero\'s name and the Walk / Sneak switch (off = walk)', /Keven/.test(bar.who) && bar.seg === 'walk:false', `${bar.who} ${bar.seg}`);
 check('no Attack button when nobody is in reach (V4.0 spec 30.4: only what the hero can do)', bar.attack === '', bar.attack.split('\n')[0]);
 check('the pack: 4 slots, the torch and the potion usable, 2 empty', bar.slots.length === 4 && bar.slots[0].action === 'torch' && bar.slots[0].usable && bar.slots.filter((x) => x.empty).length === 2, JSON.stringify(bar.slots));
 check('End turn at the right of the bar, one dot per hero who can still act (4)', bar.end === 4 && bar.endRight < 20, `${bar.end} dots, ${bar.endRight}px from the edge`);
-// Sneak per hero: S sets only the selected hero.
+// Sneak per hero: a tap of Shift flips only the selected hero (V5.0, spec 32.8); S pans the camera and sets nothing.
 await p.keyboard.press('s');
+await p.waitForTimeout(150);
+check('S no longer touches sneaking', (await p.evaluate(() => window.vc.state().delve.heroes[0].moveMode ?? 'walk')) === 'walk');
+await p.keyboard.press('Shift');
 await p.waitForTimeout(150);
 const modes = await p.evaluate(() => window.vc.state().delve.heroes.map((h) => h.moveMode ?? 'walk'));
-check('S sets only the selected hero to sneak; its card says "sneak"', modes[0] === 'sneak' && modes.slice(1).every((m) => m === 'walk' || m === 'sneak') && !!(await p.$(`.dl-rcard[data-hero="${keven}"] .dl-si.sneak`)), modes.join());
-await p.keyboard.press('s');
+check('a tap of Shift sets only the selected hero to sneak; the switch slides on; its card says "sneak"', modes[0] === 'sneak' && modes.slice(1).every((m) => m === 'walk' || m === 'sneak') && (await p.$eval('.dl-switch', (e) => e.getAttribute('aria-checked'))) === 'true' && !!(await p.$(`.dl-rcard[data-hero="${keven}"] .dl-si.sneak`)), modes.join());
+await p.keyboard.down('Shift');
+await p.keyboard.press('Tab');
+await p.keyboard.up('Shift');
 await p.waitForTimeout(150);
+check('Shift held for Shift+Tab does not flip the switch', (await p.evaluate(() => window.vc.state().delve.heroes[0].moveMode)) === 'sneak');
+await p.evaluate((id) => window.vc.hud.select(id), keven);
+await p.keyboard.press('Shift');
+await p.waitForTimeout(150);
+check('the key help: ? opens a card with the camera, turn and action keys; Esc closes it', await (async () => { await p.keyboard.press('?'); await p.waitForTimeout(80); const open = await p.$eval('.dl-keys', (e) => !e.classList.contains('hidden') && /W\s*A\s*S\s*D/.test(e.innerText.replace(/\n/g, ' ')) && /Shift/.test(e.innerText)); await p.keyboard.press('Escape'); await p.waitForTimeout(80); return open && (await p.$eval('.dl-keys', (e) => e.classList.contains('hidden'))); })());
 // More: Give and Drop (stand two heroes together so Give has someone to give to).
 await p.evaluate(() => { const s = structuredClone(window.vc.state()); const [a, c] = s.delve.heroes; c.at = { ...a.at, q: a.at.q + 1 }; window.vc.load(s); window.vc.hud.select(a.heroId); });
 await p.click('.dl-hotbar [data-more]');
@@ -294,6 +304,18 @@ const SHOTS = process.env.SHOTS ?? '';
     return { k: k.heroId, f: f.heroId, orcs: orcs.map((o) => ({ id: o.id, at: o.at })) };
   }, { k: ax(16, 14), f: ax(14, 12) });
   await p.waitForTimeout(400);
+  // V5.0 (spec 32.8): Space is Attack; with the pick open, Tab marks and Space takes the mark.
+  check('the Attack button shows Space as its key', (await p.$eval('.dl-hotbar [data-action="attack"] .dl-kb', (e) => e.textContent)) === 'Space');
+  await p.keyboard.press(' ');
+  await p.waitForTimeout(120);
+  check('Space arms the attack pick', await p.evaluate(() => !!window.vc.hud.pending && window.vc.hud.pending.action === 'attack'));
+  await p.keyboard.press('Tab');
+  await p.keyboard.press(' ');
+  await p.waitForTimeout(200);
+  check('...Tab marks a target and Space takes it (the roll panel opens)', await shown('.dl-roll'));
+  await p.keyboard.press('Escape');
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(100);
   await p.click('.dl-hotbar [data-action="attack"]');
   await p.waitForTimeout(150);
   const armed = await p.evaluate(() => ({ pill: !document.querySelector('.dl-pill').classList.contains('hidden'), keys: document.querySelector('.dl-pill-keys')?.innerText ?? '' }));
