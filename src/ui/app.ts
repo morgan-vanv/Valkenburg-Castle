@@ -349,7 +349,8 @@ export class App {
         }
         return campScreen(this.screen, s, this.campHost(s));
       case 'summary':
-        return returnScreen(this.screen, s, host);
+        // V5.0 (spec 32.11): the tally runs when the report first comes up; the instant playback setting skips it.
+        return returnScreen(this.screen, s, host, { tally: stageChanged && this.settings.speed !== 0 });
       case 'over':
         return overScreen(this.screen, s, host);
     }

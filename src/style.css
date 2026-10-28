@@ -3040,6 +3040,26 @@ div.dl-deal { cursor: default; }
 .dl-rt-renown .lg-pips i.fresh { box-shadow: 0 0 10px rgba(232, 163, 61, 0.8); }
 .lg-cream { color: #ffcf86; }
 .dl-rt-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+/* V5.0 (P, spec 32.11): the tally. Stages land one at a time; "Won back" spans the row; XP bars fill. */
+.dl-rt-boxes.with-won { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dl-rt-boxes.with-won .dl-rt-won { grid-column: 1 / -1; }
+.dl-rt-boxes:not(.with-won) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dl-rt-boxes:not(.with-won) .dl-rt-left { grid-column: 1; }
+.dl-return [data-stage].pending { opacity: 0; transform: translateY(10px); pointer-events: none; }
+.dl-return [data-stage] { transition: opacity 320ms ease, transform 320ms ease; }
+.dl-return.tallying .dl-rt-foot .lg-foot-hint { visibility: hidden; }
+.dl-rt-xp-fill { transition: width 900ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dl-return:not(.pending) [data-punch]:not(.pending) { animation: dl-rt-punch 480ms cubic-bezier(0.2, 1.4, 0.4, 1) 1; }
+@keyframes dl-rt-punch { 0% { transform: scale(0.92); opacity: 0.4; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .dl-return [data-stage] { transition: none; } .dl-rt-xp-fill { transition: none; } .dl-return [data-punch] { animation: none; } }
+.dl-rt-won { border-color: var(--ember); background: #1a140d; }
+.dl-rt-won-h { display: flex; flex-direction: column; gap: 4px; }
+.dl-rt-won-t { font-family: var(--display); font-size: 30px; color: #ffcf86; line-height: 1.1; }
+.dl-rt-won-l { font-size: 16px; color: #d8ccb4; }
+.dl-rt-won-gift { margin: 4px 0 0; font-size: 16px; color: #ffcf86; font-style: italic; line-height: 1.4; }
+.dl-rt-won-items { display: flex; flex-direction: column; gap: 6px; }
+.dl-rt-left .dl-rt-glyph { color: #9a8f7d; }
+.dl-rt-left .dl-rt-row { font-size: 15px; color: #d8ccb4; }
 .dl-rt-box { border: 1px solid var(--line); border-radius: 4px; background: #14110f; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dl-rt-row { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .dl-rt-grow { flex: 1; min-width: 0; }

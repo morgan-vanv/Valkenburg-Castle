@@ -680,6 +680,8 @@ if (crewAt) {
   await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); });
 }
 
+// V5.0 (spec 32.11): the report is a tally at normal speed (stages land one at a time; E skips to the end).
+await p.evaluate(() => { window.vc.settings.speed = 1; });
 await p.evaluate(async () => {
   const E = window.vcEngine;
   const exit = E.castle().entrances[0];
@@ -694,7 +696,15 @@ await p.evaluate(async () => {
   if (window.vc.state().stage === 'delve') await window.vc.send({ type: 'abandon' });
 });
 await idle();
-await p.waitForTimeout(500);
+await p.waitForFunction(() => window.vc.state().stage === 'summary' && !!document.querySelector('.dl-return'), null, { timeout: 20000 }).catch(() => {});
+const tallyStart = await p.evaluate(() => ({ tallying: !!document.querySelector('.dl-return.tallying'), pending: document.querySelectorAll('.dl-return [data-stage].pending').length, stages: document.querySelectorAll('.dl-return [data-stage]').length }));
+check('the report arrives as a tally: stages wait their turn', tallyStart.tallying && tallyStart.pending > 0 && tallyStart.pending < tallyStart.stages, JSON.stringify(tallyStart));
+await p.keyboard.press('e');
+await p.waitForTimeout(200);
+const tallyEnd = await p.evaluate(() => ({ tallying: !!document.querySelector('.dl-return.tallying'), pending: document.querySelectorAll('.dl-return [data-stage].pending').length, gold: document.querySelector('.lg-gold-n')?.textContent, to: document.querySelector('.lg-gold-n')?.dataset.goldTo }));
+check('...E skips to the end: every stage shown, the strongbox at its final number', !tallyEnd.tallying && tallyEnd.pending === 0 && String(parseInt(tallyEnd.gold.replace(/\D/g, ''), 10)) === tallyEnd.to, JSON.stringify(tallyEnd));
+await p.evaluate(() => { window.vc.settings.speed = 0; });
+await p.waitForTimeout(100);
 const rep = await p.evaluate(() => ({
   stage: window.vc.state().stage,
   boxes: [...document.querySelectorAll('.dl-return .dl-rt-box')].map((e) => e.getAttribute('aria-label')),
@@ -706,8 +716,8 @@ const rep = await p.evaluate(() => ({
   castle: document.querySelector('[aria-label="The castle remembers"]')?.innerText ?? '',
   go: document.querySelector('.dl-rt-go')?.innerText ?? '',
 }));
-check('the return report replaces the summary: three boxes', rep.stage === 'summary' && rep.boxes.join('|') === 'Carried out|The party|The castle remembers', rep.boxes.join('|'));
-check('...a headline and a line with the rounds and the lantern', rep.h1.length > 5 && /round/.test(rep.line), `${rep.h1} / ${rep.line}`);
+check('the return report replaces the summary: the boxes in order (V5.0: Left behind between the party and the castle)', rep.stage === 'summary' && rep.boxes.join('|') === 'Carried out|The party|Left behind|The castle remembers', rep.boxes.join('|'));
+check('...a headline and a line with the rounds', rep.h1.length > 5 && /round/.test(rep.line), `${rep.h1} / ${rep.line}`);
 check('...the strongbox with what this delve adds ("+N"), the loose gold carried out', /\+\d+/.test(rep.gold) && /Loose gold\s*\+\d+/.test(rep.carried), rep.gold.replace(/\n/g, ' '));
 check('...every hero of the party, the rooms mapped', rep.heroes === 4 && /You mapped/.test(rep.castle), `${rep.heroes} heroes; ${rep.castle.split('\n')[1]}`);
 check('..."Back to Lowgate →" or "Continue"', /Back to Lowgate|Continue/.test(rep.go), rep.go);
