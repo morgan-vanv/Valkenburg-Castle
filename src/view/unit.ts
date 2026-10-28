@@ -166,6 +166,7 @@ export class UnitView {
       const cur = this.rigged.current();
       if (cur !== want && (cur === 'idle' || cur === 'walk' || cur === 'sneak' || cur === 'sneakWalk')) this.rigged.play(want);
       this.rigged.update(time, dt);
+      if (this.torch?.visible) for (const f of this.torch.children) if (f.name === 'flame') f.scale.set(1 + Math.sin(time * 13 + this.phase) * 0.1, 1 + Math.sin(time * 9 + this.phase) * 0.2, 1);
       return;
     }
     const floats = !!this.model.floats;
@@ -173,21 +174,38 @@ export class UnitView {
     this.fig.position.y = moving ? Math.abs(Math.sin(time * 16 + this.phase)) * 0.07 + base : base + Math.sin(time * 2.2 + this.phase) * 0.006;
   }
 
+  /** V5.0 (G, W1): a steady emissive edge from a status (braced gold); flashes add on top of it. */
+  readonly rim = new THREE.Color(0, 0, 0);
+  /** V5.0 (G, W1): a status's own opacity (a veil), multiplied into setOpacity. */
+  statusOpacity = 1;
+  private lastOpacity = 1;
+
   flash(color: THREE.Color, amount: number): void {
-    this.body.emissive.copy(color).multiplyScalar(amount);
-    this.metal?.emissive.copy(color).multiplyScalar(amount);
+    this.body.emissive.copy(this.rim).add(color.clone().multiplyScalar(amount));
+    this.metal?.emissive.copy(this.body.emissive);
   }
 
   setOpacity(k: number): void {
-    this.body.opacity = this.baseOpacity * k;
-    if (this.metal) this.metal.opacity = this.baseOpacity * k;
-    this.glow.opacity = k;
+    this.lastOpacity = k;
+    const o = k * this.statusOpacity;
+    this.body.opacity = this.baseOpacity * o;
+    if (this.metal) this.metal.opacity = this.baseOpacity * o;
+    this.glow.opacity = o;
     if (this.silhouette) this.silhouette.opacity = SILHOUETTE_OPACITY * k;
+  }
+
+  /** Re-apply the current opacity after a status changed `statusOpacity`, and the rim when no flash is on. */
+  refreshStatus(): void {
+    this.setOpacity(this.lastOpacity);
+    if (this.body.emissive.r + this.body.emissive.g + this.body.emissive.b < 1e-4 || this.body.emissive.equals(this.rim)) this.flash(this.rim, 0);
   }
 
   /** V5.0 (G): a rigged figure plays a one-shot clip (a strike, a flinch) if it has one. */
   playClip(name: 'strike' | 'hit' | 'shoot' | 'cast' | 'use'): void {
-    this.rigged?.play(name);
+    if (!this.rigged) return;
+    // A figure without a bow swings instead of shooting; without a spell it gestures with its arm.
+    const want = this.rigged.clips.has(name) ? name : name === 'shoot' ? 'strike' : name === 'cast' ? 'use' : name;
+    this.rigged.play(want);
   }
 
   /** Fall over and fade. */
@@ -217,7 +235,33 @@ export class UnitView {
   /** Lie down (downed hero), without fading. */
   lieDown(down: boolean): void {
     this.fig.rotation.z = down ? 1.35 : 0;
-    this.fig.position.y = 0;
+    // V5.0 (G): lifted a little so no part of a lying figure sinks under the tile (the silhouette would show through).
+    this.fig.position.y = down ? 0.14 : 0;
+  }
+
+  private torch?: THREE.Group;
+  /** V5.0 (G, W3): a lit torch in the left hand of a rigged figure (the diorama calls this from its light sources). */
+  setTorch(on: boolean): void {
+    if (!this.rigged) return;
+    if (on && !this.torch) {
+      const g = new THREE.Group();
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.5, 5), new THREE.MeshStandardMaterial({ color: 0x4a3018, flatShading: true, roughness: 0.9 }));
+      stick.position.set(0, 0.1, 0.06);
+      stick.rotation.x = -0.35;
+      const head = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.035, 0.1, 6), new THREE.MeshStandardMaterial({ color: 0x2a1a10, flatShading: true, roughness: 0.9 }));
+      head.position.set(0, 0.34, -0.02);
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.24, 5), new THREE.MeshBasicMaterial({ color: 0xffb35c, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+      flame.position.set(0, 0.5, -0.03);
+      flame.name = 'flame';
+      const core = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.14, 5), new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+      core.position.set(0, 0.47, -0.03);
+      core.name = 'flame';
+      g.add(stick, head, flame, core);
+      g.traverse((o) => ((o as THREE.Mesh).castShadow = false));
+      this.torch = g;
+      this.rigged.attach('handL', g);
+    }
+    if (this.torch) this.torch.visible = on;
   }
 
   /** V5.0 (G): how dark the contact blob is (0 hides it). */

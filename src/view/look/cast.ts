@@ -130,7 +130,7 @@ export function humanoidFigure(spec: HumanoidSpec, mats: RigMaterials): RigFigur
       // A tall bow arc held in the left hand, the quiver on the back.
       const arc = new THREE.TorusGeometry(H * 0.36, 0.022, 5, 10, Math.PI * 1.1);
       k.add('handL', arc, 0x6b4426, [0, H * 0.1, 0.03], [0, Math.PI / 2, Math.PI * 0.95]);
-      k.box('handL', 0.01, H * 0.66, 0.006, 0xd8cfbe, [0, H * 0.1, 0.03], undefined, 'glow');
+      k.box('handL', 0.012, H * 0.66, 0.008, 0xd8cfbe, [0, H * 0.1, 0.03]);
       k.cyl('back', W * 0.11, W * 0.11, torsoH * 0.6, 6, 0x5a3a1c, [-W * 0.3, torsoH * 0.1, -W * 0.05], [0, 0, 0.35]);
       for (const x of [-0.03, 0.03]) k.cone('back', 0.02, 0.06, 3, 0xd8cfbe, [-W * 0.3 + x - torsoH * 0.12, torsoH * 0.46, -W * 0.05]);
       break;
@@ -167,12 +167,16 @@ export function humanoidFigure(spec: HumanoidSpec, mats: RigMaterials): RigFigur
   }
   if (spec.mohawk !== undefined) k.box('head', hs * 0.16, hs * 0.36, hs * 0.9, spec.mohawk, [0, hs * 0.98, -hs * 0.05]);
   const hunch = spec.hunch ?? 0;
+  // Only bows shoot and only staves cast; the others fall back to a swing or a gesture (UnitView.playClip).
+  const clips: Partial<Record<ClipName, Clip>> = { ...HUMANOID_CLIPS };
+  if (spec.weapon !== 'bow') delete clips.shoot;
+  if (spec.weapon !== 'staff') delete clips.cast;
   const rig: RigSpec = {
     rest: humanoidRest(d),
     restRot: hunch ? { torso: [hunch, 0, 0], head: [-hunch * 0.7, 0, 0] } : undefined,
     height: H + hs * (spec.hat === 'hat' ? 1.0 : spec.hat === 'hood' ? 0.3 : spec.hat === 'crown' || spec.hat === 'horned' ? 0.3 : 0.1),
     radius: spec.radius ?? 0.32 * (spec.wide ?? 1),
-    clips: HUMANOID_CLIPS,
+    clips,
   };
   return new RigFigure(k, rig, mats);
 }

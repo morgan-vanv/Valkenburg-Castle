@@ -119,4 +119,56 @@ export const hit: Clip = {
   },
 };
 
-export const HUMANOID_CLIPS: Partial<Record<ClipName, Clip>> = { idle, walk, sneak, sneakWalk, strike, hit };
+/** Loosing an arrow: the bow arm comes up, the draw hand pulls to the cheek, release, the bow drops. One shot, 0.6 s. */
+export const shoot: Clip = {
+  loop: false,
+  duration: 0.6,
+  pose: (t) => {
+    const up = t < 0.3 ? ease(t / 0.3) : 1;
+    const draw = t < 0.15 ? 0 : t < 0.4 ? ease((t - 0.15) / 0.25) : t < 0.48 ? 1 : 1 - ease((t - 0.48) / 0.12);
+    const down = t < 0.7 ? 0 : ease((t - 0.7) / 0.3);
+    return {
+      armL: { rx: -1.5 * up * (1 - down), ry: 0.2 * up * (1 - down) },
+      armR: { rx: -1.3 * up * (1 - down), rz: -0.5 * draw, ry: 0.4 * draw },
+      handR: { rz: 0.4 * draw },
+      torso: { ry: 0.5 * up * (1 - down), rx: 0.05 * up },
+      hips: { ry: 0.2 * up * (1 - down) },
+      head: { ry: -0.4 * up * (1 - down), rz: 0.15 * draw },
+    };
+  },
+};
+
+/** A spell: the staff hand rises, the free hand pushes forward, a little lift on the toes. One shot, 0.55 s. */
+export const cast: Clip = {
+  loop: false,
+  duration: 0.55,
+  pose: (t) => {
+    const k = sin(Math.min(1, t) * Math.PI);
+    const push = t < 0.35 ? 0 : t < 0.55 ? ease((t - 0.35) / 0.2) : 1 - ease((t - 0.55) / 0.45);
+    return {
+      armR: { rx: -1.6 * k, rz: -0.3 * k },
+      armL: { rx: -1.2 * push, rz: 0.4 * push },
+      handL: { rx: -0.5 * push },
+      torso: { rx: -0.15 * k + 0.2 * push },
+      hips: { py: 0.04 * k },
+      head: { rx: -0.25 * k },
+    };
+  },
+};
+
+/** Using or throwing something: a quick overhand toss with the right arm. One shot, 0.4 s. */
+export const use: Clip = {
+  loop: false,
+  duration: 0.4,
+  pose: (t) => {
+    const wind = t < 0.35 ? ease(t / 0.35) : 1 - ease((t - 0.35) / 0.65);
+    const throwK = t < 0.35 ? 0 : t < 0.5 ? ease((t - 0.35) / 0.15) : 1 - ease((t - 0.5) / 0.5);
+    return {
+      armR: { rx: -2.2 * wind + 1.6 * throwK, rz: -0.25 * wind },
+      torso: { ry: 0.25 * wind - 0.3 * throwK, rx: 0.1 * throwK },
+      head: { ry: -0.15 * wind },
+    };
+  },
+};
+
+export const HUMANOID_CLIPS: Partial<Record<ClipName, Clip>> = { idle, walk, sneak, sneakWalk, strike, shoot, cast, use, hit };

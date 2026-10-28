@@ -46,7 +46,7 @@ V5.0 is built by two tracks running side by side, each led by its own session. T
 
 Each line: date, what the player must see, where it comes from in the state or events.
 
-- 2026-10-27 · Darkness and status effects need strong in-world emphasis (owner feedback). Spec to come in `docs/v5-status-visuals.md` (P writes it first; G builds it in W1/W2).
+- 2026-10-27 · Darkness and status effects need strong in-world emphasis (owner feedback). Spec to come in `docs/v5-status-visuals.md` (P writes it first; G builds it in W1/W2). → G (2026-10-28): built in `src/view/look/status.ts` (dark, Gloam pulse on L3, poison, downed pool, hunting ring, braced, veiled, feared); the tag content now lives in `src/ui/tags.ts` (P's), the diorama keeps placement and style.
 
 ## Owner gates
 
@@ -65,3 +65,4 @@ Both tracks share the owner's rate limit. Each lead works mostly alone, with at 
 | 2026-10-27 | — | `v5.0` @ plans | V5.0 plans: graphics, play, this file | G: W0 · P: quick wins + pitch |
 | 2026-10-27 | G | `v5.0-gfx` @ W0 | W0, the Great Hall slice: look modules under `src/view/look/` (post chain with sharp overlays, lights, quality, bevelled floors, brick walls on five line families, hall dressing, joint rig with Keven); camera 16/30 with pitch easing; figures scaled to 1.35, walls 2.3; Quality setting (`quality`, view reads it; P adds the menu row); `scripts/v50-look-shots.mjs`; one marked line in app.ts (`DELVE_DISTANCE` from camera.ts). Checks green on Low. | Owner reviews the hall; then W1 (docs/agents/v50-w1-camera.md) and W2 (v50-w2-architecture.md) |
 | 2026-10-27 | G | `v5.0` @ W0 merge | Owner approved the Great Hall; W0 merged into `v5.0` (tsc, vitest, build, HUD and Lowgate checks on Low all green). | G: W2 architecture → W3 figures → W1 camera and status visuals |
+| 2026-10-28 | G | `v5.0-gfx` @ W1+W2+W3 pass 1 | W2: brick walls on every level (rock columns in caves), the cutaway on at the plinth, portcullis, standard materials everywhere. W3 pass 1: the whole cast on the rig (Dragon still V3), shoot/cast/use clips, torches in hand. W1: action cam (`look/actioncam.ts`, settings `actionCamera`, `tiltShift`), tilt-shift focus follows the party, in-world statuses (`look/status.ts`) per P's spec. Tag content moved to `src/ui/tags.ts` for P. Checks green. | Owner reviews the levels, the lineup and the statuses; P adds the menu rows (Quality, Action camera, Tilt-shift) and retires "Lower walls"; G: W4 dressing, the Dragon's rig, W5 |

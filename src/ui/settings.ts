@@ -14,9 +14,13 @@ export interface Settings {
   fullCards: boolean;
   /** V5.0 (G): render quality. 'low' = no shadow, bloom or tilt-shift, pixel ratio 1 (headless checks use it). */
   quality?: 'high' | 'low';
+  /** V5.0 (G): the action cam pushes in on attacks, shots, spells and item use (on by default). */
+  actionCamera?: boolean;
+  /** V5.0 (G): tilt-shift blur on High quality (on by default). */
+  tiltShift?: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, quality: 'high' };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, quality: 'high', actionCamera: true, tiltShift: true };
 
 export function loadSettings(): Settings {
   try {

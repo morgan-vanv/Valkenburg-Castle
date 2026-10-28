@@ -40,6 +40,7 @@ async function session(quality, room) {
   await p.waitForFunction(() => !!window.vc, null, { timeout: SLOW });
   let spot = ROOMS[room];
   if (!spot) {
+    const findRoom = room === 'status' ? 'tunnels' : room;
     spot = await p.evaluate(({ room, WALKABLE }) => {
       for (const lv of window.vc.dio.castle.levels) {
         const r = lv.rooms.find((x) => x.id === room);
@@ -53,11 +54,12 @@ async function session(quality, room) {
         return { level: lv.level, at: hexes.slice(0, 4), look: { q: L.q, r: L.r } };
       }
       return null;
-    }, { room, WALKABLE: [...WALKABLE] });
+    }, { room: findRoom, WALKABLE: [...WALKABLE] });
     if (!spot) throw new Error(`unknown room ${room}`);
   }
-  spot.rooms = room === 'hall' || room === 'lineup' ? ['hall', 'dais'] : [room];
+  spot.rooms = room === 'hall' || room === 'lineup' ? ['hall', 'dais'] : room === 'status' ? ['tunnels'] : [room];
   if (room === 'lineup') spot.lineup = true;
+  if (room === 'status') spot.status = true;
   const ok = await p.evaluate(async (spot) => {
     const E = window.vcEngine;
     const s = E.newGame(11);
@@ -88,6 +90,19 @@ async function session(quality, room) {
       if (inRoom.some(([q2, r2]) => Math.max(Math.abs(q - q2), Math.abs(r - r2), Math.abs(q + r - q2 - r2)) <= 1)) keys.add(`${spot.level}:${key}`);
     }
     d.delve.explored = [...keys];
+    if (spot.status) {
+      // W1 status shot: unlit Keven with the Gloam near, a poisoned hero, a downed one bleeding 2, a braced one, a hunting orc.
+      const h = d.delve.heroes;
+      for (const x of h) x.pack = x.pack.filter((i) => i.kind !== 'torch');
+      if (h[1]) { h[1].poisoned = true; h[1].hp = 1; }
+      if (h[2]) { h[2].status = 'downed'; h[2].bleed = 2; h[2].hp = 0; }
+      if (h[3]) h[3].braced = true;
+      const near = spot.at[0];
+      d.delve.monsters = [
+        { id: 'st-orc', kind: 'orc', name: 'Orc', at: { level: spot.level, q: near.q + 2, r: near.r }, hp: 5, maxHp: 5, awareness: 'hunting', spawnedAt: { level: spot.level, q: near.q + 2, r: near.r }, facing: 3 },
+        { id: 'st-gloam', kind: 'gloam', name: 'the Gloam', at: { level: spot.level, q: near.q - 2, r: near.r + 1 }, hp: 5, maxHp: 5, awareness: 'hunting', spawnedAt: { level: spot.level, q: near.q - 2, r: near.r + 1 } },
+      ];
+    }
     if (spot.lineup) {
       // W3 lineup: every hero class, every monster, the Sisters, crew members and the prisoner, in rows facing the camera.
       const ax = (col, row) => ({ level: spot.level, q: col - Math.floor(row / 2), r: row });
@@ -113,8 +128,8 @@ async function session(quality, room) {
       else d.delve.rivals = { crew: 'lantern-sisters', name: 'Lineup', temperament: 'prospector', stance: 'neutral', goal: 'loot', members, entersRound: 0, entered: true };
       d.delve.prisoner = { id: 'lineup-prisoner', name: 'Prisoner', at: ax(33, 17), hp: 3, freed: true, out: false, dead: false };
     }
-    // Everyone carries a lit torch, so a room without fixed light still shows lit.
-    for (const h of d.delve.heroes) h.pack.push({ id: `shot-torch-${h.heroId}`, kind: 'torch', name: 'Torch', amount: 1, slots: 1, lit: true, rounds: 15 });
+    // Everyone carries a lit torch, so a room without fixed light still shows lit (the status shot keeps Keven dark).
+    if (!spot.status) for (const h of d.delve.heroes) h.pack.push({ id: `shot-torch-${h.heroId}`, kind: 'torch', name: 'Torch', amount: 1, slots: 1, lit: true, rounds: 15 });
     window.vc.load(d);
     return 'ok';
   }, spot);
