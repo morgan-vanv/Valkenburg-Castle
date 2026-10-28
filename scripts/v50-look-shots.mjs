@@ -157,6 +157,7 @@ const SHOTS = [
   { name: 'default', distance: 16, yaw: 0.35 },
   { name: 'close', distance: 9, yaw: 0.35 },
   { name: 'out', distance: 26, yaw: 0.35 },
+  { name: 'far', distance: 60, yaw: 0.35 },
   { name: 'rotated', distance: 16, yaw: 0.35 + (2 * Math.PI) / 3 },
 ];
 

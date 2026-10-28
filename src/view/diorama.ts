@@ -8,7 +8,7 @@ import type { MoveRisks, Visibility } from '../game/api';
 import { DIRS, add, hexKey, hexToWorld, parseHexKey, posKey, range, samePos, worldToHex, type Pos } from '../game/hex';
 import type { Brightness, CastleDef, GameEvent, GameState, Intent, Item, LevelDef, Rival, RivalCrew } from '../game/types';
 import { AnimClock } from './anim';
-import { CameraRig } from './camera';
+import { CameraRig, DEFAULT_DISTANCE } from './camera';
 import type { ModelKey } from './figures';
 import { LevelView } from './level';
 import { makeBook, makeChest, makeCoins, makeCopper, makeHeirloom, makeHoard, makeRope, makeSack, makeTrap, type PropView } from './props';
@@ -687,13 +687,15 @@ export class Diorama {
    * V5.0 (G, W1): push the camera in on an action between two figures (or a figure and a hex) for about `ms`.
    * Skipped at the fastest speed and under "reduce camera shake", and when neither end is on the shown level.
    */
-  private pushCam(a: UnitView | undefined, b: UnitView | Pos | undefined, ms: number): void {
+  private async pushCam(a: UnitView | undefined, b: UnitView | Pos | undefined, ms: number): Promise<void> {
     if (!a || !b || this.clock.speed >= 6 || this.reduceShake) return;
     if (a.at.level !== this.shownLevel) return;
     const pa = a.root.position;
     const pb = b instanceof UnitView ? (b.at.level === this.shownLevel ? b.root.position : null) : b.level === this.shownLevel ? this.worldOf(b) : null;
     if (!pb) return;
-    this.actionCam.play(pa, pb, ms / Math.max(0.25, this.clock.speed));
+    const settle = this.actionCam.play(pa, pb, ms / Math.max(0.25, this.clock.speed));
+    // Owner: the camera arrives before the blow lands (a short beat, scaled by the speed setting).
+    if (settle > 0) await this.clock.wait(settle / 1000);
   }
 
   private loop = (): void => {
@@ -717,13 +719,24 @@ export class Diorama {
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
       this.effects.update(t);
+      // V5.0 (G, owner feedback): the haze is a close-up effect. It thins as the camera pulls back, so a zoomed-out
+      // board stays readable instead of going black (the fog's depth is the camera distance).
+      {
+        const fog = this.scene.fog as THREE.FogExp2 | null;
+        if (fog) {
+          const d = this.rig.distance;
+          const k = Math.min(1, Math.pow(DEFAULT_DISTANCE / Math.max(DEFAULT_DISTANCE, d), 1.6));
+          fog.density = FILL.haze.density * k + FILL.haze.far * (1 - k);
+        }
+      }
       // V5.0 (G, W1): the tilt-shift's sharp band follows the selected hero (or the camera target).
       {
         const sel = this.selectedId ? this.units.get(this.selectedId) : undefined;
         const p = sel && sel.root.visible ? sel.root.position.clone() : this.rig.currentTarget().clone();
         p.y += 0.6;
         const ndc = p.project(this.rig.camera);
-        this.post.setFocus((ndc.y + 1) / 2, dtReal);
+        const wide = THREE.MathUtils.smoothstep(this.rig.distance, DEFAULT_DISTANCE * 1.2, DEFAULT_DISTANCE * 2.6);
+        this.post.setFocus((ndc.y + 1) / 2, dtReal, wide);
       }
       this.post.render(this.scene, this.overlayScene, this.rig.camera);
       this.updateDom();
@@ -2853,7 +2866,7 @@ export class Diorama {
         if (!t) return;
         const watch = (a?.root.visible ?? false) || t.root.visible;
         if (!watch) return;
-        this.pushCam(a, t, 520); // V5.0 (G): action cam
+        await this.pushCam(a, t, 520); // V5.0 (G): action cam
         if (a && a.id !== t.id) await this.lunge(a, t);
         if (e.type === 'hit') {
           t.flash(new THREE.Color(1, 0.15, 0.1), 0.9);
@@ -3443,8 +3456,8 @@ export class Diorama {
         if (!watch) return;
         const by = this.units.get(e.by);
         if (by) by.face(b.x - a.x, b.z - a.z);
+        await this.pushCam(by, e.to, 500); // V5.0 (G): action cam
         by?.playClip?.('use'); // V5.0 (G)
-        this.pushCam(by, e.to, 500); // V5.0 (G): action cam
         const color = THROW_COLOR[e.kind] ?? 0xd8d0c0;
         const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color }));
         this.overlay.add(m);
@@ -3470,7 +3483,7 @@ export class Diorama {
           const w = this.worldOf(at);
           by.face(w.x - by.root.position.x, w.z - by.root.position.z);
         }
-        this.pushCam(by, at, 600); // V5.0 (G): action cam
+        await this.pushCam(by, at, 600); // V5.0 (G): action cam
         if (by) {
           by.playClip?.('cast'); // V5.0 (G)
           by.flash(new THREE.Color(color), 0.6);

@@ -33,6 +33,8 @@ export class CameraRig {
   /** Limits for the target, set from the shown level's bounds. */
   bounds = new THREE.Box3(new THREE.Vector3(-100, -100, -100), new THREE.Vector3(100, 100, 100));
   shake = 0;
+  /** How fast the current values chase the desired ones (8 = snappy; the action cam lowers it while it moves). */
+  easeRate = 8;
   private shakeOffset = new THREE.Vector3();
   /** True if the last pointer gesture moved enough to count as a drag. */
   dragged = false;
@@ -135,7 +137,7 @@ export class CameraRig {
       this.clampTarget();
     }
     // ---- end keyboard block ----
-    const a = 1 - Math.exp(-dt * 8);
+    const a = 1 - Math.exp(-dt * this.easeRate);
     this.cur.target.lerp(this.target, a);
     this.cur.yaw += (this.yaw - this.cur.yaw) * a;
     this.cur.pitch += (this.pitch - this.cur.pitch) * a;

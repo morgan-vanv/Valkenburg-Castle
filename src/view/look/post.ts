@@ -132,11 +132,20 @@ export class LookPost {
   }
 
   private focusY = 0.5;
-  /** Where the tilt-shift's sharp band sits (0 bottom, 1 top of the screen); eased toward the party. */
-  setFocus(y: number, dt: number): void {
+  /**
+   * Where the tilt-shift's sharp band sits (0 bottom, 1 top of the screen), eased toward the party; `wide` (0..1)
+   * opens the band and softens the blur as the camera pulls back, so a zoomed-out board is for reading, not looking.
+   */
+  setFocus(y: number, dt: number, wide = 0): void {
     const a = 1 - Math.exp(-dt * 4);
     this.focusY += (THREE.MathUtils.clamp(y, 0.2, 0.8) - this.focusY) * a;
-    for (const t of this.tilts) t.uniforms.focusY!.value = this.focusY;
+    const band = POST.tilt.band + 0.3 * wide;
+    const amt = 1 - 0.75 * wide;
+    this.tilts.forEach((t, i) => {
+      t.uniforms.focusY!.value = this.focusY;
+      t.uniforms.band!.value = band;
+      t.uniforms.amount!.value = (i < 2 ? POST.tilt.amount : POST.tilt.amount2) * amt;
+    });
   }
 
   /** Does the frame go through the chain at all? Off: straight to the canvas. */
