@@ -2072,7 +2072,7 @@ export class Hud {
         'span',
         { class: 'dl-roll-btns' },
         h('button', { type: 'button', class: 'dl-btn dl-ghost', onclick: () => this.cancel() }, 'Cancel ', h('kbd', null, 'Esc')),
-        h('button', { type: 'button', class: `dl-btn ${p.option.action === 'jump' ? 'dl-danger' : 'dl-primary'} dl-go`, onclick: () => this.confirmPreview() }, `${verb} `, h('kbd', null, 'Enter')),
+        h('button', { type: 'button', class: `dl-btn ${p.option.action === 'jump' ? 'dl-danger' : 'dl-primary'} dl-go`, onclick: () => this.confirmPreview() }, `${verb} `, h('kbd', null, 'Enter'), h('kbd', null, 'E')),
       ),
     );
     el.append(foot);
@@ -3179,6 +3179,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
             okLabel,
             ' ',
             h('kbd', null, 'Enter'),
+            h('kbd', null, 'E'),
           ),
         ),
       ),
@@ -3492,6 +3493,8 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const s = this.state;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
     // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
+    // V5.0 (P, B3): E is deliberately inert here. The card has two real answers and comes up during the castle's turn,
+    // right after the player pressed E to end theirs; a second E must not strike (and blow their cover) unread.
     if (this.reactWait) {
       const w = this.reactWait;
       if (e.key === 'Enter' || e.key === '1') {
@@ -3505,6 +3508,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     }
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    const k0 = e.key.toLowerCase();
     if (e.key === 'Alt') {
       e.preventDefault();
       this.setAlt(true);
@@ -3514,8 +3518,11 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
       this.cancel();
       return;
     }
+    // V5.0 (P, B3): E confirms too. While a confirmation or a roll panel is open, E, Enter and Space all confirm it,
+    // and E never ends the turn underneath. A held key (auto-repeat) never confirms a window it just raised.
+    const confirms = (e.key === 'Enter' || e.key === ' ' || k0 === 'e') && !e.repeat;
     if (this.confirmBox) {
-      if (e.key === 'Enter') {
+      if (confirms) {
         e.preventDefault();
         const ok = this.confirmBox.ok;
         this.closeConfirm();
@@ -3534,7 +3541,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
         this.repickArrow(ids[(i + (e.key === '.' ? 1 : ids.length - 1)) % ids.length] ?? null);
         return;
       }
-      if (e.key === 'Enter') {
+      if (confirms) {
         e.preventDefault();
         this.confirmPreview();
       } else if (e.key === '+' || e.key === '=' || e.key === 'ArrowUp') {

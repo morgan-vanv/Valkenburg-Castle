@@ -999,6 +999,8 @@ export class App {
       dio: this.dio,
       hud: this.hud,
       busy: () => this.busy,
+      /** The live settings object (checks flip a setting without reloading). */
+      settings: this.settings,
       /** Play a list of events through the HUD as if the engine sent them (DOM checks only). */
       play: (events: GameEvent[], before: GameState) => this.playEvents(events, before),
       posKey,

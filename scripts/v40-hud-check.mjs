@@ -323,6 +323,27 @@ const SHOTS = process.env.SHOTS ?? '';
   await p.keyboard.press('Enter');
   await p.waitForTimeout(200);
   check('Enter takes the marked one (the roll panel opens)', await shown('.dl-roll'));
+  // V5.0 (P, B3): E confirms the roll panel (and never ends the turn underneath it); the button says Enter and E.
+  check('the roll panel\'s Go button shows Enter and E', /Enter\s*E/.test(await p.$eval('.dl-roll .dl-go', (e) => e.innerText.replace(/\s+/g, ' '))));
+  const r0 = await p.evaluate(() => window.vc.state().delve.round);
+  const hero0 = await p.evaluate(() => window.vc.hud.selectedId);
+  await p.keyboard.press('e');
+  await idle();
+  const afterE = await p.evaluate((id) => ({ round: window.vc.state().delve.round, phase: window.vc.state().delve.phase, acted: window.vc.state().delve.heroes.find((h) => h.heroId === id)?.acted, roll: !!document.querySelector('.dl-roll') && !document.querySelector('.dl-roll').classList.contains('hidden') }), hero0);
+  check('E confirms the roll (the hero acted, the panel closed) and the turn did not end', afterE.acted === true && !afterE.roll && afterE.round === r0 && afterE.phase === 'player', JSON.stringify(afterE));
+  // E on a confirmation window confirms it too: the idle check before ending a turn.
+  await p.evaluate(() => { window.vc.settings.noEndTurnAsk = false; const s = structuredClone(window.vc.state()); for (const h of s.delve.heroes) { h.moved = false; h.acted = false; } window.vc.load(s); });
+  await p.waitForTimeout(150);
+  await p.keyboard.press('e');
+  await p.waitForTimeout(150);
+  const modal = await p.evaluate(() => ({ open: !document.querySelector('.dl-modal')?.classList.contains('hidden'), text: document.querySelector('.dl-modal-box')?.innerText ?? '' }));
+  check('E with idle heroes raises the "done nothing" check, with Enter and E on its button', modal.open && /done nothing/.test(modal.text) && /Enter\s*E/.test(modal.text.replace(/\s+/g, ' ')), JSON.stringify(modal));
+  const r1 = await p.evaluate(() => window.vc.state().delve.round);
+  await p.keyboard.press('e');
+  await idle();
+  check('...and a second E confirms it: the turn ends', (await p.evaluate(() => window.vc.state().delve.round)) === r1 + 1);
+  await p.evaluate(() => { window.vc.settings.noEndTurnAsk = true; });
+  await p.evaluate(() => window.vc.hud.onHover(null, null));
   await p.keyboard.press('Escape');
   await p.keyboard.press('Escape');
   check('Esc clears the mark', await p.evaluate(() => !window.vc.dio.picked.at && document.querySelectorAll('.unit-tag.tag-picked').length === 0));
