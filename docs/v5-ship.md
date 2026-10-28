@@ -44,3 +44,4 @@ Write `docs/v5-review.md`: findings ranked by severity, each with the file, a re
 ## Log
 
 - 2026-10-28 · Plan written (G). W4/W5 awaiting the checkpoint merge; P at spec 32.14 on `v5.0-play`.
+- 2026-10-28 · Step 1 done: W4/W5 and the first play-test feedback (haze, tilt band, action cam timing) merged into `v5.0`. Owner chose to replace main (no preview path). Two feedback items are P's (free-swing caption lingering; the Walk/Sneak switch's clipping tip).
