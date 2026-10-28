@@ -60,6 +60,8 @@ export class UnitView {
   readonly glow: THREE.MeshBasicMaterial;
   /** V5.0 (G): the joint-rigged figure, when this unit has one (W0: Keven). */
   readonly rigged?: Figure;
+  /** V5.0 (G): a soft blob under the feet: the figure's contact shadow on Low, a lighter grounding on High. */
+  readonly blob: THREE.Mesh;
   private sneaking = false;
   private lastIdleTime = 0;
   /** Heroes: the through-wall silhouette material (see the constructor). */
@@ -136,6 +138,11 @@ export class UnitView {
     });
     this.rig.add(this.fig);
     this.root.add(this.rig);
+    this.blob = new THREE.Mesh(new THREE.CircleGeometry(Math.max(0.22, this.model.radius * this.scale * 1.15), 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
+    this.blob.position.y = 0.012;
+    this.blob.name = 'blob';
+    if (ghost || this.model.floats) this.blob.visible = false;
+    this.root.add(this.blob);
     this.root.name = `unit-${id}`;
   }
 
@@ -210,6 +217,12 @@ export class UnitView {
   lieDown(down: boolean): void {
     this.fig.rotation.z = down ? 1.35 : 0;
     this.fig.position.y = 0;
+  }
+
+  /** V5.0 (G): how dark the contact blob is (0 hides it). */
+  setBlob(opacity: number): void {
+    (this.blob.material as THREE.MeshBasicMaterial).opacity = opacity;
+    this.blob.visible = opacity > 0;
   }
 
   pickables(): THREE.Object3D[] {

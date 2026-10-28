@@ -63,3 +63,4 @@ Both tracks share the owner's rate limit. Each lead works mostly alone, with at 
 | Date | Track | Branch @ commit | What landed | Next |
 | --- | --- | --- | --- | --- |
 | 2026-10-27 | — | `v5.0` @ plans | V5.0 plans: graphics, play, this file | G: W0 · P: quick wins + pitch |
+| 2026-10-27 | G | `v5.0-gfx` @ W0 | W0, the Great Hall slice: look modules under `src/view/look/` (post chain with sharp overlays, lights, quality, bevelled floors, brick walls on five line families, hall dressing, joint rig with Keven); camera 16/30 with pitch easing; figures scaled to 1.35, walls 2.3; Quality setting (`quality`, view reads it; P adds the menu row); `scripts/v50-look-shots.mjs`; one marked line in app.ts (`DELVE_DISTANCE` from camera.ts). Checks green on Low. | Owner reviews the hall; then W1 (docs/agents/v50-w1-camera.md) and W2 (v50-w2-architecture.md) |

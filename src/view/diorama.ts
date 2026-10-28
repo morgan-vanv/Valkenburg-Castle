@@ -655,6 +655,7 @@ export class Diorama {
     this.features = featuresOf(q);
     this.renderer.shadowMap.enabled = this.features.shadows;
     this.post.setFeatures(this.features);
+    for (const v of this.units.values()) v.setBlob(this.features.shadows ? 0.16 : 0.32);
     this.resize();
   }
 
@@ -744,8 +745,9 @@ export class Diorama {
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         // V5.0 (G): carried lights sit a little ahead of the figure and above its head, so they don't blow out its hat and pack.
         const ahead = new THREE.Vector3(Math.sin(v.facing), 0, Math.cos(v.facing)).multiplyScalar(0.45);
-        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.55, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.45, 0) : new THREE.Vector3(-0.25, v.height + 0.5, 0)).add(ahead);
-        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 1, kind: L.kind, seed: srcs.length * 1.7 });
+        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.7, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.6, 0) : new THREE.Vector3(-0.25, v.height + 0.7, 0)).add(ahead);
+        // Carried lights are close to the figure that carries them: a fraction of a fixed source's candela is plenty.
+        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.45, kind: L.kind, seed: srcs.length * 1.7 });
       } else {
         if (!this.vis.explored.has(posKey(L.at))) continue;
         srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.9, kind: L.kind, seed: srcs.length * 2.3 + 0.5 });
@@ -1274,6 +1276,7 @@ export class Diorama {
     let v = this.units.get(id);
     if (!v) {
       v = new UnitView(id, key, side, at, this.clock);
+      v.setBlob(this.features.shadows ? 0.16 : 0.32);
       this.units.set(id, v);
       this.scene.add(v.root);
       v.root.position.copy(this.worldOf(at));
