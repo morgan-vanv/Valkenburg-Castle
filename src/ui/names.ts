@@ -356,7 +356,7 @@ export const ACTION_HELP: Record<ActionKind, string> = {
   charge: `Set a bought charge on a door, chest or cracked wall next to you, fuse 1: it blows at the end of the coming castle turn. ${V37.blastInner} damage within 1 (everyone there is pushed a hex away), ${V37.blastOuter} within 2; opens locks, breaks cracked walls and built walls on Levels 1 and 2. Noise ${V37.blastNoise}, heard a level up and down.`,
   rope: 'Anchor a rope at this pit edge. From then on anyone here can Climb down and back up.',
   climb: 'Climb the rope to the other level, no damage. Takes the whole turn (move and action).',
-  jump: 'Drop into the pit to the level below. The fall hurts, more for each level. Takes the whole turn.',
+  jump: 'Drop into the pit to the level below. The fall hurts, more for each level. It is your move (no dash after); you land with your action ready.',
   shove: 'Push an enemy next to you 1 hex straight away: 2 Might slots (Sellsword 3), needs 2 hits. Into a pit it falls; into a wall it takes 1. Noise 2.',
   bribe: 'Pay the rival crew 40 gold from the party\'s packs: they stop fighting and leave.',
   parley: 'Talk to a rival crew within 4 hexes, in sight. Free. Opens the deal card: pay them to leave, buy a truce, give them a job, hire them, or fight. One deal per crew per round; paid from the party\'s packs.',
@@ -419,13 +419,15 @@ export function actionHelp(action: ActionKind, cls?: string): string {
 
 /** Actions that don't use the hero's action, and those that take the whole turn. */
 export const FREE_ACTIONS = new Set<ActionKind>(['take', 'drop', 'give', 'leave', 'shutter', 'parley', 'setDown', 'snuff', 'dropTorch']);
-export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'jump', 'grapple']);
+export const WHOLE_TURN_ACTIONS = new Set<ActionKind>(['climb', 'grapple']);
+/** V5.0 (spec 32.1): a jump is the hero's move, not their action. */
+export const MOVE_ACTIONS = new Set<ActionKind>(['jump']);
 
 /** What the bar tooltip says it costs. */
 export function actionCost(action: ActionKind, mana?: number, rolls?: boolean): string {
   const parts: string[] = [];
   if (mana) parts.push(`${mana} mana`);
-  parts.push(FREE_ACTIONS.has(action) ? 'free' : WHOLE_TURN_ACTIONS.has(action) ? 'whole turn' : action === 'open' ? 'free for doors' : 'uses the action');
+  parts.push(FREE_ACTIONS.has(action) ? 'free' : WHOLE_TURN_ACTIONS.has(action) ? 'whole turn' : MOVE_ACTIONS.has(action) ? 'uses the move' : action === 'open' ? 'free for doors' : 'uses the action');
   if (rolls) parts.push('roll');
   return parts.join(' · ');
 }

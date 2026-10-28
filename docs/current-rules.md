@@ -223,7 +223,7 @@ Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.
 - A round = player phase, then world phase. No initiative.
 - Player phase: each active hero may move once and act once, in either order.
   - **Dash**: a hero who has moved and not acted may spend the action on a second move (same allowance, walk or sneak). A hero who acted first gets a normal move afterwards.
-  - Whole-turn actions (need both move and action unused): jump, climb, grapple.
+  - Whole-turn actions (need both move and action unused): climb, grapple. V5.0 (spec 32.1): **jump is the hero's move** (needs the move unused; no dash after it; the action stays, so a jumper can light a torch, drink, attack or take where they land).
   - Free actions (no action used, any number): open/close a door, take, drop, give, leave, shutter, parley (deals are a separate free command, one per crew per round), V4.1 set down. Opening a chest is free for a Burglar; for anyone else it uses the action.
   - V4.1 (spec 31.4): a hero carrying a body (Carry) takes free actions only (doors, take, drop, give, leave, parley, set down), no chest, and moves 3 at most. With the splints, a downed hero may crawl 1 hex (no dash) and Leave on an exit; nothing else.
   - Walk/Sneak (`setMoveMode`, V4.0): free, any number, any active hero; changes only that hero's setting (section 5.1).
@@ -241,7 +241,7 @@ Code: camp.ts `startDelve`, `spawnMonster`, `freeSpotsNear`, `drinkAle`; dragon.
 - The delve ends when no hero is active (V4.1: or crawling, with the splints). At the end, downed heroes still inside die (a downed hero being carried off, or a seized hero held by a crew member, is captured instead). A downed hero carried out by a friend lives (section 8.5).
 - `abandon`: heroes on an exit leave; everyone else still inside dies.
 
-Code: world-phase.ts `worldPhase`, `computeIntents`; engine.ts `apply`/`run`/`resume` and react.ts (V4.1 reactions); delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`, V4.1 `CARRY_OK`), `canCrawl`, `checkDelveEnd`, `endDelve`, `abandon`.
+Code: world-phase.ts `worldPhase`, `computeIntents`; engine.ts `apply`/`run`/`resume` and react.ts (V4.1 reactions); delve.ts `moveKind`, `canDo` (`FREE`, `WHOLE_TURN`, V5.0 `MOVE_ONLY`, V4.1 `CARRY_OK`), `canCrawl`, `checkDelveEnd`, `endDelve`, `abandon`.
 
 ---
 
@@ -572,7 +572,7 @@ V4.0 (spec 30.1): the Sapper is a little squishier than the Sellsword (HP 9, Mig
 | Light brazier | Adjacent unlit brazier: +4 light, lit for the campaign |
 | Light torch (an action), Snuff, Drop torch (free) | Section 7.1 |
 | Potion, Oil, thrown items | Section 9.5 |
-| Jump | Whole turn; from a hex next to a pit, into it (section 13.1). Preview confirms for drops over 1 level |
+| Jump | V5.0 (spec 32.1): uses the move (no dash after); the action stays. From a hex next to a pit, into it (section 13.1). Preview confirms for drops over 1 level |
 | Rope, Climb, Grapple | Section 13.1 |
 | Winch | Next to the winch, if the lift isn't running: lift works for the delve; noise 6 |
 | Carry | V4.1 (spec 31.4): an action, next to a downed hero or the shackled captive nobody carries. The body shares the carrier's hex (it doesn't block; the carrier counts) and moves with them, through falls, shoves and blinks too. The carrier moves `CARRY_MOVE` 3 at most (dash too) and takes free actions only: no jump, climb, grapple or blink, no chest, no attack. A carried downed hero doesn't bleed. Area effects on the hex (fireball, burning, blasts, breath, a fall) hit both, and any damage kills a downed body; single strikes pick one (monsters still ignore a downed hero; they may strike a carried captive). Carrying ends when the carrier is downed or killed (the body lies there) |

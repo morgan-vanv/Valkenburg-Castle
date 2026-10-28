@@ -833,7 +833,7 @@ describe('falls (14.2)', () => {
     expect(b.hp).toBe(3);
     const fell = r.events.find((x) => x.type === 'fell');
     expect(fell).toMatchObject({ type: 'fell', id: 'brann', levels: 2, damage: 7 });
-    expect(b.moved && b.acted).toBe(true);
+    expect([b.moved, b.acted, b.dashed]).toEqual([true, false, true]); // V5.0 (spec 32.1): the jump is the move; the action stays
   });
 
   it('rope and climb: down to where a fall would land, no damage, and back up', () => {

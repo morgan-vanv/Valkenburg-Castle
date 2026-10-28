@@ -1385,3 +1385,17 @@ The owner: "I'd like for the castle's turn to be interruptible/pausable if we wa
 **Bots.** The sim (scripts/v3-engine-sim.ts), the crew arena and the stairs walk answer by policy (hidden swing: let it pass; overwatch: shoot); the sim throws if a turn ever pauses.
 
 Code: react.ts (`ask`, `Pause`, `reactionSetting`), engine.ts (`apply`, `run`, `resume`, `EngineOptions`), stealth.ts (`hiddenFrom`, `heroSwings`, `revealTo`, `hiddenSwingQuestion`), ai.ts (`overwatchCheck`, `overwatchQuestion`), delve.ts (`doSetReaction`), data.ts (`REACTION_DEFAULTS`, `REACTION_FALLBACK`), state.ts (`Ctx.answers`, `asked`, `reacted`, `policy`); ui/app.ts (`playEvents` on `react`, `answerReaction`, `resumePending`), ui/hud.ts (`askReaction`, `reactionsButton`, `reactionsPop`), ui/names.ts (`REACT_*`). Tests: react.test.ts.
+
+## 32. V5.0 play track (owner play-test feedback, 2026-10-27)
+
+V5.0 is built as two tracks (docs/v5-plan.md): the graphics overhaul (view-only, no rules) and the play track (docs/v5-play-plan.md: the owner's play-test feedback with new players). Sections are added here as each play item ships; the design items (reactions for melee, mages and items; the return report; the Ranger's curve; controls; the camera after a hero is done; status visuals) wait on the owner's answer to the pitch.
+
+### 32.1 A jump is the move, not the action (P, 2026-10-27)
+
+The play-test bug: a hero who jumped into the Hollow could not light their torch. The cause: `jump` was a whole-turn action (both move and action, like climb and grapple), so the hero landed in the dark with nothing left, the Gloam woke (section 31.5), and Light (an action) came only the next round. Pillars 16 (a rule you can guess: you jumped, your hands are free) and "flexibility with tradeoffs" (the jump hurts and lands you where it will; the rope is safe but slow).
+
+- **Jump takes the hero's move and no more.** `canDo`: jump needs `!moved` (and not rooted); a hero who has acted may still jump. After it: `moved = true`, `dashed = true` (no second move: they land hard), `acted` untouched. So a hero who jumps can light a torch, drink, give, attack or take where they land.
+- Climb and grapple still take the whole turn (`WHOLE_TURN`); the rope is the slow, safe way down. `MOVE_ONLY` (delve.ts) holds the jump; names.ts `MOVE_ACTIONS` words the cost "uses the move".
+- The refusal reads "X has already moved." (was "Needs both move and action."). Crews don't jump (they rope down), so nothing mirrors.
+
+Audit (`src/game/itemuse.test.ts`, table-driven): what a hero can do with a torch, a potion and Give after a fall from a shove (nothing spent), after a jump, carrying a body (free actions only, spec 31.4), on a raised floor, in the dark, with a full pack (lighting needs no slot; Give offers a friend with room), and the turn after answering a reaction (the new round starts clean). Items on friends: a potion or an antipoison on a hurt, poisoned or downed hero next to you (or on your back), Give to an active neighbour with room; darts, caltrops and smoke already reach enemies. Nothing else needed fixing.

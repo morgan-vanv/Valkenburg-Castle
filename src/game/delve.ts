@@ -1047,8 +1047,13 @@ const AREA: Partial<Record<ActionKind, number>> = { fireball: 1, gust: 1, smoke:
 const MANA_COST: Partial<Record<ActionKind, number>> = { firebolt: 1, kindle: 1, mend: 1, fireball: 2, veil: 1, sleep: 1, blink: 1, ward: 1, gust: 1, dread: DREAD_MANA, nightthorn: NIGHTTHORN_MANA, briar: BRIAR_MANA };
 /** Attacks break a Veil (spec 15.3). */
 const VEIL_BREAKERS: ActionKind[] = ['attack', 'knockback', 'firebolt', 'fireball', 'shove', 'gust', 'smash', 'hamstring', 'nightthorn', 'briar', 'smashProp'];
-/** Whole-turn actions: need both move and action. */
-const WHOLE_TURN: ActionKind[] = ['climb', 'jump', 'grapple'];
+/** Whole-turn actions: need both move and action. V5.0 (spec 32.1): a jump is the hero's move, not their action. */
+const WHOLE_TURN: ActionKind[] = ['climb', 'grapple'];
+/**
+ * V5.0 (spec 32.1, the torch after a jump): jumping into a pit takes the hero's move (no dash after it: they land hard),
+ * and leaves the action: light a torch where you land, drink, attack. Climb and grapple still take the whole turn.
+ */
+const MOVE_ONLY: ActionKind[] = ['jump'];
 
 /** V4.1 (spec 31.4): what a hero carrying a body may still do: the free actions (and Set down). */
 const CARRY_OK: ActionKind[] = ['open', 'take', 'drop', 'give', 'leave', 'parley', 'setDown', 'shutter'];
@@ -1059,6 +1064,7 @@ function canDo(h: HeroInDelve, action: ActionKind): boolean {
   if (h.status === 'downed') return action === 'leave';
   if (h.carrying && !CARRY_OK.includes(action)) return false;
   if (WHOLE_TURN.includes(action)) return !h.moved && !h.acted && !((h.rooted ?? 0) > 0);
+  if (MOVE_ONLY.includes(action)) return !h.moved && !((h.rooted ?? 0) > 0);
   if (FREE.includes(action)) return true;
   return !h.acted;
 }
@@ -1256,7 +1262,7 @@ export function spec(c: Ctx, heroId: string, action: ActionKind, target: ActionT
   if ((h as HeroX).dozing) return no(`${heroName(c, heroId)} is out cold this turn.`);
   if (h.dreaded && !FREE.includes(action)) return no(`${heroName(c, heroId)} is gripped by dread this turn: they can move, but not act.`); // V4.1 (WS7)
   if (h.carrying && !CARRY_OK.includes(action)) return no(`${heroName(c, heroId)} is carrying ${bodyName(c, h.carrying)}: free actions only. Set them down first.`);
-  if (!canDo(h, action)) return no(action === 'climb' || action === 'jump' ? 'Needs both move and action.' : `${heroName(c, heroId)} has already acted.`);
+  if (!canDo(h, action)) return no(action === 'climb' || action === 'grapple' ? 'Needs both move and action.' : action === 'jump' ? `${heroName(c, heroId)} has already moved.` : `${heroName(c, heroId)} has already acted.`);
   const t = findTarget(c, h, action, target);
   if (!t) return no('No valid target.');
   const def = heroDef(c, heroId)!;
@@ -1690,10 +1696,14 @@ export function doAct(c: Ctx, heroId: string, action: ActionKind, target: Action
     setFacing(c, h, dirIndex(h.at, aim));
     if (!c.visCache) refreshSight(c);
   }
-  if (!FREE.includes(action)) h.acted = true;
+  if (!FREE.includes(action) && !MOVE_ONLY.includes(action)) h.acted = true;
   if (action === 'carry') h.acted = true;
   if (action === 'open' && t.id && def.cls !== 'burglar') h.acted = true;
   if (WHOLE_TURN.includes(action)) h.moved = true;
+  if (MOVE_ONLY.includes(action)) {
+    h.moved = true;
+    h.dashed = true; // V5.0 (spec 32.1): the jump is the move; no dash after landing
+  }
   if (MANA_COST[action]) h.mana -= MANA_COST[action]!;
   // Attacking or making a loud noise breaks a Veil (spec 15.3).
   if (h.veil > 0 && (VEIL_BREAKERS.includes(action) || sp.noise >= VEIL_BREAK_NOISE)) {
