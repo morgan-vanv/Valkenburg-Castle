@@ -47,3 +47,7 @@ Saved from the pitch's P1 and the owner's notes for a later pass on meta-progres
 ## The End turn question's threshold (owner, 2026-10-28)
 
 Spec 32.6 asks whenever any hero can still do something plausible (move, act, take, open, parley). A player who moved everyone and chose not to attack sees it every turn until they turn the setting off. The owner: not worried, the toggle is for that; revisit with player feedback. The softer variant, if wanted: ask only when a hero could still move or act (not merely loot or open), one line in hud.ts `endTurn`.
+
+## Take the stairs together (owner, 2026-10-28: tabled for a future session)
+
+Pitched with the stairs rework (spec 32.15): with a hero on a stair hex, one command walks every hero within 3 who hasn't moved to the stairs and across, placed around the landing in party order, each spending their move (not their action); one click, the party arrives as a group, the view flips once. The shelved "follow" idea (docs/shelved/exploration-mode.md) brought back for the one place it matters. The owner wants the quick, elegant fixes first (the landing, the free crossing, the view staying put, the peek) and this explored later.

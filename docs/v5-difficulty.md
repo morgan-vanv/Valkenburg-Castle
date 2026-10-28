@@ -31,7 +31,28 @@ It is not a player. It doesn't read a room, doesn't change plans mid-fight, and 
 
 ## The gap, measured (V5.0, 2026-10-28)
 
-_To be filled from the run in progress._
+`SEED=1 SCENARIO=l1|l2|l3 POLICY=careless|prepared npx tsx scripts/v3-engine-sim.ts 16`, after the second and third bot passes (spec 32.14). Done = the job done and the party out; wiped = the heir dead or taken; hurt = damage taken as a share of the party's HP pool; first down = the round the first hero fell.
+
+| Level | Policy | Done | Wiped | Deaths (16 delves) | Hurt | First down | Where they died |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | careless | 14/16 | 2 | 2 | 0.33 | r13.5 (2 delves) | both after provoking the Lantern Sisters (the heir taken) |
+| 1 | prepared | **16/16** | 0 | 0 | 0.25 | never | — |
+| 2 | careless | 0/16 | 3 | 21 | 0.62 | r9.1 | the guard post (12): the stairs' landing |
+| 2 | prepared | **4/16** (recover 4/8, rescue 0/8) | 5 | 34 | 0.93 | r15.0 | Arcade 10, Barracks 9, Guard post 6, East ledge 6 |
+| 2, seed 2 | careless | 0/16 | 1 | 23 | 0.57 | r6.3 | the Drain and the Bone Pile (fell through the hall pit), the tower stair |
+| 2, seed 2 | prepared | 2/16 (recover 2/8, rescue 0/8) | 8 | 38 | 0.89 | r13.6 | Arcade 12, Guard post 7, Barracks 6, the Great Hall and gatehouse 9 (on the way back out) |
+| 3 | careless | 0/16 | 0 | 19 | 0.51 | r7.4 | the guard post (8) on the way through Level 2; the Drain (7); 5 forced Wake fights (tolls unpayable) |
+| 3 | prepared | 1/16 | 9 | 39 | 1.08 | r23.7 | Arcade 10 and the East ledge 4 on the way through; the Drain 8, the Tunnels 7, the lift base 5 |
+
+**Read against the heuristic:**
+- **Level 1 is right.** A prepared party of three fresh heroes finishes every job unhurt; a careless one finishes most and loses only when it picks on the Sisters. Teaching, not punishing.
+- **Level 2 pushes back, and then some.** Careless never gets out with the job and dies at the landing within nine rounds: the jump is there. Prepared completes recover jobs a quarter to half of the time (6 of 16 over two seeds) and **rescue jobs never** (0 of 16): the cellblock is at the far end of the level and every route there runs the gauntlet at the top (the guard's patrol, two archers, the arcade pair, the barracks' open arches). A player is better than the bot at that gauntlet (the bot can't wait for a patrol to turn, and still gives free swings when it must move), so the human number is higher; the shape is the point: the landing decides the delve.
+- **Level 3 is deadly for both,** as wanted, but for the wrong reason in part: half the prepared party's deaths on Level 3 contracts happen on Level 2 on the way through, and the careless party's forced Wake fights come from the unpayable toll. The Hollow's own killers are the Drain's berserker and the Tunnels.
+
+**What this says to change (for playtesting to confirm, not the bot):**
+1. The arrival on Level 2 (the stairs' landing and the guard's patrol) is the single biggest lever on Level 2's feel; the stairs rework (32.15, the peek) is where to look first.
+2. The unpayable toll (below) turns a Level 2 or 3 crew from a tax into a wipe.
+3. Rescue contracts on Level 2 may want a nearer cell, or a second way to the cellblock that isn't past the barracks.
 
 ## Open items from the measurement
 
