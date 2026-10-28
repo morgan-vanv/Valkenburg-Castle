@@ -121,6 +121,8 @@ function bake(parts: Part[]): THREE.BufferGeometry | undefined {
 export interface RigSpec {
   /** Rest position of each joint in its parent's frame. */
   rest: Record<JointName, [number, number, number]>;
+  /** Rest rotation (Euler XYZ) added under every clip: a hunch, a cocked head. */
+  restRot?: Partial<Record<JointName, [number, number, number]>>;
   height: number;
   radius: number;
   clips: Partial<Record<ClipName, Clip>>;
@@ -222,7 +224,8 @@ export class RigFigure implements Figure {
       const pb = b?.[j] ?? {};
       const mix = (x: number | undefined, y: number | undefined) => (x ?? 0) * k + (y ?? 0) * (1 - k);
       const rest = this.spec.rest[j];
-      o.rotation.set(mix(pa.rx, pb.rx), mix(pa.ry, pb.ry), mix(pa.rz, pb.rz));
+      const rr = this.spec.restRot?.[j] ?? [0, 0, 0];
+      o.rotation.set(rr[0] + mix(pa.rx, pb.rx), rr[1] + mix(pa.ry, pb.ry), rr[2] + mix(pa.rz, pb.rz));
       o.position.set(rest[0] + mix(pa.px, pb.px), rest[1] + mix(pa.py, pb.py), rest[2] + mix(pa.pz, pb.pz));
       const sy = (pa.sy ?? 1) * k + (pb.sy ?? 1) * (1 - k);
       o.scale.set(1, sy, 1);

@@ -24,6 +24,7 @@ import { INTENT_ICON, iconSvg, intentTone } from './icons';
 import { LookPost, POST } from './look/post';
 import { FILL, POINT, makeFill, placeKey, setupShadowLight, type SourceKind } from './look/lights';
 import { featuresOf, readQuality, type Quality, type QualityFeatures } from './look/quality';
+import { LOOK_CUTAWAY, WALL_LOOK } from './look/walls';
 
 const MAX_LIGHTS = 12;
 
@@ -705,8 +706,9 @@ export class Diorama {
     const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
     if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
     CUTAWAY.dir.value.copy(d.normalize());
-    // Off: the cut height is above every wall, so nothing is lowered.
-    CUTAWAY.height.value = this.cutaway ? 0.3 : 99;
+    // V5.0 (G, W2): the look's walls are lowered to their plinth on the camera's side of the focus whenever the
+    // walls are the new brick runs (the camera sits lower now); the old setting still forces it on elsewhere.
+    CUTAWAY.height.value = this.cutaway || LOOK_CUTAWAY ? WALL_LOOK.plinthH : 99;
   }
 
   /** Render one frame now (for screenshots in a throttled headless tab). */
@@ -745,7 +747,7 @@ export class Diorama {
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         // V5.0 (G): carried lights sit a little ahead of the figure and above its head, so they don't blow out its hat and pack.
         const ahead = new THREE.Vector3(Math.sin(v.facing), 0, Math.cos(v.facing)).multiplyScalar(0.45);
-        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.7, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.6, 0) : new THREE.Vector3(-0.25, v.height + 0.7, 0)).add(ahead);
+        const off = (L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.9, 0) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.8, 0) : new THREE.Vector3(-0.25, v.height + 0.95, 0)).add(ahead);
         // Carried lights are close to the figure that carries them: a fraction of a fixed source's candela is plenty.
         srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.45, kind: L.kind, seed: srcs.length * 1.7 });
       } else {

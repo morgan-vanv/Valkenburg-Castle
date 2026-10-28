@@ -5,7 +5,8 @@ import type { Pos } from '../game/hex';
 import type { AnimClock } from './anim';
 import { getModel, makeFigure, type FigureModel, type ModelKey } from './figures';
 import { easeOutCubic } from './world';
-import { makeKeven, rigMaterials } from './look/keven';
+import { rigMaterials } from './look/keven';
+import { makeRigFigure } from './look/cast';
 import type { Figure } from './look/rig';
 
 export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
@@ -98,11 +99,11 @@ export class UnitView {
     // pass) and only where something nearer is already in the depth buffer (GreaterDepth), so it
     // never tints the visible hero itself. Heroes only.
     if (side === 'hero') this.silhouette = new THREE.MeshBasicMaterial({ color: SILHOUETTE_COLOR, transparent: true, opacity: SILHOUETTE_OPACITY, depthWrite: false, depthFunc: THREE.GreaterDepth });
-    if (key === 'heir') {
-      // V5.0 (G, W0): Keven on the joint rig, built in world units (scale 1); the rest follow in W3.
-      const mats = rigMaterials();
+    const mats = rigMaterials();
+    const rig = makeRigFigure(key, { body: this.body, metal: mats.metal, glow: this.glow });
+    if (rig) {
+      // V5.0 (G, W3): the cast on the joint rig, built in world units (scale 1). The Dragon keeps its V3 model.
       this.metal = mats.metal as THREE.MeshStandardMaterial;
-      const rig = makeKeven({ body: this.body, metal: this.metal, glow: this.glow });
       this.rigged = rig;
       this.fig = rig.object as THREE.Group;
       this.model = { body: new THREE.BufferGeometry(), height: rig.height, radius: rig.radius };

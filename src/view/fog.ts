@@ -31,6 +31,8 @@ export interface FogMaterialOptions {
   litFloor?: number;
   /** Instanced walls: lower the ones between the camera and the focus point. */
   cutaway?: boolean;
+  /** V5.0 (G, W2): with `cutaway`, drop whole instances above the cut height (bricks, caps) instead of clamping their vertices. */
+  cutDrop?: boolean;
   /** Instanced: read baked light from the `aGlow` attribute. */
   glow?: boolean;
   /** Instanced floors: draw material patterns from `aMat` and hex edges. */
@@ -142,7 +144,9 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
     opacity: opts.opacity ?? 1,
     side: opts.side ?? THREE.FrontSide,
   };
-  const m = (opts.standard ? new THREE.MeshStandardMaterial({ ...common, roughness: opts.roughness ?? 0.82, metalness: opts.metalness ?? 0 }) : new THREE.MeshLambertMaterial(common)) as FogMaterial;
+  // V5.0 (G, W2): every fogged material is flat-shaded standard now (one shading model under the look's lights);
+  // `standard: false` keeps Lambert for anything that needs it.
+  const m = (opts.standard === false ? new THREE.MeshLambertMaterial(common) : new THREE.MeshStandardMaterial({ ...common, roughness: opts.roughness ?? 0.85, metalness: opts.metalness ?? 0 })) as FogMaterial;
   const edge = { value: opts.edge ?? 1 };
   const fog = { value: 1 };
   const dim = { value: opts.litFloor ?? 0.1 };
@@ -200,7 +204,7 @@ ${
   float side = abs(dot(rel, vec2(-uCutDir.z, uCutDir.x)));
   float k = smoothstep(-1.3, -0.2, ahead) * (1.0 - smoothstep(6.0, 9.0, side)) * (1.0 - smoothstep(9.0, 13.0, ahead));
   k *= step(abs(iCenter.y - uCutCenter.y), 2.0);
-  transformed.y = mix(transformed.y, min(transformed.y, uCutHeight), k);
+  ${opts.cutDrop ? 'if (k > 0.5 && iCenter.y - uCutCenter.y > uCutHeight) { vFog = 0.0; }' : 'transformed.y = mix(transformed.y, min(transformed.y, uCutHeight), k);'}
 }`
     : ''
 }`,
@@ -238,7 +242,7 @@ if (vFog < 0.45) {
 #include <opaque_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => `fog-${opts.standard ? 's' : 'l'}${instanced ? 'i' : 'u'}${cut ? '-cut' : ''}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
+  m.customProgramCacheKey = () => `fog-${opts.standard === false ? 'l' : 's'}${instanced ? 'i' : 'u'}${cut ? (opts.cutDrop ? '-cutdrop' : '-cut') : ''}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
   return m;
 }
 
