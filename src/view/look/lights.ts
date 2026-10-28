@@ -12,7 +12,8 @@ export const FILL = {
   hemi: { sky: 0xa89ad0, ground: 0x3a2418, intensity: 1.7 },
   key: { color: 0xffd6a8, intensity: 1.6 },
   background: 0x0c0810,
-  haze: { color: 0x1a1020, density: 0.032 },
+  /** Haze density at the default distance, and the floor it thins to when zoomed right out (owner: the board must stay readable). */
+  haze: { color: 0x1a1020, density: 0.026, far: 0.006 },
 };
 
 export type SourceKind = 'torch' | 'lantern' | 'crew' | 'arrow' | 'brazier' | 'sconce' | 'daylight' | 'fire' | 'fungus' | 'glow' | 'candle';

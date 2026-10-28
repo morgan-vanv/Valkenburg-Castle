@@ -40,7 +40,7 @@ async function session(quality, room) {
   await p.waitForFunction(() => !!window.vc, null, { timeout: SLOW });
   let spot = ROOMS[room];
   if (!spot) {
-    const findRoom = room === 'status' ? 'tunnels' : room;
+    const findRoom = room === 'status' ? 'tunnels' : room === 'dragon' ? 'lair' : room;
     spot = await p.evaluate(({ room, WALKABLE }) => {
       for (const lv of window.vc.dio.castle.levels) {
         const r = lv.rooms.find((x) => x.id === room);
@@ -57,9 +57,10 @@ async function session(quality, room) {
     }, { room: findRoom, WALKABLE: [...WALKABLE] });
     if (!spot) throw new Error(`unknown room ${room}`);
   }
-  spot.rooms = room === 'hall' || room === 'lineup' ? ['hall', 'dais'] : room === 'status' ? ['tunnels'] : [room];
+  spot.rooms = room === 'hall' || room === 'lineup' ? ['hall', 'dais'] : room === 'status' ? ['tunnels'] : room === 'dragon' ? ['lair'] : [room];
   if (room === 'lineup') spot.lineup = true;
   if (room === 'status') spot.status = true;
+  if (room === 'dragon') { spot.dragon = true; spot.look = { level: 3, q: 39 - Math.floor(11 / 2), r: 11 }; spot.shots = [{ name: 'awake', distance: 11, yaw: 0.5 }, { name: 'asleep', distance: 11, yaw: 0.5, look: { q: 34 - Math.floor(14 / 2), r: 14 } }, { name: 'lair', distance: 22, yaw: 0.5 }]; }
   const ok = await p.evaluate(async (spot) => {
     const E = window.vcEngine;
     const s = E.newGame(11);
@@ -102,6 +103,13 @@ async function session(quality, room) {
         { id: 'st-orc', kind: 'orc', name: 'Orc', at: { level: spot.level, q: near.q + 2, r: near.r }, hp: 5, maxHp: 5, awareness: 'hunting', spawnedAt: { level: spot.level, q: near.q + 2, r: near.r }, facing: 3 },
         { id: 'st-gloam', kind: 'gloam', name: 'the Gloam', at: { level: spot.level, q: near.q - 2, r: near.r + 1 }, hp: 5, maxHp: 5, awareness: 'hunting', spawnedAt: { level: spot.level, q: near.q - 2, r: near.r + 1 } },
       ];
+    }
+    if (spot.dragon) {
+      // The lair: the Dragon awake beside its sleeping self (two monsters), the party at a distance.
+      const L3 = (col, row) => ({ level: 3, q: col - Math.floor(row / 2), r: row });
+      d.delve.monsters = d.delve.monsters.filter((m) => m.kind !== 'dragon');
+      d.delve.monsters.push({ id: 'sh-dragon', kind: 'dragon', name: 'The Wyrm', at: L3(39, 11), hp: 40, maxHp: 40, awareness: 'hunting', spawnedAt: L3(39, 11), facing: 4 });
+      d.delve.monsters.push({ id: 'sh-dragon2', kind: 'dragon', name: 'The Wyrm', at: L3(34, 14), hp: 40, maxHp: 40, awareness: 'asleep', spawnedAt: L3(34, 14) });
     }
     if (spot.lineup) {
       // W3 lineup: every hero class, every monster, the Sisters, crew members and the prisoner, in rows facing the camera.
@@ -149,6 +157,7 @@ const SHOTS = [
   { name: 'default', distance: 16, yaw: 0.35 },
   { name: 'close', distance: 9, yaw: 0.35 },
   { name: 'out', distance: 26, yaw: 0.35 },
+  { name: 'far', distance: 60, yaw: 0.35 },
   { name: 'rotated', distance: 16, yaw: 0.35 + (2 * Math.PI) / 3 },
 ];
 
