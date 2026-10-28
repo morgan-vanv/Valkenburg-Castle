@@ -693,7 +693,7 @@ export function pathTo(nodes: Map<string, Node>, to: Pos): Pos[] {
 }
 
 /** Unbounded BFS distance (in steps) from goals over walkable terrain. */
-export function distField(w: World, d: DelveX, goals: Pos[], opts: { stairs: boolean; allowLocked?: boolean }): Map<string, number> {
+export function distField(w: World, d: DelveX, goals: Pos[], opts: { stairs: boolean; allowLocked?: boolean; /** V5.0 (spec 32.14): hexes not to path through (the balance bot: a crew at peace standing on the way). */ blocked?: Set<string> }): Map<string, number> {
   const dist = new Map<string, number>();
   const q: Pos[] = [];
   for (const g of goals) {
@@ -707,7 +707,7 @@ export function distField(w: World, d: DelveX, goals: Pos[], opts: { stairs: boo
     const dp = dist.get(posKey(p))!;
     for (const [n] of steps(w, d, p, opts)) {
       const k = posKey(n);
-      if (dist.has(k)) continue;
+      if (dist.has(k) || opts.blocked?.has(k)) continue;
       dist.set(k, dp + 1);
       q.push(n);
     }

@@ -53,8 +53,8 @@ import { createEngine } from '../src/game/engine';
 import { testCastle } from '../src/game/test/testCastle';
 import { castle as realCastle } from '../src/data/castle';
 import { parsePosKey, posKey, samePos, type Pos } from '../src/game/hex';
-import type { ActionKind, ActionTarget, Command, Delve, GameState, HeroInDelve } from '../src/game/types';
-import { World, dirIndex, distField, fallColumn, fixedLit, kindAt, litSet, pitsNextTo } from '../src/game/world';
+import type { ActionKind, ActionTarget, Command, Delve, GameState, HeroInDelve, Monster } from '../src/game/types';
+import { World, dirIndex, distField, fallColumn, fixedLit, kindAt, litSet, pitsNextTo, noiseField } from '../src/game/world';
 import { inRearHalf } from '../src/game/stealth';
 import { posNeighbors } from '../src/game/hex';
 import type { Ctx, DelveX, GameStateX } from '../src/game/state';
@@ -65,6 +65,7 @@ import { calmReach } from '../src/game/calm';
 import { FACING, SHIELD_PRICE, WEAPON_PRICE, ARMOR_PRICE } from '../src/game/data'; // V3.9.1: the face command is shelved (off)
 import { quiverPerDelve } from '../src/game/data'; // V4.1 (WS6)
 import { squadSlots } from '../src/game/data'; // V4.1 (squads)
+import { SAPPER_CHARGE_NOISE } from '../src/game/data'; // V5.0 (spec 32.14)
 
 const N = Number(process.argv[2] ?? 20);
 const SEED = Number(process.env.SEED ?? 1);
@@ -112,12 +113,28 @@ const SAPPER = process.env.SAPPER === '1';
 /**
  * V4.1 (WS9): POLICY=v41 or prepared plays carefully (buys light and a cure, sneaks, sweeps loot, uses kit);
  * POLICY=careless buys nothing before a delve and never sneaks, but otherwise fights and loots like v41.
- * SCENARIO=l2 measures the Level 2 check: every delve is a fresh campaign whose party of four (levels 3, 3, 2, 2:
- * mean 2.5) takes a regular Level 2 contract with 300 gold to spend, Aldric and Wim home, reputation 2.
+ * SCENARIO=l1|l2|l3 measures one level: every delve is a fresh campaign whose party is built for it (SCENARIOS: Level 1
+ * three heroes at level 1 with 120 gold; Level 2 four at 3, 3, 2, 2 with 300 and Aldric and Wim home; Level 3 four at
+ * 4, 4, 3, 3 with 500 and the smith and alchemist home) and takes a regular contract there.
  */
 const CARELESS = process.env.POLICY === 'careless';
 const V41 = process.env.POLICY === 'v41' || process.env.POLICY === 'prepared' || CARELESS;
+/**
+ * V5.0 (spec 32.14): the discipline a prepared party has and a careless one hasn't: light before the dark, the lure,
+ * edges, cohesion, low-HP, retreat, no swings at a crew at peace. Careless keeps fighting, looting and kit use, so
+ * the gap between the two policies on one level is what the level's mechanics are worth (the owner's heuristic:
+ * Level 1 a small gap, Level 2 a wide one, Level 3 deadly for both).
+ */
+const CAREFUL = V41 && !CARELESS;
+/** SCENARIO=l1|l2|l3: every delve a fresh campaign with a party built for that level (see SCENARIOS). */
 const SCENARIO = process.env.SCENARIO ?? '';
+/** Per level: the party's levels (the heir first), camp gold, reputation; three heroes on Level 1 as a first delve has. */
+const SCENARIOS: Record<string, { levels: number[]; gold: number; rep: number; level: number }> = {
+  l1: { levels: [1, 1, 1], gold: 120, rep: 0, level: 1 },
+  l2: { levels: [3, 3, 2, 2], gold: 300, rep: 2, level: 2 },
+  l3: { levels: [4, 4, 3, 3], gold: 500, rep: 3, level: 3 },
+};
+const SCN = SCENARIOS[SCENARIO];
 const L2_SQUADS: HeroClass[][] = [['sellsword', 'burglar', 'ranger'], ['sapper', 'shadowmancer', 'hedgewitch'], ['sellsword', 'pyromancer', 'burglar'], ['ranger', 'hedgewitch', 'sapper']];
 const CSV = process.env.CSV ?? '';
 /** Gold the v41 bot keeps back in camp for potions and torches before it spends on the forge or ales. */
@@ -156,6 +173,7 @@ const dmgByClass: Record<string, DmgRow> = {};
 const dmgRow = (cls: string): DmgRow => (dmgByClass[cls] ??= { attacks: 0, hits: 0, dmg: 0, kills: 0, unawareAttacks: 0, unawareDmg: 0, unawareKills: 0, range: 0 });
 const DMG_ACTIONS = new Set(['attack', 'shoot', 'knockback', 'hamstring', 'firebolt', 'fireball', 'nightthorn', 'briar', 'throwCharge', 'dart', 'venomdart']);
 function run(s: GameState, cmd: Command): GameState {
+  if (VERBOSE && s.delve) console.log(`  > r${s.delve.round} ${cmd.type}${'heroId' in cmd ? ' ' + cmd.heroId : ''}${'action' in cmd ? ' ' + cmd.action : ''}${'path' in cmd && cmd.path ? ' ' + posKey(cmd.path[cmd.path.length - 1]!) : ''}`);
   stabbing = cmd.type === 'act' && cmd.action === 'attack' && e.preview(s, cmd.heroId, 'attack', cmd.target).modifiers.some((m) => m.startsWith('Backstab'));
   let unaware = false;
   let dmgCls: string | null = null;
@@ -304,6 +322,7 @@ function run(s: GameState, cmd: Command): GameState {
   for (const ev of r.events) {
     const key = ev.type === 'hit' ? (ev.target.startsWith('m') || ev.target.startsWith('r') ? 'hit:monster' : 'hit:hero') : ev.type === 'awake' ? `awake:${ev.awareness}` : ev.type;
     evCount[key] = (evCount[key] ?? 0) + 1;
+    if (ev.type === 'swing' && r.state.delve?.heroes.some((h) => h.heroId === ev.target)) bot.freeSwingsGiven++; // V5.0 (spec 32.14)
     if (ev.type === 'hit' && (ev.attacker === gloamId || r.state.delve?.monsters.find((m) => m.id === ev.attacker)?.kind === 'gloam')) gloamStrikes++;
     // V3.7 (spec 20.3): the Sapper's work.
     if (ev.type === 'downed' && s.delve?.rivals?.stance === 'hostile') crewStats.heroesDowned++;
@@ -347,9 +366,18 @@ function act(s: GameState, heroId: string, action: ActionKind, target: ActionTar
   return r;
 }
 
+/** Actions the bot never aims at a crew member while the crew is at peace (V5.0, spec 32.14). */
+const HOSTILE_ONLY = new Set<ActionKind>(['attack', 'firebolt', 'fireball', 'shoot', 'knockback', 'hamstring', 'nightthorn', 'briar', 'throwCharge', 'dart', 'venomdart', 'dread', 'gust', 'sleep', 'smoke']);
 function option(s: GameState, heroId: string, a: ActionKind) {
   const o = e.actions(s, heroId).find((o) => o.action === a);
-  return o && !o.blocked ? o : undefined;
+  if (!o || o.blocked) return undefined;
+  const cr = s.delve?.rivals;
+  if (cr && cr.stance !== 'hostile' && HOSTILE_ONLY.has(a)) {
+    // V5.0 (spec 32.14): a crew at peace is not a target; "an enemy in reach" means one the bot would strike.
+    const targets = o.targets.filter((t) => !cr.members.some((r) => r.id === t.id));
+    return targets.length ? { ...o, targets } : undefined;
+  }
+  return o;
 }
 
 const FRONT = SAPPER ? ['sapper', 'sellsword'] : ['sellsword', 'sapper'];
@@ -433,7 +461,7 @@ function goalFor(s: GameState): Pos[] {
   }
   const leaving = retreating || objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || d.round > 50 || d.heroes.some((h) => h.status === 'active' && h.carrying && h.carrying !== d.prisoner?.id);
   // V4.1 (POLICY=v41): a careful player sweeps what it knows of on the way, while it's quiet and there's time.
-  if (V41 && !retreating) {
+  if (CAREFUL && !retreating) {
     const loot = lootGoals(s);
     if (loot.length) return loot;
   }
@@ -624,9 +652,13 @@ function lightCheck(s: GameState, id: string): GameState {
   return s;
 }
 
-/** V4.1 (WS2): torches the bot packs for a contract level: 1 for Level 2, 3 for Level 3 (one more when rich); Level 1 none. */
+/**
+ * V4.1 (WS2): torches the bot packs for a contract level; Level 1 none. V5.0 (spec 32.14): 3 for Level 2 and 4 for
+ * Level 3 (one more when rich): a torch is 10 gold and a Level 2 delve runs 25 rounds; one torch had been leaving the
+ * party in the dark by round 20 with no way to light its way out.
+ */
 function torchesFor(level: number, gold: number): number {
-  const base = level >= 3 ? 3 : level === 2 ? 1 : 0;
+  const base = level >= 3 ? 4 : level === 2 ? 3 : 0;
   return base + (base && gold >= 300 ? 1 : 0);
 }
 
@@ -645,7 +677,12 @@ function buyLight(st: GameState, level: number): GameState {
   return st;
 }
 
-/** Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. V3.7: on every third crew delve, fight on purpose. */
+/**
+ * Spec 18.6: pay a cutthroat toll when the party can afford it; fight when it can't. V3.7: on every third crew delve,
+ * fight on purpose. V5.0 (spec 32.14): that was a way to exercise crew fights, not a thing a prepared party does, so
+ * it is off unless PICKFIGHT=1; the toll refused for want of gold still happens and is counted as the bot's own doing.
+ */
+const PICKFIGHT = process.env.PICKFIGHT === '1';
 let crewLog: string[] = [];
 let crewDelves = 0;
 let pickFight = false;
@@ -659,6 +696,7 @@ function parleyCheck(s: GameState, id: string): GameState {
     const f = e.deals(s, id).find((d) => d.deal === 'fight');
     if (f?.ok) {
       crewLog.push('picked a fight');
+      bot.fightsPicked++;
       return run(s, { type: 'deal', heroId: id, deal: 'fight' });
     }
     return s;
@@ -668,6 +706,7 @@ function parleyCheck(s: GameState, id: string): GameState {
     const f = e.deals(s, id).find((d) => d.deal === 'fight');
     if (f?.ok) {
       crewLog.push(`refused toll ${cr.toll ?? '?'} (on purpose)`);
+      bot.fightsPicked++;
       return run(s, { type: 'deal', heroId: id, deal: 'fight' });
     }
     return s; // out of parley range: they turn hostile on their own next phase
@@ -696,9 +735,19 @@ function parleyCheck(s: GameState, id: string): GameState {
   const fight = ds.find((d) => d.deal === 'fight');
   if (fight?.ok) {
     crewLog.push(`refused toll ${toll?.price ?? '?'}`);
+    bot.tollsRefused++;
     return run(s, { type: 'deal', heroId: id, deal: 'fight' });
   }
   return s;
+}
+
+/** V5.0 (spec 32.14): the hexes of a crew at peace (not hostile, still inside): the bot paths round them. */
+function peaceBlock(s: GameState): Set<string> {
+  const cr = s.delve?.rivals;
+  const out = new Set<string>();
+  if (!cr || cr.stance === 'hostile') return out;
+  for (const r of cr.members) if (r.hp > 0 && !r.goneOut) out.add(posKey(r.at));
+  return out;
 }
 
 /** Hex distance. */
@@ -882,16 +931,9 @@ function faceParty(s: GameState): GameState {
  * V5.0 (spec 32.14): light ahead. Before the lead moves, if the way ahead within 4 is dark (an unlit floor hex in sight,
  * not in castle light) and nothing burns, light the torch first: the party then sees what posts the dark before it is seen.
  */
-function lightAhead(s: GameState, id: string): GameState {
-  if (!V41 || CARELESS) return s;
+/** Unlit floor hexes in sight within 4 on the way ahead (nearer the goal than here); the lead lights at 3 or more. */
+function darkAhead(s: GameState, me: HeroInDelve): number {
   const d = s.delve as DelveX;
-  const me = d.heroes.find((x) => x.heroId === id)!;
-  if (me.status !== 'active' || me.acted) return s;
-  const lead = leadOf(d);
-  if (lead && lead.heroId !== id) return s;
-  if (me.pack.some((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit)) return s;
-  const t = option(s, id, 'torch') ?? option(s, id, 'shutter');
-  if (!t) return s;
   const lit = litSet(w, d);
   const fixed = fixedLit(w, d);
   const vis = e.visibility(s).visible;
@@ -904,14 +946,30 @@ function lightAhead(s: GameState, id: string): GameState {
     if ((field.get(k) ?? 999) >= here) continue; // only the way ahead
     if (!lit.has(k) && !fixed.has(k)) dark++;
   }
+  return dark;
+}
+const DARK_AHEAD = 3;
+
+function lightAhead(s: GameState, id: string): GameState {
+  if (!CAREFUL) return s;
+  const d = s.delve as DelveX;
+  const me = d.heroes.find((x) => x.heroId === id)!;
+  if (me.status !== 'active' || me.acted) return s;
+  const lead = leadOf(d);
+  if (lead && lead.heroId !== id) return s;
+  if (me.pack.some((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit)) return s;
+  const t = option(s, id, 'torch') ?? option(s, id, 'shutter');
+  if (!t) return s;
+  const lit = litSet(w, d);
+  const fixed = fixedLit(w, d);
   const standingDark = !lit.has(posKey(me.at)) && !fixed.has(posKey(me.at));
-  if (dark < 3 && !standingDark) return s;
+  if (darkAhead(s, me) < DARK_AHEAD && !standingDark) return s;
   return act(s, id, t.action, t.targets[0]!);
 }
 
 /** V5.0 (spec 32.14): the lead has a light to light but nothing burning: it keeps to lit hexes until it lights it. */
 function darkEdge(s: GameState, id: string): { has: (p: Pos) => boolean } | null {
-  if (!V41 || CARELESS) return null;
+  if (!CAREFUL) return null;
   const d = s.delve as DelveX;
   const me = d.heroes.find((x) => x.heroId === id)!;
   const lead = leadOf(d);
@@ -921,6 +979,7 @@ function darkEdge(s: GameState, id: string): { has: (p: Pos) => boolean } | null
   const lit = litSet(w, d);
   const fixed = fixedLit(w, d);
   if (!lit.has(posKey(me.at)) && !fixed.has(posKey(me.at))) return null; // already in the dark: light first, then move (lightAhead)
+  if (darkAhead(s, me) < DARK_AHEAD) return null; // a hex or two of dark (a stair, a doorway) is walked, not lit for
   return { has: (p) => lit.has(posKey(p)) || fixed.has(posKey(p)) };
 }
 
@@ -943,7 +1002,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const br = option(s, id, 'brace');
     if (br) {
       const adj = (option(s, id, 'attack')?.targets.filter((t) => t.at && Math.max(Math.abs(t.at.q - me.at.q), Math.abs(t.at.r - me.at.r), Math.abs(t.at.q + t.at.r - me.at.q - me.at.r)) === 1).length) ?? 0;
-      const desperate = V41 && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') && adj >= 1
+      const desperate = CAREFUL && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') && adj >= 1
         && !(option(s, id, 'attack')?.targets.some((t) => { const m = s.delve!.monsters.find((x) => x.id === t.id); return !!m && m.hp <= 2; }));
       if (adj >= 2 || desperate) {
         const before = s;
@@ -970,6 +1029,15 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
           if (!t.at) continue;
           const hit = e.blastPreview(s, t.at).hit;
           if (hit.some((x) => heroIds.has(x) && x !== id)) continue;
+          // V5.0 (spec 32.14): a blast (noise 8) in earshot of a sleeper the castle is known to hold (the barracks
+          // squad, the Dragon) wakes it: a prepared party knows the castle and holds the charge. Counted.
+          if (CAREFUL) {
+            const heard = noiseField(w, d as DelveX, t.at, SAPPER_CHARGE_NOISE);
+            const at = t.at;
+            // A blast is heard on the level above and below too, by straight distance (charges.ts `otherLevels`).
+            const wakes = (m: Monster) => heard.has(posKey(m.at)) || (Math.abs(m.at.level - at.level) === 1 && hexDistance(m.at, at) <= SAPPER_CHARGE_NOISE);
+            if (d.monsters.some((m) => m.awareness === 'asleep' && !m.buried && wakes(m))) { bot.chargesHeld++; continue; }
+          }
           const n = hit.filter((x) => foes.has(x)).length;
           const hunting = hit.some((x) => foes.get(x));
           if ((n >= 2 || (n === 1 && hunting && !inReach)) && (!best || n > best.n)) best = { t, n };
@@ -1022,9 +1090,13 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         continue;
       }
       // V3.7: focus fire back: the lowest-HP enemy in reach (crew members and monsters alike).
+      // V5.0 (spec 32.14): never a crew member while the crew isn't hostile (a paid toll had been turning into a fight
+      // two rounds later: the bot shot the burglar); and at 3 HP or less with no potion, no swing before the move has
+      // had its chance to back off, unless the swing can kill.
       if (a === 'attack' || a === 'firebolt') {
         const hpOf = (tid: string) => s.delve!.monsters.find((m) => m.id === tid)?.hp ?? s.delve!.rivals?.members.find((r) => r.id === tid)?.hp ?? 99;
         o.targets.sort((x, y) => hpOf(x.id!) - hpOf(y.id!));
+        if (CAREFUL && !me.moved && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') && hpOf(o.targets[0]!.id!) > 2) continue;
       }
       if (a === 'leave' && !(retreating || objectiveDone(s) || objectiveFailed(s) || outOfLight(s) || s.delve!.round > 50)) continue;
       // V4.1 (spec 31.4): the downed first (Mend gets them up at 2), then the poisoned; else the badly hurt.
@@ -1107,11 +1179,16 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const noLight = V41 && !CARELESS && isBearer && !d.heroes.some((h) => h.status === 'active' && h.pack.some((i) => (i.kind === 'torch' || i.kind === 'lantern') && i.lit)) && me.pack.some((i) => i.kind === 'torch' || i.kind === 'lantern');
       const litNow = noLight ? litSet(w, d) : null;
       const fixedNow = noLight ? fixedLit(w, d) : null;
+      // V5.0 (spec 32.14): a calm walk never ends on an unrailed edge with an awake monster within 3 (the hall orc on
+      // the pit's lip, L1-5): the Sapper had been walked onto the lip beside it and shoved into the Hollow.
+      const awake = CAREFUL ? d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep').map((m) => m.at) : [];
+      const lipHex = (p: Pos) => pitsNextTo(w, d, p).length > 0 && !w.tile(p)?.railing && awake.some((t) => t.level === p.level && hexDist(t, p) <= 3);
       for (const r of calmReach(c, id, sneak)) {
         if (inBlast(d, r.to)) continue;
+        if (lipHex(r.to)) continue;
         if (litNow && fixedNow && !litNow.has(posKey(r.to)) && !fixedNow.has(posKey(r.to))) continue;
         if (!isBearer && hexDist(r.to, bearer!.at) > 1 && r.to.level === bearer!.at.level) continue; // catch up to the bearer's side
-        if (V41 && !isBearer && r.to.level !== me.at.level && r.to.level !== bearer!.at.level) continue; // V5.0 (spec 32.14): not down the stairs ahead of the light
+        if (CAREFUL && !isBearer && r.to.level !== me.at.level && r.to.level !== bearer!.at.level) continue; // V5.0 (spec 32.14): not down the stairs ahead of the light
         const dd = field.get(posKey(r.to)) ?? 999;
         if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
           bestD = dd;
@@ -1136,9 +1213,16 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
     const d0 = s.delve as DelveX;
     const hexDist0 = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
     const threats0 = d0.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep' && m.at.level === me.at.level).map((m) => m.at);
-    const edgeNow = V41 && pitsNextTo(w, d0, me.at).length > 0 && !w.tile(me.at)?.railing && threats0.some((t) => hexDist0(t, me.at) <= 3);
-    const lowNow = V41 && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion');
-    if (!(enemyNear && !me.acted) || edgeNow || lowNow) {
+    const edgeNow = CAREFUL && pitsNextTo(w, d0, me.at).length > 0 && !w.tile(me.at)?.railing && threats0.some((t) => hexDist0(t, me.at) <= 3);
+    const lowNow = CAREFUL && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion');
+    // V5.0 (spec 32.14): engaged (an awake enemy that has noticed this hero, or a hostile crew member, adjacent): a
+    // step away provokes its swing (spec 31.11), so a careful hero stands and fights unless it is backing off an edge,
+    // low on HP, retreating or carrying someone out. The bot had been attacking, then walking off toward the goal, and
+    // taking twelve free swings a delve.
+    const engagedNow = CAREFUL && !retreating && !me.carrying && (d0.monsters.some((m) => !m.buried && m.kind !== 'gloam' && m.awareness === 'hunting' && m.at.level === me.at.level && hexDist0(m.at, me.at) === 1 && (m.noticedIds ?? []).includes(id))
+      || (d0.rivals?.stance === 'hostile' && d0.rivals.members.some((r) => r.hp > 0 && !r.goneOut && !r.downed && r.at.level === me.at.level && hexDist0(r.at, me.at) === 1)));
+    if (engagedNow && !edgeNow && !lowNow) bot.stoodEngaged++;
+    if ((!(enemyNear && !me.acted) || edgeNow || lowNow) && !(engagedNow && !edgeNow && !lowNow)) {
       const d = s.delve as DelveX;
       const vis = e.visibility(s).visible;
       const hunters = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.kind !== 'dragon' && m.awareness === 'hunting' && m.at.level === me.at.level
@@ -1149,18 +1233,21 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       const bow = ['ranger'].includes(e.heroById(s, id)?.cls ?? '');
       const lead0 = leadOf(d);
       const chase = hunters.filter((m) => !bow && (!lead0 || lead0.heroId === id || m.at.level !== lead0.at.level || hexDist0(m.at, lead0.at) <= COHESION + 1));
-      const apart = V41 && lead0 && lead0.heroId !== id && lead0.at.level !== me.at.level && !me.carrying;
+      const apart = CAREFUL && lead0 && lead0.heroId !== id && lead0.at.level !== me.at.level && !me.carrying;
       const goals = chase.length && !me.acted && !me.carrying ? chase.flatMap((m) => posNeighbors(m.at).filter((p) => kindAt(w, d, p) === 'floor')) : apart ? [lead0!.at] : routeFor(s, me.at).goals;
-      const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
+      // V5.0 (spec 32.14): a crew at peace standing on the way is a wall, not a path (the Choir under truce stood on
+      // the east bridge end for fifteen rounds while the party waited to walk through them).
+      const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true, blocked: peaceBlock(s) });
       const here = field.get(posKey(me.at)) ?? 999;
       const sneak = wantSneak(s, me);
       const reach = e.reachable(s, id, sneak);
+      if (VERBOSE) console.log(`  ? r${d.round} ${id}@${posKey(me.at)} move: goals ${goals.map(posKey).join(' ')} here ${here} reach ${reach.length} (walk ${e.reachable(s, id, false).length}) sneak ${sneak} rooted ${me.rooted ?? 0} webbed ${me.webbed} held ${me.grabbedBy ?? '-'} moved ${me.moved} acted ${me.acted} status ${me.status}`);
       // Squad cohesion: stay within COHESION of the lantern bearer; the bearer waits for stragglers on its level.
       const bearer = leadOf(d);
       const hexDist = (a: Pos, b: Pos) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
       const isBearer = !bearer || bearer.heroId === id;
       const stragglers = isBearer
-        ? d.heroes.filter((h) => h.status === 'active' && h.heroId !== id && h.at.level === me.at.level && !h.webbed && !h.grabbedBy && hexDist(h.at, me.at) > COHESION + 1)
+        ? d.heroes.filter((h) => h.status === 'active' && h.heroId !== id && h.at.level === me.at.level && hexDist(h.at, me.at) > COHESION + 1)
         : [];
       let best: (typeof reach)[0] | undefined;
       let bestD = here;
@@ -1169,10 +1256,10 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
       // shoved from; the bot never ends a move there when it has another choice, and steps off one before it fights.
       const threats = d.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep' && m.at.level === me.at.level)
         .map((m) => m.at).concat(d.rivals?.stance === 'hostile' ? d.rivals.members.filter((r) => r.hp > 0 && !r.goneOut && r.at.level === me.at.level).map((r) => r.at) : []);
-      const atEdge = (p: Pos) => V41 && pitsNextTo(w, d, p).length > 0 && !w.tile(p)?.railing && threats.some((t) => hexDist(t, p) <= 3);
+      const atEdge = (p: Pos) => CAREFUL && pitsNextTo(w, d, p).length > 0 && !w.tile(p)?.railing && threats.some((t) => hexDist(t, p) <= 3);
       // V5.0 (spec 32.14): a hero at 3 HP or less with no potion and an enemy in reach backs away toward the party instead
       // of trading blows (counted); the lead keeps the party's HP in mind through shouldRetreat.
-      const lowHp = V41 && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') && !!enemyNear;
+      const lowHp = CAREFUL && me.hp <= 3 && !me.pack.some((i) => i.kind === 'potion' || i.kind === 'greaterpotion') && !!enemyNear;
       // A lit fuse nearby: anywhere out of its blast area beats the goal this turn.
       const ducking = inBlast(d, me.at) && reach.some((r) => !inBlast(d, r.to));
       if (!(isBearer && stragglers.length && !hunters.length) || ducking) {
@@ -1185,11 +1272,11 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
           }
           if (!isBearer && bearer && r.to.level === bearer.at.level && hexDist(r.to, bearer.at) > COHESION && hexDist(me.at, bearer.at) <= COHESION) continue;
           // V5.0 (spec 32.14): already beyond cohesion (the bearer stopped to fight): never farther from the bearer.
-          if (V41 && !isBearer && bearer && r.to.level === bearer.at.level && hexDist(me.at, bearer.at) > COHESION && hexDist(r.to, bearer.at) >= hexDist(me.at, bearer.at) && !chase.length) continue;
+          if (CAREFUL && !isBearer && bearer && r.to.level === bearer.at.level && hexDist(me.at, bearer.at) > COHESION && hexDist(r.to, bearer.at) >= hexDist(me.at, bearer.at) && !chase.length) continue;
           // V5.0 (spec 32.14): nobody takes the stairs ahead of the light; one left behind on the bearer's old level
           // only moves to follow it (the link), not toward the goal.
-          if (V41 && !isBearer && bearer && r.to.level !== me.at.level && r.to.level !== bearer.at.level) continue;
-          if (atEdge(r.to) && !atEdge(me.at)) { bot.edgeStepsAvoided++; continue; }
+          if (CAREFUL && !isBearer && bearer && r.to.level !== me.at.level && r.to.level !== bearer.at.level) continue;
+          if (atEdge(r.to)) { bot.edgeStepsAvoided++; continue; } // never an edge hex with an enemy near, even from one (the lip walk)
           if (edge && !edge.has(r.to)) continue; // V5.0 (spec 32.14): not into the dark unlit
           const dd = field.get(posKey(r.to)) ?? 999;
           if (dd < bestD || (dd === bestD && best && r.cost < best.cost)) {
@@ -1199,7 +1286,7 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         }
       }
       // V5.0 (spec 32.14): standing at an edge with an enemy near: any hex off the edge beats staying (even away from the goal).
-      if (!best && atEdge(me.at) && !me.acted) {
+      if (!best && atEdge(me.at)) { // after the swing too: a shove into the pit is worse than a free swing
         let bd = 999;
         for (const r of reach) {
           if (atEdge(r.to) || inBlast(d, r.to)) continue;
@@ -1227,8 +1314,23 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
         const bf = distField(w, d, [bearer.at], { stairs: true, allowLocked: true });
         let bd = bf.get(posKey(me.at)) ?? 999;
         for (const r of reach) {
+          if (atEdge(r.to) || inBlast(d, r.to)) continue;
           const dd = bf.get(posKey(r.to)) ?? 999;
           if (dd < bd) { bd = dd; best = r; }
+        }
+      }
+      // V5.0 (spec 32.14): the bearer waiting for a straggler who can't come (rooted, webbed, held: an archer in the
+      // dark kept a Ranger rooted for sixty rounds while the party stood) goes to them instead.
+      if (!best && isBearer && stragglers.length && !hunters.length) {
+        const stuck = stragglers.filter((h) => (h.rooted ?? 0) > 0 || h.webbed || h.grabbedBy);
+        if (stuck.length) {
+          const sf = distField(w, d, stuck.map((h) => h.at), { stairs: true, allowLocked: true });
+          let bd = sf.get(posKey(me.at)) ?? 999;
+          for (const r of reach) {
+            if (inBlast(d, r.to) || atEdge(r.to)) continue;
+            const dd = sf.get(posKey(r.to)) ?? 999;
+            if (dd < bd) { bd = dd; best = r; }
+          }
         }
       }
       if (best) {
@@ -1246,17 +1348,22 @@ function heroTurn(s: GameState, h: HeroInDelve): GameState {
   if (alive() && !hero()!.acted && hero()!.moved && !option(s, id, 'attack')) {
     const me2 = hero()!;
     const goals = routeFor(s, me2.at).goals;
-    const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true });
+    const field = distField(w, s.delve as DelveX, goals, { stairs: true, allowLocked: true, blocked: peaceBlock(s) });
     const here = field.get(posKey(me2.at)) ?? 999;
     let best: ReturnType<typeof e.reachable>[0] | undefined;
     let bestD = here;
     const d2 = s.delve as DelveX;
     const bearer2 = leadOf(d2);
     const edge2 = darkEdge(s, id);
+    // V5.0 (spec 32.14): the dash keeps off unrailed edges near awake monsters too (the Sapper had dashed onto the
+    // hall pit's lip beside the patrol and been shoved two levels down).
+    const awake2 = CAREFUL ? d2.monsters.filter((m) => !m.buried && m.kind !== 'gloam' && m.awareness !== 'asleep' && m.at.level === me2.at.level).map((m) => m.at) : [];
+    const lip2 = (p: Pos) => pitsNextTo(w, d2, p).length > 0 && !w.tile(p)?.railing && awake2.some((t) => Math.max(Math.abs(t.q - p.q), Math.abs(t.r - p.r), Math.abs(t.q + t.r - p.q - p.r)) <= 3);
     for (const r of e.reachable(s, id, false)) {
       if (!r.dash || inBlast(d2, r.to)) continue;
+      if (lip2(r.to)) { bot.edgeStepsAvoided++; continue; }
       if (edge2 && !edge2.has(r.to)) continue; // V5.0 (spec 32.14)
-      if (V41 && bearer2 && bearer2.heroId !== id && r.to.level !== me2.at.level && r.to.level !== bearer2.at.level) continue; // not down the stairs ahead of the light
+      if (CAREFUL && bearer2 && bearer2.heroId !== id && r.to.level !== me2.at.level && r.to.level !== bearer2.at.level) continue; // not down the stairs ahead of the light
       if (bearer2 && bearer2.heroId !== id && r.to.level === bearer2.at.level && Math.max(Math.abs(r.to.q - bearer2.at.q), Math.abs(r.to.r - bearer2.at.r), Math.abs(r.to.q + r.to.r - bearer2.at.q - bearer2.at.r)) > COHESION) continue;
       const dd = field.get(posKey(r.to)) ?? 999;
       if (dd < bestD) { bestD = dd; best = r; }
@@ -1328,7 +1435,7 @@ const rows: Row[] = [];
  * V5.0 (spec 32.14): the bot's own mistakes, counted so the difficulty numbers can be read against them. A death that
  * follows an unforced error says less about the castle than one that doesn't.
  */
-const bot = { retreats: 0, shovedOffEdge: 0, diedHoldingPotion: 0, foughtAtLowHp: 0, edgeStepsAvoided: 0, lowHpBackedOff: 0, firecrackersBought: 0, lures: 0, potionsTaken: 0 };
+const bot = { fightsPicked: 0, tollsRefused: 0, freeSwingsGiven: 0, stoodEngaged: 0, chargesHeld: 0, retreats: 0, shovedOffEdge: 0, diedHoldingPotion: 0, foughtAtLowHp: 0, edgeStepsAvoided: 0, lowHpBackedOff: 0, firecrackersBought: 0, lures: 0, potionsTaken: 0 };
 let campaignNo = 1;
 let campDelve = 0;
 const stashValue = (st: GameState) => st.campaign.stash.filter((i) => VALUABLE.has(i.kind) && !i.story).reduce((a, i) => a + i.amount, 0);
@@ -1413,22 +1520,31 @@ for (let i = 0; i < N; i++) {
   }
   campDelve++;
   let scenarioContract: Contract | undefined;
-  if (SCENARIO === 'l2') {
+  if (SCN) {
+    // V5.0 (spec 32.14): SCENARIO=l1|l2|l3: a fresh campaign a delve, the party built for the level (SCENARIOS), a
+    // regular contract there. Level 1 sends three (a first delve); the village is as it would be by then.
     s = e.newGame(SEED + i * 7919);
     campaignNo = i + 1;
     campDelve = 1;
     const C = s.campaign;
     const keven = C.roster.find((h) => h.id === 'keven')!;
-    const k3 = makeHero('keven', keven.name, keven.cls, 3);
-    C.roster = [k3, ...L2_SQUADS[i % L2_SQUADS.length]!.map((cls, j) => makeHero(`l2h${i}-${j}`, `${cls[0]!.toUpperCase()}${cls.slice(1)} ${j}`, cls, j === 0 ? 3 : 2))];
-    C.gold = 300;
-    C.reputation = 2;
-    C.squadSlots = 4; // V5.0 (spec 32.14): the scenario promises four; the 31.12 cap had been sending three
-    C.village.surgeon = true;
-    C.village.innkeeper = true;
-    const sites = castle.contractSites.filter((x) => x.at.level === 2 && !x.story && !x.hideout);
+    const kv = makeHero('keven', keven.name, keven.cls, SCN.levels[0]!);
+    const squad = L2_SQUADS[i % L2_SQUADS.length]!.slice(0, SCN.levels.length - 1);
+    C.roster = [kv, ...squad.map((cls, j) => makeHero(`l2h${i}-${j}`, `${cls[0]!.toUpperCase()}${cls.slice(1)} ${j}`, cls, SCN.levels[j + 1]!))];
+    C.gold = SCN.gold;
+    C.reputation = SCN.rep;
+    C.squadSlots = SCN.levels.length; // V5.0 (spec 32.14): the scenario promises four; the 31.12 cap had been sending three
+    if (SCN.level >= 2) {
+      C.village.surgeon = true;
+      C.village.innkeeper = true;
+    }
+    if (SCN.level >= 3) {
+      C.village.smith = true;
+      C.village.alchemist = true;
+    }
+    const sites = castle.contractSites.filter((x) => x.at.level === SCN.level && !x.story && !x.hideout && x.kind !== 'slay');
     const site = sites[i % sites.length]!;
-    scenarioContract = { id: `l2-${i}`, kind: site.kind, title: `L2 ${site.kind} at ${site.where}`, brief: '', siteId: site.id, level: 2, bounty: 200, warnings: [], subject: site.kind === 'recover' ? 'the old reeve\'s seal' : 'a carter from Lowgate' } as Contract;
+    scenarioContract = { id: `${SCENARIO}-${i}`, kind: site.kind, title: `L${SCN.level} ${site.kind} at ${site.where}`, brief: '', siteId: site.id, level: SCN.level, bounty: 100 * SCN.level, warnings: [], subject: site.kind === 'recover' ? 'the old reeve\'s seal' : 'a carter from Lowgate' } as Contract;
     C.board = [scenarioContract, ...C.board];
   }
   if (V41) s = campSell(s);
@@ -1563,7 +1679,7 @@ for (let i = 0; i < N; i++) {
   const crewName = s.delve!.rivals?.crew ?? '';
   if (rivals) {
     crewDelves++;
-    pickFight = crewDelves % 3 === 0;
+    pickFight = PICKFIGHT && crewDelves % 3 === 0;
     if (pickFight) crewLog.push('fight delve');
   } else pickFight = false;
   const isRescue = k.id.startsWith('cap-');
@@ -1748,7 +1864,16 @@ for (const kd of [...new Set(rows.map((r) => r.contract))].sort()) {
   const fd = rs.filter((r) => r.firstDown > 0);
   console.log(`  ${kd.padEnd(12)} n ${String(n).padStart(3)}  done ${String(Math.round((100 * k) / n)).padStart(3)}% [${Math.round(100 * lo)}–${Math.round(100 * hi)}]  retreated ${cnt('retreated')}  lost ${cnt('lost')}  wiped ${cnt('wiped')}  ran out ${cnt('ran out')}  hurt ${(rs.reduce((a, r) => a + r.hurtShare, 0) / n).toFixed(2)}  first down r${fd.length ? (fd.reduce((a, r) => a + r.firstDown, 0) / fd.length).toFixed(1) : '—'} (${fd.length}/${n})  deaths ${rs.reduce((a, r) => a + r.deaths, 0)}`);
 }
-console.log(`the bot's own mistakes: retreats called ${bot.retreats}; lures thrown ${bot.lures} (firecrackers bought ${bot.firecrackersBought}); shoved or knocked off an edge ${bot.shovedOffEdge}; died holding a potion ${bot.diedHoldingPotion} (potions taken from the downed ${bot.potionsTaken}); swung at ≤3 HP with no potion ${bot.foughtAtLowHp}; edge hexes avoided ${bot.edgeStepsAvoided}; backed off low on HP ${bot.lowHpBackedOff}`);
+// The same, split by whether a crew turned hostile: a crew fight is a different delve from a monster delve.
+for (const [label, rs] of [['crew hostile', rows.filter((r) => r.crew.includes('hostile'))], ['no crew fight', rows.filter((r) => !r.crew.includes('hostile'))]] as const) {
+  const n = rs.length;
+  if (!n) continue;
+  const k = rs.filter((r) => r.outcome === 'done').length;
+  const [lo, hi] = wilson(k, n);
+  const cnt = (o: Row['outcome']) => rs.filter((r) => r.outcome === o).length;
+  console.log(`  ${label.padEnd(12)} n ${String(n).padStart(3)}  done ${String(Math.round((100 * k) / n)).padStart(3)}% [${Math.round(100 * lo)}–${Math.round(100 * hi)}]  retreated ${cnt('retreated')}  lost ${cnt('lost')}  wiped ${cnt('wiped')}  ran out ${cnt('ran out')}  hurt ${(rs.reduce((a, r) => a + r.hurtShare, 0) / n).toFixed(2)}  deaths ${rs.reduce((a, r) => a + r.deaths, 0)}`);
+}
+console.log(`the bot's own mistakes: crew fights picked ${bot.fightsPicked}, tolls refused for want of gold ${bot.tollsRefused}; free swings given ${bot.freeSwingsGiven} (stood and fought ${bot.stoodEngaged}); charges held for a sleeper in earshot ${bot.chargesHeld}; retreats called ${bot.retreats}; lures thrown ${bot.lures} (firecrackers bought ${bot.firecrackersBought}); shoved or knocked off an edge ${bot.shovedOffEdge}; died holding a potion ${bot.diedHoldingPotion} (potions taken from the downed ${bot.potionsTaken}); swung at ≤3 HP with no potion ${bot.foughtAtLowHp}; edge hexes avoided ${bot.edgeStepsAvoided}; backed off low on HP ${bot.lowHpBackedOff}`);
 console.log('\nper contract type:  n  done%  rounds  light  deaths');
 const kinds = [...new Set(rows.map((r) => r.contract))].sort();
 for (const kd of kinds) {
