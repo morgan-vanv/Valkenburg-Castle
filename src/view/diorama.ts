@@ -21,6 +21,9 @@ import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, exitShut, linkEnds, linkMarker, prizeInHand } from './links';
 import { heardFade, heardIcon, heardTitle } from './sounds';
 import { INTENT_ICON, iconSvg, intentTone } from './icons';
+import { LookPost, POST } from './look/post';
+import { FILL, POINT, makeFill, placeKey, setupShadowLight, type SourceKind } from './look/lights';
+import { featuresOf, readQuality, type Quality, type QualityFeatures } from './look/quality';
 
 const MAX_LIGHTS = 12;
 
@@ -59,8 +62,8 @@ function viewLights(state: GameState): ViewLight[] {
   for (const g of d.glows ?? []) if (g.rounds > 0) out.push({ kind: 'arrow', radius: 2, ...(g.on ? { holder: g.on } : {}), at: g.at });
   return out;
 }
-/** Floating text starts just above a hero's head (V3.3 scale: heroes are 2.0). */
-const FLOAT_LIFT = 2.25;
+/** Floating text starts just above a hero's head (V5.0 scale: heroes are 1.35). */
+const FLOAT_LIFT = 1.6;
 /** How far below the shown level we draw through pits. */
 const BELOW_HALO = 3;
 
@@ -134,6 +137,12 @@ export class Diorama {
   private flashLight: THREE.PointLight;
   private ambient: THREE.AmbientLight;
   private hemi: THREE.HemisphereLight;
+  private keyLight: THREE.DirectionalLight;
+  /** V5.0 (G): the sharp overlay scene and the post chain. */
+  readonly overlayScene = new THREE.Scene();
+  private post: LookPost;
+  quality: Quality = 'high';
+  private features: QualityFeatures = featuresOf('high');
   private highlights = new Map<HighlightStyle, THREE.InstancedMesh>();
   /** V4.0 HUD (spec 27): the floor a hovered monster sees: bright ahead, faint at an unaware monster's sides. */
   private sightFront!: THREE.InstancedMesh;
@@ -271,29 +280,35 @@ export class Diorama {
     void 0;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.setClearColor(COLORS.void, 1);
-    this.scene.background = new THREE.Color(COLORS.void);
+    // V5.0 (G): ACES tone mapping, the look's haze and background; the post chain and quality below.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = POST.exposure;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.setClearColor(FILL.background, 1);
+    this.scene.background = new THREE.Color(FILL.background);
+    this.scene.fog = new THREE.FogExp2(FILL.haze.color, FILL.haze.density);
     this.rig = new CameraRig(canvas);
 
-    // Near-black ambient; light comes from the lantern, torches and braziers.
-    this.ambient = new THREE.AmbientLight(0x3a3f4a, 0.4);
-    this.hemi = new THREE.HemisphereLight(0x9aa4b8, 0x2a2018, 0.55);
-    const rim = new THREE.DirectionalLight(COLORS.cold, 0.22);
-    rim.position.set(-6, 9, -8);
-    // A soft key from above-left so wall faces and props have form.
-    const key = new THREE.DirectionalLight(0xfff0dc, 0.55);
-    key.position.set(-20, 40, 25);
-    this.scene.add(this.ambient, this.hemi, rim, rim.target, key, key.target);
+    // V5.0 (G): the lab's fill (physical units) and a warm key kept on the camera's side (placeKey).
+    const fill = makeFill();
+    this.ambient = fill.ambient;
+    this.hemi = fill.hemi;
+    this.keyLight = fill.key;
+    this.scene.add(this.ambient, this.hemi, this.keyLight, this.keyLight.target);
     for (let i = 0; i < MAX_LIGHTS; i++) {
-      const l = new THREE.PointLight(COLORS.emberHot, 0, 10, 1.3);
+      const l = new THREE.PointLight(COLORS.emberHot, 0, 10, 1.4);
       this.scene.add(l);
       this.lights.push(l);
     }
+    setupShadowLight(this.lights[0]!);
     this.flashLight = new THREE.PointLight(0xffd2a0, 0, 20, 1.2);
     this.scene.add(this.flashLight);
-    this.scene.add(this.propGroup, this.overlay);
+    // V5.0 (G): overlays live in their own scene, drawn sharp after the post chain (look/post.ts).
+    this.scene.add(this.propGroup);
+    this.overlayScene.add(this.overlay);
+    this.post = new LookPost(this.renderer);
+    this.setQuality(readQuality());
 
     // Overlays.
     for (const style of Object.keys(HIGHLIGHT_COLORS) as HighlightStyle[]) {
@@ -630,7 +645,17 @@ export class Diorama {
     const w = this.container.clientWidth || innerWidth;
     const h = this.container.clientHeight || innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post.setSize(w, h);
     this.rig.resize(w, h);
+  }
+
+  /** V5.0 (G): switch render quality live (Settings; scripts pass ?quality=low). */
+  setQuality(q: Quality): void {
+    this.quality = q;
+    this.features = featuresOf(q);
+    this.renderer.shadowMap.enabled = this.features.shadows;
+    this.post.setFeatures(this.features);
+    this.resize();
   }
 
   private loop = (): void => {
@@ -653,7 +678,7 @@ export class Diorama {
       this.updateLights(t);
       this.updateOverlay(t, dtReal);
       this.effects.update(t);
-      this.renderer.render(this.scene, this.rig.camera);
+      this.post.render(this.scene, this.overlayScene, this.rig.camera);
       this.updateDom();
     }
     requestAnimationFrame(this.loop);
@@ -686,13 +711,14 @@ export class Diorama {
   /** Render one frame now (for screenshots in a throttled headless tab). */
   renderNow(): void {
     this.rig.update(1, this.clock.real);
+    this.updateCutaway();
     this.updateLights(this.clock.real);
-    this.renderer.render(this.scene, this.rig.camera);
+    this.post.render(this.scene, this.overlayScene, this.rig.camera);
     this.updateDom();
   }
 
   private updateLights(t: number): void {
-    type Src = { at: THREE.Vector3; radius: number; color: number; power: number; seed: number };
+    type Src = { at: THREE.Vector3; radius: number; color: number; power: number; kind: SourceKind; seed: number };
     const srcs: Src[] = [];
     // V4.1 (WS2): the lantern model hangs at the hip of the first hero carrying an open lantern; every carried or dropped
     // torch and lantern, and every crew member's light, is a point light (lanterns warmer and wider).
@@ -717,23 +743,23 @@ export class Diorama {
         const v = this.units.get(L.holder);
         if (!v || !v.shown || v.at.level !== this.shownLevel) continue;
         const off = L.kind === 'lantern' ? new THREE.Vector3(0.3, v.height + 0.5, 0.3) : L.kind === 'crew' ? new THREE.Vector3(0.2, v.height + 0.3, 0.2) : new THREE.Vector3(-0.3, v.height + 0.4, 0.2);
-        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: L.kind === 'crew' ? 0.7 : L.kind === 'torch' ? 0.95 : 1, seed: srcs.length * 1.7 });
+        srcs.push({ at: v.root.position.clone().add(off), radius: L.radius, color: L.kind === 'lantern' ? 0xffb862 : L.kind === 'crew' ? 0xe8c890 : L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 1, kind: L.kind, seed: srcs.length * 1.7 });
       } else {
         if (!this.vis.explored.has(posKey(L.at))) continue;
-        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.9, seed: srcs.length * 2.3 + 0.5 });
+        srcs.push({ at: this.worldOf(L.at, 0.4), radius: L.radius, color: L.kind === 'arrow' ? 0x9ff0d0 : 0xff9a40, power: 0.9, kind: L.kind, seed: srcs.length * 2.3 + 0.5 });
       }
     }
     const lv = this.levels.get(this.shownLevel);
     if (lv) {
       const target = this.rig.currentTarget();
       const pool: (Src & { d: number })[] = [];
-      for (const b of lv.braziers.values()) if (b.lit) pool.push({ at: b.center.clone().add(new THREE.Vector3(0, 0.3, 0)), radius: 3, color: 0xff8a30, power: 1, seed: b.center.x, d: b.center.distanceToSquared(target) });
+      for (const b of lv.braziers.values()) if (b.lit) pool.push({ at: b.center.clone().add(new THREE.Vector3(0, 0.3, 0)), radius: 3, color: 0xff8a30, power: 1, kind: 'brazier', seed: b.center.x, d: b.center.distanceToSquared(target) });
       // Fixed lights are baked into the floors; the nearest few also get a point light so figures pick them up.
       for (const f of lv.fixedLights) {
         if (!lv.lightShown(f)) continue;
         const d = f.at.distanceToSquared(target);
         if (d > 22 * 22) continue;
-        pool.push({ at: f.at, radius: Math.max(1.5, f.radius), color: f.color, power: f.power * (f.def.kind === 'fire' ? 0.9 : 0.55), seed: f.at.x * 3.1 + f.at.z, d });
+        pool.push({ at: f.at, radius: Math.max(1.5, f.radius), color: f.color, power: f.power, kind: f.def.kind, seed: f.at.x * 3.1 + f.at.z, d });
       }
       pool.sort((a, b) => a.d - b.d);
       for (const p of pool) if (srcs.length < MAX_LIGHTS) srcs.push(p);
@@ -753,6 +779,21 @@ export class Diorama {
       }
     }
     setFogTime(t);
+    // V5.0 (G): the strongest source nearest the camera target takes the one shadow-casting light (pool slot 0).
+    {
+      const target = this.rig.currentTarget();
+      let best = -1;
+      let bestScore = -Infinity;
+      srcs.forEach((s, i) => {
+        if (s.kind === 'daylight' || s.kind === 'fungus' || s.kind === 'glow') return;
+        const score = POINT[s.kind].intensity * s.power - s.at.distanceTo(target) * 1.5;
+        if (score > bestScore) {
+          bestScore = score;
+          best = i;
+        }
+      });
+      if (best > 0) [srcs[0], srcs[best]] = [srcs[best]!, srcs[0]!];
+    }
     for (let i = 0; i < MAX_LIGHTS; i++) {
       const l = this.lights[i]!;
       const s = srcs[i];
@@ -762,13 +803,16 @@ export class Diorama {
       }
       const flicker = 1 + Math.sin(t * 11 + s.seed) * 0.05 + Math.sin(t * 23 + s.seed * 2) * 0.03 + Math.sin(t * 5.3 + s.seed) * 0.04;
       const reach = s.radius * Math.sqrt(3) * HEX + 2.2;
+      const p = POINT[s.kind];
       l.color.setHex(s.color);
       l.distance = reach;
-      l.decay = 1.1;
-      l.intensity = (3 + s.radius * 1.3) * s.power * flicker;
+      l.decay = p.decay;
+      l.intensity = p.intensity * (0.7 + s.radius * 0.1) * s.power * flicker;
       l.position.copy(s.at);
       l.position.y += Math.sin(t * 7 + s.seed) * 0.02;
     }
+    this.lights[0]!.castShadow = this.features.shadows;
+    placeKey(this.keyLight, this.rig.camera, this.rig.currentTarget());
     // Braziers flicker.
     if (lv)
       for (const b of lv.braziers.values())

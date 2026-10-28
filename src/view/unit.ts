@@ -15,23 +15,29 @@ export type UnitSide = 'hero' | 'monster' | 'rival' | 'prisoner';
  * 0.8x wide, orc 1.05x, berserker a head taller, captain like an orc, ghoul gaunt at hero
  * height, the Gloam looming. The Dragon is built in world units and drawn at 1 (unchanged).
  */
-export const HERO_SCALE = 2.0;
+/**
+ * V5.0 (G, W0): the owner's figurine scale: a hero stands about 1.35 hexes (For the King 1), so today's
+ * figures are drawn at 1.35 / 2.0 of their V3.3 size until W3 rebuilds them on the joint rig. The Dragon
+ * is built in world units and keeps scale 1.
+ */
+export const HERO_SCALE = 1.35;
+const K = HERO_SCALE / 2.0;
 export const FIGURE_SCALE: Partial<Record<ModelKey, number>> = {
-  heir: 2.0,
-  rats: 1.3,
-  orc: 2.1,
-  archer: 2.0,
-  captain: 2.1,
-  ghoul: 2.0,
-  cutpurse: 1.9,
-  berserker: 2.5,
-  spider: 1.25,
-  gloam: 1.8,
-  sister: 1.95,
-  sisterRanger: 1.95,
-  sisterShadow: 1.95,
-  sisterBurglar: 1.95,
-  prisoner: 1.9,
+  heir: 2.0 * K,
+  rats: 1.3 * K,
+  orc: 2.1 * K,
+  archer: 2.0 * K,
+  captain: 2.1 * K,
+  ghoul: 2.0 * K,
+  cutpurse: 1.9 * K,
+  berserker: 2.5 * K,
+  spider: 1.25 * K,
+  gloam: 1.8 * K,
+  sister: 1.95 * K,
+  sisterRanger: 1.95 * K,
+  sisterShadow: 1.95 * K,
+  sisterBurglar: 1.95 * K,
+  prisoner: 1.9 * K,
   dragon: 1,
   dragonSleep: 1,
 };
@@ -88,7 +94,7 @@ export class UnitView {
       sil.renderOrder = -1;
       this.fig.add(sil);
     }
-    this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.0);
+    this.scale = FIGURE_SCALE[key] ?? (side === 'hero' ? HERO_SCALE : 2.0 * K);
     this.fig.scale.setScalar(this.scale);
     this.fig.traverse((o) => {
       o.userData.unitId = id;
