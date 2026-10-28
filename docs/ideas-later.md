@@ -51,3 +51,7 @@ Spec 32.6 asks whenever any hero can still do something plausible (move, act, ta
 ## Take the stairs together (owner, 2026-10-28: tabled for a future session)
 
 Pitched with the stairs rework (spec 32.15): with a hero on a stair hex, one command walks every hero within 3 who hasn't moved to the stairs and across, placed around the landing in party order, each spending their move (not their action); one click, the party arrives as a group, the view flips once. The shelved "follow" idea (docs/shelved/exploration-mode.md) brought back for the one place it matters. The owner wants the quick, elegant fixes first (the landing, the free crossing, the view staying put, the peek) and this explored later.
+
+## The toll and the demand, solidified (owner, 2026-10-28: a later V5 refinement)
+
+Spec 32.16 is a stopgap the owner accepted "for now": empty pockets are let by once and the toll never exceeds what the party carries. To settle properly in a V5.x pass: what a cutthroat crew does when the party comes back past it loaded (demand again, as now, or escort, or a cut on the way out only); whether the floor of 50 means anything once the toll is capped; whether a purse from camp gold should exist (option b); how the demand reads in the HUD (the Carrying tip, the stance card) and in the crew's words; and whether a let-by crew should stay a threat (noise, a lookout) rather than a free pass. Measure with the bot's "crew hostile / no crew fight" split before and after.
