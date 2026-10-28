@@ -388,7 +388,20 @@ export class App {
       sfx.play('levelup', { gain: 0.8 });
       setTimeout(() => sfx.play('horn', { pitch: 1.2, gain: 0.35 }), 260);
     } else if (cmd.type === 'startDelve') this.wonBack = [];
+    // V5.0 (spec 32.15): the selected hero crossed while others still have to: hand the selection to the next able
+    // hero on the level shown, before the render looks at anyone.
+    if (this.stayOn !== null && this.state?.delve) {
+      const lvl = this.stayOn;
+      this.stayOn = null;
+      const next = this.state.delve.heroes.find((x) => x.status === 'active' && x.at.level === lvl && !(x.moved && x.acted));
+      if (next) this.hud.select(next.heroId);
+    }
     this.render(cmd.type === 'startDelve');
+    // V5.0 (spec 32.15): the threshold's peek, said once as a hero stops on the stairs (the status mark keeps it).
+    if (cmd.type === 'move' && this.state?.stage === 'delve') {
+      const pk = this.hud.peekLine(cmd.heroId);
+      if (pk) this.hud.log(pk.text, pk.figures ? 'log-enemy' : '');
+    }
     // V5.0 (P, spec 32.5, 32.6): the flow. A done hero hands the camera on after a beat; with nothing left for anyone,
     // the turn ends on its own.
     if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.scheduleFlow();
@@ -916,6 +929,18 @@ export class App {
           this.hud.log(`${this.hud.nameOf(e.id)} is out.`);
           await this.dio.playEvent(e);
           continue;
+        case 'levelChanged': {
+          // V5.0 (spec 32.15): the selected hero took the stairs while another able hero who hasn't finished their
+          // turn is still on the level they left: after the command the selection goes to that hero (`stayOn`), so
+          // the view comes back to the level with work left on it. (The diorama follows the crossing itself; not
+          // following while `stayOn` is set is on G's list.)
+          const d = this.state?.delve;
+          const stay = !!d && e.id === this.hud.selectedId && e.to !== e.from
+            && d.heroes.some((x) => x.heroId !== e.id && x.status === 'active' && x.at.level === e.from && !(x.moved && x.acted));
+          if (stay) this.stayOn = e.from;
+          await this.dio.playEvent(e);
+          continue;
+        }
         default:
           await this.dio.playEvent(e);
       }
@@ -995,6 +1020,9 @@ export class App {
   }
 
   /** End of the world phase: back to the selected hero. */
+  /** V5.0 (spec 32.15): the level the view is to stay on after the selected hero took the stairs (null: follow). */
+  private stayOn: number | null = null;
+
   private returnToSelected(): void {
     const s = this.state;
     const id = this.hud.selectedId;

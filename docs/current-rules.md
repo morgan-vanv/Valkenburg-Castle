@@ -252,7 +252,7 @@ Code: world-phase.ts `worldPhase`, `computeIntents`; engine.ts `apply`/`run`/`re
 
 - Walk 4 (Burglar 5, V4.0). Sneak 2 (Burglar 4; Smuggler's Mead 4). A dash goes as far as a first move. Escorting the prisoner: 3 at most. Carrying a heavy item: 3 at most (both cap the Burglar too). V4.0 (spec 28): crew members move as heroes of their class, walk or sneak, and dash (section 12.2).
 - Walk or sneak is each hero's own setting for the delve (`HeroInDelve.moveMode`, V4.0): Burglars start on `sneak`, everyone else on `walk` (absent, as in older saves: walk). The free `setMoveMode` command (`{ heroId, sneak }`) changes it for that hero only. A `move` without `sneak` uses it, as do `reachable`, `moveNoise` and `calmReach` when their `sneak` argument is left out; an explicit `sneak` on a move wins and doesn't change the setting.
-- Rubble costs 2. Stairs: stepping from a stairs hex to its linked hex costs 1. Lift: the same, once the winch is worked.
+- Rubble costs 2. Stairs: stepping from a stairs hex to its linked hex costs 0 (V5.0, spec 32.15; was 1). Lift: the same, once the winch is worked.
 - Can't enter walls, pillars, props, tall props, braziers, pits, cracked walls, the sealed stair, locked closed doors, or a hex with a monster or non-hired crew member. Heroes pass through heroes, the prisoner and hired crew members; they can't end on anyone.
 - Unlocked closed doors open as a path passes through them and stay open.
 - Webbed, grabbed, dozing or rooted heroes can't move or dash (they may still act unless dozing).
@@ -878,8 +878,9 @@ V4.1: a hero who drank Dragonfire Porter takes 2 less from all of these, from fi
 
 ### 13.6 Stairs, lift, winch, sealed stair
 
-- Tower stair: L1 (37, 3) ↔ L2 (37, 3), cost 1. Monsters use it only while hunting.
-- Lift: L2 winch room (24, 27) ↔ L3 lift base (24, 27), cost 1, only after the winch (L2 (25, 27)) is worked by a hero (action, noise 6) or a crew job. Runs for the rest of the delve.
+- Tower stair: L1 (37, 3) ↔ L2 (37, 3). V5.0 (spec 32.15): the step across is free (on 1, across 0, off 1: a sneaking hero clears the stairs in one move). Monsters use it only while hunting.
+- Lift: L2 winch room (24, 27) ↔ L3 lift base (24, 27), the crossing free like the stairs (V5.0), only after the winch (L2 (25, 27)) is worked by a hero (action, noise 6) or a crew job. Runs for the rest of the delve.
+- **The peek** (V5.0, spec 32.15): a hero on a stair hex (or a working lift) sees the other level within 3 of the link, in the link's line of sight and light, no facing; monsters within 3 of the link see the hero on the stairs by the usual noticing rules, and a monster on a stair hex sees heroes within 3 of its link. A hunting monster climbs when the stair hex is free; a hero on it holds the stairs. Crews don't peek. The HUD marks a hero on the stairs with an eye and says what's at the foot (in the log too as they stop there).
 - Sealed Stair (L3): never opens.
 - L2 has a collapsed-floor pit at (3, 23) in the cellblock that drops into the Drain.
 

@@ -7,6 +7,7 @@ import type { DelveX } from './state';
 import { DARK_SIGHT, FIXED_LIGHT_SIGHT, LIGHT_BRIGHT, LIGHT_DIM, LIGHT_MAX, MONSTER_DARK_SIGHT, MONSTER_SIGHT } from './data';
 import { GLOW_ARROW_RADIUS } from './data'; // V4.1 (WS6)
 import { CREW_LIGHT_RADIUS, LANTERN_LOW_AT, LANTERN_MAX, LANTERN_RADIUS_FULL, LANTERN_RADIUS_LOW, NIGHTEYE_ALE, TORCH_RADIUS, TORCH_ROUNDS } from './data'; // V4.1 (WS2)
+import { PEEK_RANGE, STAIR_CROSS_COST } from './data'; // V5.0 (spec 32.15)
 
 export class World {
   readonly levels = new Map<number, LevelDef>();
@@ -594,6 +595,28 @@ export function visibleSet(w: World, d: DelveX, lit?: Set<string>): Set<string> 
       if (los(w, d, h.at, p)) (near ? out : distant).add(k);
     }
   }
+  // V5.0 (spec 32.15): the peek. A hero on a stair hex (or a working lift) looks across: the hexes within PEEK_RANGE
+  // of the linked hex on the other level, in its line of sight and in whatever light is there, no facing.
+  for (const h of eyes) {
+    const o = peekFrom(w, d, h.at);
+    if (!o) continue;
+    const sr = Math.min(PEEK_RANGE, sightRangeAt(w, d, o, L));
+    for (const n of range(o, PEEK_RANGE)) {
+      const p = { level: o.level, ...n };
+      if (!w.tile(p)) continue;
+      const k = posKey(p);
+      if (out.has(k)) continue;
+      const dist = distance(o, p);
+      if (dist === 0) {
+        out.add(k);
+        continue;
+      }
+      const near = dist <= sr;
+      if (!near && !far(k)) continue;
+      if (smoky(d, p) || smoky(d, o)) continue;
+      if (los(w, d, o, p)) (near ? out : distant).add(k);
+    }
+  }
   // Walls next to seen floor are revealed (15.1), but not around a far light (17.4): a
   // distant fire shows the fire, not the room. Daylight still floods its whole patch.
   addEdgeWalls(w, d, out);
@@ -638,15 +661,20 @@ export function steps(w: World, d: DelveX, p: Pos, opts: { stairs: boolean; allo
     if (!canEnter(w, d, n, opts.allowLocked)) continue;
     out.push([n, kindAt(w, d, n) === 'rubble' ? 2 : 1]);
   }
-  if (opts.stairs && kindAt(w, d, p) === 'stairs') {
-    const o = w.stairs.get(posKey(p));
-    if (o) out.push([o, 1]);
-  }
-  if (opts.stairs && d.liftWorking && kindAt(w, d, p) === 'lift') {
-    const o = w.lifts.get(posKey(p));
-    if (o) out.push([o, 1]);
+  // V5.0 (spec 32.15): the step across is free (STAIR_CROSS_COST): on, across and off in one walk or sneak.
+  if (opts.stairs) {
+    const o = peekFrom(w, d, p);
+    if (o) out.push([o, STAIR_CROSS_COST]);
   }
   return out;
+}
+
+/** V5.0 (spec 32.15): the hex on the other level a figure on `p` would cross to: a stair's link, or a working lift's. */
+export function peekFrom(w: World, d: DelveX, p: Pos): Pos | null {
+  const k = kindAt(w, d, p);
+  if (k === 'stairs') return w.stairs.get(posKey(p)) ?? null;
+  if (k === 'lift' && d.liftWorking) return w.lifts.get(posKey(p)) ?? null;
+  return null;
 }
 
 /** Dijkstra from `from`. Returns nodes by posKey (start included, cost 0). */

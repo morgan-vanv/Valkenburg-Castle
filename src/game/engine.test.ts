@@ -313,11 +313,16 @@ describe('movement', () => {
     expect(e.actions(dashed, 'brann').some((a) => a.action === 'attack')).toBe(false);
   });
 
-  it('stairs cost 1 and change level', () => {
+  it('stairs change level; V5.0 (spec 32.15): the step across is free, so on, across and off is 2', () => {
     const s = delve();
     put(s, 'brann', at(1, 2, 7));
     const down = e.reachable(s, 'brann', false).find((r) => r.to.level === 2 && samePos(r.to, at(2, 2, 4)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // from the stair hex itself
+    // A sneaking hero (2) standing beside the stairs gets on, across and off the far stair hex in one move.
+    put(s, 'brann', at(1, 2, 6));
+    const over = e.reachable(s, 'brann', true).filter((r) => r.to.level === 2);
+    expect(over.some((r) => !samePos(r.to, at(2, 2, 4)) && r.cost === 2)).toBe(true);
+    put(s, 'brann', at(1, 2, 7));
     const r = ok(s, { type: 'move', heroId: 'brann', path: down.path, sneak: false });
     expect(hero(r.state, 'brann').at.level).toBe(2);
     expect(r.events.some((x) => x.type === 'levelChanged')).toBe(true);
@@ -1142,7 +1147,7 @@ describe('lift and winch (14.6)', () => {
     s = r.state;
     expect(s.delve!.liftWorking).toBe(true);
     const down = e.reachable(s, 'brann', false).find((x) => samePos(x.to, at(3, 1, 6)))!;
-    expect(down.cost).toBe(1);
+    expect(down.cost).toBe(0); // V5.0 (spec 32.15): the crossing is free, as the stairs
     expect(e.actions(s, 'brann').some((o) => o.action === 'winch')).toBe(false);
   });
 
@@ -5080,7 +5085,7 @@ describe('V4.0 play-test fixes (spec 26)', () => {
   /** A Level 2 scene: Keven (the lantern) far off on Level 1, so Level 2 is lit only by the forge. */
   function scene(extra: [string, string, HeroClass][] = [], heroes = ['keven', 'brann']) {
     const s = delve({ heroes, extra });
-    put(s, 'keven', at(1, 2, 7));
+    put(s, 'keven', at(1, 2, 6)); // V5.0 (spec 32.15): not on the stair hex, or Level 2's orcs would see him up the stairs
     setLantern(s, { rounds: 20 });
     setLantern(s, { bearer: 'keven' });
     return s;

@@ -2609,6 +2609,8 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-si.warded { color: #9cc8ff; }
 .dl-si.overwatch { color: var(--dl-cream); }
 .dl-si.doze { color: #c9c3b5; }
+/* V5.0 (P, spec 32.15): on the stairs: the peek (red when something waits at the foot). */
+.dl-si.peek { color: var(--dl-cream); }
 .dl-rcard.dark:not(.sel) .dl-hexb { filter: saturate(0.35) brightness(0.8); }
 .dl-rcard.dark .dl-rcard-n { color: #a9a9c4; }
 .dl-rcard.poisoned .dl-hp { box-shadow: inset -6px 0 0 var(--venom-dim); }

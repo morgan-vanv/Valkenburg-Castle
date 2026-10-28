@@ -8,13 +8,14 @@ interface Box {
   ev: GameEvent[];
   s?: GameState;
 }
-import type { Engine, Reach, RollPreview, Visibility } from './api';
+import type { Engine, Peek, Reach, RollPreview, Visibility } from './api';
 import { classInfo } from './data';
 import type { Ctx, DelveX, GameStateX, ReactionPolicy } from './state';
 import { Pause } from './react'; // V4.1 (spec 31.13)
 import { blastPreview, migrateSatchel } from './charges';
 import { calmReach } from './calm';
-import { litSet, sightRangeAt, visibleSet, World } from './world';
+import { litSet, peekFrom, sightRangeAt, visibleSet, World } from './world';
+import { PEEK_RANGE } from './data'; // V5.0 (spec 32.15)
 import { brightnessAt } from './common';
 import { lightsOf, migrateLight, siteUnlit } from './light'; // V4.1 (WS2)
 import { migrateArrows, syncGlows } from './arrows'; // V4.1 (WS6)
@@ -216,6 +217,28 @@ export function createEngine(castle: CastleDef, opts: EngineOptions = {}): Engin
       };
     },
 
+    // V5.0 (spec 32.15): the threshold's peek, for the HUD line and the bot.
+    peek(state, heroId): Peek | null {
+      const c = rctx(state);
+      const h = c ? hd(c, heroId) : undefined;
+      if (!c || !h || h.status !== 'active') return null;
+      const o = peekFrom(w, c.d, h.at);
+      if (!o) return null;
+      const lit = litSet(w, c.d);
+      const vis = visibleSet(w, c.d, lit);
+      const dist = (p: Pos) => Math.max(Math.abs(p.q - o.q), Math.abs(p.r - o.r), Math.abs(p.q + p.r - o.q - o.r));
+      const figures: Peek['figures'] = [];
+      for (const m of c.d.monsters) {
+        if (m.buried || m.at.level !== o.level || dist(m.at) > PEEK_RANGE || !vis.has(posKey(m.at))) continue;
+        figures.push({ id: m.id, name: m.name, kind: m.kind, dist: dist(m.at), mood: m.awareness, at: { ...m.at } });
+      }
+      for (const r of rivalsOnMap(c)) {
+        if (r.at.level !== o.level || dist(r.at) > PEEK_RANGE || !vis.has(posKey(r.at))) continue;
+        figures.push({ id: r.id, name: r.name, kind: r.cls, dist: dist(r.at), mood: 'crew', at: { ...r.at } });
+      }
+      figures.sort((a, b) => a.dist - b.dist || a.id.localeCompare(b.id));
+      return { level: o.level, down: o.level > h.at.level, lit: lit.has(posKey(o)) || sightRangeAt(w, c.d, o, lit) > 1, figures };
+    },
     visibility(state): Visibility {
       const c = rctx(state);
       if (!c) return { visible: new Set(), explored: new Set(), lit: new Set() };

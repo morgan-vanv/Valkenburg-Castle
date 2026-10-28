@@ -16,7 +16,7 @@ import {
   goHunting, hd, heroName, hurtAny, hurtHero, hurtPrisoner, isKit, killHero, loseQuarry, makeNoise, monsterStats, nameOf, noteOnce, occupant,
   onMap, releaseHold, rivalsOnMap, roll,
 } from './common';
-import { canEnter, dijkstra, isFloorish, kindAt, litSet, los, pathTo, visibleSet, within } from './world';
+import { canEnter, dijkstra, isFloorish, kindAt, litSet, los, pathTo, visibleSet, within, peekFrom } from './world';
 import { awayFrom, checkDelveEnd, pusherFor, refreshSight, unlitOnL3, visNow } from './delve';
 import { push, pushOutcome } from './falls';
 import { dragonSpecial, planDragon } from './dragon';
@@ -24,6 +24,7 @@ import {
   adjacentTo, approach, attackSpots, blocked, byDist, exitsBy, foes, hamstringIntent, hamstringShot, hitRange, overwatchCheck, sees, strike, targets, walk, wardOf, type Target,
 } from './ai';
 import { HAMSTRING_RANGE } from './data';
+import { PEEK_RANGE } from './data'; // V5.0 (spec 32.15)
 import { computeRivalIntents, crewNotice, rivalsAct } from './rivals';
 import { relockGate } from './ways';
 import { tickFuses } from './charges';
@@ -379,8 +380,18 @@ export function lookAll(c: Ctx, first?: string, before?: () => void, anyPhase = 
   for (const m of onMap(c)) {
     if (m.kind === 'gloam' || m.kind === 'dragon' || m.awareness === 'asleep') continue;
     const hs = heroes.filter((x) => x.at.level === m.at.level);
-    if (!hs.length) continue;
-    const r = lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first);
+    const r = hs.length ? lookRound(c, { at: m.at, facing: m.facing, mood: moodOf(m), noticed: [...(m.noticedIds ?? [])] }, hs, lit, first) : { ids: [] as string[], turnedTo: undefined as string | undefined };
+    // V5.0 (spec 32.15): a monster on a stair hex looks up (or down) the stairs too: heroes within PEEK_RANGE of its
+    // link, seen from the link.
+    const om = peekFrom(c.w, c.d, m.at);
+    if (om) {
+      const hs2 = heroes.filter((x) => !x.peek && x.at.level === om.level && distance(x.at, om) <= PEEK_RANGE && !r.ids.includes(x.id));
+      if (hs2.length) {
+        const r2 = lookRound(c, { at: om, facing: m.facing, mood: r.ids.length ? 'hunting' : moodOf(m), noticed: [...(m.noticedIds ?? []), ...r.ids] }, hs2, lit, first);
+        r.ids.push(...r2.ids);
+        r.turnedTo ??= r2.turnedTo;
+      }
+    }
     if (r.ids.length) found.push({ m, ...r });
   }
   if (!found.length) return false;

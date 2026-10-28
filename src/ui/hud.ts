@@ -1017,6 +1017,27 @@ export class Hud {
   }
 
   /** The mood words: "unaware, at its post", "searching", "hunting Corin". */
+  /**
+   * V5.0 (spec 32.15): the threshold's peek, in words: "Down the stairs: an orc on patrol, 2 hexes; an archer, 3 hexes."
+   * Null when the hero stands on neither a stair hex nor a working lift.
+   */
+  peekLine(heroId: string): { text: string; figures: number } | null {
+    const s = this.state;
+    if (!s || !this.engine.peek) return null;
+    const p = this.engine.peek(s, heroId);
+    if (!p) return null;
+    const where = p.down ? `Down the ${p.level === 3 && s.delve?.liftWorking ? 'lift' : 'stairs'}` : `Up the ${s.delve?.liftWorking && p.level === 2 ? 'lift' : 'stairs'}`;
+    const mood = (f: (typeof p.figures)[number]) => f.mood === 'crew' ? 'a crew member' : f.mood === 'asleep' ? 'asleep' : f.mood === 'hunting' ? 'hunting' : f.mood === 'alert' ? 'searching' : f.mood === 'patrol' ? 'on patrol' : 'at its post';
+    if (!p.figures.length) return { text: `${where} (${this.levelName(p.level)}): ${p.lit ? 'nothing moves in sight of the landing' : 'too dark to make anything out'}. What's there sees you on the stairs too.`, figures: 0 };
+    const list = p.figures.map((f) => `${f.name.toLowerCase()} ${f.mood === 'crew' ? '' : mood(f) + ', '}${f.dist} hex${f.dist === 1 ? '' : 'es'} from the foot`).join('; ');
+    return { text: `${where} (${this.levelName(p.level)}): ${list}. They can see you on the stairs too; a hunter will climb.`, figures: p.figures.length };
+  }
+
+  private levelName(level: number): string {
+    const n = this.engine.castle().levels.find((l) => l.level === level)?.name ?? `Level ${level}`;
+    return n.replace(/^The /, 'the ');
+  }
+
   private moodWords(m: Monster): string {
     if (m.kind === 'gloam') return 'the dark itself';
     if (m.awareness === 'asleep') return 'asleep';
@@ -2509,10 +2530,10 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const coin = items.filter((i) => i.kind === 'gold').reduce((a, i) => a + i.amount, 0);
     const rest = items.filter((i) => i.kind === 'gem' || i.kind === 'jewelry' || i.kind === 'heirloom' || i.kind === 'hoard');
     const words = [coin ? `${coin} gold` : '', ...rest.map((i) => (i.kind === 'heirloom' || i.kind === 'hoard' ? i.name : `${article(i.name)} ${i.name.toLowerCase()}`))].filter(Boolean);
-    const toll = Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5);
+    const toll = Math.min(value, Math.max(TOLL_MIN, Math.round(value / 2 / 5) * 5)); // V5.0 (spec 32.16): never more than you carry
     return h(
       'div',
-      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} (now ${toll}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
+      { class: 'dl-carry dl-pan', tabindex: 0, 'data-tip': `Carrying · worth ${value} gold\nWhat a crew's toll is worked out from: half of it, at least ${TOLL_MIN} but never more than you carry (now ${value ? toll : 'nothing: empty pockets are let by, and taxed on the way out'}). Hired crews may turn on a party carrying ${BETRAY_LOOT} or more when their deal ends.${words.length ? `\n${words.join(', ')}.` : ''}` },
       h('span', { class: 'dl-kick dl-kick-dim' }, 'Carrying'),
       value > 0 ? h('span', { class: 'dl-carry-v' }, h('span', { class: `num dl-goldtxt ${value >= BETRAY_LOOT ? 'rich' : ''}` }, `${value}`), h('span', { class: 'dl-carry-w' }, ` · ${shortList(words)}`)) : h('span', { class: 'dl-carry-w' }, 'Nothing yet'),
     );
@@ -2634,6 +2655,9 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (risk) add('bad edge', 'drop', `By a drop · a shove would send ${name} ${risk.levels === 1 ? '1 level' : `${risk.levels} levels`} down into ${risk.levelName} (${risk.damage} damage).\nStep away from the drop, or kill whatever could shove.`);
     const nightEye = (hd.nightEyes ?? 0) > 0 || hd.ale === 'nighteye'; // V4.1 (WS2): Night-eye Stout
     if (darkSight !== null) add(`dark ${nightEye ? 'night' : ''}`, 'moon', nightEye ? `In the dark · night-eye: sight ${darkSight} and whole rolls.` : `In the dark · ${name} stands outside all light: sees only ${darkSight} hex${darkSight === 1 ? '' : 'es'} and rolls at −20% or worse.${hd.at.level === 3 ? '\nIn the Hollow the dark itself hunts anyone standing unlit.' : `\nMonsters notice an unlit hero within ${V37.noticeDarkWalk} walking, ${V37.noticeDarkSneak} sneaking.`}`);
+    // V5.0 (spec 32.15): on the stairs (or the working lift): what the peek shows.
+    const pk = this.peekLine(hd.heroId);
+    if (pk) add(pk.figures ? 'bad peek' : 'peek', 'eye', pk.text);
     if (hd.grabbedBy) add('bad grab', 'chain', `Held · by ${d.monsters.find((m) => m.id === hd.grabbedBy)?.name ?? 'a ghoul'}: can't move or dash.\nBreak free (2 Might tries, 1 hit frees you) or kill it.`);
     else if (hd.webbed) add('bad', 'chain', "Webbed · can't move this turn, can still act. It clears next round.");
     else if (hd.dreaded) add('bad dread', 'flee', `Dread · ${name} can move this turn but not act (a crew Shadowmancer's Dread).`); // V4.1 (WS7)
