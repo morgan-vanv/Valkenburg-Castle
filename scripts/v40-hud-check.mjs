@@ -593,6 +593,45 @@ if (crewAt) {
 }
 
 // ---- the return report
+// V5.0 (P, B5, spec 32.5): auto end turn. Everyone spent, nothing in reach: after a beat the turn ends by itself (a toast
+// says so). With the setting off, or with Take in reach, it waits.
+{
+  const spent = () => p.evaluate(() => {
+    const s = structuredClone(window.vc.state());
+    s.delve.ground = [];
+    s.delve.monsters = [];
+    s.delve.rivals = null;
+    s.delve.prisoner = null;
+    s.delve.pending = undefined;
+    for (const h of s.delve.heroes) { if (h.status === 'active') { h.moved = true; h.acted = true; h.dashed = true; h.pack = h.pack.filter((i) => i.kind !== 'potion'); } }
+    window.vc.load(s);
+    return s.delve.round;
+  });
+  await p.evaluate(() => { window.vc.settings.autoEndTurn = false; });
+  const ra = await spent();
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForTimeout(700);
+  check('auto end turn off: everyone spent, the turn stays open', (await p.evaluate(() => window.vc.state().delve.round)) === ra);
+  await p.evaluate(() => { window.vc.settings.autoEndTurn = true; });
+  const rb = await spent();
+  const nothingLeft = await p.evaluate(() => { const s = window.vc.state(); const E = window.vcEngine; return s.delve.heroes.filter((h) => h.status === 'active').map((h) => ({ id: h.heroId, reach: E.reachable(s, h.heroId, false).length, acts: E.actions(s, h.heroId).filter((o) => !o.blocked).map((o) => o.action) })); });
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForFunction(() => /Ending the turn/.test(document.querySelector('.hud-toast')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
+  const toastEarly = await p.evaluate(() => document.querySelector('.hud-toast')?.textContent ?? '');
+  await p.waitForFunction((r) => window.vc.state().delve && window.vc.state().delve.round === r + 1 && !window.vc.busy(), rb, { timeout: 20000 }).catch(() => {});
+  await idle();
+  const rc = await p.evaluate(() => window.vc.state().delve.round);
+  check('auto end turn on: everyone spent, the turn ends by itself after a beat', rc === rb + 1, `${rb} → ${rc}; ${JSON.stringify(nothingLeft)}`);
+  check('...and a toast said so', /Ending the turn/.test(toastEarly), toastEarly);
+  // Take in reach keeps it open.
+  const rd = await spent();
+  await p.evaluate(() => { const s = structuredClone(window.vc.state()); const h = s.delve.heroes.find((x) => x.status === 'active'); s.delve.ground.push({ at: { ...h.at }, items: [{ id: 'ae-g', kind: 'potion', name: 'Potion', amount: 1, slots: 1 }] }); window.vc.load(s); });
+  await p.evaluate(() => window.vc.send({ type: 'setMoveMode', heroId: window.vc.state().delve.heroes.find((h) => h.status === 'active').heroId, sneak: false }));
+  await p.waitForTimeout(700);
+  check('auto end turn on, but loot to take: the turn stays open', (await p.evaluate(() => window.vc.state().delve.round)) === rd);
+  await p.evaluate(() => { const s = structuredClone(window.vc.state()); s.delve.ground = []; for (const h of s.delve.heroes) { h.moved = false; h.acted = false; h.dashed = false; } window.vc.load(s); });
+}
+
 await p.evaluate(async () => {
   const E = window.vcEngine;
   const exit = E.castle().entrances[0];

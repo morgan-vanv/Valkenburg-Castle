@@ -12,9 +12,11 @@ export interface Settings {
   cutaway: boolean;
   /** V4.0 HUD: hover cards always show the full rules card (as if Alt were held), for touch screens. */
   fullCards: boolean;
+  /** V5.0 (P, spec 32.5): end the turn on its own when no hero can move, act or use anything. On by default. */
+  autoEndTurn: boolean;
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, autoEndTurn: true };
 
 export function loadSettings(): Settings {
   try {

@@ -388,6 +388,8 @@ export class App {
     } else if (cmd.type === 'startDelve') this.wonBack = [];
     this.render(cmd.type === 'startDelve');
     if (this.state?.stage === 'delve' && (cmd.type === 'move' || cmd.type === 'act')) this.hud.autoAdvance();
+    // V5.0 (P, B5, spec 32.5): with nothing left for anyone, the turn ends on its own after a beat.
+    if (this.state?.stage === 'delve' && cmd.type !== 'endTurn' && cmd.type !== 'react') this.hud.maybeAutoEnd();
     // V4.1 (WS2): the "Go in with the lantern shut" checkbox is gone: lanterns and torches go in unlit.
     return true;
   }

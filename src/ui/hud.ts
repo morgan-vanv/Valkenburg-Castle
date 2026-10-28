@@ -27,6 +27,7 @@ import { INTENT_ICON, iconSvg, type IconName } from '../view/icons';
 import { Chronicle } from './hud-chronicle';
 import { Coach } from './coach';
 import { bonusSlots, cap, dieHex, hitTable, lightWords, modifierChip, noiseWords, oddsWords, outcomeBar, readRoll, statName, type RollRead } from './hud-roll';
+import { partyDone } from './autoend'; // V5.0 (P, B5)
 
 export { hitOdds } from './hud-roll';
 
@@ -276,6 +277,7 @@ export class Hud {
     // Clicking anywhere else closes the More menu and the game menu.
     addEventListener('pointerdown', (e) => {
       const t = e.target as Node;
+      this.cancelAutoEnd(); // V5.0 (P, B5): a click is the player's: the turn waits for them
       if (!this.moreEl.classList.contains('hidden') && !this.moreEl.contains(t) && !(t instanceof Element && t.closest('[data-more]'))) this.moreEl.classList.add('hidden');
       if (!this.menuEl.classList.contains('hidden') && !this.menuEl.contains(t) && !(t instanceof Element && t.closest('[data-menu]'))) this.menuEl.classList.add('hidden');
       // V4.1 (spec 31.13): the Reactions popover closes on a click elsewhere.
@@ -351,6 +353,39 @@ export class Hud {
     this.refresh();
   }
 
+  // ---- V5.0 (P, B5, spec 32.5): auto end turn
+  private autoEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * After a command: when the setting is on and nobody can move, act or use anything, end the turn after a short beat
+   * (long enough to read what just happened; cancelled by any input, panel or playback in between). Never while a
+   * reaction, a roll panel, a pick or a confirmation is open. Skips the idle question: nobody here could act.
+   */
+  maybeAutoEnd(): void {
+    this.cancelAutoEnd();
+    const s = this.state;
+    if (!s || !this.host.settings.autoEndTurn || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+    if (!partyDone(this.engine, s)) return;
+    const beat = this.host.settings.speed === 0 ? 220 : 700;
+    this.autoEndTimer = setTimeout(() => {
+      this.autoEndTimer = null;
+      const now = this.state;
+      if (!now || this.busy || this.reactWait || this.pv || this.pending || this.confirmBox || this.parleyHero) return;
+      if (!this.host.settings.autoEndTurn || !partyDone(this.engine, now)) return;
+      this.toast('Everyone has done what they can. Ending the turn.');
+      this.coach.done(3);
+      this.coach.done(1);
+      void this.host.send({ type: 'endTurn' });
+    }, beat);
+  }
+
+  cancelAutoEnd(): void {
+    if (this.autoEndTimer !== null) {
+      clearTimeout(this.autoEndTimer);
+      this.autoEndTimer = null;
+    }
+  }
+
   /** After a command: if the selected hero is spent, select the next one with something left. */
   autoAdvance(): void {
     const d = this.state?.delve;
@@ -362,6 +397,7 @@ export class Hud {
   }
 
   setBusy(b: boolean): void {
+    if (b) this.cancelAutoEnd();
     this.busy = b;
     this.root.classList.toggle('busy', b);
     if (b) {
@@ -3224,6 +3260,11 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
           st.noEndTurnAsk = !v;
           save();
         }),
+        check('Auto end turn', st.autoEndTurn !== false, (v) => {
+          st.autoEndTurn = v;
+          save();
+          if (!v) this.cancelAutoEnd();
+        }, 'When nobody can move, act or use anything, the turn ends on its own after a moment. Any key or click keeps it open.'),
         check('Lower walls near the camera', !!st.cutaway, (v) => {
           st.cutaway = v;
           save();
@@ -3486,6 +3527,7 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
   private onKey(e: KeyboardEvent): void {
     const s = this.state;
     if (!s?.delve || this.root.classList.contains('hidden')) return;
+    this.cancelAutoEnd(); // V5.0 (P, B5): any key is the player's: the turn waits for them
     // V4.1 (spec 31.13): the reaction card takes its keys first, and only those, while the castle waits.
     // V5.0 (P, B3): E is deliberately inert here. The card has two real answers and comes up during the castle's turn,
     // right after the player pressed E to end theirs; a second E must not strike (and blow their cover) unread.
