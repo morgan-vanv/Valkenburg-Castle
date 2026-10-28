@@ -12,9 +12,11 @@ export interface Settings {
   cutaway: boolean;
   /** V4.0 HUD: hover cards always show the full rules card (as if Alt were held), for touch screens. */
   fullCards: boolean;
+  /** V5.0 (G): render quality. 'low' = no shadow, bloom or tilt-shift, pixel ratio 1 (headless checks use it). */
+  quality?: 'high' | 'low';
 }
 
-const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false };
+const DEFAULTS: Settings = { speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: false, fullCards: false, quality: 'high' };
 
 export function loadSettings(): Settings {
   try {

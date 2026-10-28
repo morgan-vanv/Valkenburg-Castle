@@ -35,6 +35,12 @@ export interface FogMaterialOptions {
   glow?: boolean;
   /** Instanced floors: draw material patterns from `aMat` and hex edges. */
   floor?: boolean;
+  /** V5.0 (G): build a flat-shaded MeshStandardMaterial (the look's stone and wood) instead of Lambert. */
+  standard?: boolean;
+  roughness?: number;
+  metalness?: number;
+  /** V5.0 (G): scale of the engraved hex-edge lines on floors (0 for bevelled tiles with real gaps). */
+  edge?: number;
 }
 
 /** Shared cutaway state, updated by the diorama every frame. */
@@ -45,7 +51,13 @@ export const CUTAWAY = {
   height: { value: 0.3 },
 };
 
-export type FogMaterial = THREE.MeshLambertMaterial & { userData: { fog: { value: number }; dim: { value: number } } };
+export type FogMaterial = (THREE.MeshLambertMaterial | THREE.MeshStandardMaterial) & { userData: { fog: { value: number }; dim: { value: number } } };
+
+/**
+ * V5.0 (G): gain on the fog shader's own light (the baked fixed-light glow and the lit floor of warmth). The
+ * look's fill already lights the scene in physical units, so these additive terms are turned well down.
+ */
+export const LOOK_GAIN = { value: 0.32 };
 
 /** Global dimming of explored squares; tweak for readability. */
 export const EXPLORED_LEVEL = 0.26;
@@ -109,7 +121,7 @@ const FLOOR_FRAG = `
       diffuseColor.rgb = mix(diffuseColor.rgb * (0.88 + n1 * 0.12), vec3(0.82, 0.78, 0.68), fleck * 0.6);
       lines = 0.2;
     }
-    diffuseColor.rgb *= 1.0 - edge * lines;
+    diffuseColor.rgb *= 1.0 - edge * lines * uEdge;
   }
 }
 `;
@@ -121,7 +133,7 @@ export function setFogTime(t: number): void {
 }
 
 export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
-  const m = new THREE.MeshLambertMaterial({
+  const common = {
     color: opts.color ?? 0xffffff,
     flatShading: true,
     vertexColors: opts.vertexColors ?? false,
@@ -129,7 +141,9 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
     transparent: opts.transparent ?? false,
     opacity: opts.opacity ?? 1,
     side: opts.side ?? THREE.FrontSide,
-  }) as FogMaterial;
+  };
+  const m = (opts.standard ? new THREE.MeshStandardMaterial({ ...common, roughness: opts.roughness ?? 0.82, metalness: opts.metalness ?? 0 }) : new THREE.MeshLambertMaterial(common)) as FogMaterial;
+  const edge = { value: opts.edge ?? 1 };
   const fog = { value: 1 };
   const dim = { value: opts.litFloor ?? 0.1 };
   m.userData.fog = fog;
@@ -146,6 +160,8 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
     shader.uniforms.uLitFloor = dim;
     shader.uniforms.uExplored = { value: EXPLORED_LEVEL };
     shader.uniforms.uTime = timeUniform;
+    shader.uniforms.uLook = LOOK_GAIN;
+    shader.uniforms.uEdge = edge;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -198,7 +214,9 @@ ${glow ? 'varying vec3 vGlow;' : ''}
 ${floor ? 'varying float vMat; varying vec2 vLocal; varying vec3 vWorld; varying float vUp;' : ''}
 uniform float uLitFloor;
 uniform float uExplored;
-uniform float uTime;`,
+uniform float uTime;
+uniform float uLook;
+uniform float uEdge;`,
       )
       .replace('#include <clipping_planes_fragment>', `if (vFog < 0.25) discard;\n#include <clipping_planes_fragment>`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${floor ? FLOOR_FRAG : ''}`)
@@ -213,14 +231,14 @@ if (vFog < 0.45) {
   float l = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
   outgoingLight = mix(vec3(l), diffuseColor.rgb, 0.25) * uExplored + baked * 0.12 + vec3(0.004, 0.006, 0.012);
 } else if (vFog < 0.9) {
-  outgoingLight += diffuseColor.rgb * uLitFloor * 0.25 + baked * 0.85;
+  outgoingLight += (diffuseColor.rgb * uLitFloor * 0.25 + baked * 0.85) * uLook;
 } else {
-  outgoingLight += diffuseColor.rgb * uLitFloor + baked;
+  outgoingLight += (diffuseColor.rgb * uLitFloor + baked) * uLook;
 }
 #include <opaque_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => `fog-${instanced ? 'i' : 'u'}${cut ? '-cut' : ''}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
+  m.customProgramCacheKey = () => `fog-${opts.standard ? 's' : 'l'}${instanced ? 'i' : 'u'}${cut ? '-cut' : ''}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
   return m;
 }
 

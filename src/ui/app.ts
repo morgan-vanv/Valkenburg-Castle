@@ -16,6 +16,7 @@ import { returnScreen } from './return';
 import { campScreen, freshLoadout, type CampHost, type CampPage, type Loadout } from './lowgate';
 import { CREW, STANCE, dealLine } from './names';
 import { loadSettings, saveSettings, type Settings } from './settings';
+import { DEFAULT_DISTANCE } from '../view/camera'; // V5.0 G: camera default
 
 export const SAVE_KEY = 'vc.save.v39';
 
@@ -70,7 +71,7 @@ const LOADOUT_KEY = 'vc.loadout.v33';
 /** V4.0: the first-visit welcome card was dismissed (per browser). */
 const WELCOME_KEY = 'vc.welcome.v40';
 /** Default camera distance at delve start (V3.3 scale C: heroes are 2.0, a bit closer than 15.8's 22). */
-const DELVE_DISTANCE = 19;
+const DELVE_DISTANCE = DEFAULT_DISTANCE; // V5.0 G: camera default (camera.ts), was 19
 
 export class App {
   private state: GameState | null = null;

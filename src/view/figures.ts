@@ -807,7 +807,7 @@ function banner(k: Kit, color: number, f: Frame): void {
 }
 
 /** Make a figure object: body mesh (+ glow mesh). Materials are per figure so it can flash and fade. */
-export function makeFigure(model: FigureModel, mats: { body: THREE.MeshLambertMaterial; glow: THREE.MeshBasicMaterial }): THREE.Group {
+export function makeFigure(model: FigureModel, mats: { body: THREE.Material; glow: THREE.MeshBasicMaterial }): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(model.body, mats.body);
   body.name = 'body';
