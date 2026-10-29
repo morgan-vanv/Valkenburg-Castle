@@ -25,7 +25,7 @@ const s0 = await p.evaluate(() => {
   window.vc.load(s);
   return { gold: s.campaign.gold, recruits: s.campaign.recruits.map((r) => [r.hero.level, r.price]) };
 });
-check('new campaign: 90 gold', s0.gold === 90, `${s0.gold}`);
+check('new campaign: 70 gold (V4.1)', s0.gold === 70, `${s0.gold}`);
 check('opening drifters: 3, all level 1 at 60 (18.2)', s0.recruits.length === 3 && s0.recruits.every(([l, pr]) => l === 1 && pr === 60), JSON.stringify(s0.recruits));
 // Hire one (90 gold buys one), hurt them, open the infirmary.
 await p.evaluate(async () => {

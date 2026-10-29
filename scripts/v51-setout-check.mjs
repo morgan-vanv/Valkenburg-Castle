@@ -89,7 +89,10 @@ await tap('[data-bench="w4-jutta"]').catch(() => {});
 await p.waitForTimeout(80);
 await step('outfit');
 for (const k of ['rope', 'potion']) {
+  // V5.1 Outfit: click a wagon spare, then click a pack (the drag helper's click fallback).
   await tap(`[data-cartbox] [data-cart="${k}"]`).catch(() => {});
+  await p.waitForTimeout(80);
+  await tap('.hr[data-hero] .packrow').catch(() => {});
   await p.waitForTimeout(80);
 }
 
