@@ -91,15 +91,16 @@ await p.waitForTimeout(80);
 await p.click('[data-next="party"]');
 await p.waitForTimeout(80);
 check('"Next: Party" goes to step 2', (await page()) === 'party');
-check('Keven fills the first slot: "If he falls, it\'s over."', /Keven/.test(await p.$eval('.lg-slot >> nth=0', (e) => e.innerText)) && /If he falls, it's over\./.test(await text()));
-check('the first empty slot says "Hire someone below."', /Hire someone below\./.test(await p.$eval('.lg-slot.empty.first', (e) => e.innerText)));
-check('recruits "At the campfire"', /At the campfire/.test(await text()));
-const can = await p.$$eval('.lg-canchip', (els) => els.map((e) => `${e.dataset.can}:${e.classList.contains('yes') ? 1 : 0}`));
-check('"This party can": melee and rally lit for Keven alone, the rest dim', can.join(',') === 'melee:1,rally:1,range:0,unseen:0,locks:0,heal:0,blast:0,burn:0', can.join(','));
-const rc = await p.$eval('.lg-rc', (e) => ({ text: e.innerText, abs: e.querySelectorAll('.lg-ab').length, badgeTip: e.querySelector('.lg-hex')?.dataset.tip ?? '' }));
-check('recruit card: plan tag, "Best at", ability chips, HP, "Hire · 60"', /Best at/i.test(rc.text) && rc.abs >= 3 && /HP/.test(rc.text) && /Hire\s*·\s*60/.test(rc.text), rc.text.replace(/\n/g, ' | ').slice(0, 140));
+// V5.1 (W2): the Party board (Party.dc.html) drops the slot texts ("If he falls" moved to the crown mark's tip, "Hire someone
+// below."), "This party can", the plan tag and "Best at"; the stats moved from the hex+letter badge to the bust's hover.
+check('Keven fills the first slot; the crown mark says "If he falls, it\'s over."', /Keven/.test(await p.$eval('.lg-slot >> nth=0', (e) => e.innerText)) && /If he falls, it's over\./.test((await p.getAttribute('.lg-slot.hero[data-hero="keven"] .crownmark', 'data-tip')) ?? ''));
+check('the first empty slot is open (a drop target)', !!(await p.$('.lg-slot.empty.first[data-drop]')));
+check('recruits "At the campfire"', /At the campfire/i.test(await text()));
+check('no "This party can" (V5.1)', !(await p.$('.lg-canchip')));
+const rc = await p.$eval('.lg-rc', (e) => ({ text: e.innerText, abs: e.querySelectorAll('.lg-ab').length, badgeTip: e.querySelector('[data-tip*="Might"]')?.dataset.tip ?? '' }));
+check('recruit card: ability tiles, HP, "Hire 60"; no "Best at"', !/Best at/i.test(rc.text) && rc.abs >= 3 && /Hire\s*60/.test(rc.text), rc.text.replace(/\n/g, ' | ').slice(0, 140));
 check('recruit card: no stat bars or ability rule text on the card', !/Might|Finesse \d|mana|slots/.test(rc.text));
-check('class badge hover has the stats', /Might \d+, Finesse \d+, Wits \d+/.test(rc.badgeTip));
+check('the bust\'s hover has the stats', /Might \d+, Finesse \d+, Wits \d+/.test(rc.badgeTip));
 await p.focus('.lg-rc .lg-ab');
 await p.keyboard.press('Tab');
 await p.keyboard.press('Shift+Tab');
@@ -122,15 +123,15 @@ check('...and come back from the bench', (await p.$$('.lg-slot.hero')).length ==
 // V4.1 (squads, spec 31.12): three slots on a new campaign; the fourth is locked with Wim's hint until the muster roll is home.
 {
   const lock = await p.$eval('.lg-slot.locked', (e) => ({ slot: e.dataset.slot, text: e.innerText, tip: e.dataset.tip ?? '' })).catch(() => null);
-  check('squads: the fourth slot is locked, with Wim\'s hint about the muster roll', !!lock && lock.slot === '3' && /Wim says the old muster roll is in the officers' quarters\. With it, a fourth could sign on\./.test(lock.text), JSON.stringify(lock));
-  check('squads: "Up to three for now."', /Up to three for now\./.test(await text()));
+  check('squads: the fourth slot is locked, with Wim\'s hint about the muster roll', !!lock && lock.slot === '3' && /Wim says the old muster roll is in the officers' quarters\. With it, a fourth could sign on\./.test(lock.tip), JSON.stringify(lock));
+  check('squads: "Up to three for now." (V5.1: on the slot pips)', /Up to three for now\./.test((await p.getAttribute('.pt-pips', 'aria-label')) ?? ''));
   await edit(`const mk = (id, name) => ({ id, name, cls: 'sellsword', level: 1, xp: 0, maxHp: 10, hp: 10, stats: { might: 65, finesse: 40, wits: 30, nerve: 50 }, weaponTier: 0, armorTier: 0, wounded: 0, kills: 0, delves: 0 }); s.campaign.roster.push(mk('sq-a', 'Sq Ada'), mk('sq-b', 'Sq Bors'));`);
   await p.click('[data-bench="sq-a"]');
   await p.waitForTimeout(80);
   const full = await p.$eval('[data-bench="sq-b"]', (e) => ({ off: e.getAttribute('aria-disabled'), tip: e.dataset.tip ?? '' }));
   check('squads: with three in, the bench is full ("The party is full")', (await p.$$('.lg-slot.hero')).length === 3 && full.off === 'true' && /The party is full/.test(full.tip), JSON.stringify(full));
   await edit(`s.campaign.squadSlots = 4; s.campaign.village.muster = true;`);
-  check('squads: with the muster roll home, the fourth slot opens', !(await p.$('.lg-slot.locked')) && (await p.$$('.lg-slot')).length === 4 && /Up to four\./.test(await text()));
+  check('squads: with the muster roll home, the fourth slot opens', !(await p.$('.lg-slot.locked')) && (await p.$$('.lg-slot')).length === 4 && /Up to four\./.test((await p.getAttribute('.pt-pips', 'aria-label')) ?? ''));
   await p.click('[data-bench="sq-b"]');
   await p.waitForTimeout(80);
   check('squads: ...and a fourth hero goes in', (await p.$$('.lg-slot.hero')).length === 4);
@@ -148,7 +149,7 @@ check('no "Heal · N gold" without the surgeon', !(await p.$('[data-heal]')));
 check('"Drink a potion" with a potion on the cart', !!(await p.$(`[data-drink="${r0}"]`)));
 await edit(`s.campaign.village.surgeon = true; s.campaign.gold = 30;`);
 const healTxt = await p.$eval(`[data-heal="${r0}"]`, (e) => e.innerText).catch(() => '');
-check('with the surgeon home: "Heal · 9 gold" in the slot', /Heal\s*·\s*9\s*gold/.test(healTxt), healTxt);
+check('with the surgeon home: "Heal 9" (coin) in the slot', /Heal\s*9/.test(healTxt), healTxt);
 await p.click(`[data-heal="${r0}"]`);
 await p.waitForTimeout(100);
 s = await st();
@@ -302,7 +303,7 @@ await p.waitForTimeout(120);
 await p.click('[data-vendor-tab="mott"]');
 await p.waitForTimeout(60);
 await step('party');
-check('"Pick locks quietly" lights up when someone packs lockpicks', (await p.$eval('[data-can="locks"]', (e) => e.classList.contains('yes'))) && /Keven \(lockpicks\)/.test(await p.$eval('[data-can="locks"]', (e) => e.dataset.tip)));
+// V5.1 (W2): "This party can" is gone from the Party board (the "Pick locks quietly" chip check retired with it).
 
 // ---- step 4: Set out
 await step('setout');
