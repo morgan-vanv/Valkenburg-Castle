@@ -1,0 +1,145 @@
+/* V5.2 (spec 35): the title screen on the camp stage. Boards 8–10 of the "Lowgate V5.1 Camp Screens" canvas. */
+
+.camp-host > .camp.title-screen{max-width:none;margin:0;padding:0;display:block;width:1920px;height:1080px;overflow:hidden;font-family:var(--serif);color:var(--ink);font-size:18px;line-height:1.3;
+  background:linear-gradient(180deg,#0d1220 0%,#1a1a2a 26%,#3a2a24 50%,#5a3418 62%,#1b120a 78%,#0b0704 100%)}
+.camp.title-screen::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;box-shadow:inset 0 0 260px 60px rgba(0,0,0,.7)}
+.camp.title-screen h1,.camp.title-screen p{margin:0}
+.camp.title-screen .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.camp.title-screen .hidden{display:none !important}
+
+/* scene */
+.t-scene{position:absolute;inset:0;z-index:0;pointer-events:none}
+.t-stars{position:absolute;inset:0 0 50% 0;background:radial-gradient(1.4px 1.4px at 8% 14%,#fff9,transparent),radial-gradient(1.4px 1.4px at 22% 30%,#fff6,transparent),radial-gradient(1.2px 1.2px at 41% 9%,#fff8,transparent),radial-gradient(1.4px 1.4px at 58% 22%,#fff5,transparent),radial-gradient(1.4px 1.4px at 71% 6%,#fff8,transparent),radial-gradient(1.2px 1.2px at 86% 18%,#fff7,transparent),radial-gradient(1.4px 1.4px at 94% 34%,#fff5,transparent),radial-gradient(1.2px 1.2px at 33% 40%,#fff4,transparent)}
+.t-moon{position:absolute;left:1530px;top:110px;width:84px;height:84px;border-radius:50%;background:radial-gradient(circle at 38% 36%,#f4efe0,#bfb9a6 70%);box-shadow:0 0 80px 30px rgba(190,205,240,.18)}
+.t-castle{position:absolute;left:880px;top:150px;width:1040px;height:620px}
+.t-win{opacity:var(--o,1)}
+.t-haze{position:absolute;left:0;right:0;top:560px;height:220px;background:linear-gradient(180deg,transparent,rgba(255,150,70,.12) 50%,transparent)}
+.t-village{position:absolute;left:0;bottom:0;width:1920px;height:300px}
+.t-fire{position:absolute;left:1280px;bottom:110px;width:520px;height:300px;transform:translateX(-50%);background:radial-gradient(ellipse at 50% 80%,rgba(255,170,70,.42),rgba(255,120,40,.12) 40%,transparent 70%)}
+
+/* lockup */
+.t-lock{position:absolute;z-index:2;left:120px;top:96px;width:800px}
+.t-lock .kick{font-size:17px;color:var(--ink-dim);letter-spacing:.2em}
+.t-lock h1{font-family:var(--serif);font-size:124px;line-height:.9;margin-top:14px;font-weight:700;color:#f6e8c8;letter-spacing:-.01em;text-shadow:0 4px 30px rgba(0,0,0,.8),0 0 60px rgba(255,170,80,.18)}
+.t-sub{display:flex;align-items:center;gap:16px;margin-top:18px;font-family:var(--caps);font-size:30px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber)}
+.t-rule{flex:none;width:70px;height:2px;background:linear-gradient(90deg,transparent,var(--amber));transform-origin:100% 50%}
+.t-hook{margin-top:20px;font-size:25px;font-style:italic;color:var(--ink-dim);max-width:660px;line-height:1.35}
+
+/* the column under the lockup: the card, then New campaign (or the confirm) */
+.t-col{position:absolute;z-index:2;left:120px;top:516px;width:720px;display:flex;flex-direction:column;gap:22px}
+.t-card{padding:20px 26px 22px}
+.t-card.dimmed{opacity:.45;filter:saturate(.6)}
+.t-card.dimmed .t-row,.t-card.dimmed .t-go,.t-card.dimmed .t-last{display:none}
+.t-hd{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.t-where{font-size:22px;color:var(--ink);text-align:right}
+.t-row{display:flex;align-items:flex-end;gap:14px;margin-top:14px}
+.t-row-start{align-items:center}
+.t-hero{display:flex;flex-direction:column;align-items:center}
+.t-hex{position:relative;width:110px;height:127px;display:grid;place-items:end center;clip-path:var(--hex)}
+.t-hex::before{content:'';position:absolute;inset:0;clip-path:var(--hex);background:var(--c,#4a3a26)}
+.t-hex::after{content:'';position:absolute;inset:3px;clip-path:var(--hex);background:radial-gradient(circle at 50% 30%,#4a331b,#1b130c 75%)}
+.t-hex .bust{position:relative;z-index:2;margin-bottom:0}
+.t-hex.lead{width:134px;height:155px}
+.t-card.four .t-hex{width:96px;height:111px}
+.t-card.four .t-hex .bust{--bs:90px !important}
+.t-hero.down .t-hex{filter:grayscale(.8) brightness(.7)}
+.t-who{text-align:center;margin-top:6px;font-size:18px;line-height:1.1}
+.t-who small{display:block;font-family:var(--caps);font-size:13px;letter-spacing:.12em;color:var(--ink-faint);text-transform:uppercase;margin-top:2px}
+.t-hero.down .t-who small{color:#ffb4ac}
+.t-facts{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:12px;padding-bottom:4px}
+.t-facts-start{margin-left:20px;align-items:flex-start}
+.t-facts .purse{padding:4px 14px 6px 12px}
+.t-facts .purse .gold-n{font-size:32px}
+.t-facts .coinstack{height:44px}
+.t-fact{display:flex;align-items:center;gap:8px;font-size:19px;color:var(--ink-dim);white-space:nowrap}
+.t-fact .ic{font-size:22px}
+.t-fact .num{color:var(--ink)}
+.t-say{font-style:italic;white-space:normal}
+.t-go{display:flex;align-items:center;gap:14px;margin-top:20px}
+.t-go .btn.primary{flex:1;justify-content:center;height:66px;font-size:26px}
+.t-kbd{display:inline-grid;place-items:center;min-width:30px;height:28px;padding:0 7px;border-radius:6px;border:1px solid rgba(28,17,6,.5);background:rgba(28,17,6,.12);font-family:var(--mono);font-size:14px;font-weight:500;color:#3a2408}
+.btn.ghost .t-kbd{border-color:#8a6a35;background:rgba(0,0,0,.3);color:var(--ink-dim)}
+
+/* seed */
+.t-seedfield{flex:none;display:inline-flex;align-items:center;gap:10px;height:50px;padding:0 12px 0 14px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid #4a3a26}
+.t-seedfield label{font-family:var(--caps);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+.t-seedfield input{width:130px;min-width:0;height:34px;border:0;background:none;color:var(--ink);font-family:var(--mono);font-size:19px;outline:none;padding:0}
+.t-seedfield input::placeholder{color:#8a7a60}
+.t-seedfield:focus-within{border-color:var(--amber)}
+.t-seedlink{display:inline-flex;align-items:center;font-size:18px;color:var(--ink-dim);background:none;border:0;border-bottom:1px dashed #6a5a46;padding:0 0 2px;cursor:pointer}
+.t-seedlink:hover,.t-seedlink:focus-visible{color:var(--ink)}
+
+/* New campaign row, the runs before */
+.t-newrow{display:flex;align-items:center;gap:18px;min-height:52px}
+.t-newrow .btn{height:52px;font-size:20px}
+.t-runs{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:17px;color:var(--ink-dim);font-style:italic}
+.t-runs .ic{font-size:20px}
+
+/* the last run, on the new-campaign card */
+.t-last{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid #3e3022}
+.t-last-k{grid-row:span 2;display:flex;align-items:center;gap:8px;font-family:var(--caps);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+.t-last-k .ic{font-size:22px;color:var(--ink-dim)}
+.t-last-l{font-size:19px;color:var(--ink)}
+.t-last-b{font-size:16px;color:var(--ink-dim)}
+
+/* the confirm, in place */
+.t-confirm{padding:18px 20px;border-radius:12px;background:rgba(80,24,20,.55);border:1px solid #7a3a35}
+.t-confirm p{font-size:22px;color:var(--ink)}
+.t-confirm p.s{font-size:17px;color:var(--ink-dim);margin-top:4px;font-style:italic}
+.t-confirm .acts{display:flex;gap:12px;margin-top:16px}
+.camp .btn.danger{color:#ffd7d2;border-color:#a0443c;background:linear-gradient(180deg,#6a2a24,#4a1c18)}
+
+/* corner and popover */
+.t-corner{position:absolute;z-index:4;right:44px;top:30px;display:flex;gap:14px}
+.t-corner .prop svg{position:relative;z-index:2;width:26px;height:26px}
+.t-corner .prop[aria-expanded="true"]{--rim:var(--amber);color:var(--amber-hi)}
+.t-q{font-family:var(--mono);font-size:24px;font-weight:600}
+.t-pop{position:absolute;z-index:5;background:linear-gradient(180deg,#2e2117,#1d150e) !important;right:44px;top:104px;width:520px;padding:18px 22px 20px;display:flex;flex-direction:column;gap:10px}
+.t-pop.t-pop-keys{width:1100px}
+.t-seg-row{display:flex;align-items:center;gap:12px}
+.t-seg-k{width:96px;font-size:17px;color:var(--ink-dim)}
+.t-seg{display:inline-flex;border:1px solid #4a3a26;border-radius:9px;overflow:hidden}
+.t-seg button{height:40px;min-width:56px;padding:0 12px;background:rgba(0,0,0,.25);border:0;border-right:1px solid #4a3a26;color:var(--ink-dim);font-size:17px}
+.t-seg button:last-child{border-right:0}
+.t-seg button.on{background:var(--amber);color:#1c1106;font-weight:700}
+.t-check{display:flex;align-items:center;gap:10px;min-height:36px;font-size:18px;color:var(--ink);cursor:pointer}
+.t-check input{width:20px;height:20px;accent-color:var(--amber);margin:0}
+.t-legend{font-size:16px;color:var(--ink-dim)}
+.t-legend .dl-leg-cols{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:18px}
+.t-legend .dl-leg-col{display:flex;flex-direction:column;gap:6px}
+.t-legend .dl-leg-h{font-family:var(--caps);letter-spacing:.12em;text-transform:uppercase;color:var(--amber);font-size:14px}
+.t-legend .dl-leg-i{display:flex;align-items:center;gap:8px}
+.t-legend .dl-leg-m{display:inline-grid;place-items:center;min-width:22px}
+.t-legend kbd{display:inline-grid;place-items:center;min-width:24px;height:22px;padding:0 5px;margin:0 1px;border-radius:5px;border:1px solid #8a6a35;font-family:var(--mono);font-size:13px;color:var(--ink)}
+.t-legend .dl-leg-keys{line-height:1.8}
+
+/* fine print */
+.t-fine{position:absolute;z-index:2;left:44px;right:44px;bottom:26px;display:flex;justify-content:space-between;font-size:16px;color:var(--ink-faint)}
+.t-fine .num{font-size:14px}
+
+/* arrival (about 1.5 s; any key or click settles it; reduced motion starts settled) */
+.camp.title-screen.arriving:not(.settled) .t-lock h1{animation:t-up .7s .25s both ease-out}
+.camp.title-screen.arriving:not(.settled) .t-lock .kick{animation:t-fade .6s .1s both}
+.camp.title-screen.arriving:not(.settled) .t-sub{animation:t-fade .5s .55s both}
+.camp.title-screen.arriving:not(.settled) .t-rule{animation:t-draw .5s .6s both ease-out}
+.camp.title-screen.arriving:not(.settled) .t-hook{animation:t-fade .6s .7s both}
+.camp.title-screen.arriving:not(.settled) .t-win{animation:t-lamp .4s both}
+.camp.title-screen.arriving:not(.settled) .t-win.w1{animation-delay:.8s}
+.camp.title-screen.arriving:not(.settled) .t-win.w2{animation-delay:.95s}
+.camp.title-screen.arriving:not(.settled) .t-win.w3{animation-delay:1.05s}
+.camp.title-screen.arriving:not(.settled) .t-win.w4{animation-delay:1.15s}
+.camp.title-screen.arriving:not(.settled) .t-win.w5{animation-delay:1.2s}
+.camp.title-screen.arriving:not(.settled) .t-fire{animation:t-fade .8s .8s both}
+.camp.title-screen.arriving:not(.settled) .t-col{animation:t-rise .5s 1.15s both ease-out}
+@keyframes t-up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes t-fade{from{opacity:0}to{opacity:1}}
+@keyframes t-draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes t-lamp{from{opacity:0}to{opacity:var(--o,1)}}
+@keyframes t-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:no-preference){
+  .t-win.w1{animation:t-flk 3.2s ease-in-out 2s infinite alternate}
+  @keyframes t-flk{from{opacity:.7}to{opacity:1}}
+}
+
+/* the delve legend's line icons are <svg class="ic">: not the kit's mask icons */
+.t-legend svg.ic{background:none;-webkit-mask:none;mask:none;width:13px;height:13px}

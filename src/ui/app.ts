@@ -11,8 +11,9 @@ import { sfx } from '../audio/sfx';
 import { Diorama } from '../view/diorama';
 import { wasBackstab } from '../view/stealth';
 import { clear, h } from './dom';
-import { Hud } from './hud';
-import { overScreen, titleScreen, type ScreenHost } from './screens';
+import { Hud, legend } from './hud';
+import { overScreen, titleScreen, type ScreenHost, type TitleHost } from './screens';
+import { recordRun } from './camp/runs';
 import { returnScreen } from './return';
 import { campScreen, freshLoadout, type CampHost, type CampPage, type Loadout } from './lowgate';
 import { CREW, STANCE, dealLine } from './names';
@@ -20,6 +21,8 @@ import { loadSettings, saveSettings, type Settings } from './settings';
 import { DEFAULT_DISTANCE } from '../view/camera'; // V5.0 G: camera default
 
 export const SAVE_KEY = 'vc.save.v39';
+/** The version line on the title screen. */
+export const GAME_VERSION = 'V5.2';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',
@@ -303,7 +306,28 @@ export class App {
     this.hud.root.classList.add('hidden');
     this.screen.classList.remove('hidden');
     sfx.setDrone(false);
-    titleScreen(this.screen, this.host());
+    titleScreen(this.screen, this.titleHost());
+  }
+
+  /** V5.2 (spec 35): what the title screen needs: the save as it stands, the settings, the keys legend. */
+  private titleHost(): TitleHost {
+    const host = this.host();
+    return {
+      saved: this.load(),
+      newCampaign: host.newCampaign,
+      continueGame: host.continueGame,
+      settings: this.settings,
+      saveSettings: () => {
+        saveSettings(this.settings);
+        this.applySettings();
+        // The look rows (read by the view at start; set here so a change on the title holds for the next delve).
+        this.dio.setQuality(this.settings.quality ?? 'high');
+        this.dio.setActionCamera(this.settings.actionCamera !== false);
+        this.dio.setTiltShift(this.settings.tiltShift !== false);
+      },
+      version: GAME_VERSION,
+      legend,
+    };
   }
 
   private render(snapCamera = false): void {
@@ -370,6 +394,8 @@ export class App {
     }
     this.state = res.state;
     this.save();
+    // V5.2 (spec 35): an ended campaign is remembered for the title screen ("Last run"), past the save it outlives.
+    if (res.state.stage === 'over' && before.stage !== 'over') recordRun(res.state);
     if (cmd.type === 'act') {
       const snd = ACTION_SFX[cmd.action];
       if (snd) sfx.play(snd);

@@ -35,7 +35,7 @@ await p.goto(base);
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('vc.settings', JSON.stringify({ speed: 1, reduceShake: true, noEndTurnAsk: true, quality: 'low' })); });
 await p.reload();
 await p.waitForFunction(() => !!window.vc);
-await p.click('text=New campaign');
+await p.click('[data-new-campaign]');
 await p.waitForSelector('.lowgate');
 if (await p.$('.lg-welcome [data-welcome]')) await p.click('.lg-welcome [data-welcome]');
 await p.click('.lg-step[data-step="party"]');

@@ -44,7 +44,7 @@ await p.evaluate(() => localStorage.setItem('vc.settings', JSON.stringify({ spee
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
 await p.fill('input.seed', '7');
-await p.click('text=New campaign');
+await p.click('[data-new-campaign]');
 await p.waitForTimeout(200);
 
 // V4.0: Set out (step 4) offers "Go in with the lantern shut", remembered with the loadout at Delve.

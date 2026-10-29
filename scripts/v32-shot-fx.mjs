@@ -15,7 +15,7 @@ await p.evaluate(() => localStorage.clear());
 await p.reload();
 await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
 await p.fill('input.seed', '7');
-await p.click('text=New campaign');
+await p.click('[data-new-campaign]');
 await p.click('.lg-step[data-step="setout"]'); // V4.0: Lowgate's step 4
 await p.click('.lg-delve');
 await p.waitForFunction(() => window.vc && !window.vc.busy(), null, { timeout: 60000 });

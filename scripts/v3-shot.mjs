@@ -44,7 +44,7 @@ await p.waitForFunction(() => !!window.vc, null, { timeout: 30000 });
 await p.waitForTimeout(500);
 await snap('00-title');
 await p.fill('input.seed', seed);
-await click('text=New campaign');
+await click('[data-new-campaign]');
 await snap('01-camp-board');
 
 if (tour === 'full') {

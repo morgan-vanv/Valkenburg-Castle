@@ -52,7 +52,7 @@ export function campStage(el: HTMLElement, s: GameState): Frame {
 }
 
 /** Tooltips for every [data-tip] (or [title]) in the stage, on hover and keyboard focus, placed in stage px. */
-function installStageTips(stage: Stage, tip: HTMLElement): () => void {
+export function installStageTips(stage: Stage, tip: HTMLElement): () => void {
   const root = stage.root;
   let on: HTMLElement | null = null;
   const hide = () => {

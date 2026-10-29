@@ -4102,7 +4102,7 @@ function kitChip(it: Item, owner: string, small = false, pack?: Item[]): HTMLEle
 }
 
 /** The menu's legend: the marks over figures, on the party cards, and the keys (Legend.dc.html, compact). */
-function legend(): HTMLElement[] {
+export function legend(): HTMLElement[] {
   const li = (mark: HTMLElement | string, text: string) => h('span', { class: 'dl-leg-i' }, h('span', { class: 'dl-leg-m' }, mark), text);
   const svgEl = (name: IconName, color: string) => {
     const s = h('span', { class: 'icw' });

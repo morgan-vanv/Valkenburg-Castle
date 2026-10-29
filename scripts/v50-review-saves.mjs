@@ -114,9 +114,9 @@ async function loadOn(raw) {
   await p.reload();
   await p.waitForFunction(() => !!window.vc && !!window.vcEngine);
   // The title screen offers Continue when a save exists: the real path a play-tester takes.
-  const btn = await p.$('button.btn-primary.btn-big');
+  const btn = await p.$('button[data-continue]'); // V5.2: the title's campaign card
   const label = btn ? await btn.innerText() : '';
-  check('the title screen offers Continue for the save', label === 'Continue', label || 'no primary button');
+  check('the title screen offers Continue for the save', /^Continue/.test(label), label || 'no primary button');
   if (btn) await btn.click();
   await p.waitForTimeout(600);
   return p;
@@ -169,7 +169,7 @@ if (saves.pending?.raw) {
   await p.reload();
   await p.waitForFunction(() => !!window.vc && !!window.vcEngine);
   await p.evaluate(() => { window.__keepReact = true; });
-  const btn = await p.$('button.btn-primary.btn-big');
+  const btn = await p.$('button[data-continue]');
   if (btn) await btn.click();
   const up = await p.waitForFunction(() => { const r = document.querySelector('.dl-react'); return r && !r.classList.contains('hidden'); }, null, { timeout: 60000 }).then(() => true).catch(() => false);
   const card = await p.evaluate(() => ({ text: document.querySelector('.dl-react')?.innerText.replace(/\n/g, ' | ') ?? '', pending: window.vc.state()?.delve?.pending?.question?.kind, busy: window.vc.busy() }));

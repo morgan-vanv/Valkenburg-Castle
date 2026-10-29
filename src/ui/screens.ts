@@ -5,7 +5,7 @@ import type { Command, GameState } from '../game/types';
 import { clear, gold, h } from './dom';
 import { classGlyph, className } from './names';
 
-/** What the title, summary and game-over pages need from the app. */
+/** What the summary and game-over pages need from the app (the title has its own host, TitleHost). */
 export interface ScreenHost {
   engine: Engine;
   send(cmd: Command): Promise<boolean>;
@@ -13,10 +13,6 @@ export interface ScreenHost {
   continueGame(): void;
   hasSave: boolean;
 }
-
-const TITLE = 'Valkenburg Castle';
-const SUBTITLE = "The Heir's Return";
-
 
 // ------------------------------------------------------------ title
 
@@ -28,38 +24,8 @@ export const INTRO = [
   'Take contracts. Come back alive. If Keven falls, Valkenburg stays dark.',
 ];
 
-export function titleScreen(el: HTMLElement, host: ScreenHost): void {
-  clear(el);
-  const seed = h('input', { class: 'seed', type: 'text', inputmode: 'numeric', placeholder: 'random', 'aria-label': 'Seed' }) as HTMLInputElement;
-  el.append(
-    h(
-      'div',
-      { class: 'screen-panel title-panel' },
-      h('div', { class: 'kicker' }, 'A delve into the ruined seat of the Van Valkenburgs'),
-      h('h1', { class: 'game-title' }, TITLE, h('span', { class: 'game-sub' }, SUBTITLE)),
-      h('div', { class: 'lede intro-lines' }, ...INTRO.map((l) => h('p', null, l))),
-      h(
-        'div',
-        { class: 'title-actions' },
-        host.hasSave ? h('button', { class: 'btn btn-primary btn-big', onclick: () => host.continueGame() }, 'Continue') : '',
-        h(
-          'button',
-          {
-            class: `btn ${host.hasSave ? '' : 'btn-primary'} btn-big`,
-            onclick: () => {
-              const n = Number.parseInt(seed.value, 10);
-              host.newCampaign(Number.isFinite(n) ? n : Math.floor(Math.random() * 1e9));
-            },
-          },
-          'New campaign',
-        ),
-      ),
-      h('div', { class: 'seed-row' }, h('label', { class: 'seed-label' }, 'Seed', seed)),
-      host.hasSave ? h('p', { class: 'fine' }, 'A new campaign replaces your saved one.') : '',
-      h('p', { class: 'fine' }, 'After the 1980 board game by Task Force Games.'),
-    ),
-  );
-}
+// V5.2 (spec 35): the title screen lives on the camp stage, src/ui/camp/title.ts.
+export { titleScreen, type TitleHost } from './camp/title';
 
 // ------------------------------------------------------------ camp (V4.0: src/ui/lowgate.ts)
 
