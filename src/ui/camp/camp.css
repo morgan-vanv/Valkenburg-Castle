@@ -201,9 +201,12 @@
 @keyframes camp-fly-out{from{transform:translateY(0);opacity:1}to{transform:translateY(-36px);opacity:0}}
 @media (prefers-reduced-motion:reduce){.camp .coinstack i,.camp .coinstack.earn i,.camp .coinstack.spend i,.camp .coinstack .fly{transition:none;animation:none}}
 
-/* a rendered bust (bust.ts): the image fills the bust box; the CSS bust parts are the fallback */
-.camp .bust img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
-.camp .bust.img>i,.camp .bust.img::after{display:none}
+/* a baked bust (bust.ts): the image fills the bust box and fades in over the CSS figurine once loaded (.img) */
+.camp .bust img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;opacity:0;transition:opacity .18s ease-out}
+.camp .bust>i,.camp .bust::after{transition:opacity .18s ease-out}
+.camp .bust.img img{opacity:1}
+.camp .bust.img>i,.camp .bust.img::after{opacity:0}
+@media (prefers-reduced-motion:reduce){.camp .bust img,.camp .bust>i,.camp .bust::after{transition:none}}
 
 /* drag (drag.ts): lifted, valid and invalid targets */
 .camp [data-drag]{touch-action:none;cursor:grab}

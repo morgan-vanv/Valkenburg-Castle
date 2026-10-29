@@ -15,6 +15,7 @@ import * as outfitMod from './camp/outfit';
 import * as setoutMod from './camp/setout';
 import * as gravesMod from './camp/graves';
 import { campStage, finishFrame, header, footer } from './camp/frame';
+import { warmBusts } from './camp/bust';
 import './camp/camp.css'; // V5.1 (W0): the camp kit, scoped under .camp
 
 export { STEPS, type Step, type CampPage, type Loadout, type CampHost, type EntranceInfo, entrancesOf, memoryOf, BOARD_ROW_MAX, boardRows, boardOrder, cleanLoadout, freshLoadout, sameAsLast, installTips, villageOf, captiveContract, contractCaptive } from './camp/shared';
@@ -29,6 +30,10 @@ export function campScreen(el: HTMLElement, s: GameState, host: CampHost): void 
   const l = cleanLoadout(s, host.engine, host.draft);
   if ((STEPS as readonly string[]).includes(host.page)) ui.lastStep = host.page as Step;
   if (!ui.packFor || !l.heroIds.includes(ui.packFor)) ui.packFor = l.heroIds[0] ?? null;
+
+  // V5.1.1: fetch the party's and the Flagon's baked busts now, so every step shows them at once.
+  const c = s.campaign;
+  if (c) warmBusts([...c.roster.map((x) => x.cls), ...c.recruits.map((x) => x.hero.cls)]);
 
   const f = campStage(el, s);
   const root = f.stage.root;

@@ -1,6 +1,6 @@
 // V5.1 (W0): step 2, Party: party slots, the roster bench, the Flagon's recruits. Split out of src/ui/lowgate.ts.
 // V5.1 (W2): rebuilt to the approved Party board (Party.dc.html) on the 1920x900 <main> of the camp stage: four big
-// slots with rig-rendered busts (bust.ts), class shown by colour and a role icon, HP and a heal button, hex ability
+// slots with baked rig busts (bust.ts), class shown by colour and a role icon, HP and a heal button, hex ability
 // tiles (details on hover); empty slots are drop targets (drag.ts: pointer, click, keyboard) for a roster hero or a
 // recruit (hired on drop, the price shows on the slot); a locked slot past the squad cap. Below: the roster bench (small
 // busts, paged so it never scrolls) and the Flagon's recruits. "This party can" and the "Best at" text are gone.
@@ -43,39 +43,6 @@ const BENCH_PAGE = 7;
 let benchPage = 0;
 
 const ORDINAL = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
-
-/**
- * A bust that never holds up the screen: a class drawn before comes straight from bust.ts's cache; a new one shows the
- * CSS figurine first and is rendered a moment later, one class per task (on software WebGL a first render can take
- * seconds, and a fresh Flagon can bring three new classes at once).
- */
-const drawn = new Set<string>();
-const queue: (() => void)[] = [];
-function lazyBust(cls: string, opts: { size: number; label?: string }): HTMLElement {
-  if (drawn.has(cls)) return bust(cls, opts);
-  const el = document.createElement('div');
-  el.className = `bust k-${bustKey(cls)}`;
-  el.style.setProperty('--bs', `${opts.size}px`);
-  el.dataset.cls = cls;
-  if (opts.label) {
-    el.setAttribute('role', 'img');
-    el.setAttribute('aria-label', opts.label);
-  } else el.setAttribute('aria-hidden', 'true');
-  for (const part of ['sh', 'hd', 'ht']) el.append(h('i', { class: part }));
-  queue.push(() => {
-    const real = bust(cls, opts); // renders (and caches) the class
-    drawn.add(cls);
-    if (el.isConnected) el.replaceWith(real);
-  });
-  if (queue.length === 1) setTimeout(drain, 30);
-  return el;
-}
-function drain(): void {
-  const job = queue.shift();
-  if (!job) return;
-  job();
-  if (queue.length) setTimeout(drain, 0);
-}
 
 export function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: CampHost): void {
   const c = s.campaign;
@@ -285,7 +252,7 @@ function heroSlot(hr: Hero, s: GameState, l: Loadout, host: CampHost, set: (l: L
       },
       '×',
     ),
-    h('div', { class: 'pt-bustw', 'data-tip': statsTip(hr.cls, hr) }, lazyBust(hr.cls, { size: 196, label: `${hr.name}, ${className(hr.cls)}` })),
+    h('div', { class: 'pt-bustw', 'data-tip': statsTip(hr.cls, hr) }, bust(hr.cls, { size: 196, label: `${hr.name}, ${className(hr.cls)}` })),
     h('h3', { class: 'lg-slot-n' }, hr.name),
     clsRow(hr),
     vit,
@@ -355,7 +322,7 @@ function benchRow(s: GameState, l: Loadout, set: (l: Loadout) => void, room: num
     const chip = h(
       'div',
       { class: `pt-bh ${hurt(hr) ? 'wounded' : ''}`, role: 'listitem', style: clsStyle(hr.cls), 'aria-label': `${hr.name}, ${classLine(hr)}. Enter picks them up for a slot.`, 'data-tip': `${hr.name} · ${classLine(hr)}\n${hpOf(hr)} of ${hr.maxHp} HP. ${full ? 'The party is full. Take someone out first.' : 'Drag into an open slot, or press +.'}` },
-      h('span', { class: 'pt-bh-b' }, lazyBust(hr.cls, { size: 58 })),
+      h('span', { class: 'pt-bh-b' }, bust(hr.cls, { size: 58 })),
       h('span', { class: 'pt-bh-t' }, h('span', { class: 'pt-bh-n' }, hr.name), h('span', { class: 'pt-bh-c' }, ic(ROLE_ICON[hr.cls] ?? 'star'), hurt(hr) ? h('span', { class: 'num low' }, `${hpOf(hr)}/${hr.maxHp}`) : h('span', { class: 'num' }, `${hr.maxHp}`), ic('heart', { class: 'hrt' }))),
       own(btn(
         {
@@ -404,7 +371,7 @@ function recruitCard(hr: Hero, price: number, s: GameState, l: Loadout, host: Ca
   const card = h(
     'article',
     { class: `pt-rc lg-rc cls-${hr.cls}`, 'data-recruit': hr.id, style: clsStyle(hr.cls), 'aria-label': `${hr.name}, ${className(hr.cls)}, level ${hr.level}, ${price} gold. Enter picks them up for a slot.` },
-    h('div', { class: 'bw', 'data-tip': statsTip(hr.cls, hr) }, lazyBust(hr.cls, { size: 104 })),
+    h('div', { class: 'bw', 'data-tip': statsTip(hr.cls, hr) }, bust(hr.cls, { size: 104 })),
     h('div', { class: 'pt-rc-who' }, h('h4', { class: 'lg-rc-n' }, hr.name), clsRow(hr)),
     abilityTiles(hr.cls, host),
     h(

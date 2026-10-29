@@ -1,0 +1,22 @@
+{
+  "px": 256,
+  "format": "webp",
+  "quality": 0.9,
+  "inputs": [
+    "src/view/look/cast.ts",
+    "src/view/look/keven.ts",
+    "src/view/look/rig.ts",
+    "src/ui/camp/bust-render.ts"
+  ],
+  "hash": "9976431f714a8359beb0e58348c492fb92204e64f26a23d651f11321a301e156",
+  "files": {
+    "heir": "heir.webp",
+    "sellsword": "sellsword.webp",
+    "burglar": "burglar.webp",
+    "ranger": "ranger.webp",
+    "sapper": "sapper.webp",
+    "pyromancer": "pyromancer.webp",
+    "shadowmancer": "shadowmancer.webp",
+    "hedgewitch": "hedgewitch.webp"
+  }
+}

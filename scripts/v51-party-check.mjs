@@ -54,7 +54,7 @@ await edit(`const mk = ${mk};
   ];`);
 await p.click('[data-bench="petra"]');
 await wait();
-// New classes render a moment after the screen (party.ts lazyBust): wait until every bust is the rig image.
+// Busts are baked images (bust.ts) that fade in once loaded: wait until every bust shows its image.
 await p.waitForFunction(() => [...document.querySelectorAll('.pt .bust')].every((b) => b.classList.contains('img')), null, { timeout: 60000 });
 
 /** Nothing scrolls; nothing inside <main> pokes out of the 1920x900 box. */
