@@ -45,7 +45,8 @@ await p.waitForTimeout(150);
 const heal = p.locator(`[data-heal="${hid}"]`);
 const tip = await heal.getAttribute('data-tip').catch(() => '');
 check('healing explains per-HP pricing', /3 gold per HP/.test(tip ?? ''), tip ?? '');
-check('the slot offers "Heal · 12 gold"', /Heal\s*·\s*12\s*gold/.test(await heal.innerText().catch(() => '')));
+// V5.1 (W2): the Party board's heal button reads "Heal" and the price on a coin.
+check('the slot offers "Heal 12" (coin)', /Heal\s*12/.test(await heal.innerText().catch(() => '')));
 await heal.click();
 await p.waitForTimeout(300);
 const after = await p.evaluate(() => {

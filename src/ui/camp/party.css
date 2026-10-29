@@ -1,0 +1,110 @@
+/* V5.1 (W2): step 2, Party (Party.dc.html), laid out on the camp stage's <main> (1920x900). Scoped under .camp .pt.
+   Legacy hook classes (.lg-slot, .lg-rc, .lg-ab, .lg-hpbar...) stay on the elements for the checks; the rules here
+   are specific enough to override the old style.css looks. */
+.camp .pt{position:absolute;inset:0;padding:18px 44px 0;display:flex;flex-direction:column;overflow:hidden}
+.camp .pt-title{display:flex;align-items:flex-end;justify-content:space-between;height:50px;margin-bottom:14px;flex:none}
+.camp .pt-title h2{font-size:38px;line-height:1;font-weight:500}
+.camp .pt-pips{display:flex;gap:8px;font-size:30px;color:#4a3a26;align-items:center}
+.camp .pt-pips .on{color:var(--amber)}
+.camp .pt-pips .lock{font-size:24px}
+
+/* slots */
+.camp .pt .pt-slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;flex:none}
+.camp .pt .pt-slot{position:relative;height:452px;min-height:0;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:0;padding:14px 20px 20px;
+  background:linear-gradient(180deg,#2d2016,#1b130c);border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.1),0 12px 26px rgba(0,0,0,.5)}
+.camp .pt .pt-hero.heir{border-color:#6a4a22}
+.camp .pt .pt-hero.wounded{border-color:#5a3a2a}
+.camp .pt-hero .spot{position:absolute;left:0;right:0;top:0;height:260px;pointer-events:none;background:radial-gradient(ellipse 60% 70% at 50% 42%,color-mix(in srgb,var(--c) 38%,#2d2016),transparent 72%)}
+.camp .pt-hero .plinth{position:absolute;left:18%;right:18%;top:226px;height:16px;border-radius:50%;pointer-events:none;background:radial-gradient(ellipse,rgba(0,0,0,.55),transparent 70%)}
+.camp .pt-bustw{position:relative;margin-top:2px;filter:drop-shadow(0 8px 10px rgba(0,0,0,.55))}
+.camp .pt .pt-x{position:absolute;z-index:3;right:12px;top:12px;width:34px;height:34px;padding:0;border-radius:50%;display:grid;place-items:center;align-self:auto;
+  background:rgba(0,0,0,.4);border:1px solid #4a3a26;color:var(--ink-dim);font-size:22px;line-height:1}
+.camp .pt .pt-x:hover,.camp .pt .pt-x:focus-visible{color:var(--ink);border-color:var(--amber)}
+.camp .pt .crownmark{position:absolute;z-index:3;left:14px;top:12px;width:40px;height:46px;display:grid;place-items:center;font-size:22px;color:#ffb4ac}
+.camp .pt-hero h3{position:relative;font-size:32px;line-height:1.05;margin-top:4px;font-weight:500;color:var(--ink);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .pt-cls{position:relative;display:flex;align-items:center;gap:9px;font-family:var(--caps);font-size:19px;letter-spacing:.12em;text-transform:uppercase;color:var(--c);margin-top:2px;white-space:nowrap}
+.camp .pt-cls .em{display:grid;place-items:center;width:30px;height:34px;font-size:16px;--rw:2px}
+.camp .pt-cls .lv{color:var(--ink-dim);letter-spacing:.06em}
+.camp .pt-vit{position:relative;display:flex;align-items:center;gap:8px;margin-top:10px;height:36px}
+.camp .pt-hp{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:22px;color:var(--ink)}
+.camp .pt-hp .ic-heart{color:#d9534f;font-size:22px}
+.camp .pt-hp .low{color:#ff8a80}
+.camp .pt-hp .max{color:var(--ink-faint);font-size:17px;margin-left:-6px}
+.camp .pt .pt-hp .bar{display:block;flex:none;width:110px;height:10px;border-radius:5px;background:#120d08;border:1px solid #4a3a26;overflow:hidden}
+.camp .pt .pt-hp .bar i{display:block;height:100%;background:linear-gradient(90deg,#b8372f,#e0605a)}
+.camp .pt-heal{display:inline-flex;align-items:center;gap:7px;margin-left:4px;height:34px;padding:0 12px;border-radius:8px;font-size:17px;
+  background:linear-gradient(180deg,#34271a,#21170e);border:1px solid #6a8a55;color:#bfe3a8}
+.camp .pt-heal:hover:not(.is-off),.camp .pt-heal:focus-visible{border-color:#9fd486;color:#e0f6d2}
+.camp .pt-heal .price{font-size:17px;color:var(--amber-hi);gap:4px}
+.camp .pt-heal .price .ic{font-size:15px}
+.camp .pt-heal.is-off{opacity:.5;cursor:not-allowed}
+.camp .pt-drink{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:8px;font-size:20px;background:linear-gradient(180deg,#34271a,#21170e);border:1px solid #5a4529;color:#e0605a}
+.camp .pt-drink:hover,.camp .pt-drink:focus-visible{border-color:var(--amber)}
+.camp .pt .pt-ale{position:relative;display:inline-flex;align-items:center;gap:6px;margin-top:8px;height:28px;padding:0 10px;border-radius:14px;font-size:16px;color:var(--amber-hi);background:rgba(0,0,0,.35);border:1px solid #6a4a22}
+.camp .pt-ale .ic{font-size:16px}
+.camp .pt-abw{position:relative;margin-top:auto}
+.camp .pt-abils{position:relative;display:flex;gap:10px;flex-wrap:nowrap}
+.camp .pt .pt-abils .abil{padding:0;cursor:help;text-decoration:none;font-size:30px}
+.camp .pt .pt-abils .abil:hover,.camp .pt .pt-abils .abil:focus-visible{--rim:var(--c,#8a6a35);outline:none;filter:drop-shadow(0 0 8px rgba(255,170,80,.6))}
+
+/* empty and locked slots */
+.camp .pt .pt-empty{border:2px dashed #5a4529;background:rgba(0,0,0,.18);box-shadow:none;justify-content:center;gap:12px;color:var(--ink-faint)}
+.camp .pt .pt-empty.first{border-color:#7a5a2c;color:var(--ink-dim)}
+.camp .pt-empty .plus{display:grid;place-items:center;width:84px;height:96px;font-size:40px;--rw:4px}
+.camp .pt-empty .t{font-family:var(--caps);font-size:19px;letter-spacing:.14em;text-transform:uppercase}
+.camp .pt-empty .when{display:none}
+.camp .pt-empty .price{font-size:24px}
+.camp .pt .pt-empty.drop-ok{border-color:var(--amber-hi);background:radial-gradient(circle at 50% 50%,rgba(232,163,61,.18),rgba(0,0,0,.2));box-shadow:0 0 0 5px rgba(232,163,61,.14),0 0 40px rgba(255,170,80,.3);color:var(--amber-hi);filter:none}
+.camp .pt .pt-empty.drop-over{filter:brightness(1.18)}
+.camp .pt-empty.drop-ok .idle{display:none}
+.camp .pt-empty.drop-ok .when{display:inline-flex}
+.camp .pt .pt-locked{border-style:dashed;border-color:#3a2c1b;background:repeating-linear-gradient(135deg,rgba(0,0,0,.18) 0 10px,rgba(255,255,255,.015) 10px 20px);color:#6d6150}
+.camp .pt .pt-locked .plus{font-size:34px}
+
+/* the roster bench */
+.camp .pt .pt-bench{display:flex;align-items:center;gap:14px;flex:none;flex-wrap:nowrap;height:72px;margin-top:14px;overflow:hidden}
+.camp .pt-bench-k{flex:none;width:92px;font-size:17px}
+.camp .pt-bench-none{font-style:italic;color:var(--ink-faint);font-size:18px}
+.camp .pt-bh{position:relative;flex:none;display:flex;align-items:center;gap:10px;width:214px;height:68px;padding:0 8px 0 4px;border-radius:12px;
+  background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.08),0 6px 14px rgba(0,0,0,.4)}
+.camp .pt-bh:hover,.camp .pt-bh:focus-visible{border-color:#8a6a35;outline:none}
+.camp .pt-bh-b{flex:none;width:60px;height:60px;border-radius:9px;overflow:hidden;display:grid;place-items:end center;background:radial-gradient(circle at 50% 30%,color-mix(in srgb,var(--c) 40%,#2d2016),#1b130c 78%)}
+.camp .pt-bh-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.camp .pt-bh-n{font-size:20px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .pt-bh-c{display:flex;align-items:center;gap:6px;color:var(--c);font-size:17px}
+.camp .pt-bh-c .num{font-size:15px;color:var(--ink-dim)}
+.camp .pt-bh-c .num.low{color:#ff8a80}
+.camp .pt-bh-c .hrt{color:#d9534f;font-size:13px;margin-left:-3px}
+.camp .pt-add{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:50%;font-size:18px;background:rgba(0,0,0,.4);border:1px solid #7a5a2c;color:var(--amber-hi)}
+.camp .pt-add:hover:not(.is-off),.camp .pt-add:focus-visible{background:#6a4519;border-color:var(--amber-hi)}
+.camp .pt-add.is-off{opacity:.4;cursor:not-allowed}
+.camp .pt-more{flex:none;height:44px;min-width:56px;padding:0 12px;border-radius:22px;background:rgba(0,0,0,.35);border:1px solid #5a4529;color:var(--amber-hi);font-family:var(--mono);font-size:18px}
+.camp .pt-more:hover,.camp .pt-more:focus-visible{border-color:var(--amber-hi)}
+
+/* the Flagon */
+.camp .pt-fl{display:flex;align-items:center;gap:14px;margin:14px 0 10px;height:28px;flex:none}
+.camp .pt-fl .kick{font-size:17px}
+.camp .pt-fl::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,#4a3a26,transparent)}
+.camp .pt-fl-sm{font-size:16px;color:var(--ink-faint);font-style:italic}
+.camp .pt-recs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;height:204px;flex:none}
+.camp .pt-recs-none{display:flex;align-items:center;justify-content:center;border:1px dashed #3a2c1b;border-radius:14px;color:var(--ink-faint);font-style:italic}
+.camp .pt-rc{position:relative;height:204px;border-radius:14px;padding:14px 16px;display:grid;grid-template-columns:104px minmax(0,1fr);grid-template-rows:auto 1fr auto;column-gap:14px;row-gap:0;
+  background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.1),0 10px 22px rgba(0,0,0,.45);cursor:grab;color:var(--ink)}
+.camp .pt-rc:hover,.camp .pt-rc:focus-visible{border-color:#8a6a35;outline:none}
+.camp .pt-rc.lifted{opacity:.45;border-style:dashed;outline:none}
+.camp .pt-rc .bw{grid-row:1/3;grid-column:1;border-radius:10px;background:radial-gradient(circle at 50% 30%,color-mix(in srgb,var(--c) 40%,#2d2016),#1b130c 78%);border:1px solid #4a3a26;display:grid;place-items:end center;overflow:hidden;height:118px}
+.camp .pt-rc-who{grid-column:2;grid-row:1;min-width:0}
+.camp .pt-rc h4{margin:0;font-size:27px;font-weight:500;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .pt-rc .pt-cls{font-size:16px;gap:7px}
+.camp .pt-rc .pt-cls .em{width:26px;height:30px;font-size:14px}
+.camp .pt-rc .pt-abils{grid-column:2;grid-row:2;align-self:end;gap:6px}
+.camp .pt-rc .pt-abils .abil{width:44px;height:51px;font-size:23px}
+.camp .pt-rc-row{grid-column:1/3;grid-row:3;display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+.camp .pt-rc-row .pt-hp{font-size:20px}
+.camp .pt-rc-row .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.camp .pt-buy{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 16px;border-radius:9px;color:#1c1106;font-weight:700;font-size:19px;
+  background:linear-gradient(180deg,#f6bb58,#c98421);border:1px solid #ffcf86;box-shadow:inset 0 1px 0 rgba(255,245,210,.5)}
+.camp .pt-buy:hover:not(.is-off),.camp .pt-buy:focus-visible{filter:brightness(1.1)}
+.camp .pt-buy .price{font-size:19px;color:#1c1106;gap:4px}
+.camp .pt-buy .price .ic{font-size:18px;color:#5a3a0c}
+.camp .pt-buy.is-off{opacity:.5;filter:saturate(.4);cursor:not-allowed}
