@@ -32,12 +32,13 @@ await p.evaluate(() => { const E = window.vcEngine; window.vc.load(E.apply(E.new
 await p.waitForTimeout(150);
 
 // 21.1 / 21.2 (V4.0: Lowgate's four steps)
-check('new campaign: 90 gold', (await p.evaluate(() => window.vc.state().campaign.gold)) === 90);
+check('new campaign: 70 gold (V4.1)', (await p.evaluate(() => window.vc.state().campaign.gold)) === 70);
 check('lands on the notice post (step 1, Job)', (await p.evaluate(() => document.querySelector('.lowgate')?.dataset.page)) === 'job');
 check('no hire gate: a job is chosen with Keven alone', !!(await p.$('.lg-card[aria-pressed="true"]')));
 await step('party');
-check('Party: "Keven can go alone, but if he falls, it\'s over."', /Keven can go alone, but if he falls, it's over\./.test(await text()));
-check('Party: the first empty slot points at the campfire ("Hire someone below.")', /Hire someone below\./.test(await text()));
+// V5.1: the Party board carries no prose; the heir's warning is the crown mark's tip, the open slot takes a drop.
+check('Party: Keven\'s crown mark warns "If he falls, it\'s over."', await p.evaluate(() => [...document.querySelectorAll('[data-tip]')].some((e) => /If he falls, it's over/.test(e.dataset.tip ?? ''))));
+check('Party: the first empty slot is an open drop slot', !!(await p.$('.pt-slot.pt-empty.first:not(.pt-locked)')));
 await step('setout');
 const prep = await text();
 check('Set out: "Keven goes in alone. If he falls, it\'s over."', /Keven goes in alone\. If he falls, it's over\./.test(prep));
