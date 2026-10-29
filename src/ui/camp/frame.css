@@ -1,0 +1,74 @@
+/* V5.1 (W1): the camp frame on the 1920x1080 stage: header 92px, main 1920x900, footer 88px. No scrolling. */
+
+/* style.css has an old V3 .camp rule (max-width 1360px, padding): the stage is always 1920 wide, unpadded. */
+.camp-host > .camp{max-width:none;margin:0;padding:0}
+/* The stage root also carries .lowgate (the old screens' styles and the checks key on it): undo the old flex shell. */
+.camp-host > .camp.lowgate{display:block;inset:0 auto auto 0;width:1920px;height:1080px;font-family:var(--serif);color:var(--ink);
+  background:radial-gradient(1300px 720px at 50% -8%,#432a14 0%,#1b130b 52%,#0b0704 100%)}
+.camp .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* header */
+.camp > header.top{position:absolute;left:0;top:0;width:1920px;height:92px;z-index:3;gap:0;padding:0 44px}
+.camp .top .brand{display:flex;flex-direction:column;gap:4px;width:auto;cursor:default}
+.camp .top .brand .kick{font-family:var(--caps);letter-spacing:.16em}
+.camp .top .brand h1{font-family:var(--serif)}
+.camp .steps{gap:0;min-width:0}
+.camp .step{min-height:0;padding:0 6px;text-align:left;font-family:var(--serif)}
+.camp .step .step-t{display:flex;flex-direction:column;min-width:0}
+.camp .step .med .ic{font-size:27px}
+.camp .step .med .tick{position:absolute;right:-4px;bottom:2px;width:22px;height:22px;border-radius:50%;background:var(--amber);color:#1a1006;display:grid;place-items:center;font-size:13px;z-index:3;box-shadow:0 1px 3px rgba(0,0,0,.6)}
+.camp .step .med .tick .ic{font-size:13px}
+.camp .step:hover .nm,.camp .step:focus-visible .nm{color:var(--amber-hi)}
+.camp .step:hover .med{--rim:#8a6a35}
+.camp .step.on:hover .med{--rim:var(--amber-hi)}
+.camp .right{gap:22px}
+.camp .props .prop{padding:0;font-size:27px}
+.camp .prop .ic{font-size:28px}
+.camp .prop:hover,.camp .prop:focus-visible{color:var(--amber-hi)}
+.camp .prop:hover{--rim:#8a6a35}
+.camp .prop.here{--rim:var(--amber-hi);--face:radial-gradient(circle at 35% 30%,#6a4519,#2b1c0c);color:var(--amber-hi);filter:drop-shadow(0 0 8px rgba(255,170,80,.6))}
+.camp .prop .bd{z-index:3}
+.camp .purse{cursor:default;min-width:150px;justify-content:flex-start}
+.camp .purse .gold-n{min-width:3ch}
+
+/* main: the screens own everything inside it */
+.camp > main.camp-main{position:absolute;left:0;top:92px;width:1920px;height:900px;overflow:hidden;padding:0;margin:0;display:block;z-index:1;flex:none;min-height:0;gap:0}
+
+/* footer */
+.camp > footer.foot{z-index:3;gap:24px;padding:0 44px}
+.camp .foot .foot-l,.camp .foot .foot-r{flex:none;width:420px;display:flex;align-items:center;gap:14px}
+.camp .foot .foot-r{justify-content:flex-end}
+.camp .foot .mid{flex:1;min-width:0;padding:0 10px;font-size:19px;line-height:1.3;max-height:2.6em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.camp .btn{font-family:var(--serif);white-space:nowrap}
+.camp .btn .ic{font-size:22px}
+.camp .btn .ic.flip{transform:scaleX(-1)}
+.camp .btn.ghost:hover:not(.is-off),.camp .btn.ghost:focus-visible{color:var(--ink);border-color:#5a4529}
+.camp .btn.primary:hover:not(.is-off){background:linear-gradient(180deg,#ffcb6c,#d99530)}
+.camp .btn.is-off{opacity:.5;cursor:not-allowed}
+.camp .btn.primary.is-off{filter:saturate(.4)}
+.camp .lg-same{border:1px solid #5a4529}
+
+/* tooltips: inside the stage, positioned in stage px (frame.ts) */
+.camp > .lg-tip{position:absolute;left:0;top:0;z-index:40;max-width:440px;padding:12px 15px;border-radius:10px;background:#120d08;border:1px solid #8a6a35;
+  box-shadow:0 12px 30px rgba(0,0,0,.7);font-family:var(--serif);font-size:max(18px,var(--tf));line-height:1.35;color:var(--ink-dim);gap:6px;pointer-events:none}
+.camp > .lg-tip.hidden{display:none}
+.camp > .lg-tip .lg-tip-head b{font-size:max(20px,var(--tf));font-weight:500;color:var(--amber-hi)}
+.camp > .lg-tip .lg-tip-kind{font-family:var(--caps);font-size:max(13px,var(--tf));letter-spacing:.14em;color:var(--ink-faint)}
+.camp > .lg-tip .lg-tip-nums{font-size:max(15px,var(--tf));border-top-color:#3a2c1b}
+
+.camp :focus-visible{outline:2px solid var(--amber-hi);outline-offset:3px}
+.camp .step:focus-visible,.camp .prop:focus-visible{outline:none}
+.camp .step:focus-visible .med,.camp .prop:focus-visible{filter:drop-shadow(0 0 6px var(--amber-hi))}
+
+/* header columns: brand | steps (centred, shrink first: the step lines ellipsize) | props and purse */
+.camp > header.top{grid-template-columns:auto minmax(0,1fr) auto;column-gap:28px}
+.camp .top .steps{justify-self:center;max-width:100%}
+.camp .top .step{flex:0 1 auto;min-width:0}
+.camp .top .step .med{flex:none}
+.camp .top .step .sb{max-width:170px}
+.camp .top .link{flex:0 1 40px;width:40px;min-width:12px;margin:0 6px}
+/* the purse's pile stays inside the 92px header however rich Keven gets (more gold still adds columns) */
+.camp .purse{padding:6px 16px 8px 14px;gap:12px}
+.camp .purse .coinstack{height:58px;overflow:visible}
+.camp .purse .coinstack>i:not(.fly){max-height:50px}
+.camp .top .right{width:auto;flex:none}

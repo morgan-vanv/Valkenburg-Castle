@@ -46,8 +46,7 @@ await p.waitForTimeout(200);
 t = await text();
 check('camp header is Lowgate', (await p.textContent('.lg-title')) === 'Lowgate');
 check('no "Hobart\'s camp" anywhere', !/Hobart's camp/.test(t));
-const houses0 = await p.$$eval('.lg-house', (els) => els.map((e) => e.dataset.state));
-check('ribbon: three houses, none home', houses0.length === 3 && !houses0.includes('home'), houses0.join(','));
+// V5.1 (W1): the Lowgate house ribbon is retired (its checks are gone).
 const stories = await p.$$eval('.lg-card.story', (els) => els.map((e) => e.dataset.story));
 check('surgeon story contract pinned with its own look', stories.includes('surgeon'), stories.join(','));
 t = await p.textContent('.lg-card.story');
@@ -106,8 +105,6 @@ await p.evaluate(() => window.vc.send({ type: 'backToCamp' }));
 await p.waitForTimeout(300);
 t = await text();
 check('won back: banner, "Brother Aldric is home."', !!(await p.$('.lg-wonback')) && /Brother Aldric is home\./.test(t));
-check('won back: the chapel lit on the ribbon', !!(await p.$('.lg-house[data-house="chapel"].won')));
-check('ribbon: Aldric home', (await p.$$('.lg-house[data-state="home"]')).length === 1);
 await p.click('[data-wonback="later"]');
 await p.waitForTimeout(100);
 check('won-back banner dismisses ("Later")', !(await p.$('.lg-wonback')));
