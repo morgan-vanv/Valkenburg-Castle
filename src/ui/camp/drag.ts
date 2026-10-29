@@ -9,7 +9,8 @@
 export interface DropSpec<T> {
   /** True to take the payload, or a short reason why not (shown on hover). */
   accepts: (payload: T) => true | string;
-  onDrop: (payload: T) => void;
+  /** `how`: the way it was carried (a keyboard drop may want to put focus somewhere that survives the re-render). */
+  onDrop: (payload: T, how: Mode) => void;
   /** A short line shown over the target while a payload hovers it (e.g. the cost). */
   hint?: (payload: T) => string | undefined;
   /** V5.1.2: true when this target has nothing to do with the payload (neither lit nor dimmed; e.g. a slot while an ale is carried). */
@@ -24,7 +25,7 @@ interface Target {
   tip: string | undefined;
 }
 
-type Mode = 'pointer' | 'select' | 'keyboard';
+export type Mode = 'pointer' | 'select' | 'keyboard';
 interface Lift {
   source: HTMLElement;
   payload: unknown;
@@ -139,8 +140,9 @@ function setOver(t: Target | undefined): void {
 function drop(t: Target): void {
   if (!lift) return;
   const payload = lift.payload;
+  const how = lift.mode;
   end(true);
-  t.spec.onDrop(payload);
+  t.spec.onDrop(payload, how);
 }
 
 function targetAt(x: number, y: number): Target | undefined {

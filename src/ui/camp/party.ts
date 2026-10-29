@@ -294,6 +294,7 @@ function liveTap(o: AleOffer, s: GameState, party: Hero[], host: CampHost): HTML
     {
       class: `pt-tap ${o.special ? 'special' : ''}`,
       'data-tap': o.kind,
+      'data-k': `tap-${o.kind}`,
       'data-special': o.special ? '1' : undefined,
       style: aleStyle(o.kind),
       role: 'button',
@@ -379,8 +380,12 @@ function pourTarget(el: HTMLElement, hr: Hero, s: GameState, host: CampHost, whe
       return ok;
     },
     hint: (p) => (p.kind === 'ale' ? `Pour for ${hr.name} · ${p.price}` : undefined),
-    onDrop: (p) => {
-      if (p.kind === 'ale') void pour(hr.id, p.ale, host);
+    onDrop: (p, how) => {
+      if (p.kind !== 'ale') return;
+      // A keyboard pour would leave focus on the page (the card loses its lift tabindex and is re-rendered): hand it
+      // back to the tap (restored by data-k) so the next pour is one Enter away.
+      if (how === 'keyboard') document.querySelector<HTMLElement>(`.pt-tap[data-tap="${p.ale}"]`)?.focus({ preventScroll: true });
+      void pour(hr.id, p.ale, host);
     },
   });
 }
