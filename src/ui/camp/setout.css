@@ -1,0 +1,76 @@
+/* V5.1 (W4): Set out (SetOut board). The screen fills <main>: 1920 x 900 stage px, nothing scrolls. */
+.camp .so{position:absolute;left:0;top:0;width:1920px;height:900px;overflow:hidden;display:grid;grid-template-columns:1202px 600px;gap:30px;padding:22px 44px 0;align-content:start}
+.camp .so-l{min-width:0}
+.camp .so-title{display:flex;align-items:flex-end;justify-content:space-between;height:50px;margin-bottom:14px}
+.camp .so-title h2{font-size:38px;line-height:1}
+.camp .so-title-s{font-size:19px;font-style:italic;color:var(--ink-faint)}
+
+/* the map board */
+.camp .so-board{position:relative;width:1202px;height:660px;border-radius:16px;overflow:hidden;border:1px solid #5a4529;
+  background:radial-gradient(ellipse at 50% 45%,#1c1510 0%,#0f0b08 70%,#080605 100%);box-shadow:inset 0 0 90px rgba(0,0,0,.7),0 14px 30px rgba(0,0,0,.55)}
+.camp .so-board>svg{position:absolute;inset:0;width:100%;height:100%}
+.camp .so-rn{font-family:var(--serif);font-style:italic;fill:#b3a58c;text-anchor:middle;paint-order:stroke;stroke:#0d0906;stroke-width:4px;pointer-events:none}
+.camp .so-none{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-size:24px;font-style:italic;color:var(--ink-dim)}
+.camp .so-none-ic{font-size:64px;color:#5a4529}
+.camp .so-pin{position:absolute;display:flex;flex-direction:column;align-items:center;gap:6px;transform:translate(-50%,-50%);z-index:3;padding:0;background:none;border:0}
+.camp .so-pin .dot{width:50px;height:58px;display:grid;place-items:center;font-size:25px;color:#2a1a08;--rim:#fff0cc;--face:radial-gradient(circle at 35% 30%,#ffd88f,#d28a22);filter:drop-shadow(0 0 12px rgba(255,170,70,.85))}
+.camp .so-pin.off .dot{color:#9a8a70;--rim:#6b5d48;--face:#1d1710;filter:none}
+.camp .so-pin.off{opacity:.6}
+.camp .so-pin.plain .dot{color:#d9c9a8;--rim:#8a7f6e;--face:#17120d;filter:none}
+.camp button.so-pin.plain:hover .dot{--rim:var(--amber);color:var(--amber-hi)}
+.camp .so-pin .lb{padding:3px 12px;border-radius:14px;background:rgba(10,6,3,.82);border:1px solid #5a4529;font-size:19px;font-style:italic;white-space:nowrap;color:#d6c9ae}
+.camp .so-pin.on .lb{border-color:var(--amber-hi);color:var(--amber-hi)}
+.camp .so-pin.stairs .dot{width:52px;height:60px;font-size:30px;color:#06211d;--rim:#d6fff8;--face:radial-gradient(circle at 35% 30%,#b5f3ea,#3fa79a);filter:drop-shadow(0 0 14px rgba(143,227,214,.95));animation:so-stairs 2.4s ease-in-out infinite}
+@keyframes so-stairs{50%{filter:drop-shadow(0 0 24px rgba(143,227,214,1))}}
+.camp .so-pin.seal .dot{width:44px;height:50px;font-size:22px;color:#ffe3bd;--rim:#ffcf86;--face:radial-gradient(circle at 35% 30%,#d03a2f,#7a1017);filter:drop-shadow(0 0 12px rgba(220,60,50,.8))}
+.camp .so-legend{position:absolute;left:18px;bottom:14px;display:flex;gap:18px;font-size:max(16px,var(--tf));color:var(--ink-dim);z-index:3;pointer-events:none}
+.camp .so-legend span{display:inline-flex;align-items:center;gap:7px}
+.camp .so-legend .so-lj{color:#e0605a}
+.camp .so-legend .so-ls{color:#8fe3d6}
+.camp .so-legend .so-lw{color:var(--amber)}
+@media (prefers-reduced-motion:reduce){.camp .so-pin.stairs .dot{animation:none}}
+
+/* the ways in */
+.camp .so-ents{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:16px}
+.camp .so-ent{height:98px;border-radius:14px;padding:12px 18px;display:flex;flex-direction:column;justify-content:center;gap:3px;text-align:left;background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.1),0 10px 22px rgba(0,0,0,.45)}
+.camp .so-ent b{font-size:27px;font-weight:500;line-height:1.1;display:flex;align-items:center;gap:10px;white-space:nowrap}
+.camp .so-ent .so-ent-ic{color:var(--ink-dim)}
+.camp .so-ent.on .so-ent-ic{color:var(--amber)}
+.camp .so-ent small{font-size:18px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .so-ent.on{border:2px solid var(--amber-hi);box-shadow:0 0 0 4px rgba(232,163,61,.14),0 0 34px rgba(255,170,80,.28)}
+.camp .so-ent:not(.on):not(.shut):hover{border-color:#8a6a35}
+.camp .so-ent.shut{border-style:dashed;opacity:.65;cursor:not-allowed}
+.camp .so-tg{margin-left:auto;font-family:var(--caps);font-size:max(13px,var(--tf));letter-spacing:.14em;text-transform:uppercase;color:var(--amber-hi);display:inline-flex;gap:6px;align-items:center}
+.camp .so-tg.dim{color:var(--ink-faint)}
+
+/* the muster panel */
+.camp .so-muster{padding:22px 24px 24px;height:838px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.camp .so-job{display:flex;align-items:center;gap:16px;padding:14px 16px;border-radius:12px;background:linear-gradient(90deg,rgba(138,90,42,.3),rgba(0,0,0,.2));border:1px solid #8a5a2a}
+.camp .so-job.none{border-color:#4a3a26;background:rgba(0,0,0,.2)}
+.camp .so-job .ico{width:56px;height:64px;display:grid;place-items:center;font-size:32px;color:#ffd48f;--rim:#7a5a2c;--face:radial-gradient(circle at 50% 40%,#5a3a22,#2a1b10 75%);filter:none;flex:none}
+.camp .so-job-t{min-width:0}
+.camp .so-job h3{font-size:28px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .so-job-sub{display:flex;gap:12px;align-items:center;margin-top:4px;font-size:17px;color:var(--ink-dim);white-space:nowrap}
+.camp .so-job-sub>span{display:inline-flex;align-items:center;gap:6px}
+.camp .so-job .gift{color:#9fe0a8}
+.camp .so-job .lv{color:var(--amber-hi)}
+.camp .so-bounty{color:var(--amber-hi);font-size:19px}
+.camp .so-coins{height:auto;padding:0;gap:2px;transform:scale(.5);transform-origin:left bottom;margin-right:-24px}
+.camp .so-heart{color:#d9534f}
+.camp .so-who{display:flex;flex-direction:column}
+.camp .so-nobody{padding:14px 0;font-style:italic}
+.camp .so-mh{display:grid;grid-template-columns:78px 1fr;gap:6px 14px;align-items:center;padding:10px 0;border-top:1px solid #3a2c1b}
+.camp .so-mh:first-child{border-top:0}
+.camp .so-mh .bw{border-radius:10px;background:radial-gradient(circle at 50% 30%,color-mix(in srgb,var(--c) 40%,#2d2016),#1b130c 78%);border:1px solid #4a3a26;display:grid;place-items:end center;overflow:hidden;height:78px}
+.camp .so-mh .nm{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.camp .so-mh .nm b{font-size:25px;font-weight:500}
+.camp .so-mh .nm span{font-family:var(--caps);font-size:max(14px,var(--tf));letter-spacing:.12em;text-transform:uppercase;color:var(--c)}
+.camp .so-slots{display:flex;gap:8px;align-items:center}
+.camp .so-slots .ms{width:46px;height:53px;display:grid;place-items:center;font-size:25px;color:#ffd48f;--rw:2.5px}
+.camp .so-slots .ms.cont{opacity:.55}
+.camp .so-warns{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+.camp .so-warns .wn{display:flex;align-items:center;gap:12px;min-height:50px;padding:6px 14px;border-radius:12px;font-size:19px;line-height:1.2}
+.camp .so-warns .wn .ic{font-size:24px}
+.camp .so-warns .wn.red{color:#ffc2bb;background:rgba(120,40,35,.28);border:1px solid #7a3a35}
+.camp .so-warns .wn.amb{color:var(--amber-hi);background:rgba(150,100,30,.22);border:1px solid #7a5a24}
+.camp .so-none-t{max-width:640px;text-align:center}

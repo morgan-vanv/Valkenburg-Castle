@@ -307,10 +307,10 @@ await step('party');
 
 // ---- step 4: Set out
 await step('setout');
-const ents = await p.$$eval('.lg-ent', (els) => els.map((e) => e.innerText.split('\n')[0]));
+const ents = await p.$$eval('.so-ent', (els) => els.map((e) => e.innerText.split('\n')[0]));
 const hasMemory = await p.evaluate(() => typeof window.vcEngine.castleMemory === 'function' && window.vcEngine.castleMemory(window.vc.state()).some((m) => m.hexes.length));
 check('step 4 lists only the main gate on a new campaign', ents.length === 1 && /Main gate|Gatehouse/.test(ents[0]), ents.join(','));
-check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(await p.$('.lg-sketch.none')) && !(await p.$('.lg-sketch svg')));
+check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(await p.$('[data-sketch="none"]')) && !(await p.$('[data-sketch] svg')));
 // V4.0 (spec 30.5): with a remembered Level 1, the sketch takes most of the column (≥ 45% of the window's height) and the
 // ways in and the plan still show without scrolling, at 1280×800 and 1440×900 (V4.1: the lantern checkbox is gone).
 {
@@ -324,12 +324,12 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
     const m = await p.evaluate(() => {
       const r = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
       const main = document.querySelector('.lg-main');
-      const sk = r('.lg-sketch svg');
-      return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 0, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
+      const sk = r('[data-sketch] svg');
+      return { sketch: r('[data-sketch]')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.so-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 0, plan: r('.so-muster')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('[data-sketch] text.lg-sk-room').length, ents2: document.querySelectorAll('[data-sketch] .lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('[data-sketch] text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
     });
-    // V5.1 (W1): the camp is a scaled 1920x1080 stage and main no longer stretches the old sketch column; the Set out
-    // board (W4) owns the map's size. Only that a sketch is drawn is checked here.
-    check(`${w}×${hh}: the sketch is drawn`, m.svg, `${Math.round(m.sketch)} of ${m.vh}`);
+    // V5.1 (W4): the map board is 660 of the 1080 stage px (61%), so it fills ≥ 50% of the window's height whatever the
+    // stage scale (the old ≥ 45% assertion, raised for the fixed board).
+    check(`${w}×${hh}: the map takes ≥ 50% of the window's height`, m.svg && m.sketch >= 0.5 * m.vh, `${Math.round(m.sketch)} of ${m.vh}`);
     check(`...ways in and plan in view without scrolling (no lantern checkbox)`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
     check('...room names readable (≥ 11px) and the ways in named on it', m.names >= 3 && m.fs >= 11 && m.ents2 >= 1, `${m.names} names, ${m.ents2} ways, ${Math.round(m.fs)}px`);
     if (SHOTS) {
@@ -342,9 +342,10 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
   await edit(`s.campaign.explored = ${JSON.stringify(keep.explored ?? null)} ?? undefined; s.campaign.opened = ${JSON.stringify(keep.opened ?? null)} ?? undefined;`);
   await step('setout');
 }
-check('the plan names the job, the party and what they carry', /The plan/i.test(await text()) && /Torch/.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+// V5.1 (W4): the plan is the muster panel; what each hero carries is a hex slot whose tip names it.
+check('the muster names the job and the party, and what they carry', /The party goes in/i.test(await text()) && !!(await p.$('.so-muster .so-mh [data-tip*="Torch"]')));
 check('V4.1: no lantern checkbox on Set out', !(await p.$('.lg-shutter input')));
-check('the plan warns when Keven goes', /If he falls, the campaign ends with him\./.test(await p.$eval('.lg-plan', (e) => e.innerText)));
+check('the plan warns when Keven goes', /If he falls, the campaign ends with him\./.test(await p.$eval('.so-muster', (e) => e.innerText)));
 const partyBefore = (await st()).campaign.roster.map((x) => x.id);
 await p.click('.lg-delve');
 await p.waitForFunction(() => window.vc.state()?.stage === 'delve', null, { timeout: 15000 }).catch(() => {});
@@ -399,8 +400,8 @@ if (await p.$('[data-same]')) {
   await p.waitForTimeout(60);
   await p.click('[data-same]');
   await p.waitForTimeout(100);
-  const plan = await p.$eval('.lg-plan', (e) => e.innerText).catch(() => '');
-  check('"Same as last time" jumps to step 4 with the remembered party', (await page()) === 'setout' && (await p.$$('.lg-plan-hero')).length === 2 && /Keven/.test(plan));
+  const plan = await p.$eval('.so-muster', (e) => e.innerText).catch(() => '');
+  check('"Same as last time" jumps to step 4 with the remembered party', (await page()) === 'setout' && (await p.$$('.so-mh')).length === 2 && /Keven/.test(plan));
   check('...keeps the chosen job', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).length > 0);
 }
 
@@ -439,7 +440,9 @@ await p.waitForTimeout(80);
 check('the graves: empty state', /No names yet\. Keep it that way\./.test(await text()));
 await edit(`s.campaign.fallen.push({ name: 'Bram Ashby', cls: 'sellsword', level: 2, where: 'Level 1, great hall', delve: 2 });`);
 const gtxt = await text();
-check('the graves: a headstone with name, class, where, delve and epitaph', /Bram Ashby/.test(gtxt) && /Sellsword · Level 2/.test(gtxt) && /Fell in the great hall/.test(gtxt) && /Held the line\./.test(gtxt) && /What they carried still lies where they fell/.test(gtxt));
+// V5.1 (W4): the epitaph is picked from the class's lines by a hash of the record (graves.ts epitaph()), so any line.
+const ep = await p.$eval('.gv-stone .ep', (e) => e.textContent).catch(() => '');
+check('the graves: a headstone with name, class, where, delve and epitaph', /Bram Ashby/.test(gtxt) && /Sellsword · Level 2/i.test(gtxt) && /Fell in the great hall/.test(gtxt) && ep.length > 3 && /What they carried still lies where they fell/.test(gtxt), ep);
 await p.click('[data-k="back-steps"]'); // V5.1 (W1): Back lives in the footer
 await p.waitForTimeout(80);
 check('"Back to the delve steps" returns to the last step', (await page()) === 'party');
