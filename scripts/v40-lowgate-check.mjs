@@ -54,8 +54,8 @@ check('step summaries: the job, "Keven alone", "Packs empty", "Main gate"', /Res
 check('primary action bottom-right: "Next: Party"', /Next: Party/.test(await p.$eval('.lg-foot-r', (e) => e.innerText)));
 check('no "Same as last time" without a last loadout', !(await p.$('[data-same]')));
 check('no who-is-where village list', !(await p.$('.village-panel')) && !/Old Wim/.test(await p.$eval('.lg-foot', (e) => e.innerText)));
-const houses = await p.$$eval('.lg-house', (els) => els.map((e) => `${e.dataset.house}:${e.dataset.state}`));
-check('ribbon: chapel has the plea, Flagon, forge and bench boarded', JSON.stringify(houses) === '["chapel:plea","flagon:boarded","forge:boarded","bench:boarded"]', houses.join(','));
+// V5.1 (W1): the Lowgate house ribbon is retired; the wagon and the gravestone sit in the header.
+check('no house ribbon; the wagon and the gravestone in the header', !(await p.$('.lg-house')) && !!(await p.$('.lg-head [data-ribbon="cart"]')) && !!(await p.$('.lg-head [data-ribbon="graves"]')));
 await p.click('.lg-welcome [data-welcome]');
 await p.waitForTimeout(80);
 check('"Got it" dismisses the welcome card', !(await p.$('.lg-welcome')));
@@ -63,7 +63,7 @@ check('"Got it" dismisses the welcome card', !(await p.$('.lg-welcome')));
 // ---- step 1: Job
 const cards = await p.$$eval('.lg-card', (els) => els.map((e) => ({ id: e.dataset.contract, story: e.dataset.story, chosen: e.getAttribute('aria-pressed') === 'true', text: e.innerText })));
 check('the village plea comes first, with a seal and "Wins back"', cards[0]?.story === 'surgeon' && /Wins back/i.test(cards[0].text) && !!(await p.$('.lg-card.story .lg-card-seal')));
-check('the first card is chosen by default ("Chosen")', cards[0]?.chosen && /Chosen/.test(cards[0].text));
+check('the first card is chosen by default ("Chosen")', cards[0]?.chosen && /Chosen/i.test(cards[0].text));
 check('no "Story" / "Unlocks" chips, no "No warnings posted"', cards.every((c) => !/No warnings posted|^Story$|Unlocks the/m.test(c.text)));
 await p.click(`.lg-card[data-contract="${cards[1].id}"]`);
 await p.waitForTimeout(80);
@@ -71,9 +71,9 @@ check('clicking a card selects it (no navigation)', (await page()) === 'job' && 
 const title1 = await p.evaluate((id) => window.vc.state().campaign.board.find((k) => k.id === id).title, cards[1].id);
 check('...and the step summary names it', (await p.$eval('.lg-step[data-step="job"]', (e) => e.innerText)).includes(title1), title1);
 check('renown pips at the step heading, with a hover text', !!(await p.$('.lg-renown[data-tip*="Renown"]')) && (await p.$$('.lg-renown .lg-pips i')).length === 3);
-await p.click('.lg-house[data-house="chapel"]');
+await p.click('.lg-card[data-story="surgeon"]'); // V5.1 (W1): no house ribbon to pick the plea from; the card itself
 await p.waitForTimeout(80);
-check('the chapel\'s plea seal selects that job', (await p.$eval('.lg-card[data-story="surgeon"]', (e) => e.getAttribute('aria-pressed'))) === 'true');
+check('the surgeon\'s plea card selects that job', (await p.$eval('.lg-card[data-story="surgeon"]', (e) => e.getAttribute('aria-pressed'))) === 'true');
 // V4.1 (spec 31.11): the board in two labelled rows, the village's pins above work for hire, at most 3 cards each.
 const boardRows = () => p.$$eval('.lg-board-row', (els) => els.map((e) => ({ id: e.dataset.row, label: e.querySelector('.lg-board-h')?.textContent, tip: e.querySelector('.lg-board-h')?.dataset.tip ?? '', cards: [...e.querySelectorAll('.lg-card')].map((c) => ({ story: c.dataset.story, captive: c.dataset.captive })), more: e.querySelector('.lg-board-more')?.textContent ?? '' })));
 let rows = await boardRows();
@@ -155,8 +155,6 @@ await p.waitForTimeout(100);
 s = await st();
 check('healing paid and applied', s.campaign.gold === 21 && s.campaign.roster[1].hp === s.campaign.roster[1].maxHp, `${s.campaign.gold} gold`);
 check('a healed hero has no HP bar', !(await p.$(`.lg-slot.hero[data-hero="${r0}"] .lg-hpbar`)));
-const houses2 = await p.$$eval('.lg-house', (els) => els.map((e) => `${e.dataset.house}:${e.dataset.state}`));
-check('ribbon: the chapel is home (lit)', houses2[0] === 'chapel:home', houses2.join(','));
 
 // ---- step 3: Outfit (V4.1 WS4, spec 31.6: two counters, "Yours" and "Vendors")
 await p.click('[data-next="outfit"]');
@@ -332,7 +330,9 @@ check('...and no sketch: "You\'ve never been inside."', hasMemory ? true : !!(aw
       const sk = r('.lg-sketch svg');
       return { sketch: r('.lg-sketch')?.height ?? 0, svg: !!sk, vh: innerHeight, mainBottom: r('.lg-main').bottom, ents: r('.lg-ents')?.bottom ?? 9999, shutter: r('.lg-shutter')?.bottom ?? 0, plan: r('.lg-plan')?.bottom ?? 9999, scroll: main.scrollHeight - main.clientHeight, names: document.querySelectorAll('.lg-sketch text.lg-sk-room').length, ents2: document.querySelectorAll('.lg-sketch text.lg-sk-ent').length, fs: Math.min(...[...document.querySelectorAll('.lg-sketch text.lg-sk-room')].map((t) => t.getBoundingClientRect().height)) };
     });
-    check(`${w}×${hh}: the sketch takes ≥ 45% of the window's height`, m.svg && m.sketch >= 0.45 * m.vh, `${Math.round(m.sketch)} of ${m.vh}`);
+    // V5.1 (W1): the camp is a scaled 1920x1080 stage and main no longer stretches the old sketch column; the Set out
+    // board (W4) owns the map's size. Only that a sketch is drawn is checked here.
+    check(`${w}×${hh}: the sketch is drawn`, m.svg, `${Math.round(m.sketch)} of ${m.vh}`);
     check(`...ways in and plan in view without scrolling (no lantern checkbox)`, m.scroll <= 1 && m.ents <= m.mainBottom && m.shutter <= m.mainBottom && m.plan <= m.mainBottom, JSON.stringify(m));
     check('...room names readable (≥ 11px) and the ways in named on it', m.names >= 3 && m.fs >= 11 && m.ents2 >= 1, `${m.names} names, ${m.ents2} ways, ${Math.round(m.fs)}px`);
     if (SHOTS) {
@@ -430,7 +430,6 @@ await p.waitForSelector('.lowgate');
 await p.waitForTimeout(150);
 const wb = await p.$eval('.lg-wonback', (e) => e.innerText).catch(() => '');
 check('won back: "Brother Aldric is home." with where it lives now', /Brother Aldric is home\./.test(wb) && /when you pick the party/.test(wb), wb.replace(/\n/g, ' | ').slice(0, 120));
-check('won back: the chapel glows on the ribbon', !!(await p.$('.lg-house[data-house="chapel"].won')));
 if (wb) {
   await p.click('[data-wonback="show"]');
   await p.waitForTimeout(80);
@@ -444,7 +443,7 @@ check('the graves: empty state', /No names yet\. Keep it that way\./.test(await 
 await edit(`s.campaign.fallen.push({ name: 'Bram Ashby', cls: 'sellsword', level: 2, where: 'Level 1, great hall', delve: 2 });`);
 const gtxt = await text();
 check('the graves: a headstone with name, class, where, delve and epitaph', /Bram Ashby/.test(gtxt) && /Sellsword · Level 2/.test(gtxt) && /Fell in the great hall/.test(gtxt) && /Held the line\./.test(gtxt) && /What they carried still lies where they fell/.test(gtxt));
-await p.click('.lg-head .lg-btn');
+await p.click('[data-k="back-steps"]'); // V5.1 (W1): Back lives in the footer
 await p.waitForTimeout(80);
 check('"Back to the delve steps" returns to the last step', (await page()) === 'party');
 await p.click('[data-ribbon="cart"]');
