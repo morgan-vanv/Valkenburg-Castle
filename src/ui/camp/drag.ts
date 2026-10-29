@@ -291,6 +291,9 @@ export function makeDraggable<T>(el: HTMLElement, payload: T, opts: { ghost?: bo
     }
     e.stopPropagation();
     if (lift?.source === el) end(false);
+    // V5.1.2: the second click of a double-click never picks something up (a double-clicked Round re-renders under
+    // the pointer and its second click would land on the tap behind it, leaving a tankard lifted).
+    else if (e.detail > 1) e.preventDefault();
     else begin(el, payload, e.detail === 0 ? 'keyboard' : 'select');
   };
   const key = (e: KeyboardEvent) => {
