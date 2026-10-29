@@ -16,6 +16,7 @@ import { partyStep } from './camp/party';
 import { outfitStep, cartPage } from './camp/outfit';
 import { setOutStep } from './camp/setout';
 import { gravesPage } from './camp/graves';
+import './camp/camp.css'; // V5.1 (W0): the camp kit, scoped under .camp (unused by the old .lg-* screens until they migrate)
 
 export { STEPS, type Step, type CampPage, type Loadout, type CampHost, type EntranceInfo, entrancesOf, memoryOf, BOARD_ROW_MAX, boardRows, boardOrder, cleanLoadout, freshLoadout, sameAsLast, installTips, villageOf, captiveContract, contractCaptive } from './camp/shared';
 

@@ -1,0 +1,219 @@
+/* V5.1 (W0): the camp kit, ported from the approved Claude Design mockups (camp.css on the canvas).
+   Scoped under .camp so it lives beside the old .lg-* Lowgate styles until each screen migrates.
+   The .camp element is the 1920x1080 stage (src/ui/camp/stage.ts scales it); the mockups' .scr is .camp here. */
+/* Lowgate V5.1 camp kit: lit-tabletop tokens, frame, busts, icons, coins. Shared by every board. */
+.camp{
+  --ground:#0c0805; --board:#17110b; --leather:#241a11; --leather2:#30231a; --edge:#4a3a26; --edge-hi:#8a6a35;
+  --amber:#e8a33d; --amber-hi:#ffcf86; --ink:#f1e4c8; --ink-dim:#b8a785; --ink-faint:#7f7159;
+  --ember:#e0572f; --bad:#e0605a; --ok:#8cc47f; --glow:rgba(255,170,80,.16);
+  --serif:'Alegreya',Georgia,serif; --caps:'Alegreya Sans SC','Alegreya Sans',sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --k-heir:#e8a33d; --k-sellsword:#c8503f; --k-burglar:#3fa7a0; --k-ranger:#6aa84f; --k-sapper:#d9822b; --k-pyro:#e0572f; --k-shadow:#8b6ae0; --k-witch:#5fd49a;
+}
+.camp *{box-sizing:border-box}
+.camp{position:relative;width:1920px;height:1080px;overflow:hidden;color:var(--ink);font-family:var(--serif);font-size:18px;line-height:1.3;
+  background:radial-gradient(1300px 720px at 50% -8%,#432a14 0%,#1b130b 52%,#0b0704 100%);}
+/* honeycomb on the table: a faint hex grid, not planks */
+.camp::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:.9;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100' viewBox='0 0 56 100'%3E%3Cpath fill='none' stroke='%23ffc878' stroke-opacity='.055' stroke-width='1.4' d='M28 66L0 50L0 16L28 0L56 16L56 50L28 66L28 100M28 0L28 34L0 50L0 84L28 100L56 84L56 50L28 34'/%3E%3C/svg%3E") 0 0/56px 100px;}
+.camp::after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 220px 40px rgba(0,0,0,.65)}
+.camp > header,.camp > main,.camp > .fd,.camp > .h{position:relative;z-index:1}
+.camp h1,.camp h2,.camp h3,.camp p{margin:0;font-weight:500}
+.camp button{font:inherit;color:inherit;cursor:pointer}
+.camp .kick{font-family:var(--caps);font-size:15px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber)}
+.camp .dim{color:var(--ink-dim)}
+.camp .faint{color:var(--ink-faint)}
+.camp .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* icons: one mask per glyph, tinted by currentColor */
+.camp .ic{display:inline-block;width:1em;height:1em;flex:none;background:currentColor;-webkit-mask:var(--m) center/contain no-repeat;mask:var(--m) center/contain no-repeat}
+.camp .ic-sword{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 18 L19 5 M15 4 L20 4 L20 9 M7 13 L11 17 M4 20 L6 18'/%3E%3C/svg%3E")}
+.camp .ic-shield{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 L19 6 V12 C19 16 16 19 12 21 C8 19 5 16 5 12 V6 Z M12 8 V15'/%3E%3C/svg%3E")}
+.camp .ic-bow{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 4 C15 6 15 18 6 20 M6 4 L6 20 M6 12 H21 M18 9 L21 12 L18 15'/%3E%3C/svg%3E")}
+.camp .ic-bomb{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 8 A6.5 6.5 0 1 0 11.01 8 M15 9 L18 6 M17 3.5 L20.5 7'/%3E%3C/svg%3E")}
+.camp .ic-flame{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 C13 8 18 9 18 14 A6 6 0 0 1 6 14 C6 11 8 10 9 8 C10 10 11 10 11 8 C11 6 12 5 12 3Z'/%3E%3C/svg%3E")}
+.camp .ic-hood{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 C7 3 5 8 5 13 L5 21 L19 21 L19 13 C19 8 17 3 12 3Z M9 12 C10 14 14 14 15 12'/%3E%3C/svg%3E")}
+.camp .ic-lock{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 11 V8 A5 5 0 0 1 17 8 V11 M5 11 H19 V21 H5Z M12 15 V17'/%3E%3C/svg%3E")}
+.camp .ic-heart{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black' stroke='black' stroke-width='1.2' stroke-linejoin='round'%3E%3Cpath d='M12 20 C4 14 3 9 6 6 C8 4 11 5 12 8 C13 5 16 4 18 6 C21 9 20 14 12 20Z'/%3E%3C/svg%3E")}
+.camp .ic-potion{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3 H15 M10 3 V8 L5 18 A2 2 0 0 0 7 21 H17 A2 2 0 0 0 19 18 L14 8 V3 M7.5 15 H16.5'/%3E%3C/svg%3E")}
+.camp .ic-torch{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 C14 5 16 6 16 9 A4 4 0 0 1 8 9 C8 7 10 6 10 4 C11 5 11 3 12 2Z M10 13 H14 L13 21 H11Z'/%3E%3C/svg%3E")}
+.camp .ic-rope{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 A8 8 0 1 0 12.01 3 M12 7.5 A3.5 3.5 0 1 0 12.01 7.5 M17.5 17.5 C19 19.5 21 19 21 22'/%3E%3C/svg%3E")}
+.camp .ic-coin{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 A9 9 0 1 0 12.01 3 M12 7.5 A4.5 4.5 0 1 0 12.01 7.5'/%3E%3C/svg%3E")}
+.camp .ic-gem{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 4 H18 L22 10 L12 21 L2 10Z M2 10 H22 M9 4 L7 10 L12 21 L17 10 L15 4'/%3E%3C/svg%3E")}
+.camp .ic-skull{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 C7 3 4 6 4 10 C4 13 6 14 6 16 V18 H9 V20.5 H15 V18 H18 V16 C18 14 20 13 20 10 C20 6 17 3 12 3Z M9 10.5 H9.01 M15 10.5 H15.01 M12 14 V16'/%3E%3C/svg%3E")}
+.camp .ic-chain{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 14 A3.5 3.5 0 0 1 10 9 L12 7 A3.5 3.5 0 0 1 17 12 M14 10 A3.5 3.5 0 0 1 14 15 L12 17 A3.5 3.5 0 0 1 7 12'/%3E%3C/svg%3E")}
+.camp .ic-chest{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10 C3 6 6 4 12 4 C18 4 21 6 21 10 V20 H3Z M3 10 H21 M10 12 H14 V15.5 H10Z'/%3E%3C/svg%3E")}
+.camp .ic-cart{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 6 H5 L7.5 16 H19 L21 8 H6 M9 20.5 H9.01 M17.5 20.5 H17.51'/%3E%3C/svg%3E")}
+.camp .ic-grave{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 21 V10 A6 6 0 0 1 18 10 V21 Z M12 8 V14 M9.5 11 H14.5 M3 21 H21'/%3E%3C/svg%3E")}
+.camp .ic-arrow{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20 L20 4 M20 4 H14 M20 4 V10 M4 20 H8 M4 20 V16 M7 17 H11 M7 17 V13'/%3E%3C/svg%3E")}
+.camp .ic-anvil{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 9 H21 V12.5 H15.5 L15 16 H18 V20 H6 V16 H9 L8.5 12.5 H3 Z'/%3E%3C/svg%3E")}
+.camp .ic-mail{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6 L9 3 L12 5 L15 3 L19 6 L18 12 C17 17 14.5 19.5 12 21 C9.5 19.5 7 17 6 12Z M9 11 H15'/%3E%3C/svg%3E")}
+.camp .ic-mug{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7 H15 V19 H4Z M15 9 H19 V15 H15 M7.5 10.5 V15.5 M11.5 10.5 V15.5 M5 4 C6 3 8 5 9 4 C10 3 12 5 14 4'/%3E%3C/svg%3E")}
+.camp .ic-lantern{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4 H15 M12 2 V4 M8 7 H16 L17.5 18 H6.5Z M12 10 V15 M5.5 21 H18.5'/%3E%3C/svg%3E")}
+.camp .ic-warn{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 L22 20 H2Z M12 10 V14 M12 17 H12.01'/%3E%3C/svg%3E")}
+.camp .ic-spider{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8 A3 3 0 1 0 12.01 8 M12 14 A3.5 3.5 0 1 0 12.01 14 M9.5 10 L4 6 M9 13 L3 12 M9.5 16 L4 20 M14.5 10 L20 6 M15 13 L21 12 M14.5 16 L20 20'/%3E%3C/svg%3E")}
+.camp .ic-crown{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8 L8 12 L12 5 L16 12 L21 8 L19 19 H5Z'/%3E%3C/svg%3E")}
+.camp .ic-star{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 L14.2 9 L20.5 9.3 L15.5 13.2 L17.3 19.5 L12 16 L6.7 19.5 L8.5 13.2 L3.5 9.3 L9.8 9Z'/%3E%3C/svg%3E")}
+.camp .ic-leaf{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20 C4 10 10 4 20 4 C20 14 14 20 4 20Z M4 20 L14 10'/%3E%3C/svg%3E")}
+.camp .ic-pick{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20 L14 10 M7 6 C11 2.5 18 3.5 21 8 C17 7 14.5 8 13 10 L10 7'/%3E%3C/svg%3E")}
+.camp .ic-aim{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5 A7 7 0 1 0 12.01 5 M12 1.5 V7 M12 17 V22.5 M1.5 12 H7 M17 12 H22.5'/%3E%3C/svg%3E")}
+.camp .ic-push{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12 H15 M10 6 L16 12 L10 18 M20 5 V19'/%3E%3C/svg%3E")}
+.camp .ic-horn{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10 V14 H7 L16 19 V5 L7 10Z M19.5 9 C21 11 21 13 19.5 15'/%3E%3C/svg%3E")}
+.camp .ic-moon{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 14.5 A8 8 0 1 1 9.5 4.5 A6.5 6.5 0 0 0 19 14.5Z'/%3E%3C/svg%3E")}
+.camp .ic-scroll{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 4 H18 V18 A3 3 0 0 0 21 21 H8 A3 3 0 0 1 5 18 V6 A2 2 0 0 1 6 4Z M9 9 H15 M9 13 H14'/%3E%3C/svg%3E")}
+.camp .ic-banner{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 3 V21 M5 4 H19 L16 8.5 L19 13 H5'/%3E%3C/svg%3E")}
+.camp .ic-sack{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3 H15 L14 7 C18 9 20 13 19 18 C18.5 20.5 16 21 12 21 C8 21 5.5 20.5 5 18 C4 13 6 9 10 7Z M9.5 7.5 H14.5'/%3E%3C/svg%3E")}
+.camp .ic-gate{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 21 V8 L6 6 V4 M21 21 V8 L18 6 V4 M3 21 H21 M7 21 V13 A5 5 0 0 1 17 13 V21 M12 9 V21'/%3E%3C/svg%3E")}
+.camp .ic-check{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 L10 17.5 L19 7'/%3E%3C/svg%3E")}
+.camp .ic-plus{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M12 5 V19 M5 12 H19'/%3E%3C/svg%3E")}
+.camp .ic-fuse{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 V7 M12 17 V21 M3 12 H7 M17 12 H21 M5.5 5.5 L8.5 8.5 M15.5 15.5 L18.5 18.5 M18.5 5.5 L15.5 8.5 M8.5 15.5 L5.5 18.5 M12 10 A2 2 0 1 0 12.01 10'/%3E%3C/svg%3E")}
+/* frame: header, steps, purse, camp props, footer */
+.camp .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:92px;padding:0 44px;
+  background:linear-gradient(180deg,rgba(12,8,5,.88),rgba(12,8,5,.35));border-bottom:1px solid #3a2c1b;}
+.camp .brand .kick{font-size:13px;color:var(--ink-faint)}
+.camp .brand h1{font-size:34px;line-height:1;color:var(--ink)}
+.camp .steps{display:flex;align-items:center;gap:0}
+.camp .step{display:flex;align-items:center;gap:12px;padding:0 6px;background:none;border:0;color:var(--ink-faint)}
+.camp .step .med{position:relative;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:27px;
+  background:radial-gradient(circle at 35% 30%,#3a2b1b,#1b130c);border:2px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,220,160,.12),0 3px 8px rgba(0,0,0,.5)}
+.camp .step .nm{font-size:22px;line-height:1;color:var(--ink-dim)}
+.camp .step .sb{font-family:var(--caps);font-size:14px;letter-spacing:.06em;color:var(--ink-faint);margin-top:3px;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .step.done .med{border-color:#a07a36;color:var(--amber)}
+.camp .step.done .med .tick{position:absolute;right:-4px;bottom:-4px;width:20px;height:20px;border-radius:50%;background:var(--amber);color:#1a1006;display:grid;place-items:center;font-size:12px}
+.camp .step.on .med{border-color:var(--amber-hi);color:var(--amber-hi);background:radial-gradient(circle at 35% 30%,#6a4519,#2b1c0c);box-shadow:0 0 0 4px rgba(232,163,61,.18),0 0 28px rgba(255,170,80,.45),inset 0 1px 0 rgba(255,230,180,.3)}
+.camp .step.on .nm{color:var(--ink)}
+.camp .step.on .sb{color:var(--ink-dim)}
+.camp .link{width:46px;height:2px;background:#3a2c1b;margin:0 8px}
+.camp .link.done{background:#a07a36}
+.camp .right{display:flex;justify-content:flex-end;align-items:center;gap:22px}
+.camp .purse{display:flex;align-items:flex-end;gap:14px;padding:6px 18px 8px 16px;border-radius:12px;background:linear-gradient(180deg,rgba(0,0,0,.35),rgba(60,40,18,.35));border:1px solid #4a3a26}
+.camp .purse .gold-n{font-family:var(--mono);font-size:38px;line-height:1;color:var(--amber-hi);font-weight:500;text-shadow:0 0 16px rgba(255,180,80,.35)}
+.camp .coinstack{display:flex;align-items:flex-end;gap:5px;height:52px;padding-bottom:6px}
+.camp .coinstack i{display:block;position:relative;width:20px;height:var(--h);margin-top:8px;border-radius:0 0 10px 10px/0 0 5px 5px;
+  background:repeating-linear-gradient(180deg,#f0c35a 0 4px,#8f5f16 4px 6px)}
+.camp .coinstack i::before{content:'';position:absolute;left:-1px;right:-1px;top:-5px;height:11px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#ffe29a,#d19a2e);border:1px solid #8f5f16}
+.camp .props{display:flex;gap:10px}
+.camp .prop{position:relative;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-size:27px;color:var(--ink-dim);
+  background:radial-gradient(circle at 35% 30%,#33261a,#16100a);border:2px solid #4a3a26;box-shadow:0 3px 8px rgba(0,0,0,.5)}
+.camp .prop .bd{position:absolute;right:-6px;top:-6px;min-width:24px;height:24px;border-radius:12px;padding:0 6px;background:var(--amber);color:#1a1006;font-family:var(--mono);font-size:14px;font-weight:600;display:grid;place-items:center}
+.camp .prop.grave .bd{background:#6d6150;color:var(--ink)}
+.camp .foot{position:absolute !important;left:0;right:0;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;padding:0 44px;
+  background:linear-gradient(0deg,rgba(12,8,5,.92),rgba(12,8,5,.3));border-top:1px solid #3a2c1b}
+.camp .foot .mid{color:var(--ink-dim);font-style:italic;font-size:19px;text-align:center;flex:1;padding:0 40px}
+.camp .btn{display:inline-flex;align-items:center;gap:10px;height:54px;padding:0 26px;border-radius:10px;font-size:21px;color:var(--ink);
+  background:linear-gradient(180deg,#34271a,#21170e);border:1px solid #5a4529;box-shadow:inset 0 1px 0 rgba(255,225,170,.14),0 3px 8px rgba(0,0,0,.5)}
+.camp .btn.ghost{background:none;border-color:transparent;box-shadow:none;color:var(--ink-dim)}
+.camp .btn.primary{height:58px;padding:0 34px;font-size:23px;color:#1c1106;font-weight:700;border-color:#ffcf86;
+  background:linear-gradient(180deg,#f6bb58,#c98421);box-shadow:inset 0 1px 0 rgba(255,245,210,.6),0 0 26px rgba(255,170,70,.35),0 4px 10px rgba(0,0,0,.55)}
+.camp .panel{border-radius:12px;background:linear-gradient(180deg,rgba(48,35,24,.92),rgba(30,21,14,.94));border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.09),0 10px 26px rgba(0,0,0,.45)}
+.camp .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:15px;font-size:16px;background:rgba(0,0,0,.35);border:1px solid #4a3a26;color:var(--ink-dim)}
+.camp .chip.bad{color:#ffb4ac;border-color:#7a3a35;background:rgba(120,40,35,.25)}
+.camp .chip.warn{color:var(--amber-hi);border-color:#7a5a24;background:rgba(150,100,30,.2)}
+.camp .price{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:21px;color:var(--amber-hi)}
+.camp .price .ic{font-size:19px;color:#e8b84a}
+/* busts: low-poly figurine heads, one hat per class; stand-ins for the rig renders */
+.camp .bust{position:relative;width:var(--bs,120px);aspect-ratio:1;--cl:#7a6a58;--sk:#dcb48a}
+.camp .bust i{position:absolute;display:block}
+.camp .bust .sh{left:6%;right:6%;bottom:0;height:44%;background:linear-gradient(112deg,var(--cl) 0 52%,color-mix(in srgb,var(--cl) 66%,#000) 52%);clip-path:polygon(0 100%,7% 58%,30% 26%,70% 26%,93% 58%,100% 100%)}
+.camp .bust .hd{left:30%;width:40%;top:20%;height:46%;background:linear-gradient(100deg,var(--sk) 0 52%,color-mix(in srgb,var(--sk) 80%,#000) 52%);clip-path:polygon(24% 0,76% 0,100% 28%,100% 68%,70% 100%,30% 100%,0 68%,0 28%)}
+.camp .bust .ht{background:linear-gradient(108deg,var(--hc,var(--cl)) 0 50%,color-mix(in srgb,var(--hc,var(--cl)) 62%,#000) 50%)}
+.camp .bust.k-heir{--cl:#8a5a22;--hc:#f0b44a}
+.camp .bust.k-heir .ht{left:28%;width:44%;top:19%;height:14%;clip-path:polygon(0 100%,4% 20%,22% 70%,36% 0,50% 60%,64% 0,78% 70%,96% 20%,100% 100%)}
+.camp .bust.k-sellsword{--cl:#7b3a30;--hc:#9aa2a8}
+.camp .bust.k-sellsword .ht{left:26%;width:48%;top:12%;height:44%;clip-path:polygon(50% 0,90% 14%,98% 52%,72% 52%,66% 40%,34% 40%,28% 52%,2% 52%,10% 14%)}
+.camp .bust.k-sellsword::after{content:'';position:absolute;left:46%;width:8%;top:2%;height:26%;background:var(--k-sellsword);clip-path:polygon(0 100%,50% 0,100% 100%)}
+.camp .bust.k-burglar{--cl:#1f3d3b;--hc:#2b5754}
+.camp .bust.k-burglar .ht,.camp .bust.k-ranger .ht,.camp .bust.k-shadow .ht{left:21%;width:58%;top:11%;height:58%;clip-path:polygon(50% 0,86% 13%,100% 48%,94% 92%,72% 80%,68% 42%,32% 42%,28% 80%,6% 92%,0 48%,14% 13%)}
+.camp .bust.k-ranger{--cl:#3c5a2a;--hc:#557d3a}
+.camp .bust.k-ranger::after{content:'';position:absolute;left:66%;top:6%;width:10%;height:30%;background:#d9c58a;clip-path:polygon(40% 100%,0 40%,60% 0,100% 30%)}
+.camp .bust.k-shadow{--cl:#3b2f66;--hc:#5a47a0}
+.camp .bust.k-shadow .ht{top:4%;height:66%}
+.camp .bust.k-sapper{--cl:#7a4a1c;--hc:#c27a2e}
+.camp .bust.k-sapper .ht{left:26%;width:48%;top:14%;height:20%;clip-path:polygon(0 100%,10% 30%,50% 0,90% 30%,100% 100%)}
+.camp .bust.k-sapper::after{content:'';position:absolute;left:31%;width:38%;top:36%;height:11%;background:linear-gradient(90deg,#222 0 40%,transparent 40% 60%,#222 60%);border-radius:6px;box-shadow:0 0 0 2px #8a6a35}
+.camp .bust.k-pyro{--cl:#6b2a1a;--hc:#b4381f}
+.camp .bust.k-pyro .ht{left:22%;width:56%;top:2%;height:64%;clip-path:polygon(50% 0,80% 40%,92% 90%,70% 78%,66% 42%,34% 42%,30% 78%,8% 90%,20% 40%)}
+.camp .bust.k-witch{--cl:#2b5a3f;--hc:#3f8a5c}
+.camp .bust.k-witch .ht{left:12%;width:76%;top:-4%;height:42%;clip-path:polygon(52% 0,64% 38%,100% 62%,100% 80%,0 80%,0 62%,36% 38%)}
+.camp .bust.sm{--bs:64px}
+.camp .bust.lg{--bs:180px}
+/* ability tile: icon on a small shield, name on hover (a tooltip stands in as .tip) */
+.camp .abil{display:grid;place-items:center;width:58px;height:58px;border-radius:12px;font-size:32px;color:var(--ink);
+  background:radial-gradient(circle at 35% 25%,#3a2a1a,#1a120b);border:1px solid #5a4529;box-shadow:inset 0 1px 0 rgba(255,225,170,.12),0 3px 6px rgba(0,0,0,.45)}
+.camp .abil.k-heir{color:#f6c35c}
+.camp .abil.k-sellsword{color:#ee8a7a}
+.camp .abil.k-burglar{color:#6fd4cb}
+.camp .abil.k-ranger{color:#93d070}
+.camp .abil.k-sapper{color:#f0a24a}
+.camp .abil.k-pyro{color:#ff875f}
+.camp .abil.k-shadow{color:#b79cff}
+.camp .abil.k-witch{color:#86edb8}
+.camp .tip{position:absolute;z-index:20;width:300px;padding:12px 14px;border-radius:10px;background:#120d08;border:1px solid #8a6a35;box-shadow:0 12px 30px rgba(0,0,0,.7);font-size:17px;color:var(--ink)}
+.camp .tip b{display:block;font-weight:600;color:var(--amber-hi);margin-bottom:2px}
+.camp .tip .nums{display:block;margin-top:6px;font-family:var(--mono);font-size:14px;color:var(--ink-dim)}
+/* HEX SYSTEM: medallions, slots, ability tiles, pedestals and badges are hexagons (pointy-top, w:h = 0.866).
+   The element draws nothing itself; ::before is the rim, ::after the face, so glows follow the hex via drop-shadow. */
+.camp{--hex:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.camp .med,.camp .prop,.camp .sl,.camp .abil,.camp .ped,.camp .itm,.camp .em,.camp .risk,.camp .ms,.camp .dot,.camp .crownmark,.camp .plus{position:relative;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+.camp .med::before,.camp .prop::before,.camp .sl::before,.camp .abil::before,.camp .ped::before,.camp .itm::before,.camp .em::before,.camp .risk::before,.camp .ms::before,.camp .dot::before,.camp .crownmark::before,.camp .plus::before{content:'';position:absolute;inset:0;clip-path:var(--hex);background:var(--rim,#5a4529);z-index:0}
+.camp .med::after,.camp .prop::after,.camp .sl::after,.camp .abil::after,.camp .ped::after,.camp .itm::after,.camp .em::after,.camp .risk::after,.camp .ms::after,.camp .dot::after,.camp .crownmark::after,.camp .plus::after{content:'';position:absolute;inset:var(--rw,3px);clip-path:var(--hex);background:var(--face,#2a1d10);z-index:0}
+.camp .med>*,.camp .prop>*,.camp .sl>*,.camp .abil>*,.camp .ped>*,.camp .itm>*,.camp .em>*,.camp .risk>*,.camp .ms>*,.camp .dot>*,.camp .crownmark>*,.camp .plus>*{position:relative;z-index:2}
+.camp .step .med{width:58px;height:66px}
+.camp .med{--rim:#4a3a26;--face:radial-gradient(circle at 35% 30%,#3a2b1b,#1b130c)}
+.camp .step.done .med{--rim:#a07a36}
+.camp .step.on .med{--rim:var(--amber-hi);--face:radial-gradient(circle at 35% 30%,#6a4519,#2b1c0c);filter:drop-shadow(0 0 10px rgba(255,170,80,.75))}
+.camp .step.done .med .tick{right:-2px;bottom:2px}
+.camp .props .prop{width:56px;height:64px}
+.camp .prop{--rim:#4a3a26;--face:radial-gradient(circle at 35% 30%,#33261a,#16100a)}
+.camp .prop .bd{right:-8px;top:-2px}
+.camp .abil{width:54px;height:62px}
+.camp .abil{--rim:#5a4529;--face:radial-gradient(circle at 35% 25%,#3a2a1a,#1a120b)}
+.camp .sl{--rim:#7a5a2c;--face:radial-gradient(circle at 50% 40%,#5a3b1a,#24180c 72%)}
+.camp .sl.e{--rim:#4a3a26;--face:#120d08}
+.camp .sl.drop{--rim:var(--amber-hi);--face:radial-gradient(circle,#6a4519,#2b1c0c);filter:drop-shadow(0 0 12px rgba(255,170,80,.85))}
+.camp .ped,.camp .itm{--rim:#8a6a35;--face:radial-gradient(circle at 50% 38%,#7a5222,#2e1f0f 66%);filter:drop-shadow(0 0 14px rgba(255,160,60,.3))}
+.camp .itm.lock{--rim:#4a3a26;--face:#14100b;filter:none}
+.camp .em{--rim:color-mix(in srgb,var(--c,#888) 55%,#000);--face:rgba(0,0,0,.65)}
+.camp .risk{--rim:#7a3a35;--face:rgba(70,22,20,.92)}
+.camp .risk.dark{--rim:#7a5a24;--face:rgba(80,52,14,.92)}
+.camp .ms{--rim:#7a5a2c;--face:radial-gradient(circle at 50% 40%,#5a3b1a,#24180c 72%)}
+.camp .ms.e{--rim:#4a3a26;--face:#120d08}
+.camp .crownmark{--rim:#7a3a35;--face:rgba(70,22,20,.92)}
+.camp .plus{--rim:currentColor;--face:rgba(0,0,0,.4)}
+.camp .ic-stairs{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 20 H8 V15 H13 V10 H18 V5 H21 M3 20 V22 M12 3 V8 M9.5 5.8 L12 8.3 L14.5 5.8'/%3E%3C/svg%3E")}
+
+/* text floor: stage.ts sets --stage-scale; small type grows so it never renders under 12px (1280x720 is scale 0.667) */
+.camp{--stage-scale:1;--tf:calc(12px / var(--stage-scale))}
+.camp .kick{font-size:max(15px,var(--tf))}
+.camp .brand .kick,.camp .step .sb,.camp .prop .bd,.camp .tip .nums{font-size:max(14px,var(--tf))}
+.camp .chip{font-size:max(16px,var(--tf))}
+.camp .tip{font-size:max(17px,var(--tf))}
+
+/* coin stack motion (coinstack.ts): a coin drops on when gold comes in, lifts off when it goes out */
+.camp .coinstack i{transition:height .35s cubic-bezier(.2,.8,.3,1.2)}
+.camp .coinstack.earn i{animation:camp-coin-earn .45s cubic-bezier(.2,.8,.3,1.3)}
+.camp .coinstack.spend i{animation:camp-coin-spend .4s ease-out}
+.camp .coinstack .fly{position:absolute;width:20px;height:11px;border-radius:50%;margin:0;background:radial-gradient(circle at 40% 35%,#ffe29a,#d19a2e);border:1px solid #8f5f16;pointer-events:none}
+.camp .coinstack .fly::before{display:none}
+.camp .coinstack .fly.in{animation:camp-fly-in .45s ease-in forwards}
+.camp .coinstack .fly.out{animation:camp-fly-out .5s ease-out forwards}
+@keyframes camp-coin-earn{0%{transform:translateY(0)}40%{transform:translateY(3px)}100%{transform:translateY(0)}}
+@keyframes camp-coin-spend{0%{transform:translateY(0)}35%{transform:translateY(-4px)}100%{transform:translateY(0)}}
+@keyframes camp-fly-in{from{transform:translateY(-40px);opacity:0}60%{opacity:1}to{transform:translateY(0);opacity:0}}
+@keyframes camp-fly-out{from{transform:translateY(0);opacity:1}to{transform:translateY(-36px);opacity:0}}
+@media (prefers-reduced-motion:reduce){.camp .coinstack i,.camp .coinstack.earn i,.camp .coinstack.spend i,.camp .coinstack .fly{transition:none;animation:none}}
+
+/* a rendered bust (bust.ts): the image fills the bust box; the CSS bust parts are the fallback */
+.camp .bust img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+.camp .bust.img>i,.camp .bust.img::after{display:none}
+
+/* drag (drag.ts): lifted, valid and invalid targets */
+.camp [data-drag]{touch-action:none;cursor:grab}
+.camp [data-drag].lifted{outline:2px solid var(--amber-hi);outline-offset:3px}
+.camp .drag-ghost{position:absolute;left:0;top:0;margin:0;z-index:50;pointer-events:none;opacity:.85;filter:drop-shadow(0 8px 14px rgba(0,0,0,.6))}
+.camp [data-drop].drop-ok{filter:drop-shadow(0 0 10px rgba(255,170,80,.8))}
+.camp [data-drop].drop-no{opacity:.45}
+.camp [data-drop].drop-over{filter:drop-shadow(0 0 16px rgba(255,190,100,1)) brightness(1.15)}
+.camp .drop-hint{position:absolute;z-index:3;padding:2px 8px;border-radius:8px;background:#120d08;border:1px solid #8a6a35;font-family:var(--mono);font-size:max(14px,var(--tf));color:var(--amber-hi);pointer-events:none;white-space:nowrap}
+
+/* stage host (stage.ts): letterbox bars, no scrollbars */
+.camp-host{position:fixed;inset:0;overflow:hidden;background:#060403}
+.camp-host>.camp{position:absolute;left:0;top:0;transform-origin:0 0}
