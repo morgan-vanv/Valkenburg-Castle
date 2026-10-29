@@ -58,7 +58,8 @@ await p.waitForTimeout(200);
 await step('party');
 for (const id of await p.$$eval('[data-bench]', (els) => els.map((e) => e.dataset.bench))) await p.click(`[data-bench="${id}"]`);
 await step('outfit');
-await p.click('[data-cart="potion"]');
+await p.click('[data-cart="potion"]'); // V5.1 (W3): lift it off the wagon, then click a pack
+await p.click('[data-side="yours"] .hr .bw');
 await p.waitForTimeout(100);
 await p.click('[data-buy="torch"]');
 await p.waitForTimeout(150);
@@ -67,7 +68,7 @@ await tab('gerda');
 await shot('mid-outfit-gerda');
 await tab('ilse');
 await shot('mid-outfit-ilse');
-await p.hover('[data-row="dart"] .lg-vrow-n').catch(() => p.hover('[data-row="dart"]'));
+await p.hover('[data-row="dart"]:not([hidden])').catch(() => {}); // V5.1: a strip tile, maybe on a later page
 await p.waitForTimeout(150);
 await p.screenshot({ path: `${out}/${tag}-mid-outfit-ilse-hint.png` });
 await tab('flagon');

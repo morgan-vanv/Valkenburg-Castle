@@ -56,9 +56,13 @@ if (shots) await p.screenshot({ path: `${shots}/v35-ui-camp-after.png` });
 
 // forge (V4.0: the gear row on each loadout card, hidden while the forge is cold)
 await step('outfit');
-check('no forge row while the forge is cold', !(await p.$('.lg-gear-row')));
-// peddler: metalwork as one dashed tile
-check('peddler: metalwork collapsed into one tile that needs a smith', !!(await p.$('[data-ware="metalwork"]')) && !(await p.$('[data-ware="hook"]')) && /need a smith/.test(await p.textContent('[data-ware="metalwork"]')));
+// V5.1 (W3): the Outfit board: Gerda's tab shut while the forge is cold, her metalwork locked on the strip (no Buy).
+await p.click('[data-vendor-tab="gerda"]');
+await p.waitForTimeout(80);
+check('no forge work while the forge is cold', (await p.$eval('[data-side="vendors"]', (e) => e.dataset.home)) === 'no' && !(await p.$('[data-upgrade]')));
+check('metalwork locked on the strip until the smith is home', (await p.$eval('[data-row="hook"]', (e) => e.dataset.state)) === 'locked' && !(await p.$('[data-buy="hook"]')));
+await p.click('[data-vendor-tab="mott"]');
+await p.waitForTimeout(80);
 // campfire
 await step('party');
 t = await text();
@@ -116,16 +120,18 @@ check('healing for gold now in the party slot', /3 gold per HP/.test((await p.ge
 await edit("Object.assign(s.campaign.village, { innkeeper: true, copper: true, smith: true }); s.campaign.gold = 300;");
 check('campfire became the Gilded Flagon', /At the Gilded Flagon/.test(await text()));
 await step('outfit');
-await p.click('[data-ale="keven"]');
+await p.click('[data-vendor-tab="flagon"]'); // V5.1 (W3): ales are poured from Wim's tab for the hero marked "Buying here"
 await p.waitForTimeout(80);
 const ales = await p.$$eval('[data-pour]', (els) => els.map((e) => e.dataset.pour));
 check('the copper ales on tap (4), the cask-book ales not shown until brewed', ales.length === 4 && !ales.includes('blackcask'), ales.join(','));
 await p.click('[data-pour="reserve"]');
 await p.waitForTimeout(150);
 check('bought Hobart\'s Reserve for Keven', (await p.evaluate(() => window.vc.state().campaign.roster.find((h) => h.id === 'keven').ale)) === 'reserve');
-check('Keven\'s loadout card shows the ale by name', /Hobart's Reserve/.test(await p.textContent('.lg-hero[data-hero="keven"] .lg-gear.have.ale')));
-check('no second ale for Keven (no "Pour one")', !(await p.$('[data-ale="keven"]')));
-check('forge open with Gerda home: blade, mail, shield', !!(await p.$('.lg-hero[data-hero="keven"] [data-upgrade="weapon"]')) && !!(await p.$('.lg-hero[data-hero="keven"] .lg-gear-row')));
+check('Keven\'s pack card shows the ale by name', /Hobart's Reserve/.test(await p.textContent('.hr[data-hero="keven"] [data-have="ale"]')));
+check('no second ale for Keven (every tap says one at a time)', await p.$$eval('[data-pour]', (els) => els.every((e) => e.getAttribute('aria-disabled') === 'true')));
+await p.click('[data-vendor-tab="gerda"]');
+await p.waitForTimeout(80);
+check('forge open with Gerda home: blade, mail, shield', !!(await p.$('[data-upgrade="weapon"][data-hero="keven"]')) && !!(await p.$('[data-upgrade="armor"]')) && !!(await p.$('[data-shield]')));
 if (shots) await p.screenshot({ path: `${shots}/v35-ui-camp-after-flagon.png` });
 
 // the party slot shows the ale
