@@ -62,7 +62,7 @@ check('peddler: metalwork collapsed into one tile that needs a smith', !!(await 
 // campfire
 await step('party');
 t = await text();
-check('the campfire, not the Flagon', /At the campfire/.test(t) && !/Gilded Flagon/.test(t));
+check('the campfire, not the Flagon', /At the campfire/i.test(t) && !/Gilded Flagon/i.test(t));
 check('no ales before the Flagon', !(await p.$('.lg-alepick')) && !(await p.$('[data-ale]')));
 
 // healing in the party slot: drink a potion (the real engine starts with an empty stash: buy one first)
@@ -114,7 +114,7 @@ check('healing for gold now in the party slot', /3 gold per HP/.test((await p.ge
 
 // ---- the Flagon and ales
 await edit("Object.assign(s.campaign.village, { innkeeper: true, copper: true, smith: true }); s.campaign.gold = 300;");
-check('campfire became the Gilded Flagon', /At the Gilded Flagon/.test(await text()));
+check('campfire became the Gilded Flagon', /At the Gilded Flagon/i.test(await text()));
 await step('outfit');
 await p.click('[data-ale="keven"]');
 await p.waitForTimeout(80);

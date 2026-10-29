@@ -113,6 +113,10 @@ check('slot pips: two on, one open, a lock', (await p.$$('.pt-pips .pt-pip.on'))
 check('bench: Jutta and Brann as small busts with a + each', (await p.$$('.pt-bh .bust')).length === 2 && !!(await p.$('[data-bench="jutta"]')) && !!(await p.$('[data-bench="brann"]')));
 check('Flagon: four recruits with a bust, a name and the price on Hire', (await p.$$('.pt-rc')).length === 4 && /Hire\s*60/.test(await p.$eval('.pt-rc [data-hire]', (e) => e.innerText.replace(/\s+/g, ' '))));
 
+await edit("s.campaign.roster[0].ale = 'reserve';");
+check('an ale shows on the slot by name', /Hobart's Reserve/.test(await p.textContent('.lg-slot.hero[data-hero="keven"]')));
+await edit('delete s.campaign.roster[0].ale;');
+
 // ---- pointer drag: a recruit into the open slot hires them
 {
   const card = await p.$('.pt-rc[data-recruit="r-dagny"]');
