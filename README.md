@@ -38,7 +38,7 @@ URL options for development: `?castle=test` runs the real rules on the small tes
 
 - **Unit tests:** `src/game/engine.test.ts`, `charges.test.ts`, `src/data/castle/castle.test.ts`, `src/view/stealth.test.ts`, `src/rng.test.ts`.
 - **Balance bot:** `npx tsx scripts/v3-engine-sim.ts [delves]` plays delves through the engine and prints stats. `npx tsx scripts/v37-crew-arena.ts` pits rival crews against a party.
-- **Browser checks:** `scripts/v3*-check.mjs`, `v3*-ui-check.mjs` and `v4*-check.mjs` (V4.0: `v40-lowgate-check`, `v40-play-check`, `v40-hud-check` for the in-delve HUD; V5.0: `v50-threshold-check` for the stairs and the toll) drive the real UI headless with Playwright and assert on the DOM and state. Start `npm run dev`, then for example `node scripts/v39-ui-check.mjs http://localhost:5173/`. Each script's header says what it covers and whether it also runs with `?fixture=1`. `scripts/v3-stress.mjs` plays random valid commands through the UI to catch playback and rendering errors.
+- **Browser checks:** `scripts/v3*-check.mjs`, `v3*-ui-check.mjs` and `v4*-check.mjs` (V4.0: `v40-lowgate-check`, `v40-play-check`, `v40-hud-check` for the in-delve HUD; V5.0: `v50-threshold-check` for the stairs and the toll; V5.1: `v51-job-check`, `v51-party-check`, `v51-outfit-check`, `v51-setout-check` for the camp screens at 1280–2560 wide, no scrolling) drive the real UI headless with Playwright and assert on the DOM and state. Start `npm run dev`, then for example `node scripts/v39-ui-check.mjs http://localhost:5173/`. Each script's header says what it covers and whether it also runs with `?fixture=1`. `scripts/v3-stress.mjs` plays random valid commands through the UI to catch playback and rendering errors.
 
 ## Deploying
 
