@@ -1630,3 +1630,21 @@ Approved mockups: boards 8–10 of the Claude Design canvas "Lowgate V5.1 Camp S
 - **Keys:** Enter continues or begins; N new campaign (asks first with a save); ? or F1 keys; Esc closes a panel or keeps the campaign.
 - **Arrival:** about 1.5 s (the title rises, the rule draws, the castle's windows light one by one, the fire catches, the card rises); any key or click settles it; reduced motion shows it all at once.
 - Hooks for checks: `[data-continue]`, `[data-new-campaign]` (Begin, or Bury it and begin), `[data-ask-new]`, `[data-last-run]`, `[data-title-settings]`, `[data-title-keys]`, `input.seed`. Check: `scripts/v52-title-check.mjs`.
+
+## 36. V5.3 the title's castle (owner, 2026-10-29)
+
+Approved pitch: board 11 on the "Lowgate V5.1 Camp Screens" canvas (with both extras); the Dragon tease waits on board 12. UI only: no rule, command or save change.
+
+### 36.1 The baked castle
+- `src/ui/camp/title-scene.ts` builds Valkenburg in the V5 look: a crag of hex basalt columns (the floors' bevelled hex prisms, terraced, mossy ledges), a hex keep with a stair turret, six ring towers and curtain walls, all clad in running-bond bricks in the walls' palette (`WALL_LOOK`) over a mortar core. Gone dark: one tower fallen in, one wall breached, rubble on the ground, two merlons missing, the Hobart banner torn; most windows black, four lit, a glimmer in the gate; a path of hex steps down the front with a few lanterns. Moonlight from the right (with shadows), a low warm light from Lowgate, haze (fog) at the foot.
+- It is not shipped as code: `scripts/v53-bake-title.mjs` renders it in headless Chromium from the dev server at 1× and 2×, softens the crag's foot (the diorama's tilt-shift, done in 2D), crops to what was drawn, and writes `public/title/castle.webp` and `castle@2x.webp` (about 35 KB and 80 KB) and `src/ui/camp/title-bake/castle.json`: where the image sits on the 1920×1080 stage, its lights in stage px (`window`, `gate`, `lantern`, `eye`), and a hash of the inputs (title-scene, floors, walls, dragon, rig). `src/ui/camp/title-bake.test.ts` fails when the hash no longer matches (rebake), when an image is missing, or when the castle or a light leaves its place.
+- The title shows the image (with `srcset`), fades its left edge into the dusk, and draws each light as a CSS glow that flickers. If the image can't load, the V5.2 silhouette comes back.
+
+### 36.2 Movement (CSS, all off with reduced motion)
+- Window, gate and lantern glows flicker at their own pace; two bands of mist drift across the crag's foot; a crow crosses now and then; the arrival lights the glows one by one.
+
+### 36.3 Lowgate reflects the campaign (extra 1)
+- Four cottages in Lowgate's silhouette belong to Aldric, Wim, Gerda and Ilse: each villager home (the save's `villagersHome`, live saves only) lights one more window and sets its chimney smoking.
+
+### 36.4 The Dragon tease (extra 2, not on yet)
+- `TITLE_DRAGON` in `src/ui/camp/title.ts` ('' today). `'asleep'`: the game's sleeping Dragon (`makeDragon(true)`, darkened) coiled on the keep's roof, the moon moved behind it so it reads as a silhouette, its own eye glowing and blinking. `'peek'`: no Dragon; the keep's high window goes dark and one ember eye looks out of it. Both are baked (`DRAGON=asleep|peek`), shipped, and can be seen on the live site with `?titleCastle=castle-dragon-asleep` or `?titleCastle=castle-dragon-peek`.

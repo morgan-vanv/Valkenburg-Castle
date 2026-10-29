@@ -70,7 +70,7 @@ export function titleScreen(el: HTMLElement, host: TitleHost): void {
   warmBusts(card ? card.party.map((p) => p.cls) : ['heir']);
 
   // ---------------------------------------------------------- scene
-  root.append(scene());
+  root.append(scene(card?.villagers ?? 0));
 
   // ---------------------------------------------------------- lockup
   root.append(
@@ -327,17 +327,91 @@ function settingsRows(host: TitleHost, redraw: () => void): HTMLElement[] {
 
 const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>';
 
-/** Dusk: stars, the moon, Valkenburg on its crag with a few lit windows, the haze, Lowgate's roofs and its fire. */
-function scene(): HTMLElement {
-  const s = h('div', { class: 't-scene', 'aria-hidden': 'true' });
+// ------------------------------------------------------------ the scene
+
+/** V5.3 (spec 36): the baked castles (scripts/v53-bake-title.mjs writes one manifest per bake). */
+const BAKES = import.meta.glob<TitleBakeManifest>('./title-bake/*.json', { eager: true, import: 'default' });
+interface TitleBakeManifest {
+  file: string;
+  file2x: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  glows: { x: number; y: number; r: number; kind: 'window' | 'gate' | 'lantern' | 'eye' }[];
+}
+/**
+ * The Dragon on the keep (spec 36.4): '' until the owner has seen the tease; 'asleep' or 'peek' picks a baked
+ * variant. A preview can ask for any bake with ?titleCastle=<stem>.
+ */
+export const TITLE_DRAGON: '' | 'asleep' | 'peek' = '';
+
+function castleBake(): (TitleBakeManifest & { stem: string }) | null {
+  let stem = TITLE_DRAGON ? `castle-dragon-${TITLE_DRAGON}` : 'castle';
+  try {
+    const q = new URLSearchParams(location.search).get('titleCastle');
+    if (q && /^[a-z0-9-]+$/.test(q)) stem = q;
+  } catch {
+    /* no location */
+  }
+  if (!BAKES[`./title-bake/${stem}.json`]) stem = 'castle';
+  const m = BAKES[`./title-bake/${stem}.json`];
+  return m ? { ...m, stem } : null;
+}
+
+/** Lowgate's cottages that light up as their people come home (Aldric, Wim, Gerda, Ilse), in the village's units. */
+const HOMES: [number, number, number, number][] = [
+  [54, 204, 60, 150], // [window x, window y, smoke x, smoke y (the roof's peak)]
+  [552, 216, 560, 186],
+  [794, 226, 800, 182],
+  [1844, 208, 1850, 160],
+];
+
+/**
+ * Dusk: stars, the moon, Valkenburg (the baked figurine castle, with its lights glowing and flickering on top; the old
+ * flat silhouette if the image can't load), mist at the crag's foot, Lowgate's roofs and fire, a lit cottage and a
+ * curl of smoke for each villager home, and now and then a crow.
+ */
+function scene(villagers: number): HTMLElement {
+  const bake = castleBake();
+  const s = h('div', { class: `t-scene${bake ? ` bake-${bake.stem}` : ''}`, 'aria-hidden': 'true' });
+  const base = import.meta.env.BASE_URL;
+  const homes = HOMES.map(([x, y, cx, cy], i) => {
+    const on = i < villagers;
+    const puff = `<circle cx="${cx}" cy="${cy - 4}" r="7"/>`;
+    return `<rect class="t-home${on ? ' on' : ''}" x="${x}" y="${y}" width="12" height="15"/>${on ? `<g class="t-smoke" style="--d:${(i * 1.7).toFixed(1)}s">${puff}${puff}${puff}</g>` : ''}`;
+  }).join('');
   s.innerHTML = `<div class="t-stars"></div><div class="t-moon"></div>
-<svg class="t-castle" viewBox="0 0 1040 620"><g fill="#191a28"><rect x="560" y="200" width="44" height="200"/><polygon points="552,200 582,140 612,200"/><rect x="330" y="250" width="40" height="160"/><polygon points="324,250 350,200 376,250"/></g>
+<svg class="t-crow" viewBox="0 0 40 16"><path d="M0 8 Q10 0 20 8 Q30 0 40 8 Q30 5 20 11 Q10 5 0 8Z"/></svg>
+<svg class="t-castle${bake ? ' hidden' : ''}" viewBox="0 0 1040 620"><g fill="#191a28"><rect x="560" y="200" width="44" height="200"/><polygon points="552,200 582,140 612,200"/><rect x="330" y="250" width="40" height="160"/><polygon points="324,250 350,200 376,250"/></g>
 <path fill="#0d0e17" d="M40 620 L170 486 L250 452 L300 452 L300 360 L230 360 L230 300 L222 300 L222 282 L238 282 L238 292 L250 292 L250 282 L266 282 L266 292 L278 292 L278 282 L294 282 L294 300 L300 300 L300 360 L440 360 L440 346 L452 346 L452 360 L470 360 L470 168 L462 168 L462 150 L478 150 L478 160 L494 160 L494 150 L510 150 L510 160 L526 160 L526 150 L542 150 L542 160 L558 160 L558 150 L574 150 L574 168 L566 168 L566 360 L600 360 L600 346 L612 346 L612 360 L640 360 L640 236 L630 236 L668 172 L706 236 L696 236 L696 360 L760 360 L760 346 L772 346 L772 360 L820 360 L820 300 L812 300 L812 286 L824 286 L824 294 L836 294 L836 286 L848 286 L848 294 L860 294 L860 286 L872 286 L872 300 L866 300 L866 452 L900 470 L960 530 L1040 620 Z"/>
 <polygon fill="#0d0e17" points="508,150 518,96 528,150"/><path fill="#000" opacity=".5" d="M420 452 h60 v-50 a30 30 0 0 0 -60 0 Z"/><path class="t-gate" fill="#ffb35c" opacity=".16" d="M426 452 h48 v-46 a24 24 0 0 0 -48 0 Z"/>
 <g fill="#ffb35c"><rect class="t-win w1" x="512" y="210" width="10" height="16"/><rect class="t-win w2" x="512" y="262" width="10" height="16" style="--o:.55"/><rect class="t-win w3" x="660" y="262" width="8" height="13" style="--o:.7"/><rect class="t-win w4" x="258" y="320" width="8" height="12" style="--o:.45"/><rect class="t-win w5" x="838" y="330" width="8" height="12" style="--o:.6"/></g></svg>
-<div class="t-haze"></div><div class="t-fire"></div>
+<div class="t-haze"></div><div class="t-mist"><i></i><i></i></div><div class="t-fire"></div>
 <svg class="t-village" viewBox="0 0 1920 300" preserveAspectRatio="none"><path fill="#0a0705" d="M0 300 V190 L60 150 L120 190 V170 L190 120 L260 170 V200 L320 160 L380 200 V180 L450 140 L520 180 V210 L560 186 L600 210 V196 L670 150 L740 196 V220 L800 182 L860 220 V230 L940 200 L1010 230 V250 L1100 236 L1160 250 V262 H1400 V244 L1450 214 L1500 244 V200 L1570 150 L1640 200 V180 L1710 132 L1780 180 V196 L1850 160 L1920 196 V300 Z"/>
 <g fill="#ffb35c"><rect x="180" y="200" width="14" height="18" opacity=".8"/><rect x="440" y="214" width="12" height="16" opacity=".5"/><rect x="660" y="226" width="12" height="16" opacity=".7"/><rect x="1560" y="226" width="14" height="18" opacity=".85"/><rect x="1700" y="214" width="12" height="16" opacity=".55"/></g>
+<g class="t-homes">${homes}</g>
 <g class="t-flame"><path fill="#ffcf86" d="M1280 262 C1270 248 1276 236 1284 226 C1286 236 1294 238 1292 226 C1302 238 1304 252 1296 262 Z"/><path fill="#ff9a3c" opacity=".8" d="M1268 262 C1262 252 1266 244 1272 238 C1274 246 1280 248 1280 262 Z"/></g></svg>`;
+  if (bake) {
+    const img = h('img', {
+      class: 't-castle-img',
+      alt: '',
+      draggable: 'false',
+      decoding: 'async',
+      src: `${base}title/${bake.file}`,
+      srcset: `${base}title/${bake.file} 1x, ${base}title/${bake.file2x} 2x`,
+      style: `left:${bake.x}px;top:${bake.y}px;width:${bake.w}px;height:${bake.h}px`,
+    }) as HTMLImageElement;
+    const lights = h('div', { class: 't-lights' });
+    bake.glows.forEach((g, i) => {
+      lights.append(h('i', { class: `t-glow k-${g.kind}`, style: `left:${g.x}px;top:${g.y}px;--r:${g.r}px;--i:${i};--fd:${(2.4 + ((i * 37) % 13) / 10).toFixed(1)}s` }));
+    });
+    img.addEventListener('error', () => {
+      img.remove();
+      lights.remove();
+      s.querySelector('.t-castle')?.classList.remove('hidden');
+    }, { once: true });
+    s.querySelector('.t-haze')!.before(img, lights);
+  }
   return s;
 }

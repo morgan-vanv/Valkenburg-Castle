@@ -108,6 +108,18 @@ t = await p.evaluate(() => ({
 check('camp save: the campaign card, Continue focused', t.where === 'After 4 delves · resting in Lowgate' && /^Continue/.test(t.cont) && t.focus, JSON.stringify(t));
 check('...busts, the coin stack and 330 gold; 3 villagers home, 1 in the graves; the seed hidden', t.busts >= 1 && t.coins > 0 && t.gold === '330' && t.facts.some((f) => f.includes('3 villagers home')) && t.facts.some((f) => f.includes('1 in the graves')) && !t.seed, JSON.stringify(t));
 await shot('camp');
+// V5.3 (spec 36): the baked castle, its lights, and a lit home per villager
+await p.waitForFunction(() => document.querySelector('.t-castle-img')?.complete);
+t = await p.evaluate(() => ({
+  img: document.querySelector('.t-castle-img')?.naturalWidth ?? 0,
+  flat: !document.querySelector('.t-castle')?.classList.contains('hidden'),
+  glows: document.querySelectorAll('.t-glow').length,
+  eyes: document.querySelectorAll('.t-glow.k-eye').length,
+  homes: document.querySelectorAll('.t-home.on').length,
+  smoke: document.querySelectorAll('.t-smoke').length,
+}));
+check('the baked castle shows (not the flat one), with its lights; no Dragon by default', t.img > 0 && !t.flat && t.glows >= 5 && t.eyes === 0, JSON.stringify(t));
+check('...one lit home and one chimney smoking per villager home (3)', t.homes === 3 && t.smoke === 3, JSON.stringify(t));
 for (const [w, hh] of [[1280, 720], [1440, 900], [2560, 1440]]) {
   await p.setViewportSize({ width: w, height: hh });
   await wait(200);

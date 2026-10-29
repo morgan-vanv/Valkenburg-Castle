@@ -1,0 +1,72 @@
+{
+  "file": "castle-dragon-asleep.webp",
+  "file2x": "castle-dragon-asleep@2x.webp",
+  "x": 863,
+  "y": 189,
+  "w": 1057,
+  "h": 891,
+  "glows": [
+    {
+      "x": 1497,
+      "y": 383,
+      "r": 26,
+      "kind": "window"
+    },
+    {
+      "x": 1526,
+      "y": 361,
+      "r": 18,
+      "kind": "window"
+    },
+    {
+      "x": 1435,
+      "y": 451,
+      "r": 18,
+      "kind": "window"
+    },
+    {
+      "x": 1642,
+      "y": 500,
+      "r": 18,
+      "kind": "window"
+    },
+    {
+      "x": 1483,
+      "y": 566,
+      "r": 34,
+      "kind": "gate"
+    },
+    {
+      "x": 1477,
+      "y": 664,
+      "r": 14,
+      "kind": "lantern"
+    },
+    {
+      "x": 1495,
+      "y": 806,
+      "r": 14,
+      "kind": "lantern"
+    },
+    {
+      "x": 1724,
+      "y": 887,
+      "r": 14,
+      "kind": "lantern"
+    },
+    {
+      "x": 1352,
+      "y": 266,
+      "r": 14,
+      "kind": "eye"
+    }
+  ],
+  "inputs": [
+    "src/ui/camp/title-scene.ts",
+    "src/view/look/floors.ts",
+    "src/view/look/walls.ts",
+    "src/view/look/dragon.ts",
+    "src/view/look/rig.ts"
+  ],
+  "hash": "78aff6daf9aea788d94fabcb7180635eb42a07a57bcdd7cfd1d7c69828365956"
+}
