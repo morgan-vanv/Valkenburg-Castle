@@ -1,0 +1,87 @@
+/* V5.1 (W1): the Job board (Job.dc.html). Lives in the frame's 1920x900 main; never scrolls (3 + 3 cards). */
+.camp .jobs{position:absolute;inset:0;padding:22px 44px 0}
+.camp .jobs-title{display:flex;align-items:flex-end;justify-content:space-between;height:50px;margin-bottom:12px}
+.camp .jobs-title h2{font-size:38px;line-height:1;font-family:var(--serif);font-weight:500}
+.camp .renown{display:flex;align-items:center;gap:6px;font-size:28px;color:#4a3a26;cursor:default}
+.camp .renown .lg-pips{display:flex;gap:6px}
+.camp .renown .ic.on{color:var(--amber);filter:drop-shadow(0 0 6px rgba(255,170,80,.45))}
+.camp .jobs .rowh{display:flex;align-items:center;gap:14px;margin:6px 0 10px;height:24px}
+.camp .jobs .rowh .kick{font-size:max(17px,var(--tf));font-weight:500;margin:0}
+.camp .jobs .lg-board-hire .rowh .kick{color:var(--ink-dim)}
+.camp .jobs .rowh::after{content:'';flex:1;order:1;height:1px;background:linear-gradient(90deg,#4a3a26,transparent)}
+.camp .jobs .lg-board-more{order:2;font-size:max(16px,var(--tf));color:var(--ink-faint);font-style:italic;cursor:default}
+.camp .jobs .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:12px}
+.camp .jobs-empty{display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:220px;color:var(--ink-faint);font-size:64px}
+.camp .jobs-empty p{font-size:22px;font-style:italic;color:var(--ink-dim)}
+
+/* a card */
+.camp .job{position:relative;height:330px;display:flex;flex-direction:column;border-radius:14px;text-align:left;padding:0;font-family:var(--serif);
+  background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;box-shadow:inset 0 1px 0 rgba(255,225,170,.1),0 12px 26px rgba(0,0,0,.5);color:var(--ink);
+  transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease}
+.camp .job:hover{transform:translateY(-3px);border-color:#8a6a35;box-shadow:inset 0 1px 0 rgba(255,225,170,.14),0 16px 30px rgba(0,0,0,.6)}
+.camp .job.village{border-color:#8a5a2a}
+.camp .job.chosen{border:2px solid var(--amber-hi);box-shadow:0 0 0 5px rgba(232,163,61,.16),0 0 46px rgba(255,170,80,.32),0 14px 28px rgba(0,0,0,.6)}
+.camp .job:focus-visible{outline:2px solid var(--amber-hi);outline-offset:4px}
+.camp .job .art{position:relative;display:block;height:148px;flex:none;overflow:hidden;border-bottom:1px solid #3a2c1b;border-radius:13px 13px 0 0}
+.camp .job .art.rescue{background:radial-gradient(circle at 78% 40%,#5a3a22,#2a1b10 70%)}
+.camp .job .art.recover{background:radial-gradient(circle at 78% 40%,#4e4a22,#221e0e 70%)}
+.camp .job .art.slay{background:radial-gradient(circle at 78% 40%,#5a2a22,#241008 70%)}
+.camp .job .art .big{position:absolute;right:26px;top:14px;font-size:118px;color:rgba(255,220,160,.2)}
+.camp .job.captive .art .big{right:auto;left:210px;opacity:.6}
+.camp .job .art .typ{position:absolute;right:18px;bottom:14px;display:flex;align-items:center;gap:8px;font-family:var(--caps);font-size:19px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
+.camp .job .lvl{position:absolute;left:16px;top:14px;width:50px;height:58px;display:grid;place-items:center;font-family:var(--mono);font-size:25px;font-weight:600;color:#1a1006;z-index:2;
+  background:linear-gradient(180deg,#f6c35c,#c98421);clip-path:polygon(0 0,100% 0,100% 72%,50% 100%,0 72%);padding-bottom:8px;padding-top:8px}
+.camp .job .lvl small{position:absolute;top:3px;font-family:var(--caps);font-size:10px;letter-spacing:.1em;font-weight:700}
+.camp .job .cap{position:absolute;left:78px;bottom:0;--bs:118px}
+.camp .job .pay{position:absolute;right:16px;top:12px;display:flex;align-items:flex-end;gap:10px;padding:5px 12px 6px 10px;border-radius:10px;background:rgba(10,6,3,.62);border:1px solid #5a4529}
+.camp .job .pay .coinstack{height:36px;padding-bottom:4px;gap:3px}
+.camp .job .pay .coinstack i{width:13px;margin-top:6px}
+.camp .job .pay .coinstack i::before{height:8px;top:-4px}
+.camp .job .pay .n{font-family:var(--mono);font-size:30px;line-height:1;color:var(--amber-hi)}
+.camp .job .pay.gift{align-items:center;gap:12px;color:#9fe0a8;border-color:#3f6a45;font-size:28px;padding:6px 12px}
+.camp .job .pay.gift .gp{display:inline-flex;align-items:center;gap:4px}
+.camp .job .pay.gift .gp span{font-size:22px;font-family:var(--serif);color:#c9ecd0}
+.camp .job .body{flex:1;display:flex;flex-direction:column;padding:12px 18px 14px;gap:4px;min-height:0}
+.camp .job .body .h3{display:block;font-size:29px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .job .site{display:flex;align-items:center;gap:7px;font-size:19px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.camp .job .site .ic{color:var(--ink-faint)}
+.camp .job .meta{margin-top:auto;display:flex;align-items:center;gap:8px;min-height:44px}
+.camp .job .lg-risks{display:flex;gap:6px}
+.camp .job .risk{width:38px;height:44px;display:grid;place-items:center;font-size:21px;color:#ffb4ac}
+.camp .job .risk.dark{color:var(--amber-hi)}
+.camp .job .wins{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:17px;font-size:18px;color:var(--amber-hi);background:rgba(232,163,61,.14);border:1px solid #8a6a35;white-space:nowrap;max-width:300px;overflow:hidden}
+.camp .job .wins.lg-prisoner{color:var(--ink);background:rgba(160,150,130,.12);border-color:#6d6150}
+.camp .job .pick{margin-left:auto;display:flex;align-items:center;gap:8px;font-family:var(--caps);font-size:18px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+.camp .job:hover .pick{color:var(--ink-dim)}
+.camp .job.chosen .pick{color:var(--amber-hi)}
+.camp .job .pick .tk{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--amber);color:#1a1006;font-size:15px}
+.camp .job .seal{position:absolute;right:-10px;top:-10px;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-size:22px;color:#ffdada;z-index:3;
+  background:radial-gradient(circle at 35% 30%,#c4372f,#7a1712);box-shadow:0 3px 8px rgba(0,0,0,.6)}
+.camp .job .seal.cap-seal{background:radial-gradient(circle at 35% 30%,#6d6150,#2d2619);color:var(--ink)}
+.camp .job.story .pay,.camp .job.captive .pay{right:44px}
+
+/* the welcome and the won-back banner: a card over the board, never a scroll */
+.camp .job-veil{position:absolute;inset:0;z-index:5;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 45%,rgba(12,8,5,.55),rgba(12,8,5,.88))}
+.camp .job-pop{position:relative;width:860px;padding:44px 56px 36px;border-radius:16px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;
+  background:linear-gradient(180deg,rgba(52,38,24,.98),rgba(30,21,14,.98));border:1px solid #8a6a35;box-shadow:inset 0 1px 0 rgba(255,225,170,.12),0 30px 60px rgba(0,0,0,.7),0 0 80px rgba(255,170,80,.12)}
+.camp .job-pop .seal,.camp .job-pop .job-pop-house{position:absolute;top:-28px;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:26px;color:#ffdada;
+  background:radial-gradient(circle at 35% 30%,#c4372f,#7a1712);box-shadow:0 3px 10px rgba(0,0,0,.6)}
+.camp .job-pop .job-pop-house{background:radial-gradient(circle at 35% 30%,#f6c35c,#a86a18);color:#1a1006}
+.camp .job-pop .kick{font-size:max(18px,var(--tf))}
+.camp .job-pop-story{font-size:26px;line-height:1.35;font-style:italic;color:var(--ink)}
+.camp .job-pop-how{font-size:21px;color:var(--ink-dim)}
+.camp .job-pop-b{display:flex;gap:16px;margin-top:10px}
+.camp .job-wb-list{display:flex;flex-direction:column;gap:14px;text-align:left;margin:6px 0}
+.camp .lg-wb-item{display:flex;align-items:flex-start;gap:16px;font-size:34px;color:var(--amber-hi)}
+.camp .lg-wb-item>span{display:flex;flex-direction:column;gap:3px}
+.camp .lg-wb-head{font-size:28px;font-weight:500;color:var(--ink)}
+.camp .lg-wb-line{font-size:20px;color:var(--ink-dim)}
+
+/* neutralise the old .lg-* board styles (style.css) that share these hooks */
+.camp .renown .lg-pips i{border:0;border-radius:0;width:1em;height:1em;background:currentColor}
+.camp .jobs .lg-board-row{display:block;margin:0}
+.camp .jobs .lg-board-more{margin:0}
+.camp .job .wins{flex-direction:row;width:auto}
+.camp .job.captive:not(.chosen){border-left:1px solid #8a5a2a}
+.camp .job .lg-card-foot{margin-top:0;padding-top:0}
+.camp .lg-wb-item{flex-direction:row}
