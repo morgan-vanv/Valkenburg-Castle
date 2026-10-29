@@ -326,7 +326,9 @@ await p.evaluate(() => (window.vcToastHold = false));
 const round0 = after.delve.round;
 const phase0 = after.delve.phase;
 await p.keyboard.press('e');
-await wait(500);
+// the overlay fades for ~260 ms; under software GL that can take longer, so wait for it to go (5 s cap)
+await p.waitForSelector('.vc-toast', { state: 'detached', timeout: 5000 }).catch(() => {});
+await wait(200);
 const after2 = await st();
 check('E skips the toast and does not end the turn', !(await p.$('.vc-toast')) && after2.delve.round === round0 && after2.delve.phase === phase0, `${round0}/${phase0} -> ${after2.delve.round}/${after2.delve.phase}`);
 
