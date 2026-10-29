@@ -118,7 +118,7 @@ t = await p.evaluate(() => ({
   homes: document.querySelectorAll('.t-home.on').length,
   smoke: document.querySelectorAll('.t-smoke').length,
 }));
-check('the baked castle shows (not the flat one), with its lights; no Dragon by default', t.img > 0 && !t.flat && t.glows >= 5 && t.eyes === 0, JSON.stringify(t));
+check('the baked castle shows (not the flat one), with its lights and one eye in the keep window', t.img > 0 && !t.flat && t.glows >= 5 && t.eyes === 1, JSON.stringify(t));
 check('...one lit home and one chimney smoking per villager home (3)', t.homes === 3 && t.smoke === 3, JSON.stringify(t));
 for (const [w, hh] of [[1280, 720], [1440, 900], [2560, 1440]]) {
   await p.setViewportSize({ width: w, height: hh });

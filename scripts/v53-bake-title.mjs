@@ -4,8 +4,7 @@
 // inputs. src/ui/camp/title-bake.test.ts fails when the hash no longer matches: after changing title-scene.ts (or
 // the look modules it uses), run this again and commit the images.
 //   node scripts/v53-bake-title.mjs [devServerUrl]
-// DRAGON=asleep|peek bakes a Dragon variant instead, to public/title/castle-dragon-<v>.webp (+ title-bake/castle-dragon-<v>.json);
-// PREVIEW=<dir> also drops the result into the live title and saves <dir>/title-<variant>.png.
+// PREVIEW=<dir> also saves <dir>/title-castle.png, the live title with the new bake in place.
 import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'public', 'title');
 /** The files whose contents decide how the castle looks. Keep in step with src/ui/camp/title-bake.test.ts. */
-export const TITLE_INPUTS = ['src/ui/camp/title-scene.ts', 'src/view/look/floors.ts', 'src/view/look/walls.ts', 'src/view/look/dragon.ts', 'src/view/look/rig.ts'];
+export const TITLE_INPUTS = ['src/ui/camp/title-scene.ts', 'src/view/look/floors.ts', 'src/view/look/walls.ts'];
 export function titleInputHash(dir = root) {
   const h = createHash('sha256');
   for (const f of TITLE_INPUTS) h.update(`${f}\n`).update(readFileSync(join(dir, f), 'utf8').replace(/\r\n/g, '\n'));
@@ -23,7 +22,6 @@ export function titleInputHash(dir = root) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const dragon = process.env.DRAGON ?? 'none';
   const preview = process.env.PREVIEW;
   let base = process.argv[2];
   let server = null;
@@ -33,23 +31,23 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     await server.listen();
     base = server.resolvedUrls.local[0];
   }
-  console.log(`baking from ${base}${dragon !== 'none' ? ` (dragon: ${dragon})` : ''}`);
+  console.log(`baking from ${base}`);
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
   await p.route(/fonts\./, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   p.on('pageerror', (e) => console.log('[pageerror]', e.message));
   await p.goto(base);
-  const out = await p.evaluate(async (d) => {
+  const out = await p.evaluate(async () => {
     const { renderTitleCastle } = await import('/src/ui/camp/title-scene.ts');
-    return { one: renderTitleCastle(1, d), two: renderTitleCastle(2, d) };
-  }, dragon);
+    return { one: renderTitleCastle(1), two: renderTitleCastle(2) };
+  });
   if (!out.one || !out.two) {
     console.log('FAIL: no render');
     process.exit(1);
   }
   mkdirSync(outDir, { recursive: true });
   mkdirSync(join(root, 'src', 'ui', 'camp', 'title-bake'), { recursive: true });
-  const stem = dragon === 'none' ? 'castle' : `castle-dragon-${dragon}`;
+  const stem = 'castle';
   const save = (name, url) => {
     const buf = Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
     writeFileSync(join(outDir, name), buf);
@@ -72,13 +70,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (preview) {
     // The real title, with this bake in place of the one it ships (needs the title to read the manifest).
     await p.evaluate(() => localStorage.clear());
-    await p.goto(`${base}?titleCastle=${stem}`);
+    await p.goto(base);
     await p.waitForFunction(() => !!document.querySelector('.title-screen .t-castle-img'));
     await p.evaluate(() => document.querySelector('.title-screen')?.classList.add('settled'));
     await p.waitForTimeout(1200);
     mkdirSync(preview, { recursive: true });
-    await p.screenshot({ path: join(preview, `title-${dragon}.png`) });
-    console.log(`preview ${join(preview, `title-${dragon}.png`)}`);
+    await p.screenshot({ path: join(preview, 'title-castle.png') });
+    console.log(`preview ${join(preview, 'title-castle.png')}`);
   }
   await b.close();
   if (server) await server.close();

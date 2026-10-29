@@ -22,7 +22,7 @@ import { DEFAULT_DISTANCE } from '../view/camera'; // V5.0 G: camera default
 
 export const SAVE_KEY = 'vc.save.v39';
 /** The version line on the title screen. */
-export const GAME_VERSION = 'V5.3';
+export const GAME_VERSION = 'V5.3.1';
 
 const ACTION_SFX: Partial<Record<import('../game/types').ActionKind, import('../audio/sfx').Sfx>> = {
   pick: 'pick',

@@ -6,6 +6,8 @@ V3 rebuilt the game as a turn-based extraction crawler, following the V3 Game De
 
 ## Since launch
 
+- **V5.3.1 (2026-10-29):** **Look closely at the keep.** Its highest window has gone dark, and something in it is looking back.
+
 - **V5.3, the castle (2026-10-29):** **Valkenburg on the title is a figurine now,** built like the castle you delve: brick towers and walls on a crag of hex stone, lit by the moon. It has gone dark: a tower has fallen in, a wall is breached, the Hobart banner hangs in rags, and only a few windows still glow (they flicker; so do the lanterns on the path up). Mist drifts at its foot, and now and then a crow crosses the sky. **Lowgate shows your progress:** every villager you bring home lights a cottage window, and its chimney smokes.
 
 - **V5.2, the title screen (2026-10-29):** **The first screen is new.** Valkenburg stands on its crag at dusk with Lowgate's fire below, and one card tells you where your campaign stands before you click: your heroes, your gold, who's home and who's in the graves; saved inside the castle, which level and round, and how much light is left. **Continue** (or Enter) picks it up. **New campaign** asks once before it buries a save, right there on the card. **Every run is remembered:** when Keven falls, the next start says how the last run ended and which run this is. **Settings and keys** are in the top corner, so you can set the quality or playback speed before you go in. The seed hides behind "Choose a seed".

@@ -6,9 +6,8 @@
 // Valkenburg on a crag of hex basalt columns, terraced like the board: a hex keep, hex towers, curtain walls, all
 // clad in the walls' bricks (WALL_LOOK). It has gone dark: a broken tower, a breached wall, rubble, a torn banner,
 // most windows black and a few still lit. Moonlight from the right, Lowgate's warm glow from below, haze at the foot,
-// a lantern-lit path of hex steps down toward the village. `dragon` is a tease of Level 3, behind the title's
-// TITLE_DRAGON switch until the owner has picked one: 'asleep' coils the game's sleeping Dragon on the keep's roof
-// (the title moves the moon behind it); 'peek' darkens the keep's high window and puts one ember eye in it.
+// a lantern-lit path of hex steps down toward the village. The tease of Level 3 (the owner's pick, V5.3.1): the
+// keep's high window is dark, and one ember eye looks out of it (the title draws and blinks it).
 //
 // Changing this file changes the hash in public/title/manifest.json; src/ui/camp/title-bake.test.ts fails until the
 // title is baked again.
@@ -16,10 +15,6 @@
 import * as THREE from 'three';
 import { bevelGeometry } from '../../view/look/floors';
 import { WALL_LOOK } from '../../view/look/walls';
-import { makeDragon } from '../../view/look/dragon';
-import { rigMaterials } from '../../view/look/keven';
-
-export type DragonTease = 'none' | 'asleep' | 'peek';
 
 export interface TitleGlow {
   /** Stage px (1920x1080). */
@@ -83,7 +78,7 @@ interface Built {
   dispose(): void;
 }
 
-export function buildTitleCastle(dragon: DragonTease = 'none'): Built {
+export function buildTitleCastle(): Built {
   const R = rng(1980);
   const scene = new THREE.Scene();
   const disposables: { dispose(): void }[] = [];
@@ -240,8 +235,8 @@ export function buildTitleCastle(dragon: DragonTease = 'none'): Built {
   const front = (f: number) => faceAt(K.x, K.y, keepR, f, 0.08);
   for (const [f, y, lit, big] of [[0, 6.3, true, true], [0, 4.2, false, false], [5, 5.2, false, false], [1, 3.3, false, false], [0, 2.0, false, false]] as const) {
     const p = front(f);
-    // 'peek': the keep's high window is dark, and something looks out of it.
-    const eye = dragon === 'peek' && big;
+    // The keep's high window is dark, and something looks out of it.
+    const eye = big;
     windowAt(p.x, TOP + y, p.z, p.ang, lit && !eye, big);
     if (eye) glows.push({ at: new THREE.Vector3(p.x + 0.06, TOP + y + 0.12, p.z + 0.12), r: 12, kind: 'eye' });
   }
@@ -414,37 +409,6 @@ export function buildTitleCastle(dragon: DragonTease = 'none'): Built {
     }
   }
 
-  // ---------------------------------------------------------- the Dragon (a tease, off unless asked for)
-  let dragonFig: ReturnType<typeof makeDragon> | null = null;
-  if (dragon === 'asleep') {
-    const mats = rigMaterials();
-    for (const m of Object.values(mats)) disposables.push(m);
-    // In the keep's shadow: the game's red, darkened; its own eyes stay lit (the rig's glow material).
-    (mats.body as THREE.MeshStandardMaterial).color.setRGB(0.42, 0.36, 0.4);
-    (mats.metal as THREE.MeshStandardMaterial).color.setRGB(0.5, 0.45, 0.5);
-    dragonFig = makeDragon(true, mats);
-    dragonFig.update(0, 1.2);
-    const o = dragonFig.object;
-    o.scale.setScalar(1.25);
-    // Coiled on the keep's roof, its head toward Lowgate (the title puts the moon behind it).
-    o.position.set(K.x - 0.1, TOP + keepH + 0.2, K.y - 0.25);
-    o.rotation.y = -1.75;
-    o.traverse((c) => {
-      if ((c as THREE.Mesh).isMesh) c.castShadow = true;
-    });
-    scene.add(o);
-    o.updateMatrixWorld(true);
-    // The ember eye: the rig's eye nearest Lowgate (largest z), glowing on the title.
-    let best: THREE.Vector3 | null = null;
-    o.traverse((c) => {
-      const m = c as THREE.Mesh;
-      if (!m.isMesh || m.material !== mats.glow) return;
-      const at = new THREE.Box3().setFromObject(m).getCenter(new THREE.Vector3());
-      if (!best || at.z > best.z) best = at;
-    });
-    if (best) glows.push({ at: best, r: 14, kind: 'eye' });
-  }
-
   // ---------------------------------------------------------- the bricks, as one instanced mesh
   const inst = new THREE.InstancedMesh(brickGeo, brickMat, bricks.length);
   bricks.forEach((b, i) => {
@@ -473,7 +437,6 @@ export function buildTitleCastle(dragon: DragonTease = 'none'): Built {
     scene,
     glows,
     dispose() {
-      dragonFig?.dispose();
       for (const d of disposables) d.dispose();
       inst.dispose();
     },
@@ -484,7 +447,7 @@ export function buildTitleCastle(dragon: DragonTease = 'none'): Built {
  * Render the castle at `scale` (1 = 1920x1080), with the diorama's soft focus at the foot of the crag, cropped to
  * what was drawn. Returns the crop as a data URL and where it and its lights sit on the stage.
  */
-export function renderTitleCastle(scale = 1, dragon: DragonTease = 'none', type = 'image/webp', quality = 0.9): TitleBake | null {
+export function renderTitleCastle(scale = 1, type = 'image/webp', quality = 0.9): TitleBake | null {
   const W = Math.round(STAGE_W * scale), H = Math.round(STAGE_H * scale);
   const canvas = document.createElement('canvas');
   let r: THREE.WebGLRenderer;
@@ -501,7 +464,7 @@ export function renderTitleCastle(scale = 1, dragon: DragonTease = 'none', type 
   r.toneMappingExposure = 1.0;
   r.shadowMap.enabled = true;
   r.shadowMap.type = THREE.PCFShadowMap;
-  const built = buildTitleCastle(dragon);
+  const built = buildTitleCastle();
   const cam = new THREE.PerspectiveCamera(CAMERA.fov, W / H, 0.5, 200);
   cam.position.set(...CAMERA.pos);
   cam.lookAt(new THREE.Vector3(...CAMERA.look));

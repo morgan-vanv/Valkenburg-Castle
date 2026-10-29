@@ -329,7 +329,7 @@ const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 
 // ------------------------------------------------------------ the scene
 
-/** V5.3 (spec 36): the baked castles (scripts/v53-bake-title.mjs writes one manifest per bake). */
+/** V5.3 (spec 36): the baked castle (scripts/v53-bake-title.mjs writes its manifest). */
 const BAKES = import.meta.glob<TitleBakeManifest>('./title-bake/*.json', { eager: true, import: 'default' });
 interface TitleBakeManifest {
   file: string;
@@ -340,23 +340,8 @@ interface TitleBakeManifest {
   h: number;
   glows: { x: number; y: number; r: number; kind: 'window' | 'gate' | 'lantern' | 'eye' }[];
 }
-/**
- * The Dragon on the keep (spec 36.4): '' until the owner has seen the tease; 'asleep' or 'peek' picks a baked
- * variant. A preview can ask for any bake with ?titleCastle=<stem>.
- */
-export const TITLE_DRAGON: '' | 'asleep' | 'peek' = '';
-
-function castleBake(): (TitleBakeManifest & { stem: string }) | null {
-  let stem = TITLE_DRAGON ? `castle-dragon-${TITLE_DRAGON}` : 'castle';
-  try {
-    const q = new URLSearchParams(location.search).get('titleCastle');
-    if (q && /^[a-z0-9-]+$/.test(q)) stem = q;
-  } catch {
-    /* no location */
-  }
-  if (!BAKES[`./title-bake/${stem}.json`]) stem = 'castle';
-  const m = BAKES[`./title-bake/${stem}.json`];
-  return m ? { ...m, stem } : null;
+function castleBake(): TitleBakeManifest | null {
+  return BAKES['./title-bake/castle.json'] ?? null;
 }
 
 /** Lowgate's cottages that light up as their people come home (Aldric, Wim, Gerda, Ilse), in the village's units. */
@@ -374,7 +359,7 @@ const HOMES: [number, number, number, number][] = [
  */
 function scene(villagers: number): HTMLElement {
   const bake = castleBake();
-  const s = h('div', { class: `t-scene${bake ? ` bake-${bake.stem}` : ''}`, 'aria-hidden': 'true' });
+  const s = h('div', { class: 't-scene', 'aria-hidden': 'true' });
   const base = import.meta.env.BASE_URL;
   const homes = HOMES.map(([x, y, cx, cy], i) => {
     const on = i < villagers;

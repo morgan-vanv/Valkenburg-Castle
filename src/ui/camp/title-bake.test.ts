@@ -3,12 +3,12 @@
 // fails here; its images exist; it sits on the stage and its lights fall inside it.
 import { describe, expect, it } from 'vitest';
 
-const REBAKE = 'Run `node scripts/v53-bake-title.mjs` (and DRAGON=asleep / peek for the Dragon variants) and commit public/title and src/ui/camp/title-bake.';
-const INPUTS = ['src/ui/camp/title-scene.ts', 'src/view/look/floors.ts', 'src/view/look/walls.ts', 'src/view/look/dragon.ts', 'src/view/look/rig.ts'];
+const REBAKE = 'Run `node scripts/v53-bake-title.mjs` and commit public/title and src/ui/camp/title-bake.';
+const INPUTS = ['src/ui/camp/title-scene.ts', 'src/view/look/floors.ts', 'src/view/look/walls.ts'];
 
 const sources: Record<string, string> = Object.fromEntries(
   Object.entries(
-    import.meta.glob<string>(['/src/ui/camp/title-scene.ts', '/src/view/look/floors.ts', '/src/view/look/walls.ts', '/src/view/look/dragon.ts', '/src/view/look/rig.ts'], {
+    import.meta.glob<string>(['/src/ui/camp/title-scene.ts', '/src/view/look/floors.ts', '/src/view/look/walls.ts'], {
       query: '?raw',
       import: 'default',
       eager: true,
@@ -41,6 +41,9 @@ describe('the baked title castle', () => {
       it('has its images', () => {
         expect(images.has(m.file), `${m.file}: ${REBAKE}`).toBe(true);
         expect(images.has(m.file2x), `${m.file2x}: ${REBAKE}`).toBe(true);
+      });
+      it('has one eye in the keep window (the tease of Level 3)', () => {
+        expect(m.glows.filter((g) => g.kind === 'eye')).toHaveLength(1);
       });
       it('sits on the stage, right of the lockup, with its lights inside it', () => {
         expect(m.x).toBeGreaterThanOrEqual(700);

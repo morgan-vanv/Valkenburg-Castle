@@ -7,10 +7,10 @@
   "h": 827,
   "glows": [
     {
-      "x": 1497,
-      "y": 383,
-      "r": 26,
-      "kind": "window"
+      "x": 1490,
+      "y": 380,
+      "r": 12,
+      "kind": "eye"
     },
     {
       "x": 1526,
@@ -58,9 +58,7 @@
   "inputs": [
     "src/ui/camp/title-scene.ts",
     "src/view/look/floors.ts",
-    "src/view/look/walls.ts",
-    "src/view/look/dragon.ts",
-    "src/view/look/rig.ts"
+    "src/view/look/walls.ts"
   ],
-  "hash": "78aff6daf9aea788d94fabcb7180635eb42a07a57bcdd7cfd1d7c69828365956"
+  "hash": "e5b29cf9f29fd6f992c512f89d2b16f8bf4ad464c824702225c125df0a86103b"
 }
