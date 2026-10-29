@@ -319,11 +319,13 @@ export function installTips(root: HTMLElement): void {
   };
   const find = (e: Event) => (e.target instanceof Element ? e.target.closest<HTMLElement>('[data-tip],[title]') : null);
   root.addEventListener('pointerover', (e) => {
+    if (e.buttons && document.querySelector('.camp .lifted')) return hide(); // V5.1.2: not while dragging
     const t = find(e);
     if (!t || !root.contains(t)) return hide();
     if (t !== on) show(t);
   });
   root.addEventListener('pointerleave', hide);
+  root.addEventListener('pointerdown', hide); // V5.1.2: a press (a drag starting) puts the tip away
   root.addEventListener('focusin', (e) => {
     const t = find(e);
     if (t && root.contains(t) && t.matches(':focus-visible')) show(t);
@@ -344,6 +346,8 @@ export const ui = {
   /** V4.1 (spec 31.6): what the last purchase did, shown once on its row (and the slot it went to glows). */
   flash: null as Flash | null,
   lastStep: 'job' as Step,
+  /** V5.1.2: the Flagon's open tab on the Party step, for this visit (`visit` = campaign.delveCount when chosen). */
+  flagonTab: null as null | { tab: 'hire' | 'taps'; visit: number },
 };
 
 export interface Flash {

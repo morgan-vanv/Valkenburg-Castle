@@ -119,16 +119,24 @@ check('healing for gold now in the party slot', /3 gold per HP/.test((await p.ge
 // ---- the Flagon and ales
 await edit("Object.assign(s.campaign.village, { innkeeper: true, copper: true, smith: true }); s.campaign.gold = 300;");
 check('campfire became the Gilded Flagon', /At the Gilded Flagon/i.test(await text()));
-await step('outfit');
-await p.click('[data-vendor-tab="flagon"]'); // V5.1 (W3): ales are poured from Wim's tab for the hero marked "Buying here"
+// V5.1.2 (spec 34): ales are poured on the Party step's taps (the Flagon's "The taps" tab), not on Wim's Outfit tab.
+await step('party');
+await p.click('[data-ftab="taps"]');
 await p.waitForTimeout(80);
-const ales = await p.$$eval('[data-pour]', (els) => els.map((e) => e.dataset.pour));
-check('the copper ales on tap (4), the cask-book ales not shown until brewed', ales.length === 4 && !ales.includes('blackcask'), ales.join(','));
-await p.click('[data-pour="reserve"]');
+const ales = await p.$$eval('.pt-tap[data-drag]', (els) => els.map((e) => e.dataset.tap));
+check('the copper ales on tap (4), the cask-book ales dry until brewed', ales.length === 4 && !ales.includes('blackcask') && !!(await p.$('.pt-tap.off[data-tap="blackcask"]')), ales.join(','));
+await p.click('.pt-tap[data-tap="reserve"] h5');
+await p.waitForTimeout(60);
+await p.click('.pt-hero[data-hero="keven"] h3');
 await p.waitForTimeout(150);
 check('bought Hobart\'s Reserve for Keven', (await p.evaluate(() => window.vc.state().campaign.roster.find((h) => h.id === 'keven').ale)) === 'reserve');
+await p.click('.pt-tap[data-tap="glowworm"] h5');
+await p.waitForTimeout(60);
+check('no second ale for Keven (his card dims: one a delve)', !!(await p.$('.pt-hero[data-hero="keven"].drop-no')));
+await p.keyboard.press('Escape');
+await step('outfit');
 check('Keven\'s pack card shows the ale by name', /Hobart's Reserve/.test(await p.textContent('.hr[data-hero="keven"] [data-have="ale"]')));
-check('no second ale for Keven (every tap says one at a time)', await p.$$eval('[data-pour]', (els) => els.every((e) => e.getAttribute('aria-disabled') === 'true')));
+check('no Wim\'s tab in Outfit', !(await p.$('[data-vendor-tab="flagon"]')));
 await p.click('[data-vendor-tab="gerda"]');
 await p.waitForTimeout(80);
 check('forge open with Gerda home: blade, mail, shield', !!(await p.$('[data-upgrade="weapon"][data-hero="keven"]')) && !!(await p.$('[data-upgrade="armor"]')) && !!(await p.$('[data-shield]')));
@@ -191,7 +199,7 @@ async function crewScene(stance) {
 // ---- delve: ale chip, crew, parley
 await crewScene('demanding');
 await p.waitForTimeout(400);
-check('party card: the ale on Keven', /Hobart's Reserve/.test(await p.$eval('.dl-rcard[data-hero="keven"] .dl-si.more', (e) => e.dataset.tip ?? '').catch(() => '')));
+check('party card: the ale on Keven (V5.1.2: a tankard badge)', /Hobart's Reserve/.test(await p.$eval('.dl-rcard[data-hero="keven"] .dl-si.dl-ale', (e) => e.dataset.tip ?? '').catch(() => '')));
 check('crew panel: crew name and demanding', /The Ferrymen/.test(await p.textContent('.dl-crew')) && /demanding/i.test(await p.textContent('.dl-crew')));
 check('crew panel: the toll', /Pay 75/.test(await p.textContent('.dl-crew')) && /next turn/.test(await p.textContent('.dl-crew')));
 const tollTag = await p.$('.intent-toll');

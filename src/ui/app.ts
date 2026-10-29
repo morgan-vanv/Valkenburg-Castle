@@ -2,6 +2,7 @@
 // command through engine.apply, autosaves, and plays events in order while
 // input is blocked.
 
+import { showToast } from './camp/toast'; // V5.1.2
 import type { Engine } from '../game/api';
 import { heardLines } from '../view/sounds';
 import { posKey, type Pos } from '../game/hex';
@@ -395,6 +396,9 @@ export class App {
       if (next) this.hud.select(next.heroId);
     }
     this.render(cmd.type === 'startDelve');
+    // V5.1.2 (spec 34.3): "One for the road": the party raises what Wim poured (the engine already drank it, the
+    // Black Cask included). Over the delve view, not awaited; never at the Instant speed; nothing when nobody drank.
+    if (cmd.type === 'startDelve' && this.state?.stage === 'delve' && this.settings.speed !== 0) showToast(before, this.state);
     // V5.0 (spec 32.15): the threshold's peek, said once as a hero stops on the stairs (the status mark keeps it).
     if (cmd.type === 'move' && this.state?.stage === 'delve') {
       const pk = this.hud.peekLine(cmd.heroId);

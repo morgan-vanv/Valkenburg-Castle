@@ -1587,3 +1587,29 @@ UI only; no rule, number or save change. The pre-delve flow stays Job → Party 
 - **Set out.** The map is drawn in hexes from the remembered tiles of Level 1 (boundary-traced; `src/ui/camp/setout-map.ts`): lit wall hexes, floor hexes, pits, door/exit/brazier hexes, room names, a pin per way in (the chosen one glows), the red job seal, and a pulsing teal marker on every remembered stairs tile. Entrance cards tag the way in closest to the job. The light warning reads "No light source packed."
 - **Graves.** A night yard: the gatepost with every name (newest lit), headstones with a bust relief and an epitaph picked deterministically from class, delve and place.
 - **Drag** everywhere also works by click-then-click and by keyboard (Enter to lift, arrows, Enter to drop, Esc to cancel).
+
+## 34. V5.1.2 One for the road: the drinks (owner, 2026-10-29)
+
+Approved mockups: the Claude Design boards "Drinks: the taps" and "Drinks: the toast". Two small rules, the rest UI. No save bump: both new fields are optional.
+
+### 34.1 Tip it back
+
+- New camp command `{ type: 'unpourAle', heroId }`. The hero's waiting ale (`Hero.ale`) is cleared and `Hero.alePaid` gold comes back; `alePaid` is cleared too.
+- `buyAle` records the price paid in `Hero.alePaid` (the special's price when it was the special). `startDelve` clears it with the ale.
+- Refused: no such hero; "<name> has no ale waiting."; and when nothing was paid (`alePaid` absent or 0): "A gift from Wim. He'd be hurt." That covers Wim's round of Hobart's Reserve (`giveGift` sets no `alePaid`) and any ale bought before V5.1.2 (an old save has no record; it is still drunk as usual).
+- Any time before Delve; tipping back and pouring again is free of any penalty.
+
+### 34.2 Wim's special
+
+- Each visit (per `campaign.delveCount`), one ale is the special: it costs `SPECIAL_OFF` (5) less, never under `SPECIAL_FLOOR` (5).
+- Chosen from the unlocked ales other than the Black Cask, in `ALES` order, by a fixed hash of `GameState.seed` and `delveCount` (mulberry32 over a local holder: `specialAle` in camp.ts). It never touches `GameState.rng`, so looking at the taps or buying the special changes no replay. A locked ale is never the special; with nothing unlocked there is none.
+- `aleOffers` marks it `special: true`, `price` the special price, `basePrice` the usual one (contract change: two optional fields on `AleOffer`). `buyAle` charges the special price.
+
+### 34.3 The taps (Party step) and the toast (UI only)
+
+- The Flagon area under the Party slots has two tabs, **Hire** and **The taps** (chosen tab remembered for the visit; default Hire, The taps when nobody is looking for work). The taps tab counts live + dry and, while not open, carries a "Wim's special tonight" badge.
+- The taps: Wim's chalkboard with the special (struck base price), a tap per ale (CSS tankard in the ale's colour, name, a one-line effect with icon, the price coin, a "Round ×N · total" button for every party hero without an ale: hidden at N = 0, disabled with the reason when the gold is short), dry taps grouped under one in-voice chalk line, the engine's `locked` reason on hover.
+- Every party card has a mug (hex, bottom right): empty "Thirsty", or full in the ale's colour with its name and short effect. The whole card takes a dropped tankard ("Pour for X · price"), or dims with the reason (one waiting, gold short). Drag, click-then-click and keyboard (drag.ts). Clicking a full mug tips it back. Bench heroes show a small tankard when one waits. Wim's Outfit tab is gone (the hot supper perk shows on the taps tab).
+- **The toast:** pressing Delve with at least one party hero holding an ale shows "One for the road" for about 2 s (2.7 s with a Black Cask): every hero going in, their tankard raised, a class toast (Keven: "To Valkenburg!"), the effect chip, and a reveal card per Black Cask showing what it became. It is drawn after `startDelve` resolves, from the states before and after (`toastPlan`); click, Space, E, Enter or Escape skip it, and no key reaches the delve under it. Never at the Instant speed; a plain fade with reduced motion; nothing when nobody drank.
+- **HUD:** a drinker's party card wears a small tankard badge in the ale's colour (the effect on hover); Featherfoot greys once spent (`aleSpent`); hiccups and a heavy head are red.
+- The look of each ale (colour, icon, short line, toast chip, Wim's line) is one table, `src/ui/camp/ales.ts`.

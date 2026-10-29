@@ -4,6 +4,7 @@
 // what you point at (three lines; Alt for the rules), the roll panel docks low, the castle's turn
 // gets a thin banner and a caption beside each actor. Commands go through host.send.
 
+import { aleLook, tankard } from './camp/ales'; // V5.1.2
 import type { ActionOption, Engine, MoveRisks, Reach, RollPreview, Visibility } from '../game/api';
 import { DIRS, add, distance, hexKey, hexToWorld, posKey, samePos, type Pos } from '../game/hex';
 import type { ActionKind, ActionTarget, Brightness, DealOption, GameEvent, GameState, Hero, HeroClass, HeroInDelve, Intent, Item, JobKind, Monster, ReactionChoice, ReactionKind, ReactionQuestion, ReactionSetting, SlotRoll } from '../game/types';
@@ -2657,6 +2658,20 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     const d = this.state!.delve!;
     const out: HTMLElement[] = [];
     const add = (cls: string, ic: IconName | null, tip: string, text = '') => out.push(h('span', { class: `dl-si ${cls}`, tabindex: 0, 'data-tip': tip }, ic ? icon(ic, 13) : '', text));
+    // V5.1.2 (spec 34.4): the ale this hero drank, a tankard in its colour first among the marks; Featherfoot greys
+    // once its fall is spent; a Black Cask gone wrong (hiccups, a heavy head) wears red.
+    if (hd.ale) {
+      const a = ALE_EFFECT[hd.ale];
+      const lk = aleLook(hd.ale);
+      const spent = hd.ale === 'featherfoot' && !!hd.aleSpent;
+      out.push(
+        h(
+          'span',
+          { class: `dl-si dl-ale ${lk.bad ? 'bad' : ''} ${spent ? 'spent' : ''}`, 'data-ale': hd.ale, tabindex: 0, 'aria-label': `${a.name}${spent ? ', used' : ''}`, style: `--ale-ink:${lk.ink}`, 'data-tip': `${a.name}${spent ? ' · used' : ` · ${lk.short}`}\n${a.text}${spent ? `\nThe free fall is spent: the next one hurts.` : ''}` },
+          tankard(hd.ale, { size: 16 }),
+        ),
+      );
+    }
     // V4.1 (WS2): the torch or lantern this hero carries lit, with its rounds.
     for (const it of hd.pack.filter((i) => i.kind === 'lantern' || i.kind === 'torch')) {
       const r = it.rounds ?? (it.kind === 'lantern' ? 20 : TORCH_ROUNDS);
@@ -2700,10 +2715,6 @@ ${r} of ${L.max} rounds left; burns 1 a round while lit. Radius ${L.radius}.${L.
     if (hd.nightEyes && hd.nightEyes > 0) more.push(`Night-eye: ${hd.nightEyes} more round${hd.nightEyes === 1 ? '' : 's'} without dark penalties.`);
     if (hd.escorting) more.push(`${this.nameOf(hd.escorting)} follows ${name}. Leave with them next to you to get them out.`);
     if (hd.rallyCooldown > 0) more.push(`Rally ready again in ${hd.rallyCooldown} round${hd.rallyCooldown === 1 ? '' : 's'}.`);
-    if (hd.ale) {
-      const a = ALE_EFFECT[hd.ale];
-      more.push(`${a.name}: ${a.text}${hd.ale === 'featherfoot' && hd.aleSpent ? ' (used)' : ''}`);
-    }
     if (more.length) add('more', 'dot', `Also · ${more.join('\n')}`);
     return out;
   }

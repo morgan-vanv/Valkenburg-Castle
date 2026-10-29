@@ -94,7 +94,7 @@
 .camp .of-cart .wagon.big .sell{position:absolute;right:28px;bottom:22px;height:54px;font-size:21px;padding:0 22px}
 
 /* ---- the vendors: tabs with busts */
-.camp .of .vt{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:none}
+.camp .of .vt{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex:none}
 .camp .of .v{position:relative;display:flex;align-items:center;gap:14px;height:84px;padding:0 16px 0 10px;border-radius:14px;text-align:left;overflow:hidden;
   background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;color:var(--ink-dim)}
 .camp .of .v:hover{border-color:#6a5232}

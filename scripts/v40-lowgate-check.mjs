@@ -167,7 +167,7 @@ check('two sides: the packs and the wagon, and the vendors', !!(await p.$('[data
 check('one pack per party hero, the first "Buying here"', (await p.$$('[data-side="yours"] .hr')).length === 2 && /Buying here/i.test(await p.$eval('.hr.sel', (e) => e.innerText)));
 check('V4.1: no free lantern on Keven\'s card', !(await p.$('.hr[data-hero="keven"] [data-have="lantern"]')));
 const vtabs = await p.$$eval('[data-vendor-tab]', (els) => els.map((e) => `${e.dataset.vendorTab}:${e.classList.contains('away') ? 'away' : 'open'}`));
-check('four vendor tabs, always: Mott open, the forge, the bench and the Flagon away', vtabs.join(',') === 'mott:open,gerda:away,ilse:away,flagon:away', vtabs.join(','));
+check('three vendor tabs, always: Mott open, the forge and the bench away (V5.1.2: Wim pours on the Party step)', vtabs.join(',') === 'mott:open,gerda:away,ilse:away', vtabs.join(','));
 // V4.0 (26.5): the class kit shows on the hero's card ("2 picks"), outside the slots. Keven has none.
 {
   const cls0 = (await st()).campaign.roster.find((x) => x.id === r0).cls;
@@ -198,10 +198,14 @@ check('the forge tab while Gerda is away: "The forge is cold.", every ware locke
 check("a locked ware's hover gives the in-voice hint, not the rule", /Mott hasn't seen one in years/.test(await p.$eval('[data-row="hook"]', (e) => e.dataset.tip)) && !/Level 2|rescue/i.test(await p.$eval('[data-row="hook"]', (e) => e.dataset.tip)));
 check('a pair\'s ware names the pair in its hint', /both here/.test(await p.$eval('[data-row="gerda-charge"]', (e) => e.dataset.tip)));
 check('items not built yet (the arrows) still show from the catalog', !!(await p.$('[data-row="barbarrows"]')));
-await p.click('[data-vendor-tab="flagon"]');
+// V5.1.2 (spec 34): the taps are on the Party step; while Wim is away every tap is dry with his whereabouts.
+await step('party');
+await p.click('[data-ftab="taps"]');
 await p.waitForTimeout(80);
-check('the Flagon while Wim is away: "The Gilded Flagon\'s taps are dry.", every ale locked with that line', /taps are dry/.test(await p.$eval('[data-side="vendors"] .say', (e) => e.innerText)) && (await p.$$eval('[data-side="vendors"] [data-kind="ale"]', (els) => els.length >= 10 && els.every((e) => e.dataset.state === 'locked' && /taps are dry/.test(e.dataset.tip)))));
-check('the hot supper shows as a locked village perk under the Flagon', (await p.$eval('[data-perk="supper"]', (e) => e.dataset.state).catch(() => '')) === 'locked');
+check('the taps while Wim is away: "The Flagon is dark", every tap dry, the reason on hover', /The Flagon is dark/.test(await p.$eval('.pt-board', (e) => e.innerText)) && (await p.$$eval('.pt-tap', (els) => els.length >= 10 && els.every((e) => e.classList.contains('off') && /Rescue Old Wim/.test(e.dataset.tip ?? '')))));
+check('the hot supper shows as a locked village perk on the taps', (await p.$eval('[data-perk="supper"]', (e) => e.dataset.state).catch(() => '')) === 'locked');
+await p.click('[data-ftab="hire"]');
+await step('outfit');
 await p.click('[data-vendor-tab="mott"]');
 await p.waitForTimeout(80);
 // V5.1 (W3): Buy fills the chosen hero's pack; a full pack leaves it on the wagon.
@@ -285,16 +289,27 @@ await p.click(`[data-upgrade="weapon"][data-hero="${r0}"]`);
 await p.waitForTimeout(100);
 s = await st();
 check('Forge sends `upgrade` (tier 1, 60 gold); the hero card shows the pips, no price', s.campaign.roster.find((x) => x.id === r0).weaponTier === 1 && s.campaign.gold === 240 && !!(await p.$(`.hr[data-hero="${r0}"] [data-have="blade"] .pip.on`)), `${s.campaign.gold}`);
-await p.click('[data-vendor-tab="flagon"]');
+// V5.1.2 (spec 34): pouring is on the Party step's taps: click a tap, then the hero.
+await step('party');
+await p.click('[data-ftab="taps"]');
 await p.waitForTimeout(80);
-const pours = await p.$$eval('[data-pour]:not([aria-disabled="true"])', (els) => els.map((e) => e.dataset.pour));
-check('the Flagon with the copper home: four ales to pour, "Pour for <hero> · N"', pours.length === 4 && new RegExp(`^Pour for ${hname} · 15$`).test(await lbl(`[data-pour="${pours[0]}"]`)), pours.join(','));
-check('...and the cask-book ales locked', (await p.$eval('[data-row="ale-smuggler"]', (e) => e.dataset.state)) === 'locked');
-await p.click(`[data-pour="${pours[0]}"]`);
-await p.waitForTimeout(100);
+const pours = await p.$$eval('.pt-tap[data-drag]', (els) => els.map((e) => e.dataset.tap));
+check('the taps with the copper home: four ales to pour', pours.length === 4, pours.join(','));
+check('...and the cask-book ales dry', !!(await p.$('.pt-tap.off[data-tap="smuggler"]')));
+const g1 = (await st()).campaign.gold;
+await p.click(`.pt-tap[data-tap="${pours[0]}"] h5`);
+await p.waitForTimeout(60);
+await p.click(`.pt-hero[data-hero="${r0}"] h3`);
+await p.waitForTimeout(150);
 s = await st();
-check('pouring sends `buyAle`; the ale shows on the hero card by name', s.campaign.roster.find((x) => x.id === r0).ale === pours[0] && !!(await p.$(`.hr[data-hero="${r0}"] [data-have="ale"]`)));
-check('...and the other taps say one at a time', (await p.$eval(`[data-pour="${pours[1]}"]`, (e) => e.getAttribute('aria-disabled'))) === 'true');
+const paid = g1 - s.campaign.gold;
+check('pouring sends `buyAle`; the ale shows on the hero\'s mug by name', s.campaign.roster.find((x) => x.id === r0).ale === pours[0] && paid > 0 && !!(await p.$(`.pt-hero[data-hero="${r0}"] .pt-mug.full`)), `${paid}`);
+await p.click(`.pt-tap[data-tap="${pours[1]}"] h5`);
+await p.waitForTimeout(60);
+check('...and their card says one at a time', /already has one waiting/.test((await p.getAttribute(`.pt-hero[data-hero="${r0}"]`, 'data-tip')) ?? ''));
+await p.keyboard.press('Escape');
+await step('outfit');
+check('...and the Outfit hero card still shows it', !!(await p.$(`.hr[data-hero="${r0}"] [data-have="ale"]`)));
 await pick('keven');
 await p.click('[data-vendor-tab="gerda"]');
 await p.waitForTimeout(60);

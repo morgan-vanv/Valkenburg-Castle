@@ -1,0 +1,69 @@
+/* V5.1.2 "One for the road" (Toast.dc.html): the toast on its own 1920x1080 camp stage, above the delve view. */
+.camp-host.vc-toast-host{z-index:9000;background:transparent;cursor:pointer}
+.camp.vc-toast{background:#080503;animation:ts-in .22s ease-out}
+.camp.vc-toast.out{animation:ts-out .25s ease-in forwards}
+.camp.vc-toast::before{opacity:.5}
+@keyframes ts-in{from{opacity:0}to{opacity:1}}
+@keyframes ts-out{to{opacity:0}}
+.vc-toast .ts-scene{position:absolute;inset:0;z-index:1;background:radial-gradient(ellipse 70% 60% at 50% 46%,#3a2410 0%,#1a1008 55%,#080503 100%)}
+.vc-toast .ts-scene::after{content:'';position:absolute;left:50%;top:330px;width:1300px;height:520px;transform:translateX(-50%);background:radial-gradient(ellipse at 50% 20%,rgba(255,180,90,.28),transparent 60%)}
+.vc-toast .ts-head{position:absolute;z-index:3;left:0;right:0;top:70px;text-align:center}
+.vc-toast .ts-head .kick{font-size:18px;letter-spacing:.2em}
+.vc-toast .ts-head h1{font-size:84px;line-height:1;margin:8px 0 0;font-style:italic;color:#ffe2b0;text-shadow:0 0 30px rgba(255,170,80,.5)}
+.vc-toast .ts-table{position:absolute;z-index:2;left:100px;right:100px;top:720px;height:40px;border-radius:8px;background:linear-gradient(180deg,#6a4220,#3a2412);box-shadow:0 20px 40px rgba(0,0,0,.6)}
+.vc-toast.has-cask .ts-table{right:560px}
+.vc-toast .ts-crew{position:absolute;z-index:3;left:100px;right:100px;top:250px;display:flex;justify-content:center;gap:50px}
+.vc-toast.has-cask .ts-crew{right:540px}
+.vc-toast .ts-drinker{position:relative;flex:0 1 340px;min-width:0;display:flex;flex-direction:column;align-items:center}
+.vc-toast .ts-drinker .bust{filter:drop-shadow(0 12px 16px rgba(0,0,0,.6))}
+.vc-toast .ts-raise{position:absolute;top:30px;transform-origin:50% 100%;z-index:2}
+.vc-toast .ts-raise .tank{filter:drop-shadow(0 10px 14px rgba(0,0,0,.6))}
+.vc-toast .ts-drinker.l .ts-raise{right:0;--r:18deg}
+.vc-toast .ts-drinker.c .ts-raise{left:50%;margin-left:-44px;top:-6px;--r:0deg}
+.vc-toast .ts-drinker.r .ts-raise{left:0;--r:-18deg}
+.vc-toast .ts-raise{transform:rotate(var(--r));animation:ts-raise .6s cubic-bezier(.2,.8,.3,1.25) both;animation-delay:calc(var(--i) * 60ms)}
+@keyframes ts-raise{from{transform:translateY(140px) rotate(0);opacity:0}55%{opacity:1}to{transform:rotate(var(--r))}}
+.vc-toast .ts-say{margin-top:14px;font-size:34px;font-style:italic;color:#ffe2b0;text-align:center;line-height:1.1;animation:ts-rise .4s ease-out both;animation-delay:calc(.35s + var(--i) * 80ms)}
+.vc-toast .ts-drinker.dry .ts-say{color:var(--ink-dim);font-size:28px}
+.vc-toast .ts-say small{display:block;margin-top:6px;font-family:var(--caps);font-size:16px;font-style:normal;letter-spacing:.14em;color:var(--ink-dim);text-transform:uppercase}
+.vc-toast .ts-fx{display:inline-flex;align-items:center;gap:8px;margin-top:12px;height:40px;padding:0 16px;border-radius:20px;background:rgba(10,6,3,.75);border:1px solid var(--edge,#7a5a2c);font-size:19px;color:var(--ink);white-space:nowrap;animation:ts-rise .4s ease-out both;animation-delay:calc(.5s + var(--i) * 80ms)}
+.vc-toast .ts-fx .ic{font-size:20px;color:var(--ale-ink,var(--amber-hi))}
+.vc-toast .ts-fx.bad{border-color:#7a3a35;color:#ffb4ac}
+@keyframes ts-rise{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+.vc-toast .ts-clink{position:absolute;z-index:4;left:50%;top:228px;width:140px;height:140px;margin-left:-70px;pointer-events:none;opacity:0;
+  background:radial-gradient(circle,#fff6d8 0 6%,rgba(255,220,150,.75) 10%,transparent 42%);animation:ts-clink .5s ease-out .52s both}
+.vc-toast.has-cask .ts-clink{left:calc(50% - 220px)}
+.vc-toast .ts-clink::before,.vc-toast .ts-clink::after{content:'';position:absolute;left:50%;top:50%;width:170px;height:4px;margin:-2px 0 0 -85px;background:linear-gradient(90deg,transparent,#ffe8b0,transparent)}
+.vc-toast .ts-clink::after{transform:rotate(60deg)}
+@keyframes ts-clink{0%{opacity:0;transform:scale(.4)}30%{opacity:1;transform:scale(1.1)}100%{opacity:0;transform:scale(1.4)}}
+/* the Black Cask reveal */
+.vc-toast .ts-casks{position:absolute;z-index:5;right:120px;top:250px;width:340px;display:flex;flex-direction:column;gap:18px;perspective:900px}
+.vc-toast .ts-card{position:relative;height:390px;border-radius:16px;padding:22px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;background:linear-gradient(180deg,#2b1f15,#1b130c);border:2px solid var(--amber-hi);box-shadow:0 0 40px rgba(255,170,80,.35),0 20px 40px rgba(0,0,0,.6);transform:rotateY(-12deg);animation:ts-card .7s cubic-bezier(.2,.8,.3,1.2) .15s both}
+.vc-toast .ts-card.bad{border-color:#e0605a;box-shadow:0 0 40px rgba(224,96,90,.35),0 20px 40px rgba(0,0,0,.6)}
+@keyframes ts-card{from{transform:rotateY(-90deg);opacity:0}to{transform:rotateY(-12deg);opacity:1}}
+.vc-toast .ts-card .k{font-family:var(--caps);letter-spacing:.16em;font-size:15px;color:var(--ink-dim);text-transform:uppercase}
+.vc-toast .ts-barrel{position:relative;flex:none;width:120px;height:136px;border-radius:40%/18%;background:repeating-linear-gradient(90deg,#1a1410 0 18px,#241b14 18px 22px);border:3px solid #0a0705;box-shadow:inset 0 0 20px rgba(0,0,0,.8)}
+.vc-toast .ts-barrel::before,.vc-toast .ts-barrel::after{content:'';position:absolute;left:-3px;right:-3px;height:10px;background:#5a5048;border:2px solid #0a0705}
+.vc-toast .ts-barrel::before{top:24px}.vc-toast .ts-barrel::after{bottom:24px}
+.vc-toast .ts-barrel .q{position:absolute;inset:0;display:grid;place-items:center;font-size:58px;color:#ffcf86;text-shadow:0 0 18px rgba(255,170,80,.9);font-family:var(--serif);animation:ts-q .9s ease-in both}
+.vc-toast .ts-barrel .crack{position:absolute;left:56px;top:-4px;width:4px;height:70px;background:#ffcf86;box-shadow:0 0 14px #ffb450;transform:rotate(12deg);animation:ts-crack .35s ease-out .75s both}
+.vc-toast .ts-barrel .got{position:absolute;inset:0;display:grid;place-items:center;z-index:2;animation:ts-got .45s cubic-bezier(.2,.8,.3,1.3) .95s both}
+@keyframes ts-q{0%,70%{opacity:1;transform:none}100%{opacity:0;transform:scale(1.6)}}
+@keyframes ts-crack{from{height:0}to{height:70px}}
+@keyframes ts-got{from{opacity:0;transform:translateY(-30px) scale(.6)}to{opacity:1;transform:none}}
+.vc-toast .ts-card h3{font-size:34px;line-height:1.05;color:var(--ale-ink,#ffe2b0);margin:4px 0 0;animation:ts-rise .35s ease-out 1.05s both}
+.vc-toast .ts-card.bad h3{color:#ff8a80}
+.vc-toast .ts-card p{margin:0;font-size:19px;line-height:1.25;color:var(--ink-dim);animation:ts-rise .35s ease-out 1.15s both}
+.vc-toast .ts-card .who{margin-top:auto;font-size:18px;color:var(--ink);font-style:italic}
+.vc-toast .ts-casks.many .ts-card{height:auto;min-height:0;padding:14px 18px;gap:6px}
+.vc-toast .ts-casks.many .ts-barrel{width:70px;height:80px}
+.vc-toast .ts-casks.many .ts-barrel .q{font-size:36px}
+.vc-toast .ts-casks.many h3{font-size:26px}
+.vc-toast .ts-casks.many p{font-size:16px}
+.vc-toast .ts-skip{position:absolute;z-index:6;right:60px;bottom:40px;font-size:18px;color:var(--ink-faint);font-style:italic}
+/* reduced motion: a plain fade, everything already in place */
+.vc-toast.still,.vc-toast.still *{animation:none!important}
+.vc-toast.still{animation:ts-in .15s linear!important}
+.vc-toast.still.out{animation:ts-out .15s linear forwards!important}
+.vc-toast.still .ts-barrel .q,.vc-toast.still .ts-clink{display:none}
+.vc-toast.still .ts-barrel .got{opacity:1}

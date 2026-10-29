@@ -11,7 +11,7 @@ import {
   MAX_LEVEL, MONSTERS, PACK_SLOTS, PRISONER_NAMES, RECRUIT_CLASSES, RECRUIT_NAMES, REP_FOR_LEVEL, REP_FOR_SLAY, SHOP,
   START_GOLD, TIERS, WEAPON_PRICE, RECRUIT_PRICE, RECRUIT_PRICE_PER_LEVEL, HEAL_PER_HP,
   ALES, CAMPFIRE_SIZE, CASK_BAD, CASK_GOOD, CASK_GOOD_CHANCE, CASKBOOK_L2, CASKBOOK_L3, DRINK_HEAL, FLAGON_L2, FLAGON_SIZE,
-  HEAVYHEAD_FOCUS, RESERVE_FOCUS, STORIES, CREWS, type StoryDef,
+  HEAVYHEAD_FOCUS, RESERVE_FOCUS, SPECIAL_FLOOR, SPECIAL_OFF, STORIES, CREWS, type StoryDef,
 } from './data';
 // V4.1 (WS1/WS5, spec 31.2, 31.3)
 import { ARROW_BUNDLE } from './data'; // V4.1 (WS6)
@@ -396,7 +396,22 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       if (C.gold < o.price) return err('Not enough gold.');
       C.gold -= o.price;
       h.ale = o.kind;
-      events.push({ type: 'say', text: `Wim draws ${h.name} a ${o.name}. Drunk at the start of the next delve.` });
+      h.alePaid = o.price; // V5.1.2 (spec 34.1): what tipping it back returns (the special's price when it was the special)
+      events.push({ type: 'say', text: `Wim draws ${h.name} a ${o.name}${o.special ? ' (the special)' : ''}. Drunk at the start of the next delve.` });
+      return { events };
+    }
+    case 'unpourAle': {
+      // V5.1.2 (spec 34.1): tip it back: the waiting ale goes back in the cask and what was paid comes back. A gift can't.
+      const h = C.roster.find((x) => x.id === cmd.heroId);
+      if (!h) return err('No such hero.');
+      if (!h.ale) return err(`${h.name} has no ale waiting.`);
+      const paid = h.alePaid ?? 0;
+      if (paid <= 0) return err(ALE_GIFT_TIP);
+      C.gold += paid;
+      const name = ALES.find((a) => a.kind === h.ale)?.name ?? 'ale';
+      h.ale = undefined;
+      h.alePaid = undefined;
+      events.push({ type: 'say', text: `${h.name} tips the ${name} back. Wim returns ${paid} gold.` });
       return { events };
     }
     case 'buyShield': {
@@ -492,18 +507,37 @@ export function shopOffers(s?: GameState): ShopOffer[] {
   });
 }
 
-/** The Flagon's ales, `locked` until the copper (and the cask book) is home, and while Wim is away. */
+/** V5.1.2 (spec 34.1): why a gifted ale (nothing paid) can't be tipped back. */
+export const ALE_GIFT_TIP = "A gift from Wim. He'd be hurt.";
+
+/**
+ * The Flagon's ales, `locked` until the copper (and the cask book) is home, and while Wim is away.
+ * V5.1.2 (spec 34.2): Wim's special: one unlocked ale other than the Black Cask is SPECIAL_OFF cheaper this visit.
+ */
 export function aleOffers(s: GameState): AleOffer[] {
   const v = villageOf(s);
-  return ALES.map((o) => {
+  const list = ALES.map((o) => {
     let locked: string | undefined;
     if (!v.innkeeper) locked = LOCKED.innkeeper;
     // V4.1 (spec 31.3): Wim and Ilse's brews need the two of them, not the copper.
     else if (o.needs === 'alchemist') locked = v.alchemist ? undefined : LOCKED.alchemistAle;
     else if (!v.copper) locked = LOCKED.copper;
     else if (o.needs === 'caskbook' && !v.caskbook) locked = LOCKED.caskbook;
-    return { ...o, ...(locked ? { locked } : {}) };
+    return { ...o, ...(locked ? { locked } : {}) } as AleOffer;
   });
+  const sp = specialAle(s, list);
+  return sp ? list.map((o) => (o.kind === sp ? { ...o, special: true, basePrice: o.price, price: Math.max(SPECIAL_FLOOR, o.price - SPECIAL_OFF) } : o)) : list;
+}
+
+/**
+ * V5.1.2 (spec 34.2): which ale is Wim's special this visit (campaign seed and delve count), or undefined when none is
+ * poured. A fixed hash, not GameState.rng, so looking at the taps never changes a replay.
+ */
+export function specialAle(s: GameState, offers: AleOffer[]): AleOffer['kind'] | undefined {
+  const pool = offers.filter((o) => !o.locked && o.kind !== 'blackcask');
+  if (!pool.length) return undefined;
+  const holder = { rng: (Math.imul((s.seed ?? 0) ^ 0x5bd1e995, 31) + Math.imul((s.campaign.delveCount ?? 0) + 1, 0x9e3779b1)) >>> 0 };
+  return pool[Math.floor(random(holder) * pool.length)]!.kind;
 }
 
 /** Why a delve can't start with this party (spec 15.3), or null. */
@@ -657,6 +691,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     // Spec 18.4: the ale is drunk now (the Black Cask resolves on the seeded RNG) and cleared.
     const ale = h.ale ? drinkAle(s, h.ale) : undefined;
     h.ale = undefined;
+    h.alePaid = undefined; // V5.1.2
     const hid: HeroInDelve = {
       heroId: id,
       at: spots[i] ?? { ...entrance },

@@ -180,6 +180,24 @@
 .camp .plus{--rim:currentColor;--face:rgba(0,0,0,.4)}
 .camp .ic-stairs{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 20 H8 V15 H13 V10 H18 V5 H21 M3 20 V22 M12 3 V8 M9.5 5.8 L12 8.3 L14.5 5.8'/%3E%3C/svg%3E")}
 
+/* V5.1.2 (One for the road): the drinks' icons, and the CSS tankard coloured by --ale. The tankard is unscoped (.tank is
+   used only by the ales) so the delve HUD's badge can wear it too. */
+.camp .ic-feather{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 4 C11 4 6 9 5 19 M5 19 L3 21 M20 4 C20 12 14 17 7 17 M9 13 H15 M11 9 H17'/%3E%3C/svg%3E")}
+.camp .ic-eye{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12 C5 6 19 6 22 12 C19 18 5 18 2 12 Z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E")}
+.camp .ic-drop{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 C8 9 6 12 6 15 A6 6 0 0 0 18 15 C18 12 16 9 12 3 Z'/%3E%3C/svg%3E")}
+.camp .ic-tap{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 2 H15 L14 9 H10 Z M6 9 H18 V12 H14 V16 H10 V12 H6 Z M12 16 V19 M10 21 H14'/%3E%3C/svg%3E")}
+/* tankards: drawn in CSS, coloured by --ale */
+.tank,.tank *{box-sizing:border-box}
+.tank{position:relative;display:inline-block;width:var(--tw,64px);height:calc(var(--tw,64px)*1.12);flex:none}
+.tank .gl{position:absolute;left:0;right:22%;top:14%;bottom:0;border-radius:6px 6px 10px 10px;background:linear-gradient(90deg,rgba(0,0,0,.25),transparent 30%,rgba(255,255,255,.18) 42%,transparent 55%,rgba(0,0,0,.3)),var(--ale,#c87a2a);border:2px solid #2a1c10;box-shadow:inset 0 -6px 0 rgba(0,0,0,.25)}
+.tank .gl::before,.tank .gl::after{content:'';position:absolute;left:-2px;right:-2px;height:5px;background:#6a4a26;border:2px solid #2a1c10;border-width:2px 0}
+.tank .gl::before{top:20%}.tank .gl::after{bottom:16%}
+.tank .hd{position:absolute;right:0;top:30%;width:34%;height:46%;border:calc(var(--tw,64px)*.09) solid #6a4a26;border-left:0;border-radius:0 40% 40% 0;outline:2px solid #2a1c10;outline-offset:-1px}
+.tank .fm{position:absolute;left:-5%;right:17%;top:0;height:26%;border-radius:50% 50% 40% 40%/80% 80% 40% 40%;background:radial-gradient(circle at 30% 60%,#fffaf0 0 30%,transparent 31%),radial-gradient(circle at 62% 45%,#fffaf0 0 34%,transparent 35%),radial-gradient(circle at 85% 70%,#f3ead6 0 28%,transparent 29%),#f6eedd;border:2px solid #2a1c10;border-bottom:0}
+.tank.dry .gl{background:repeating-linear-gradient(90deg,#3a2a1a 0 6px,#33251a 6px 12px);opacity:.7}
+.tank.dry .fm{display:none}
+.tank.glow .gl{box-shadow:inset 0 -6px 0 rgba(0,0,0,.25),0 0 18px var(--ale)}
+
 /* text floor: stage.ts sets --stage-scale; small type grows so it never renders under 12px (1280x720 is scale 0.667) */
 .camp{--stage-scale:1;--tf:calc(12px / var(--stage-scale))}
 .camp .kick{font-size:max(15px,var(--tf))}

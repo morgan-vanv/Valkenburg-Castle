@@ -653,6 +653,9 @@ export const BURGLAR_WALK = 5;
 export const FIRESIDE_HEAL = 3;
 export const HICCUP_NOISE = 1;
 export const HEAVY_MOVE = 3;
+/** V5.1.2 (spec 34.2): Wim's special: one unlocked ale (never the Black Cask) a visit, this much cheaper, never under the floor. */
+export const SPECIAL_OFF = 5;
+export const SPECIAL_FLOOR = 5;
 
 // ---------------------------------------------------------------- V4.1 (WS1/WS5): gold, gifts, Ilse and the village pairs (spec 31.2, 31.3)
 

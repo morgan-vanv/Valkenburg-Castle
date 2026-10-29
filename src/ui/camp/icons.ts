@@ -3,7 +3,7 @@
 
 export const ICONS = [
   'aim', 'anvil', 'arrow', 'banner', 'bomb', 'bow', 'cart', 'chain', 'check', 'chest', 'coin', 'crown', 'flame', 'fuse',
-  'gate', 'gem', 'grave', 'heart', 'hood', 'horn', 'lantern', 'leaf', 'lock', 'mail', 'moon', 'mug', 'pick', 'plus',
+  'gate', 'gem', 'grave', 'heart', 'hood', 'horn', 'lantern', 'leaf', 'lock', 'mail', 'moon', 'mug', 'pick', 'plus', 'feather', 'eye', 'drop', 'tap',
   'potion', 'push', 'rope', 'sack', 'scroll', 'shield', 'skull', 'spider', 'stairs', 'star', 'sword', 'torch', 'warn',
 ] as const;
 export type CampIcon = (typeof ICONS)[number];

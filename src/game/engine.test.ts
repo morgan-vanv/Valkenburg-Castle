@@ -2563,6 +2563,102 @@ describe('V3.5', () => {
     });
   });
 
+  describe('34 drinks: tip it back, Wim\'s special (V5.1.2)', () => {
+    const open = (seed: number, more: Record<string, boolean> = {}) => {
+      const s = party(se.newGame(seed));
+      Object.assign(s.campaign.village, { innkeeper: true, copper: true, ...more });
+      return s;
+    };
+
+    it('34.1 tip it back: refunds what was paid, clears the ale; a second time is refused', () => {
+      let s = open(3);
+      const o = se.ales(s).find((a) => a.kind === 'glowworm')!;
+      s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'glowworm' }).state;
+      const b = () => s.campaign.roster.find((h) => h.id === 'brann')!;
+      expect(b().alePaid).toBe(o.price);
+      expect(s.campaign.gold).toBe(70 - o.price);
+      s = sok(s, { type: 'unpourAle', heroId: 'brann' }).state;
+      expect(s.campaign.gold).toBe(70);
+      expect(b().ale).toBeUndefined();
+      expect(b().alePaid).toBeUndefined();
+      expect(se.apply(s, { type: 'unpourAle', heroId: 'brann' }).error).toMatch(/no ale/);
+      // and can be poured again
+      s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'featherfoot' }).state;
+      expect(b().ale).toBe('featherfoot');
+    });
+
+    it('34.1 a gift (Wim\'s round, nothing paid) can\'t be tipped back', () => {
+      const s = open(3);
+      const b = s.campaign.roster.find((h) => h.id === 'brann')!;
+      b.ale = 'reserve'; // as giveGift leaves it: no alePaid
+      const r = se.apply(s, { type: 'unpourAle', heroId: 'brann' });
+      expect(r.error).toBe("A gift from Wim. He'd be hurt.");
+      expect(r.state.campaign.gold).toBe(70);
+    });
+
+    it('34.1 the alePaid record goes when the ale is drunk', () => {
+      let s = open(3);
+      s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'mole' }).state;
+      s = sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} }).state;
+      const b = s.campaign.roster.find((h) => h.id === 'brann')!;
+      expect(b.ale).toBeUndefined();
+      expect(b.alePaid).toBeUndefined();
+    });
+
+    it('34.2 Wim\'s special: exactly one unlocked ale, 5 less, base price kept; buyAle charges it and tipping back returns it', () => {
+      let s = open(4);
+      const offers = se.ales(s);
+      const sp = offers.filter((a) => a.special);
+      expect(sp).toHaveLength(1);
+      const o = sp[0]!;
+      expect(o.locked).toBeUndefined();
+      expect(o.basePrice! - o.price).toBe(5);
+      expect(o.price).toBeGreaterThanOrEqual(5);
+      s = sok(s, { type: 'buyAle', heroId: 'brann', ale: o.kind }).state;
+      expect(s.campaign.gold).toBe(70 - o.price);
+      expect(s.campaign.roster.find((h) => h.id === 'brann')!.alePaid).toBe(o.price);
+      s = sok(s, { type: 'unpourAle', heroId: 'brann' }).state;
+      expect(s.campaign.gold).toBe(70);
+    });
+
+    it('34.2 the special is deterministic, leaves the seeded dice alone, changes with the visit, never the Black Cask nor a locked ale', () => {
+      const kinds = new Set<string>();
+      for (let seed = 1; seed <= 60; seed++) {
+        const s = open(seed, { caskbook: true });
+        const rng = s.rng;
+        const a = se.ales(s).find((x) => x.special)!.kind;
+        expect(s.rng).toBe(rng);
+        expect(se.ales(structuredClone(s)).find((x) => x.special)!.kind).toBe(a);
+        expect(a).not.toBe('blackcask');
+        // locked ales (Ilse's brews: she is away) are never special
+        expect(['nighteye', 'spidermilk', 'dragonfire']).not.toContain(a);
+        kinds.add(a);
+        for (let n = 1; n <= 6; n++) {
+          s.campaign.delveCount = n;
+          kinds.add(se.ales(s).find((x) => x.special)!.kind);
+        }
+      }
+      expect(kinds.has('blackcask')).toBe(false);
+      expect(kinds.size).toBeGreaterThanOrEqual(5); // all six cheap ales come round
+      // only the copper ales unlocked: the special is one of those four
+      const s = open(7);
+      expect(['glowworm', 'featherfoot', 'mole', 'reserve']).toContain(se.ales(s).find((x) => x.special)!.kind);
+      // nothing unlocked: no special
+      const dry = party(se.newGame(7));
+      expect(se.ales(dry).some((x) => x.special)).toBe(false);
+    });
+
+    it('34.2 buying the special does not change what the Black Cask becomes (replays unchanged)', () => {
+      const run = (look: boolean) => {
+        let s = open(11, { caskbook: true });
+        if (look) se.ales(s);
+        s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'blackcask' }).state;
+        return hero(sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann'], entrance: 0, packs: {} }).state, 'brann').ale;
+      };
+      expect(run(true)).toBe(run(false));
+    });
+  });
+
   describe('18.4 ales', () => {
     it('locked until the copper (and the cask book); one ale per hero; drunk at the next delve, then cleared', () => {
       let s = party(se.newGame(5));
@@ -2572,8 +2668,9 @@ describe('V3.5', () => {
       expect(se.ales(s).filter((a) => !a.locked).map((a) => a.kind)).toEqual(['glowworm', 'featherfoot', 'mole', 'reserve']);
       expect(se.ales(s).find((a) => a.kind === 'smuggler')!.locked).toMatch(/cask book/);
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'smuggler' }).error).toMatch(/cask book/);
+      const reservePrice = se.ales(s).find((a) => a.kind === 'reserve')!.price; // V5.1.2: 15 when it's Wim's special
       s = sok(s, { type: 'buyAle', heroId: 'brann', ale: 'reserve' }).state;
-      expect(s.campaign.gold).toBe(50);
+      expect(s.campaign.gold).toBe(70 - reservePrice);
       expect(s.campaign.roster.find((h) => h.id === 'brann')!.ale).toBe('reserve');
       expect(se.apply(s, { type: 'buyAle', heroId: 'brann', ale: 'glowworm' }).error).toMatch(/already/);
       s = sok(s, { type: 'startDelve', contractId: s.campaign.board[0]!.id, heroIds: ['brann', 'keven'], entrance: 0, packs: {} }).state;

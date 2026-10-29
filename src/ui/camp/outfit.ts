@@ -395,15 +395,19 @@ function wagon(x: Ctx, big: boolean): HTMLElement {
 
 // ------------------------------------------------------------------------------------------------ the vendors
 
+/** V5.1.2 (One for the road): Wim's taps moved to the Party step (the Flagon's "The taps" tab); Outfit keeps the other three. */
+const OUTFIT_VENDORS: VendorId[] = VENDOR_IDS.filter((vid) => vid !== 'flagon');
+
 function shopSide(x: Ctx): HTMLElement {
   const { c, host, shop, ales } = x;
   const v = villageOf(x.s);
+  if (!OUTFIT_VENDORS.includes(ui.outfitTab)) ui.outfitTab = 'mott';
   const id = ui.outfitTab;
   const open = vendorHome(v, id);
   const side = h('section', { class: 'of-col of-shop', 'data-side': 'vendors', 'data-vendor': id, 'data-home': open ? 'yes' : 'no', 'aria-label': 'Vendors' });
 
   const tabs = h('div', { class: 'vt', role: 'tablist', 'aria-label': 'Vendors' });
-  for (const vid of VENDOR_IDS) {
+  for (const vid of OUTFIT_VENDORS) {
     const vd = VENDORS[vid];
     const home = vendorHome(v, vid);
     const on = id === vid;
@@ -440,10 +444,10 @@ function shopSide(x: Ctx): HTMLElement {
   tabs.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
-    const i = VENDOR_IDS.indexOf(ui.outfitTab);
-    const n = VENDOR_IDS.length;
+    const i = OUTFIT_VENDORS.indexOf(ui.outfitTab);
+    const n = OUTFIT_VENDORS.length;
     const j = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : (i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
-    ui.outfitTab = VENDOR_IDS[j]!;
+    ui.outfitTab = OUTFIT_VENDORS[j]!;
     sfx.play('click');
     host.setPage(x.page);
   });
@@ -469,7 +473,7 @@ function shopSide(x: Ctx): HTMLElement {
   const sp = Math.min(view.shelf[id] ?? 0, shelfPages.length - 1);
   // The strip: this vendor's locked things and village perks first, then what the others keep locked (the board shows
   // the whole of what can still be unlocked, so playtesters see it; it pages, four at a time).
-  const others = CATALOG.filter((r) => r.vendor !== id)
+  const others = CATALOG.filter((r) => r.vendor !== id && r.vendor !== 'flagon')
     .map((r) => ({ r, st: rowStatus(r, v, shop, ales) }))
     .filter((y) => y.st.state === 'locked' || y.st.state === 'soon');
   const stripAll: HTMLElement[] = [...rest.map((y) => stripTile(x, y.r, y.st)), ...perks.map((p) => perkTile(p, perkStatus(p, v))), ...others.map((y) => stripTile(x, y.r, y.st, true))];

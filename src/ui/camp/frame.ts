@@ -123,8 +123,11 @@ function stepSummary(s: GameState, l: Loadout, step: Step, host: CampHost): stri
       return c.board.find((k) => k.id === l.contractId)?.title ?? 'No jobs posted';
     case 'party': {
       if (!l.heroIds.length) return 'Nobody yet';
-      if (l.heroIds.length === 1 && isHeir(c, l.heroIds[0]!)) return 'Keven alone';
-      return l.heroIds.map((id) => heroOf(c, id)?.name ?? id).join(', ');
+      // V5.1.2: and how many of them have an ale waiting, first, so a long list of names can't cut it off.
+      const ales = l.heroIds.filter((id) => heroOf(c, id)?.ale).length;
+      const head = ales ? `${ales} ale${ales === 1 ? '' : 's'} · ` : '';
+      if (l.heroIds.length === 1 && isHeir(c, l.heroIds[0]!)) return `${head}Keven alone`;
+      return head + l.heroIds.map((id) => heroOf(c, id)?.name ?? id).join(', ');
     }
     case 'outfit': {
       const n = l.heroIds.reduce((a, id) => a + (l.packs[id]?.length ?? 0), 0);

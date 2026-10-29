@@ -126,7 +126,10 @@ Bought items go to the stash (an arrow bundle as one 1-slot item with its count)
 
 ### 2.8 Ales (the Flagon, needs Wim and the copper)
 
-One ale per hero, bought in camp (`buyAle`), drunk at the start of that hero's next delve, then cleared.
+One ale per hero, bought in camp (`buyAle`, poured on the Party step's taps since V5.1.2), drunk at the start of that hero's next delve, then cleared.
+
+- V5.1.2 (spec 34.1) **tip it back** (`unpourAle`): before Delve a waiting ale can go back for exactly what was paid (`Hero.alePaid`). A gift (Wim's round; an ale bought before V5.1.2) can't: "A gift from Wim. He'd be hurt."
+- V5.1.2 (spec 34.2) **Wim's special:** each visit one unlocked ale other than the Black Cask costs 5 less (`SPECIAL_OFF`, floor `SPECIAL_FLOOR` 5), picked by a hash of the campaign seed and delve count (not the seeded dice, so replays are unchanged). `aleOffers` marks it `special` with `basePrice`.
 
 | Ale | Price | Needs | Effect for one delve |
 | --- | --- | --- | --- |

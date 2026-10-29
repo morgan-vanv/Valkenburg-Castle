@@ -12,6 +12,8 @@ export interface DropSpec<T> {
   onDrop: (payload: T) => void;
   /** A short line shown over the target while a payload hovers it (e.g. the cost). */
   hint?: (payload: T) => string | undefined;
+  /** V5.1.2: true when this target has nothing to do with the payload (neither lit nor dimmed; e.g. a slot while an ale is carried). */
+  ignores?: (payload: T) => boolean;
 }
 
 interface Target {
@@ -57,6 +59,7 @@ function begin(source: HTMLElement, payload: unknown, mode: Mode): void {
   for (const t of [...targets]) if (!t.el.isConnected) targets.delete(t);
   const ok: Target[] = [];
   for (const t of targets) {
+    if (t.spec.ignores?.(payload)) continue;
     const verdict = t.spec.accepts(payload);
     t.tip = t.el.dataset.tip;
     if (verdict === true) {
@@ -75,6 +78,7 @@ function begin(source: HTMLElement, payload: unknown, mode: Mode): void {
   }
   source.classList.add('lifted');
   source.setAttribute('aria-pressed', 'true');
+  document.getElementById('lg-tip')?.classList.add('hidden'); // V5.1.2: the source's tooltip doesn't ride along
   lift = { source, payload, mode, ok };
   document.addEventListener('click', onDocClick, true);
   document.addEventListener('keydown', onDocKey, true);
@@ -220,7 +224,7 @@ function nearest(from: HTMLElement, [dx, dy]: [number, number], list: Target[]):
 }
 
 /** Make an element draggable with a payload. Returns a function that undoes it. */
-export function makeDraggable<T>(el: HTMLElement, payload: T, opts: { ghost?: boolean } = {}): () => void {
+export function makeDraggable<T>(el: HTMLElement, payload: T, opts: { ghost?: boolean | (() => HTMLElement) } = {}): () => void {
   el.dataset.drag = '1';
   if (el.tabIndex < 0 && !el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
   let start: { x: number; y: number; id: number } | null = null;
@@ -232,12 +236,16 @@ export function makeDraggable<T>(el: HTMLElement, payload: T, opts: { ghost?: bo
       begin(el, payload, 'pointer');
       if (opts.ghost !== false) {
         const { root } = stageOf(el);
-        const g = el.cloneNode(true) as HTMLElement;
+        // V5.1.2: a screen may draw its own ghost (the taps lift a big tilted tankard, not the whole tap).
+        const own = typeof opts.ghost === 'function' ? opts.ghost() : null;
+        const g = own ?? (el.cloneNode(true) as HTMLElement);
         g.classList.add('drag-ghost');
         g.classList.remove('lifted');
         g.removeAttribute('id');
-        g.style.width = `${el.offsetWidth}px`;
-        g.style.height = `${el.offsetHeight}px`;
+        if (!own) {
+          g.style.width = `${el.offsetWidth}px`;
+          g.style.height = `${el.offsetHeight}px`;
+        }
         root.append(g);
         lift!.ghost = g;
       }

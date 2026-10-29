@@ -2600,6 +2600,23 @@ button.dl-rcard:hover { border-color: var(--line-hi); }
 .dl-stat-icons { display: flex; align-items: center; gap: 3px; flex: none; flex-wrap: wrap; }
 .dl-si { display: inline-flex; align-items: center; justify-content: center; color: var(--dl-ink-3); line-height: 0; }
 .dl-si.lantern { color: var(--dl-cream); }
+/* V5.1.2 (spec 34.4): the ale badge, a tankard in the ale's colour on a small hex; spent Featherfoot greys, a bad Black Cask goes red */
+.dl-si.dl-ale { position: relative; width: 25px; height: 29px; flex: none; line-height: 1; }
+.dl-si.dl-ale::before, .dl-si.dl-ale::after { content: ''; position: absolute; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.dl-si.dl-ale::before { inset: 0; background: #7a5a2c; }
+.dl-si.dl-ale::after { inset: 1.5px; background: radial-gradient(circle at 50% 35%, #4a3320, #21160d 75%); }
+.dl-si.dl-ale .tank { position: relative; z-index: 1; margin-top: 1px; }
+.dl-si.dl-ale .tank .gl { border-width: 1px; border-radius: 2px 2px 3px 3px; }
+.dl-si.dl-ale .tank .gl::before, .dl-si.dl-ale .tank .gl::after { height: 2px; border-width: 1px 0; }
+.dl-si.dl-ale .tank .fm { border-width: 1px; }
+.dl-si.dl-ale .tank .hd { outline-width: 1px; }
+.dl-si.dl-ale:hover::before, .dl-si.dl-ale:focus-visible::before { background: var(--ale-ink, #ffcf86); }
+.dl-si.dl-ale.spent { opacity: 0.45; filter: grayscale(1); }
+.dl-si.dl-ale.bad::before { background: #b8372f; }
+.dl-si.dl-ale.bad::after { background: radial-gradient(circle at 50% 35%, #5a2420, #200c0a 75%); }
+.dl-si.dl-ale.bad .tank { animation: dl-ale-wobble 2.4s ease-in-out infinite; }
+@keyframes dl-ale-wobble { 0%, 80%, 100% { transform: none; } 85% { transform: rotate(-14deg); } 90% { transform: rotate(10deg); } 95% { transform: rotate(-6deg); } }
+@media (prefers-reduced-motion: reduce) { .dl-si.dl-ale.bad .tank { animation: none; } }
 .dl-si.lantern.shut { color: var(--dl-ink-4); }
 .dl-si.bad { color: var(--dl-red-soft); }
 .dl-si.guarded { color: #9cc8ff; }

@@ -104,7 +104,7 @@ await p.evaluate(() => {
 await wait(200);
 await goStep('outfit');
 const [K, H1, H2] = seedIds;
-check('the board renders: three hero packs, the wagon, four vendor tabs', (await p.$$('[data-side="yours"] .hr')).length === 3 && !!(await p.$('[data-cartbox]')) && (await p.$$('[data-vendor-tab]')).length === 4);
+check('the board renders: three hero packs, the wagon, three vendor tabs (V5.1.2: Wim pours on the Party step)', (await p.$$('[data-side="yours"] .hr')).length === 3 && !!(await p.$('[data-cartbox]')) && (await p.$$('[data-vendor-tab]')).length === 3 && !(await p.$('[data-vendor-tab="flagon"]')));
 check('"Buying here" on the chosen hero (Keven first), and nowhere "Buying for"', /Buying here/i.test(await p.$eval('.hr.sel', (e) => e.innerText)) && (await p.$eval('.hr.sel', (e) => e.dataset.hero)) === K && !/Buying for/.test(await p.$eval('.of', (e) => e.innerText)));
 check("Buy buttons carry the chosen hero's face", (await p.$$('.w .buy .chipb .bust')).length >= 8);
 check("Mott's shelf: 8 wares on hex pedestals, each with an icon, a name and a coin price", (await p.$$eval('.shelf .w:not([hidden])', (els) => els.filter((e) => e.querySelector('.ped .ic') && e.querySelector('h4') && e.querySelector('.price .ic-coin')).length)) === 8);
@@ -245,14 +245,11 @@ const tip = await p.evaluate(() => ({ shown: !document.querySelector('.lg-tip')?
 check("a locked tile's hover gives its unlock hint", tip.shown && /locked/i.test(tip.text), tip.text.replace(/\n/g, ' | '));
 await shot('outfit-gerda-1920');
 
-// ---- the Flagon: pour for the chosen hero
-await tab('flagon');
-await assertFits('Flagon');
-const pours = await p.$$eval('[data-pour]:not([aria-disabled="true"])', (els) => els.map((e) => e.dataset.pour));
-check('the Flagon: four ales to pour for the chosen hero', pours.length === 4, pours.join(','));
-await p.click(`[data-pour="${pours[0]}"]`);
+// ---- V5.1.2: the Flagon is no longer a vendor here (the taps are on the Party step); an ale still shows on its hero
+check('no ale for sale in Outfit', !(await p.$('[data-pour], [data-row^="ale-"]')));
+await p.evaluate(async (id) => { await window.vc.send({ type: 'buyAle', heroId: id, ale: 'glowworm' }); }, H1);
 await wait(200);
-check('pouring sends buyAle; the ale shows on the hero card', (await st()).campaign.roster.find((x) => x.id === H1).ale === pours[0] && !!(await p.$(`.hr[data-hero="${H1}"] [data-have="ale"]`)));
+check('an ale poured elsewhere shows as a chip on the hero card', !!(await p.$(`.hr[data-hero="${H1}"] [data-have="ale"]`)));
 
 // ---- Ilse away: a shut shelf, everything on the strip, paged
 await tab('ilse');

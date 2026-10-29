@@ -44,18 +44,17 @@ const prep = await text();
 check('Set out: "Keven goes in alone. If he falls, it\'s over."', /Keven goes in alone\. If he falls, it's over\./.test(prep));
 check('Set out: the Delve button is enabled', await p.$eval('.lg-delve', (e) => e.getAttribute('aria-disabled') !== 'true'));
 
-// 21.3: the night-eye draught is Wim's (V4.0: locked stays quiet, so it isn't on the wagon until he is home)
+// 21.3: the night-eye draught was Wim's; V4.1 (WS2) retired it for Night-eye Stout, an ale (Wim and Ilse). V5.1.2: on the
+// Party step's taps, dry until both are home; never on the wagon.
 await step('outfit');
-check('wagon: no night-eye draught while Wim is away', !(await p.$('[data-ware="nightsight"]')));
+check('wagon: no night-eye draught (retired in V4.1)', !(await p.$('[data-ware="nightsight"]')));
 await edit('s.campaign.village.innkeeper = true;');
-const fl = await p.$('[data-ware="nightsight"]');
-check('wagon: the night-eye draught once Wim is home (taps dry or not)', !!fl);
-if (fl) {
-  await p.click('[data-ware="nightsight"]');
-  await p.waitForTimeout(150);
-  const s = await p.evaluate(() => window.vc.state().campaign);
-  check('bought for 30, packed for Keven', s.gold === 60 && s.stash.some((i) => i.kind === 'nightsight') && !!(await p.$('.lg-hero[data-hero="keven"] [data-kind="nightsight"]')), `gold ${s.gold}`);
-}
+await step('party');
+await p.click('[data-ftab="taps"]');
+await p.waitForTimeout(100);
+check('the taps: Night-eye Stout dry while Ilse is away', !!(await p.$('.pt-tap.off[data-tap="nighteye"]')));
+await edit('s.campaign.village.alchemist = true;');
+check('the taps: Night-eye Stout on tap once Wim and Ilse are home', !!(await p.$('.pt-tap[data-drag][data-tap="nighteye"]')));
 
 // 21.4: a Burglar in the delve
 await p.evaluate(async () => {

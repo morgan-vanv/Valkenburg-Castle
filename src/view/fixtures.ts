@@ -603,6 +603,17 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         if (s.campaign.gold < a.price) return { state, events: [], error: 'Not enough gold.' };
         s.campaign.gold -= a.price;
         r.ale = a.kind;
+        r.alePaid = a.price;
+        return { state: s, events: [] };
+      }
+      if (cmd.type === 'unpourAle') {
+        // V5.1.2: tip it back (the engine's rule, spec 34.1)
+        const r = s.campaign.roster.find((x) => x.id === cmd.heroId);
+        if (!r || !r.ale) return { state, events: [], error: 'No ale waiting.' };
+        if (!r.alePaid) return { state, events: [], error: "A gift from Wim. He'd be hurt." };
+        s.campaign.gold += r.alePaid;
+        r.ale = undefined;
+        r.alePaid = undefined;
         return { state: s, events: [] };
       }
       if (cmd.type === 'hire') {

@@ -191,6 +191,9 @@ check('the pager turns the page', !(await p.$('[data-bench="m1"]')) || !!(await 
 
 // ---- empty: no recruits
 await edit('s.campaign.recruits = [];');
+// V5.1.2: with nobody looking for work the Flagon opens on The taps (unless Hire was chosen this visit); Hire says so.
+await p.click('[data-ftab="hire"]');
+await wait();
 check('no recruits: one quiet line', /Nobody looking for work/.test(await p.$eval('.pt', (e) => e.innerText)));
 const lay3 = await layout();
 check('no recruits: still no scrolling', !lay3.pageScroll && !lay3.scrollers.length && !lay3.out.length);

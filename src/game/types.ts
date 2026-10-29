@@ -331,6 +331,8 @@ export interface Hero {
   kills: number;
   /** V3.5 (spec 18.4): an ale bought at the Flagon, drunk at the start of this hero's next delve. */
   ale?: AleKind;
+  /** V5.1.2 (spec 34.1): what was paid for the waiting `ale` (refunded by `unpourAle`); absent or 0 = a gift, can't be tipped back. */
+  alePaid?: number;
 }
 
 // ---------------------------------------------------------------- camp
@@ -389,6 +391,9 @@ export interface AleOffer {
   needs: 'copper' | 'caskbook' | 'alchemist';
   /** Why it can't be bought now (not brewed yet), if so. */
   locked?: string;
+  /** V5.1.2 (spec 34.2): Wim's special this visit: `price` is the special price, `basePrice` the usual one. */
+  special?: boolean;
+  basePrice?: number;
 }
 
 export type ShopKind =
@@ -1007,6 +1012,7 @@ export type Command =
   | { type: 'buyShield'; heroId: string } // V3.7 camp (spec 20.5): 50 gold at the forge
   | { type: 'drink'; heroId: string } // V3.5 camp: drink a stash potion, +5 HP
   | { type: 'buyAle'; heroId: string; ale: AleKind } // V3.5: at the Flagon, for the hero's next delve
+  | { type: 'unpourAle'; heroId: string } // V5.1.2 (spec 34.1): tip the waiting ale back for what was paid
   | { type: 'upgrade'; heroId: string; part: 'weapon' | 'armor' }
   | { type: 'startDelve'; contractId: string; heroIds: string[]; entrance: number; /** stash item ids per hero */ packs: Record<string, string[]> }
   // delve
