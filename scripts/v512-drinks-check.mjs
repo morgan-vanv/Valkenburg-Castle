@@ -49,7 +49,7 @@ await edit(`const mk = ${mk};
   c.gold = 325; c.squadSlots = 4; c.delveCount = 4;
   Object.assign(c.village, { innkeeper: true, copper: true, muster: true, caskbook: false, alchemist: false });
   c.roster.push(mk('petra', 'Petra', 'shadowmancer', 9, 9), mk('jutta', 'Jutta', 'hedgewitch', 7, 7), mk('brann', 'Brann', 'sapper', 9, 9));
-  c.roster[0].ale = 'reserve'; delete c.roster[0].alePaid;
+  c.roster[0].ale = 'reserve'; delete c.roster[0].alePaid; c.roster[0].aleGift = true;
   c.roster[3].ale = 'mole'; c.roster[3].alePaid = 20;
   c.recruits = [
     { hero: mk('r-dagny', 'Dagny', 'sellsword', 10, 10), price: 60 },
@@ -71,7 +71,30 @@ check('the engine names one special among the unlocked ales, never the Black Cas
 // ---- the tabs: Hire by default (recruits waiting), The taps with its counts and the special's badge
 check('the Flagon has two tabs, Hire on by default', !!(await p.$('[data-ftab="hire"].on')) && !!(await p.$('[data-ftab="taps"]:not(.on)')));
 const tapsTab = await p.$eval('[data-ftab="taps"]', (e) => e.innerText.replace(/\s+/g, ' '));
-check('The taps tab counts 4 on tap + 6 dry and badges "Wim\'s special tonight"', /4 \+ 6/.test(tapsTab) && /Wim's special tonight/.test(tapsTab), tapsTab);
+check('The taps tab counts 4 on tap + 6 dry and badges "Special tonight" inline', /4 \+ 6/.test(tapsTab) && /Special tonight/.test(tapsTab), tapsTab);
+{
+  // the badge sits after the count and never covers the label, at 1280 and at 1920
+  for (const [w, hh] of [[1280, 720], [1920, 1080]]) {
+    await p.setViewportSize({ width: w, height: hh });
+    await wait(200);
+    const o = await p.evaluate(() => {
+      const tab = document.querySelector('[data-ftab="taps"]');
+      const badge = tab.querySelector('.pt-spbadge').getBoundingClientRect();
+      const n = tab.querySelector('.n').getBoundingClientRect();
+      const r = document.createRange();
+      r.selectNodeContents(tab);
+      const label = [...tab.childNodes].find((x) => x.nodeType === 3 && /The taps/.test(x.textContent));
+      const lr = document.createRange();
+      lr.selectNodeContents(label);
+      const l = lr.getBoundingClientRect();
+      const tr = tab.getBoundingClientRect();
+      return { overLabel: badge.left < l.right && badge.right > l.left && badge.top < l.bottom && badge.bottom > l.top, afterCount: badge.left >= n.right - 1, inside: badge.top >= tr.top - 1 && badge.bottom <= tr.bottom + 1 };
+    });
+    check(`${w}: the special badge follows the count, inside the tab, off the label`, !o.overLabel && o.afterCount && o.inside, JSON.stringify(o));
+  }
+  await p.setViewportSize({ width: 1920, height: 1080 });
+  await wait(200);
+}
 check('the footer points at the taps (drinks are discoverable)', /on tap/.test(await p.$eval('.foot .mid', (e) => e.innerText)), await p.$eval('.foot .mid', (e) => e.innerText));
 await p.click('[data-ftab="taps"]');
 await wait();
@@ -95,6 +118,25 @@ const chalk = await p.$$eval('.pt-drygrp .chalk', (els) => els.map((e) => e.inne
 check('dry taps: Wim\'s hints in voice (the cask book, Ilse), the rule on hover', chalk.some((c) => /cask book/.test(c)) && chalk.some((c) => /Ilse/.test(c)) && taps.filter((t) => t.dry).every((t) => /dry tap/.test(t.tip)), chalk.join(' | '));
 check('the mugs: Keven full (a gift), Petra and Jutta thirsty', !!(await p.$('.pt-hero[data-hero="keven"] .pt-mug.full.gift')) && !!(await p.$('.pt-hero[data-hero="petra"] .pt-mug.empty')) && /Thirsty/.test(await p.textContent('.pt-hero[data-hero="jutta"] .pt-alename')));
 check('the bench: Brann shows a tiny tankard (his Mole\'s Brown waits)', !!(await p.$('.pt-bh .pt-bh-ale[data-ale="mole"] .tank')));
+{
+  // a benched hero's ale tips back from the bench (same refund and gift rules), with a tip saying so
+  const g = (await st()).campaign.gold;
+  check('...its tip says it tips back for 20', /Click to tip it back: 20 gold back/.test((await p.getAttribute('[data-bench-ale="brann"]', 'data-tip')) ?? ''));
+  await p.click('[data-bench-ale="brann"]');
+  await wait(250);
+  check('...clicking it tips it back: 20 back, the tankard gone, the bench hero not picked up', !(await hero('brann')).ale && (await gold()) === g + 20 && !(await p.$('[data-bench-ale="brann"]')) && !(await p.$('.lifted')));
+  await edit(`const b = s.campaign.roster.find((x) => x.id === 'brann'); b.ale = 'reserve'; b.aleGift = true;`);
+  await p.click('[data-bench-ale="brann"]');
+  await wait(200);
+  check('...a gifted one on the bench stays: "A gift from Wim."', (await hero('brann')).ale === 'reserve' && (await gold()) === g + 20 && /A gift from Wim/.test((await p.getAttribute('[data-bench-ale="brann"]', 'data-tip')) ?? ''));
+  // an ale from before V5.1.2: no record, no gift mark: the truthful line, on the mug and on click
+  await edit(`const b = s.campaign.roster.find((x) => x.id === 'brann'); b.ale = 'mole'; delete b.aleGift; delete b.alePaid;`);
+  check('...an old unrecorded ale says "Poured before Wim kept a tab. It stays poured."', /Poured before Wim kept a tab\. It stays poured\./.test((await p.getAttribute('[data-bench-ale="brann"]', 'data-tip')) ?? '') && !/gift/i.test((await p.getAttribute('[data-bench-ale="brann"]', 'data-tip')) ?? ''));
+  await p.click('[data-bench-ale="brann"]');
+  await wait(200);
+  check('...and clicking it refuses with that line, nothing refunded', (await hero('brann')).ale === 'mole' && (await gold()) === g + 20 && /Poured before Wim kept a tab/.test(await p.$$eval('.screen-toast', (els) => els.map((e) => e.innerText).join(' '))));
+  await edit(`const b = s.campaign.roster.find((x) => x.id === 'brann'); b.alePaid = 20; s.campaign.gold = ${g};`);
+}
 check('the Party step says how many ales', /1 ale/.test(await p.$eval('.lg-step[data-step="party"]', (e) => e.innerText)));
 
 // ---- drag: Glowworm Pale onto Petra
@@ -182,13 +224,22 @@ let g0 = await gold();
   await wait(200);
   g0 = await gold();
   const r = await p.$eval(`.pt-tap[data-tap="${special.kind}"] .pt-round`, (e) => e.innerText.replace(/\s+/g, ' '));
-  check('the special\'s Round says ×2 and the total at the special price', new RegExp(`×2 · ${special.price * 2}`).test(r), r);
+  const rtip = await p.getAttribute(`.pt-tap[data-tap="${special.kind}"] .pt-round`, 'data-tip');
+  check('the special\'s Round always says "Round" and the total at the special price; the count is in its tip', new RegExp(`^Round · ${special.price * 2}$`).test(r.trim()) && new RegExp(`2 × ${special.price}`).test(rtip ?? ''), `${r} | ${rtip}`);
+  await p.setViewportSize({ width: 1280, height: 720 });
+  await wait(200);
+  const r1280 = await p.$$eval('.pt-round', (els) => els.map((e) => e.innerText.trim()));
+  check('...at 1280 too, every Round button says "Round"', r1280.length >= 4 && r1280.every((x) => /^Round · \d+$/.test(x)), r1280.join(' | '));
+  await p.screenshot({ path: `${shots}/taps-1280.png` });
+  await p.setViewportSize({ width: 1920, height: 1080 });
+  await wait(200);
   await p.click(`.pt-tap[data-tap="${special.kind}"] .pt-round`);
   await wait(400);
   const pe = await hero('petra');
   const ju = await hero('jutta');
   check('the round pours one each, charged and recorded at the special price', pe.ale === special.kind && ju.ale === special.kind && (await gold()) === g0 - 2 * special.price && pe.alePaid === special.price, `${await gold()} vs ${g0}`);
   check('nobody thirsty: the Round buttons are gone', !(await p.$('.pt-round')));
+  check('...and focus moved to the first tap (keyboard users keep their place)', await p.evaluate(() => document.activeElement?.matches('.pt-tap[data-drag]') ?? false));
   await p.click('.pt-hero[data-hero="petra"] .pt-mug.full');
   await wait(200);
   check('the special tips back for what was paid', (await gold()) === g0 - special.price);
@@ -243,6 +294,13 @@ await wait();
 const vt = await p.$$eval('[data-vendor-tab]', (els) => els.map((e) => e.dataset.vendorTab));
 check('Outfit: three vendor tabs, no Wim (the taps are on the Party step)', vt.join(',') === 'mott,gerda,ilse', vt.join(','));
 check('Outfit: no ale for sale anywhere', !(await p.$('[data-pour], [data-row^="ale-"]')));
+check('Outfit: a quiet pointer where Wim\'s tab was', /Wim's taps/.test(await p.$eval('[data-taps-moved]', (e) => e.innerText).catch(() => '')) && /moved to the Flagon, on the Party step/.test((await p.getAttribute('[data-taps-moved]', 'data-tip')) ?? ''));
+await p.click('[data-ftab]').catch(() => {});
+await p.click('[data-taps-moved]');
+await wait(200);
+check('...clicking it opens the Party step on The taps', (await p.$eval('.lg-step.on', (e) => e.dataset.step).catch(() => '')) === 'party' && !!(await p.$('[data-ftab="taps"].on')));
+await p.click('.lg-step[data-step="outfit"]');
+await wait();
 
 // ---- the toast: Delve with drinkers (one a Black Cask)
 await edit(`Object.assign(s.campaign.village, { caskbook: true }); const j = s.campaign.roster.find((x) => x.id === 'jutta'); j.ale = 'blackcask'; j.alePaid = 10;`);

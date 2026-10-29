@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ALES } from '../../game/data';
 import type { AleOffer } from '../../game/types';
-import { ALE_LOOK, CLASS_TOAST, chalkFor, chalkGroups, pourCheck, roundOf, tapOrder, toastLine, toastPlan } from './ales';
+import { ALE_LOOK, CLASS_TOAST, chalkFor, chalkGroups, pourCheck, roundOf, tapOrder, tipBackOf, toastLine, toastPlan } from './ales';
 
 const offer = (kind: AleOffer['kind'], over: Partial<AleOffer> = {}): AleOffer => ({ ...ALES.find((a) => a.kind === kind)!, ...over });
 
@@ -56,5 +56,15 @@ describe('V5.1.2 ales (the taps, the toast)', () => {
     expect(plan[0]!.line).toBe('To Valkenburg!');
     expect(toastPlan({ campaign: { roster: [] } }, { ...after, delve: { heroes: [{ heroId: 'petra' }] } })).toEqual([]);
     expect(toastPlan(before, { ...after, stage: 'camp', delve: null })).toEqual([]);
+  });
+
+  it('tipBackOf: paid refunds; Wim\'s gift and an unrecorded old ale stay, each said truthfully', () => {
+    expect(tipBackOf({ ale: 'mole', alePaid: 20 })).toMatchObject({ can: true, kind: 'paid' });
+    expect(tipBackOf({ ale: 'reserve', aleGift: true })).toMatchObject({ can: false, kind: 'gift', line: "A gift from Wim. He'd be hurt." });
+    expect(tipBackOf({ ale: 'reserve' })).toMatchObject({ can: false, kind: 'untabbed', line: 'Poured before Wim kept a tab. It stays poured.' });
+  });
+
+  it('every short line fits a narrow tap (18 characters or fewer)', () => {
+    for (const a of ALES) expect(ALE_LOOK[a.kind].short.length, a.kind).toBeLessThanOrEqual(18);
   });
 });

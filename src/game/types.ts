@@ -333,6 +333,8 @@ export interface Hero {
   ale?: AleKind;
   /** V5.1.2 (spec 34.1): what was paid for the waiting `ale` (refunded by `unpourAle`); absent or 0 = a gift, can't be tipped back. */
   alePaid?: number;
+  /** V5.1.2 (spec 34.1): the waiting `ale` was Wim's gift (giveGift); it can't be tipped back. */
+  aleGift?: boolean;
 }
 
 // ---------------------------------------------------------------- camp

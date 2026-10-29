@@ -610,10 +610,11 @@ export function fixtureEngine(castle0: CastleDef): Engine {
         // V5.1.2: tip it back (the engine's rule, spec 34.1)
         const r = s.campaign.roster.find((x) => x.id === cmd.heroId);
         if (!r || !r.ale) return { state, events: [], error: 'No ale waiting.' };
-        if (!r.alePaid) return { state, events: [], error: "A gift from Wim. He'd be hurt." };
+        if (!r.alePaid) return { state, events: [], error: r.aleGift ? "A gift from Wim. He'd be hurt." : 'Poured before Wim kept a tab. It stays poured.' };
         s.campaign.gold += r.alePaid;
         r.ale = undefined;
         r.alePaid = undefined;
+        r.aleGift = undefined;
         return { state: s, events: [] };
       }
       if (cmd.type === 'hire') {

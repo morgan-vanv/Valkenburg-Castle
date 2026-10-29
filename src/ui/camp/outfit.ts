@@ -441,6 +441,27 @@ function shopSide(x: Ctx): HTMLElement {
       ),
     );
   }
+  // V5.1.2: where Wim's tab was, a quiet pointer for returning players (opens the Party step on The taps).
+  tabs.append(
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'v moved-taps',
+        'data-k': 'taps-moved',
+        'data-taps-moved': '1',
+        'aria-label': "Wim's taps moved to the Flagon, on the Party step. Go there.",
+        'data-tip': "Wim's taps · moved to the Flagon, on the Party step\nAles are poured onto a hero's card there. Click to go.",
+        onclick: () => {
+          sfx.play('click');
+          ui.flagonTab = { tab: 'taps', visit: c.delveCount };
+          host.setPage('party');
+        },
+      },
+      ic('tap'),
+      h('span', { class: 'vtx' }, h('span', { class: 'vn' }, "Wim's taps"), h('span', { class: 'vs' }, 'Moved to Party')),
+    ),
+  );
   tabs.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();

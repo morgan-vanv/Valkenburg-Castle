@@ -32,7 +32,7 @@ export const ALE_LOOK: Record<AleLookKey, AleLook> = {
   reserve: { colour: '#b8681f', ink: '#f0b060', icon: 'crown', short: 'Focus starts at 4', toast: 'Focus starts at 4', wim: '"The old lord\'s own. Don\'t tell him."' },
   smuggler: { colour: '#e0a840', ink: '#f0c060', icon: 'hood', short: 'Sneak 4, silently', toast: 'Sneaks 4, silently', wim: '"Never came through the gate, this one."' },
   fireside: { colour: '#7a2e18', ink: '#e88a5a', icon: 'heart', short: 'Heal 3 a level', toast: 'Heals 3 on every level', wim: '"Warms you on the stairs."' },
-  blackcask: { colour: '#1e1814', ink: '#b8aa98', icon: 'drop', short: '7 in 10, a good one', toast: 'Nobody knows', wim: '"Don\'t ask what\'s in it."' },
+  blackcask: { colour: '#1e1814', ink: '#b8aa98', icon: 'drop', short: 'Gamble: 7 in 10', toast: 'Nobody knows', wim: '"Don\'t ask what\'s in it."' },
   nighteye: { colour: '#2c3458', ink: '#a8b4f0', icon: 'eye', short: 'See in the dark', toast: 'Sees in the dark', wim: '"Ilse\'s recipe. Drink it with the lamps out."' },
   spidermilk: { colour: '#e8e2d2', ink: '#f2ecdc', icon: 'spider', short: "Poison won't take", toast: "Poison won't take", wim: '"Don\'t ask Ilse where the milk comes from."' },
   dragonfire: { colour: '#c8401a', ink: '#ff8a5a', icon: 'flame', short: 'Fire hurts 2 less', toast: 'Fire hurts 2 less', wim: '"Breathe out before you drink."' },
@@ -154,4 +154,14 @@ export function toastPlan(
     return { heroId: hd.heroId, name: hr?.name ?? hd.heroId, cls, ale: hd.ale, cask: was === 'blackcask' && !!hd.ale, line: toastLine(cls, hd.heroId) };
   });
   return out.some((d) => d.ale) ? out : [];
+}
+
+/**
+ * V5.1.2 (spec 34.1): can this waiting ale be tipped back, and what to say. Paid: the refund. Wim's gift (`aleGift`):
+ * he'd be hurt. No record either way (an ale from before V5.1.2): the truthful line. The engine says the same.
+ */
+export function tipBackOf(hr: Pick<Hero, 'ale' | 'alePaid' | 'aleGift'>): { can: boolean; kind: 'paid' | 'gift' | 'untabbed'; short: string; line: string } {
+  if (hr.alePaid && hr.alePaid > 0) return { can: true, kind: 'paid', short: 'click to tip back', line: `Click to tip it back: ${hr.alePaid} gold back.` };
+  if (hr.aleGift) return { can: false, kind: 'gift', short: 'a gift', line: "A gift from Wim. He'd be hurt." };
+  return { can: false, kind: 'untabbed', short: 'poured earlier', line: 'Poured before Wim kept a tab. It stays poured.' };
 }

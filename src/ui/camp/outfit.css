@@ -94,7 +94,12 @@
 .camp .of-cart .wagon.big .sell{position:absolute;right:28px;bottom:22px;height:54px;font-size:21px;padding:0 22px}
 
 /* ---- the vendors: tabs with busts */
-.camp .of .vt{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex:none}
+.camp .of .vt{display:grid;grid-template-columns:repeat(3,1fr) 196px;gap:12px;flex:none}
+/* V5.1.2: where Wim's tab was: a dim dashed pointer to the taps on the Party step */
+.camp .of .vt .v.moved-taps{background:none;border:1px dashed #4a3a26;box-shadow:none;color:var(--ink-faint);gap:10px;padding:0 12px}
+.camp .of .vt .v.moved-taps>.ic{font-size:24px;flex:none}
+.camp .of .vt .v.moved-taps .vn{color:var(--ink-dim)}
+.camp .of .vt .v.moved-taps:hover,.camp .of .vt .v.moved-taps:focus-visible{border-color:#8a6a35;color:var(--amber-hi);outline:none}
 .camp .of .v{position:relative;display:flex;align-items:center;gap:14px;height:84px;padding:0 16px 0 10px;border-radius:14px;text-align:left;overflow:hidden;
   background:linear-gradient(180deg,#2b1f15,#1d150e);border:1px solid #4a3a26;color:var(--ink-dim)}
 .camp .of .v:hover{border-color:#6a5232}

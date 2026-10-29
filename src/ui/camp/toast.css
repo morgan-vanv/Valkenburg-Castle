@@ -19,7 +19,8 @@
 .vc-toast .ts-raise{position:absolute;top:30px;transform-origin:50% 100%;z-index:2}
 .vc-toast .ts-raise .tank{filter:drop-shadow(0 10px 14px rgba(0,0,0,.6))}
 .vc-toast .ts-drinker.l .ts-raise{right:0;--r:18deg}
-.vc-toast .ts-drinker.c .ts-raise{left:50%;margin-left:-44px;top:-6px;--r:0deg}
+.vc-toast .ts-drinker.c .ts-raise{right:0;top:22px;--r:10deg}
+.vc-toast .ts-drinker.c:nth-child(even) .ts-raise{right:auto;left:0;--r:-10deg}
 .vc-toast .ts-drinker.r .ts-raise{left:0;--r:-18deg}
 .vc-toast .ts-raise{transform:rotate(var(--r));animation:ts-raise .6s cubic-bezier(.2,.8,.3,1.25) both;animation-delay:calc(var(--i) * 60ms)}
 @keyframes ts-raise{from{transform:translateY(140px) rotate(0);opacity:0}55%{opacity:1}to{transform:rotate(var(--r))}}

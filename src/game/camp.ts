@@ -406,11 +406,12 @@ export function campCommand(w: World, s: GameStateX, cmd: Command): Res {
       if (!h) return err('No such hero.');
       if (!h.ale) return err(`${h.name} has no ale waiting.`);
       const paid = h.alePaid ?? 0;
-      if (paid <= 0) return err(ALE_GIFT_TIP);
+      if (paid <= 0) return err(h.aleGift ? ALE_GIFT_TIP : ALE_UNTABBED_TIP);
       C.gold += paid;
       const name = ALES.find((a) => a.kind === h.ale)?.name ?? 'ale';
       h.ale = undefined;
       h.alePaid = undefined;
+      h.aleGift = undefined;
       events.push({ type: 'say', text: `${h.name} tips the ${name} back. Wim returns ${paid} gold.` });
       return { events };
     }
@@ -509,6 +510,8 @@ export function shopOffers(s?: GameState): ShopOffer[] {
 
 /** V5.1.2 (spec 34.1): why a gifted ale (nothing paid) can't be tipped back. */
 export const ALE_GIFT_TIP = "A gift from Wim. He'd be hurt.";
+/** V5.1.2 (spec 34.1): an ale with no record of what was paid and no gift mark (bought before V5.1.2): it stays. */
+export const ALE_UNTABBED_TIP = 'Poured before Wim kept a tab. It stays poured.';
 
 /**
  * The Flagon's ales, `locked` until the copper (and the cask book) is home, and while Wim is away.
@@ -692,6 +695,7 @@ function startDelve(w: World, s: GameStateX, cmd: Extract<Command, { type: 'star
     const ale = h.ale ? drinkAle(s, h.ale) : undefined;
     h.ale = undefined;
     h.alePaid = undefined; // V5.1.2
+    h.aleGift = undefined;
     const hid: HeroInDelve = {
       heroId: id,
       at: spots[i] ?? { ...entrance },
@@ -987,7 +991,8 @@ export function giveGift(s: GameStateX, story: StoryId, events: GameEvent[]): vo
   if (!g) return;
   const C = s.campaign;
   for (const [kind, n] of g.items ?? []) for (let i = 0; i < n; i++) C.stash.push(makeItem({ s }, kind));
-  if (g.ale) for (const h of C.roster) h.ale ??= g.ale;
+  // V5.1.2 (spec 34.1): marked as a gift, so it can't be tipped back for gold nobody paid.
+  if (g.ale) for (const h of C.roster) if (!h.ale) Object.assign(h, { ale: g.ale, aleGift: true });
   if (g.shields) {
     C.credits ??= {};
     C.credits.shield = (C.credits.shield ?? 0) + g.shields;

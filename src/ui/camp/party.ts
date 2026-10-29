@@ -11,7 +11,7 @@ import { sfx } from '../../audio/sfx';
 import { h } from '../dom';
 import { ALE, type AbilityChip, type AnyClass, CLASS_ABILITIES, CLASS_ROLE, className } from '../names';
 import { type Loadout, type CampHost, isHeir, heroOf, hpOf, hurt, classLine, statsTip, btn, villageOf, ui } from './shared';
-import { aleLook, chalkGroups, pourCheck, roundOf, tankard, tapOrder } from './ales'; // V5.1.2 (One for the road)
+import { aleLook, chalkGroups, pourCheck, roundOf, tankard, tapOrder, tipBackOf } from './ales'; // V5.1.2 (One for the road)
 import { ic, type CampIcon } from './icons';
 import { PERKS, perkStatus } from '../vendors';
 import { bust, bustKey } from './bust';
@@ -73,7 +73,7 @@ export function partyStep(main: HTMLElement, s: GameState, l: Loadout, host: Cam
   }
   root.append(slots);
 
-  root.append(benchRow(s, l, set, room));
+  root.append(benchRow(s, l, set, room, host));
 
   // The Flagon (or the campfire before Wim is home): V5.1.2, two tabs, Hire and The taps.
   const n = c.recruits.length;
@@ -197,7 +197,7 @@ function flagonHead(s: GameState, l: Loadout, host: CampHost, offers: AleOffer[]
         'The taps',
         dry && live ? `${live} + ${dry}` : `${live || dry}`,
         `The taps · ${live} on tap${dry ? `, ${dry} dry` : ''}\nAn ale is drunk as the hero next goes in: one each, a delve.${special ? `\nWim's special tonight: ${special.name}, ${special.price} instead of ${special.basePrice}.` : ''}`,
-        special && tab !== 'taps' ? h('span', { class: 'pt-spbadge' }, "Wim's special tonight") : undefined,
+        special && tab !== 'taps' ? h('span', { class: 'pt-spbadge', 'aria-label': `Wim's special tonight: ${special.name}` }, 'Special tonight') : undefined,
       ),
     ),
     h('span', { class: 'line', 'aria-hidden': 'true' }),
@@ -231,13 +231,12 @@ function tapsPanel(s: GameState, l: Loadout, host: CampHost, offers: AleOffer[])
   const v = villageOf(s);
   const party = l.heroIds.map((id) => heroOf(c, id)).filter((x): x is Hero => !!x);
   const special = offers.find((o) => o.special);
-  const board = h('div', { class: 'pt-board', 'data-special': special?.kind ?? '' }, h('div', { class: 'k' }, "Wim's special"));
+  const board = h('div', { class: 'pt-board', 'data-special': special?.kind ?? '', 'data-tip': special ? `Wim's special · ${special.name}, ${special.price} instead of ${special.basePrice}\nA new special every visit.` : undefined }, h('div', { class: 'k' }, "Wim's special"));
   if (special) {
     board.append(
       h('h4', null, special.name),
       h('p', null, aleLook(special.kind).wim ?? ''),
       h('div', { class: 'pr' }, h('span', { class: 'was num' }, `${special.basePrice}`), h('span', { class: 'now num' }, `${special.price}`)),
-      h('p', { class: 'sm' }, 'A new special every visit.'),
     );
   } else if (!v.innkeeper) board.append(h('h4', null, 'The Flagon is dark'), h('p', null, 'Old Wim is still somewhere in the castle kitchens.'));
   else board.append(h('h4', null, 'Nothing on tap'), h('p', null, '"Bring me my copper and I\'ll pour you something."'));
@@ -274,17 +273,18 @@ function liveTap(o: AleOffer, s: GameState, party: Hero[], host: CampHost): HTML
         k: `round-${o.kind}`,
         data: { round: o.kind },
         off: !round.ok,
-        label: `A round of ${o.name} for ${round.names.join(', ')}: ${round.total} gold`,
-        tip: round.ok ? `A round of ${o.name} · ${round.total} gold\nOne each for ${round.names.join(', ')}: everyone going in without a drink.` : `A round of ${o.name} · ${round.total} gold\n${round.reason}`,
+        label: `A round of ${o.name}, ${round.ids.length} × ${o.price}, for ${round.names.join(', ')}: ${round.total} gold`,
+        tip: `A round of ${o.name} · ${round.ids.length} × ${o.price} = ${round.total} gold\n${round.ok ? `One each for ${round.names.join(', ')}: everyone going in without a drink.` : round.reason}`,
         onclick: async () => {
           if (!round.ok) return;
           for (const id of round.ids) if (!(await host.send({ type: 'buyAle', heroId: id, ale: o.kind }))) break;
           sfx.play('coin', { pitch: 0.7 });
+          // The Round buttons are gone once everyone has one: keep keyboard users on the bar (the first tap).
+          if (!document.querySelector('.pt-round')) document.querySelector<HTMLElement>('.pt-tap[data-drag]')?.focus({ preventScroll: true });
         },
       },
       ic('mug'),
-      h('span', { class: 'rw' }, 'Round '),
-      `×${round.ids.length} · ${round.total}`,
+      `Round · ${round.total}`,
     );
     b.addEventListener('click', (e) => e.stopPropagation());
     row.append(own(b));
@@ -342,23 +342,26 @@ function mugOf(hr: Hero, s: GameState, host: CampHost): { mug: HTMLElement; labe
   const name = ALE[hr.ale].name;
   const fresh = lastAle.has(hr.id) && lastAle.get(hr.id) !== hr.ale;
   lastAle.set(hr.id, hr.ale);
-  const gift = !(hr.alePaid && hr.alePaid > 0);
-  const label = h('div', { class: 'pt-alename full', style: `--ale-ink:${a.ink}` }, h('span', { class: 'idle' }, h('b', null, name), h('span', null, `${a.short}${gift ? ' · a gift' : ' · click to tip back'}`)), when);
+  const tb = tipBackOf(hr);
+  const label = h('div', { class: 'pt-alename full', style: `--ale-ink:${a.ink}` }, h('span', { class: 'idle' }, h('b', null, name), h('span', null, `${a.short} · ${tb.short}`)), when);
   const mug = btn(
     {
-      class: `pt-mug full ${gift ? 'gift' : ''} ${fresh ? 'poured' : ''}`,
+      class: `pt-mug full ${tb.can ? '' : 'gift'} ${fresh ? 'poured' : ''}`,
       k: `mug-${hr.id}`,
-      data: { mug: hr.id, ale: hr.ale },
-      label: gift ? `${name}, a gift from Wim` : `Tip back ${name} for ${hr.alePaid} gold`,
-      tip: `${name} · drunk as ${hr.name} next goes in\n${ALE[hr.ale].text}\n${gift ? "A gift from Wim. He'd be hurt." : `Click to tip it back: ${hr.alePaid} gold back.`}`,
-      onclick: async () => {
-        if (await host.send({ type: 'unpourAle', heroId: hr.id })) sfx.play('coin', { pitch: 1.25 });
-      },
+      data: { mug: hr.id, ale: hr.ale, tipback: tb.kind },
+      label: tb.can ? `Tip back ${name} for ${hr.alePaid} gold` : `${name}: ${tb.line}`,
+      tip: `${name} · drunk as ${hr.name} next goes in\n${ALE[hr.ale].text}\n${tb.line}`,
+      onclick: () => tipBack(hr, host),
     },
     tankard(hr.ale),
   );
   void s;
   return { mug: own(mug), label, when: { b: wb, sp: wsp } };
+}
+
+/** Tip a waiting ale back (the engine refuses a gift or an unrecorded one, and says why). */
+async function tipBack(hr: Hero, host: CampHost): Promise<void> {
+  if (await host.send({ type: 'unpourAle', heroId: hr.id })) sfx.play('coin', { pitch: 1.25 });
 }
 
 /** The whole hero card takes a tankard (V5.1.2): lights its mug with "Pour for X · price", or dims with the reason. */
@@ -599,7 +602,7 @@ function emptySlot(s: GameState, l: Loadout, host: CampHost, set: (l: Loadout) =
 }
 
 /** The roster heroes not going in: small busts, dragged (or "+"-ed) into a slot; paged, never wrapped. */
-function benchRow(s: GameState, l: Loadout, set: (l: Loadout) => void, room: number): HTMLElement {
+function benchRow(s: GameState, l: Loadout, set: (l: Loadout) => void, room: number, host: CampHost): HTMLElement {
   const c = s.campaign;
   const bench = c.roster.filter((x) => !l.heroIds.includes(x.id));
   const full = l.heroIds.length >= room;
@@ -617,7 +620,7 @@ function benchRow(s: GameState, l: Loadout, set: (l: Loadout) => void, room: num
       { class: `pt-bh ${hurt(hr) ? 'wounded' : ''}`, role: 'listitem', style: clsStyle(hr.cls), 'aria-label': `${hr.name}, ${classLine(hr)}. Enter picks them up for a slot.`, 'data-tip': `${hr.name} · ${classLine(hr)}\n${hpOf(hr)} of ${hr.maxHp} HP. ${full ? 'The party is full. Take someone out first.' : 'Drag into an open slot, or press +.'}` },
       h('span', { class: 'pt-bh-b' }, bust(hr.cls, { size: 58 })),
       h('span', { class: 'pt-bh-t' }, h('span', { class: 'pt-bh-n' }, hr.name), h('span', { class: 'pt-bh-c' }, ic(ROLE_ICON[hr.cls] ?? 'star'), hurt(hr) ? h('span', { class: 'num low' }, `${hpOf(hr)}/${hr.maxHp}`) : h('span', { class: 'num' }, `${hr.maxHp}`), ic('heart', { class: 'hrt' }))),
-      hr.ale ? h('span', { class: 'pt-bh-ale', 'data-ale': hr.ale, tabindex: 0, 'data-tip': `${ALE[hr.ale].name} waits for ${hr.name} · an ale stays with the hero until they next go in.` }, tankard(hr.ale, { size: 22 })) : '',
+      hr.ale ? benchAle(hr, host) : '',
       own(btn(
         {
           class: 'pt-add',
@@ -657,6 +660,25 @@ function benchRow(s: GameState, l: Loadout, set: (l: Loadout) => void, room: num
     );
   }
   return row;
+}
+
+/** A benched hero's waiting ale: a tiny tankard that tips back like a mug (same refund and gift rules). */
+function benchAle(hr: Hero, host: CampHost): HTMLElement {
+  const tb = tipBackOf(hr);
+  const name = ALE[hr.ale!].name;
+  const b = btn(
+    {
+      class: `pt-bh-ale ${tb.can ? '' : 'gift'}`,
+      k: `bh-ale-${hr.id}`,
+      data: { ale: hr.ale!, benchAle: hr.id, tipback: tb.kind },
+      label: tb.can ? `Tip back ${hr.name}'s ${name} for ${hr.alePaid} gold` : `${hr.name}'s ${name}: ${tb.line}`,
+      tip: `${name} waits for ${hr.name} · drunk when they next go in\n${tb.line}`,
+      onclick: () => tipBack(hr, host),
+    },
+    tankard(hr.ale!, { size: 22 }),
+  );
+  b.addEventListener('click', (e) => e.stopPropagation()); // not a pick-up of the bench chip
+  return own(b);
 }
 
 function recruitCard(hr: Hero, price: number, s: GameState, l: Loadout, host: CampHost): HTMLElement {

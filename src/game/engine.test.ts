@@ -2590,9 +2590,32 @@ describe('V3.5', () => {
     it('34.1 a gift (Wim\'s round, nothing paid) can\'t be tipped back', () => {
       const s = open(3);
       const b = s.campaign.roster.find((h) => h.id === 'brann')!;
-      b.ale = 'reserve'; // as giveGift leaves it: no alePaid
+      b.ale = 'reserve';
+      b.aleGift = true; // as giveGift leaves it: no alePaid, the gift mark
       const r = se.apply(s, { type: 'unpourAle', heroId: 'brann' });
       expect(r.error).toBe("A gift from Wim. He'd be hurt.");
+      expect(r.state.campaign.gold).toBe(70);
+    });
+
+    it('34.1 giveGift marks Wim\'s round as a gift (and leaves a waiting ale alone)', async () => {
+      const { giveGift } = await import('./camp');
+      const s = open(3) as GameStateX;
+      s.campaign.roster.find((h) => h.id === 'pim')!.ale = 'mole';
+      s.campaign.roster.find((h) => h.id === 'pim')!.alePaid = 20;
+      giveGift(s, 'innkeeper', []);
+      const b = s.campaign.roster.find((h) => h.id === 'brann')!;
+      const pim = s.campaign.roster.find((h) => h.id === 'pim')!;
+      expect(b).toMatchObject({ ale: 'reserve', aleGift: true });
+      expect(pim.ale).toBe('mole');
+      expect(pim.aleGift).toBeUndefined();
+      expect(se.apply(s, { type: 'unpourAle', heroId: 'brann' }).error).toMatch(/gift from Wim/);
+    });
+
+    it('34.1 an ale from before V5.1.2 (no record, no gift mark) stays, and says so truthfully', () => {
+      const s = open(3);
+      s.campaign.roster.find((h) => h.id === 'brann')!.ale = 'glowworm';
+      const r = se.apply(s, { type: 'unpourAle', heroId: 'brann' });
+      expect(r.error).toBe('Poured before Wim kept a tab. It stays poured.');
       expect(r.state.campaign.gold).toBe(70);
     });
 
