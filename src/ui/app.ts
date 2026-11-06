@@ -194,8 +194,7 @@ export class App {
     const sp = this.settings.speed;
     this.dio.clock.speed = this.hurry ? Math.max(6, sp * 4) : sp === 0 ? 1000 : sp;
     this.dio.reduceShake = this.settings.reduceShake;
-    // V5.0 (P, docs/v5-ship.md step 2): "Lower walls near the camera" is retired: the cutaway is always on in the new
-    // look (`LOOK_CUTAWAY`); the setting key `cutaway` stays in settings.ts (append-only) and is ignored.
+    // The setting key `cutaway` stays in settings.ts (append-only) and is ignored: V5.4 removed the cutaway.
   }
 
   // ------------------------------------------------------------ saving

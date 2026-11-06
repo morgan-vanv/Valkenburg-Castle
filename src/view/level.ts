@@ -1,6 +1,6 @@
 // Builds the 3D diorama for one castle level on the hex grid: floors by room
-// material and tint (engraved hex joints, not separate blocks), cutaway walls
-// with pale caps, pit ledges and bridge piers, railings, pillars, rubble,
+// material and tint (engraved hex joints, not separate blocks), walls at full
+// height with infill between them (V5.4), pit ledges and bridge piers, railings, pillars, rubble,
 // doors, the sealed door, stairs, the lift, exits, braziers, furniture props
 // and fixed lights (sconces, daylight shafts, fires, fungus, glows, vents).
 // Fixed lights are baked into per-instance glow so they cost no point lights.
@@ -14,6 +14,7 @@ import { addFogAttribute, fogMaterial, FOG_BELOW, MAT_ID, setMaterialFog } from 
 import { FLOOR_LOOK, bevelGeometry, lookTint, tileJitter, underGeometry } from './look/floors';
 import { LOOK_WALL_ROOMS, WALL_LOOK, buildLookWalls, wallGeometries, type LookWalls } from './look/walls';
 import { buildDressing } from './look/dressing';
+import { INFILL, buildInfill, infillColor, type Infill, type InfillHex } from './look/infill';
 import { furnitureModel, winchDrum } from './furniture';
 import { glowTexture } from './sprites';
 import { COLORS, FLOOR_TOP, HEX, RAISED_TOP, WALL_HEIGHT, hash2, levelY } from './world';
@@ -172,9 +173,9 @@ export class LevelView {
   readonly y0: number;
   /** V5.0 (G): the flat brick walls (look/walls.ts) and the dressing's candle flames to flicker. */
   lookWalls!: LookWalls;
+  /** V5.4 (look/infill.ts): what fills the empty hexes around and between the level's tiles. */
+  infill!: Infill;
   readonly dressingFlames: THREE.Object3D[] = [];
-  /** V5.0 (G, W4): dressing hung on a brick face; hidden when the cutaway lowers that wall. */
-  readonly wallHung: THREE.Object3D[] = [];
 
   constructor(
     readonly def: LevelDef,
@@ -253,34 +254,85 @@ export class LevelView {
     // room), stay solid blocks so the castle keeps its mass. All of it can cut away near the camera
     // (Diorama.setCutaway; off by default since V3.4).
     // V5.0 (G, W2): the walls left to the old batches are mass away from any floor: dark stone, not pale caps.
-    const wallColor = (h: Hex) => new THREE.Color(WALL_LOOK.rock).multiplyScalar(0.85 + hash2(h.r, h.q, 9) * 0.3);
+    // V5.4: one colour for all mass (walls with no room beside them and the pockets between rooms), so it reads as one block.
+    const wallColor = (h: Hex) => new THREE.Color(INFILL.mass).multiplyScalar(0.97 + hash2(h.r, h.q, 9) * 0.06);
+    // V5.4 (look/infill.ts): the empty hexes: pockets between walls, ground outside Level 1, bedrock outside the rest.
+    this.infill = buildInfill(this.def.tiles, this.level >= 2);
+    const infillAt = new Map(this.infill.hexes.map((x) => [hexKey(x.h), x] as const));
+    const isMass = (h: Hex) => {
+      const t = this.tile(h);
+      return t ? t.kind === 'wall' : this.infill.massKeys.has(hexKey(h));
+    };
+    const massColor = (h: Hex) => {
+      const x = infillAt.get(hexKey(h));
+      return x ? infillColor(x) : wallColor(h);
+    };
     // V5.0 (G, look/walls.ts): flat brick runs for the look rooms' walls; those hexes leave the old batches.
-    this.lookWalls = buildLookWalls({ level: this.level, tile: (h) => this.tile(h), open: (t) => this.wallOpen(t), rooms: LOOK_WALL_ROOMS, cave: (t) => this.isCave(t) }, walls);
+    this.lookWalls = buildLookWalls({ level: this.level, tile: (h) => this.tile(h), open: (t) => this.wallOpen(t), rooms: LOOK_WALL_ROOMS, cave: (t) => this.isCave(t), mass: isMass, massColor }, walls);
     {
       const g = wallGeometries();
       const lw = this.lookWalls;
       const byItem = (_h: Hex, it?: { color?: THREE.Color }) => it?.color ?? new THREE.Color(0xffffff);
-      this.batchItems(g.rock, lw.rocks, byItem, (h) => this.withNeighbours(h), () => 0, 0.16, { standard: true, roughness: 0.95, glowScale: 0.3, shadow: true, cutaway: true });
+      this.batchItems(g.rock, lw.rocks, byItem, (h) => this.withNeighbours(h), () => 0, 0.16, { standard: true, roughness: 0.95, glowScale: 0.3, shadow: true });
+      this.batchItems(g.back, lw.backs, byItem, (h) => this.withNeighbours(h), () => 0, 0.16, { standard: true, roughness: 0.95, glowScale: 0.25, shadow: true });
       this.batchItems(g.plinth, lw.plinths, byItem, (h) => this.withNeighbours(h), () => 0, 0.2, { standard: true, roughness: 0.9, glowScale: 0.35, shadow: true });
-      this.batchItems(g.core, lw.cores, byItem, (h) => this.withNeighbours(h), () => 0, 0.12, { standard: true, roughness: 0.95, glowScale: 0.25, shadow: true, cutaway: true });
-      this.batchItems(g.brick, lw.bricks, byItem, (h) => this.withNeighbours(h), () => 0, 0.22, { standard: true, roughness: 0.88, glowScale: 0.35, shadow: true, cutaway: true, cutDrop: true });
-      this.batchItems(g.pillar, lw.pillars, byItem, (h) => this.withNeighbours(h), () => 0, 0.24, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true, cutaway: true });
-      this.batchItems(g.cap, lw.caps, byItem, (h) => this.withNeighbours(h), () => 0, 0.26, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true, cutaway: true, cutDrop: true });
+      this.batchItems(g.core, lw.cores, byItem, (h) => this.withNeighbours(h), () => 0, 0.12, { standard: true, roughness: 0.95, glowScale: 0.25, shadow: true });
+      this.batchItems(g.brick, lw.bricks, byItem, (h) => this.withNeighbours(h), () => 0, 0.22, { standard: true, roughness: 0.88, glowScale: 0.35, shadow: true });
+      this.batchItems(g.pillar, lw.pillars, byItem, (h) => this.withNeighbours(h), () => 0, 0.24, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true });
+      this.batchItems(g.cap, lw.caps, byItem, (h) => this.withNeighbours(h), () => 0, 0.26, { standard: true, roughness: 0.85, glowScale: 0.35, shadow: true });
     }
     // Wall mass with no open neighbour (deep rock between rooms): dark solid blocks. (V5.0 W5: the V3 thin panels,
     // posts and cores are gone; every wall that faces a room is a brick run or a rock column above.)
+    // V5.4: with the pockets beside them, flat-topped and level, so the mass reads as one block, not a stack of columns.
     const solid = walls.filter((h) => !this.lookWalls.hexes.has(hexKey(h)));
-    this.batch(
-      prism(R, WALL_HEIGHT, 1, 0.55, R, 0.52),
-      solid,
-      wallColor,
-      (h) => this.withNeighbours(h),
-      (h) => (hash2(h.q, h.r, this.level + 5) - 0.5) * 0.06,
+    const pockets = this.infill.hexes.filter((x) => x.kind === 'pocket');
+    this.batchItems(
+      prism(HEX, WALL_HEIGHT, 1, 0.55, HEX, 0.52),
+      [...solid.map((h) => ({ h, rot: 0, dx: 0, dz: 0 })), ...pockets.map((x) => ({ h: x.h, rot: 0, dx: 0, dz: 0, color: infillColor(x) }))],
+      (h, it) => it?.color ?? wallColor(h),
+      // A wall hex with no room beside it fogs with everything within two hexes and any pocket it touches, so the
+      // mass it forms with the pockets shows evenly instead of as a patchwork.
+      (h) => {
+        if (!this.tile(h)) return this.infillSources(infillAt.get(hexKey(h))!);
+        const keys = new Set<string>();
+        for (const x of range(h, 2)) keys.add(this.pk(x));
+        for (const d of DIRS) {
+          const x = infillAt.get(hexKey(add(h, d)));
+          if (x?.kind === 'pocket') for (const k of this.infillSources(x)) keys.add(k);
+        }
+        return [...keys];
+      },
+      () => 0,
       0.3,
-      { cutaway: true, glowScale: 0.35 },
+      { glowScale: 0.35, standard: true, roughness: 0.95, shadow: true },
     );
-    // A dark sill under walls that face a pit, so walls don't float.
-    const pitWalls = walls.filter((h) => DIRS.some((d) => this.isPit(add(h, d))));
+    // Bedrock outside the underground levels: rough rock like the cave walls, darkening outward.
+    const bedrock = this.infill.hexes.filter((x) => x.kind === 'bedrock');
+    this.batchItems(
+      wallGeometries().rock,
+      bedrock.map((x) => {
+        const j = (k: number) => hash2(x.h.q, x.h.r, 80 + k);
+        return { h: x.h, rot: j(0) * Math.PI * 2, dx: (j(1) - 0.5) * 0.15, dz: (j(2) - 0.5) * 0.15, dy: 0, sx: 0.98 + j(3) * 0.1, sy: 0.92 + j(4) * 0.18, sz: 0.98 + j(5) * 0.1, color: infillColor(x) };
+      }),
+      (_h, it) => it?.color ?? new THREE.Color(INFILL.bedrock),
+      (h) => this.infillSources(infillAt.get(hexKey(h))!),
+      () => 0,
+      0.12,
+      { glowScale: 0.2, standard: true, roughness: 0.95, shadow: true },
+    );
+    // Ground outside Level 1: flat packed earth just under the floor, darkening away from the walls.
+    const ground = this.infill.hexes.filter((x) => x.kind === 'ground');
+    this.batchItems(
+      prism(HEX, 0.6, 1, 0.6),
+      ground.map((x) => ({ h: x.h, rot: 0, dx: 0, dz: 0, dy: (hash2(x.h.q, x.h.r, 77) - 0.5) * 0.04, color: infillColor(x) })),
+      (_h, it) => it?.color ?? new THREE.Color(INFILL.ground),
+      (h) => this.infillSources(infillAt.get(hexKey(h))!),
+      () => FLOOR_TOP - INFILL.groundDrop - 0.6,
+      0.1,
+      { glowScale: 0.3, standard: true, roughness: 1 },
+    );
+    // A dark sill under walls (and mass) that face a pit, so walls don't float.
+    const pitWalls = [...walls, ...[...pockets, ...bedrock].map((x) => x.h)].filter((h) => DIRS.some((d) => this.isPit(add(h, d))));
     this.batch(
       prism(R, 1.1, 0.5, 0.3),
       pitWalls,
@@ -349,7 +401,6 @@ export class LevelView {
       this.group.add(piece.obj);
       this.extra(piece.hexes[0]!, piece.obj, piece.mats, piece.hexes.map((h) => this.pk(h)));
       this.dressingFlames.push(...piece.flames);
-      if (piece.onFace) this.wallHung.push(piece.obj);
     }
     this.buildLabels();
   }
@@ -385,6 +436,11 @@ export class LevelView {
     return [this.pk(h), ...DIRS.map((d) => this.pk(add(h, d)))];
   }
 
+  /** V5.4: a fill hex shows when one of its nearest tiles would (that tile or a neighbour of it is seen). */
+  private infillSources(x: InfillHex): string[] {
+    return [...new Set(x.near.flatMap((h) => this.withNeighbours(h)))];
+  }
+
   /**
    * 15.8: does a wall hex face a room across this neighbour (floor, door, exit, props...)?
    * Pits don't count: walls over the Hollow stay solid piers instead of panel rings.
@@ -407,7 +463,7 @@ export class LevelView {
     sources: (h: Hex) => string[],
     lift: (h: Hex) => number,
     litFloor: number,
-    opts: { cutaway?: boolean; floor?: boolean; glowScale?: number } = {},
+    opts: { floor?: boolean; glowScale?: number } = {},
   ): void {
     this.batchItems(
       geo,
@@ -428,10 +484,10 @@ export class LevelView {
     sources: (h: Hex) => string[],
     lift: (h: Hex) => number,
     litFloor: number,
-    opts: { cutaway?: boolean; cutDrop?: boolean; floor?: boolean; glowScale?: number; standard?: boolean; edge?: number; roughness?: number; shadow?: boolean } = {},
+    opts: { floor?: boolean; glowScale?: number; standard?: boolean; edge?: number; roughness?: number; shadow?: boolean } = {},
   ): void {
     if (!items.length) return;
-    const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, cutaway: opts.cutaway, cutDrop: opts.cutDrop, glow: true, floor: opts.floor, standard: opts.standard, edge: opts.edge, roughness: opts.roughness });
+    const mat = fogMaterial({ instanced: true, litFloor, vertexColors: true, glow: true, floor: opts.floor, standard: opts.standard, edge: opts.edge, roughness: opts.roughness });
     const mesh = new THREE.InstancedMesh(geo, mat, items.length);
     const fog = addFogAttribute(mesh, items.length);
     const glow = new THREE.InstancedBufferAttribute(new Float32Array(items.length * 3), 3);
@@ -1351,7 +1407,6 @@ export class LevelView {
       const v = max(e.sources);
       setMaterialFog(e.mats, v);
       e.obj.visible = v > 0;
-      e.obj.userData.fogShown = v > 0; // the cutaway (diorama) may hide a wall-hung piece on top of this
     }
     for (const l of this.fixedLights) l.power = l.def.kind === 'daylight' ? 0.7 : 1;
   }

@@ -473,8 +473,8 @@ console.log('\n== Settings');
   await p.evaluate(() => localStorage.setItem('vc.settings', JSON.stringify({ speed: 1, reduceShake: false, reduceFlashes: false, noEndTurnAsk: false, cutaway: true, fullCards: false })));
   await p.reload();
   await p.waitForFunction(() => !!window.vc);
-  const old = await p.evaluate(() => ({ s: window.vc.settings, q: window.vc.dio.quality, ac: window.vc.dio.actionCam.enabled, ts: window.vc.dio.tiltShift, cut: window.vc.dio.cutaway }));
-  check('a V4.1 settings blob loads: quality high, action cam on, tilt-shift on, auto end turn on; `cutaway` kept but ignored', old.s.quality === 'high' && old.s.actionCamera === true && old.s.tiltShift === true && old.s.autoEndTurn === true && old.q === 'high' && old.ac && old.ts && old.cut === false, JSON.stringify(old));
+  const old = await p.evaluate(() => ({ s: window.vc.settings, q: window.vc.dio.quality, ac: window.vc.dio.actionCam.enabled, ts: window.vc.dio.tiltShift }));
+  check('a V4.1 settings blob loads: quality high, action cam on, tilt-shift on, auto end turn on; `cutaway` kept but ignored (V5.4: no cutaway at all)', old.s.quality === 'high' && old.s.actionCamera === true && old.s.tiltShift === true && old.s.autoEndTurn === true && old.q === 'high' && old.ac && old.ts, JSON.stringify(old));
   await settings();
 }
 

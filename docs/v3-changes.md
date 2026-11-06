@@ -6,6 +6,8 @@ V3 rebuilt the game as a turn-based extraction crawler, following the V3 Game De
 
 ## Since launch
 
+- **V5.4, the walls (2026-11-06):** **Walls stay at full height.** They no longer drop to a stub between the camera and your party; a hero behind a wall still shows as a silhouette through it. **No more void between walls.** Where two rooms' walls stand a hex or two apart, the gap is solid masonry now, so the pair reads as one thick wall. Outside its walls the Keep stands on dark ground; the levels below sit in bedrock. The gaps where the Hollow's chasm meets its walls stay open, so the drop reads as one hole and you can see down through it.
+
 - **V5.3.1 (2026-10-29):** **Look closely at the keep.** Its highest window has gone dark, and something in it is looking back.
 
 - **V5.3, the castle (2026-10-29):** **Valkenburg on the title is a figurine now,** built like the castle you delve: brick towers and walls on a crag of hex stone, lit by the moon. It has gone dark: a tower has fallen in, a wall is breached, the Hobart banner hangs in rags, and only a few windows still glow (they flicker; so do the lanterns on the path up). Mist drifts at its foot, and now and then a crow crosses the sky. **Lowgate shows your progress:** every villager you bring home lights a cottage window, and its chimney smokes.

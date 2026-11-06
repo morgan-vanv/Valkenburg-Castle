@@ -1648,3 +1648,19 @@ Approved pitch: board 11 on the "Lowgate V5.1 Camp Screens" canvas (with both ex
 
 ### 36.4 The eye in the window (extra 2; owner's pick, V5.3.1)
 - The keep's high window, the brightest on the castle, is dark, and one ember eye looks out of it: a warm glow with a slit at its heart that blinks every few seconds (`k-eye`, CSS). It is part of the baked castle (no variant, no switch). The owner chose it over the Dragon asleep on the keep against the moon (board 12) because it doesn't give everything away at first glance. The variants, `TITLE_DRAGON` and `?titleCastle=` are gone; the bake's inputs are title-scene, floors and walls.
+
+## 37. V5.4 the walls: full height and infill (owner, 2026-11-06)
+
+View only: no rule, command or save change.
+
+### 37.1 No cutaway
+- The cutaway (V3.4's setting, always on for the brick runs since V5.0) is removed: the shader's cut, `Diorama.setCutaway`/`updateCutaway`, `LOOK_CUTAWAY`, and the hiding of wall-hung dressing. Every wall stands at full height. Hero figures behind a wall still draw as a faint silhouette (V3.4, `unit.ts`). The settings key `cutaway` stays (append-only) and is ignored.
+
+### 37.2 Infill (`src/view/look/infill.ts`)
+- Every hex with no tile within 5 of the level's tiles is classed by flooding inward from past that band: hexes the flood can't reach are **pockets**; the rest are **outside**.
+- **Pocket:** solid masonry to the wall's height (a flat-topped hex prism, the same colour as walls with no room beside them, which are now level too). A whole pocket fogs as one: it shows when any tile around it would.
+- **Pocket touching a pit (chasm):** left open; the level below shows through it as through the pits beside it (`Diorama.applyBelow`).
+- **Outside, Level 1:** ground (dark packed earth) 0.14 under the floor tiles' top, darkening to near black 5 hexes out.
+- **Outside, Level 2 and 3:** bedrock (rough rock like the cave walls) to the wall's height, darkening outward.
+- Outside hexes fog by their nearest tiles. Mass hexes beside a pit get the dark sill walls get.
+- **Backing (`look/walls.ts`):** a brick run's face whose every neighbour on that side is mass (a wall tile, a pocket or bedrock) is filled from the face to past the hex edge, to the wall's height, so wall and mass read as one block; the bricks it hides aren't built.

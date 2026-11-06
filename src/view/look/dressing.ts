@@ -110,8 +110,6 @@ export interface DressingPiece {
   hexes: Hex[];
   /** Flames to flicker (candles). */
   flames: THREE.Object3D[];
-  /** Hung on the brick face (goes with the wall when it is cut away), not standing on the plinth. */
-  onFace: boolean;
 }
 
 const offsetToAxial = (col: number, row: number): Hex => ({ q: col - Math.floor(row / 2), r: row });
@@ -428,7 +426,7 @@ export function buildDressing(ctx: DressingContext, roomIds: Iterable<string>): 
     g.position.set(w.x, ctx.y0, w.z);
     g.rotation.y = yaw;
     if (p.along) g.position.add(new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(p.along));
-    out.push({ obj: g, mats: ms, hexes: [wall, open], flames, onFace: ON_FACE.has(p.kind) });
+    out.push({ obj: g, mats: ms, hexes: [wall, open], flames });
     used.add(hexKey(wall));
     return true;
   };

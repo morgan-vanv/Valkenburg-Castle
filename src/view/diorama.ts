@@ -16,7 +16,7 @@ import { glowTexture } from './sprites';
 import { UnitView, type UnitSide } from './unit';
 import { CLASS_COLORS, COLORS, FLOOR_TOP, HEX, WALL_HEIGHT, easeInOut, easeOutBack, easeOutCubic, levelY } from './world';
 import { blastRings, blindArc, blownWalls, facedUnits, facingAngle, facingOf, fuseSide } from './stealth';
-import { CUTAWAY, setFogTime, setMaterialFog } from './fog';
+import { setFogTime, setMaterialFog } from './fog';
 import { MapEffects, effectsFromState } from './effects';
 import { exitList, exitMarker, exitShut, linkEnds, linkMarker, prizeInHand } from './links';
 import { heardFade, heardIcon, heardTitle } from './sounds';
@@ -27,7 +27,6 @@ import { FILL, POINT, makeFill, placeKey, setupShadowLight, type SourceKind } fr
 import { featuresOf, readLookSettings, readQuality, type Quality, type QualityFeatures } from './look/quality';
 import { ActionCam } from './look/actioncam';
 import { StatusFx, type UnitStatus } from './look/status';
-import { LOOK_CUTAWAY, WALL_LOOK } from './look/walls';
 
 const MAX_LIGHTS = 12;
 
@@ -609,8 +608,10 @@ export class Diorama {
       // What is seen down the shaft: the column plus a halo (the camera looks in at an angle).
       const seen = new Set<string>();
       // Only under the shown level's footprint (elsewhere the void would show it floating).
+      // V5.4: and under the shown level's chasm hexes (the gaps where a pit meets its walls), which are part of the drop.
       const upper = this.levels.get(shown)!.def.tiles;
-      for (const k of column) for (const hx of range(parseHexKey(k), BELOW_HALO)) if (upper[hexKey(hx)]) seen.add(hexKey(hx));
+      const chasm = this.levels.get(shown)!.infill.chasm;
+      for (const k of column) for (const hx of range(parseHexKey(k), BELOW_HALO)) if (upper[hexKey(hx)] || chasm.has(hexKey(hx))) seen.add(hexKey(hx));
       v.group.visible = true;
       v.applyBelow(seen);
       // The next level down is seen only through pits on this one that are inside the column.
@@ -712,7 +713,6 @@ export class Diorama {
       }
     }
     this.rig.update(dtReal, t);
-    this.updateCutaway();
     if (this.active) {
       for (const v of this.units.values()) v.idle(this.clock.time, this.moving.has(v.id));
       this.statusFx.update(this.units, t);
@@ -744,48 +744,9 @@ export class Diorama {
     requestAnimationFrame(this.loop);
   };
 
-  /**
-   * V3.4 (owner: "see all walls at their full height"): the cutaway that lowered walls between the
-   * camera and the focus is off by default. The shader code stays; `setCutaway(true)` brings it back
-   * (a settings toggle may call it). Hero figures hidden behind walls draw as a faint silhouette.
-   */
-  cutaway = false;
-
-  /** Lower walls between the camera and the focus (true) or keep every wall at full height (false, default). */
-  setCutaway(on: boolean): void {
-    this.cutaway = on;
-    this.updateCutaway();
-  }
-
-  private updateCutaway(): void {
-    const cam = this.rig.camera.position;
-    const tgt = this.rig.currentTarget();
-    CUTAWAY.center.value.copy(tgt);
-    const d = new THREE.Vector3(cam.x - tgt.x, 0, cam.z - tgt.z);
-    if (d.lengthSq() < 1e-6) d.set(0, 0, 1);
-    CUTAWAY.dir.value.copy(d.normalize());
-    // V5.0 (G, W2): the look's walls are lowered to their plinth on the camera's side of the focus whenever the
-    // walls are the new brick runs (the camera sits lower now); the old setting still forces it on elsewhere.
-    CUTAWAY.height.value = this.cutaway || LOOK_CUTAWAY ? WALL_LOOK.plinthH : 99;
-    // Dressing hung on a cut wall goes with it (the same window as the shader's: ahead of the focus toward the camera).
-    const lv = this.levels.get(this.shownLevel);
-    if (lv && CUTAWAY.height.value < 50) {
-      const dir = CUTAWAY.dir.value;
-      for (const o of lv.wallHung) {
-        const rx = o.position.x - tgt.x;
-        const rz = o.position.z - tgt.z;
-        const ahead = rx * dir.x + rz * dir.z;
-        const side = Math.abs(-rx * dir.z + rz * dir.x);
-        const k = THREE.MathUtils.smoothstep(ahead, -1.3, -0.2) * (1 - THREE.MathUtils.smoothstep(side, 6, 9)) * (1 - THREE.MathUtils.smoothstep(ahead, 9, 13));
-        o.visible = k < 0.5 && (o.userData.fogShown ?? true);
-      }
-    }
-  }
-
   /** Render one frame now (for screenshots in a throttled headless tab). */
   renderNow(): void {
     this.rig.update(1, this.clock.real);
-    this.updateCutaway();
     this.updateLights(this.clock.real);
     this.post.render(this.scene, this.overlayScene, this.rig.camera);
     this.updateDom();

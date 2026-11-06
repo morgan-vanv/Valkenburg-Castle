@@ -29,10 +29,6 @@ export interface FogMaterialOptions {
   side?: THREE.Side;
   /** Fraction of the base colour always shown when visible. */
   litFloor?: number;
-  /** Instanced walls: lower the ones between the camera and the focus point. */
-  cutaway?: boolean;
-  /** V5.0 (G, W2): with `cutaway`, drop whole instances above the cut height (bricks, caps) instead of clamping their vertices. */
-  cutDrop?: boolean;
   /** Instanced: read baked light from the `aGlow` attribute. */
   glow?: boolean;
   /** Instanced floors: draw material patterns from `aMat` and hex edges. */
@@ -44,14 +40,6 @@ export interface FogMaterialOptions {
   /** V5.0 (G): scale of the engraved hex-edge lines on floors (0 for bevelled tiles with real gaps). */
   edge?: number;
 }
-
-/** Shared cutaway state, updated by the diorama every frame. */
-export const CUTAWAY = {
-  center: { value: new THREE.Vector3() },
-  /** Horizontal unit vector from the focus point toward the camera. */
-  dir: { value: new THREE.Vector3(0, 0, 1) },
-  height: { value: 0.3 },
-};
 
 export type FogMaterial = (THREE.MeshLambertMaterial | THREE.MeshStandardMaterial) & { userData: { fog: { value: number }; dim: { value: number } } };
 
@@ -153,14 +141,10 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
   m.userData.fog = fog;
   m.userData.dim = dim;
   const instanced = !!opts.instanced;
-  const cut = !!opts.cutaway && instanced;
   const glow = !!opts.glow && instanced;
   const floor = !!opts.floor && instanced;
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uFog = fog;
-    shader.uniforms.uCutCenter = CUTAWAY.center;
-    shader.uniforms.uCutDir = CUTAWAY.dir;
-    shader.uniforms.uCutHeight = CUTAWAY.height;
     shader.uniforms.uLitFloor = dim;
     shader.uniforms.uExplored = { value: EXPLORED_LEVEL };
     shader.uniforms.uTime = timeUniform;
@@ -173,9 +157,6 @@ export function fogMaterial(opts: FogMaterialOptions = {}): FogMaterial {
 ${instanced ? 'attribute float aFog;' : 'uniform float uFog;'}
 ${glow ? 'attribute vec3 aGlow; varying vec3 vGlow;' : ''}
 ${floor ? 'attribute float aMat; varying float vMat; varying vec2 vLocal; varying vec3 vWorld; varying float vUp;' : ''}
-uniform vec3 uCutCenter;
-uniform vec3 uCutDir;
-uniform float uCutHeight;
 varying float vFog;`,
       )
       .replace(
@@ -193,19 +174,6 @@ ${
   floor
     ? `vMat = aMat; vLocal = position.xz; vUp = normal.y;
 vWorld = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;`
-    : ''
-}
-${
-  cut
-    ? `{
-  vec3 iCenter = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-  vec2 rel = iCenter.xz - uCutCenter.xz;
-  float ahead = dot(rel, uCutDir.xz);
-  float side = abs(dot(rel, vec2(-uCutDir.z, uCutDir.x)));
-  float k = smoothstep(-1.3, -0.2, ahead) * (1.0 - smoothstep(6.0, 9.0, side)) * (1.0 - smoothstep(9.0, 13.0, ahead));
-  k *= step(abs(iCenter.y - uCutCenter.y), 2.0);
-  ${opts.cutDrop ? 'if (k > 0.5 && iCenter.y - uCutCenter.y > uCutHeight) { vFog = 0.0; }' : 'transformed.y = mix(transformed.y, min(transformed.y, uCutHeight), k);'}
-}`
     : ''
 }`,
       );
@@ -242,7 +210,7 @@ if (vFog < 0.45) {
 #include <opaque_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => `fog-${opts.standard === false ? 'l' : 's'}${instanced ? 'i' : 'u'}${cut ? (opts.cutDrop ? '-cutdrop' : '-cut') : ''}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
+  m.customProgramCacheKey = () => `fog-${opts.standard === false ? 'l' : 's'}${instanced ? 'i' : 'u'}${glow ? '-glow' : ''}${floor ? '-floor' : ''}`;
   return m;
 }
 

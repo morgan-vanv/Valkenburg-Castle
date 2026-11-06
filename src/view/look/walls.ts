@@ -19,9 +19,6 @@ import { HEX, WALL_HEIGHT, hash2 } from '../world';
 /** Rooms whose walls get the brick look. W0: the Great Hall and its dais; W2: empty, so every room. */
 export const LOOK_WALL_ROOMS: ReadonlySet<string> = new Set();
 
-/** W2: lower the brick walls between the camera and the focus to their plinth (the camera sits lower than V4). */
-export const LOOK_CUTAWAY = true;
-
 export const WALL_LOOK = {
   brickL: 0.82,
   brickH: 0.34,
@@ -60,6 +57,12 @@ export interface LookWalls {
   plinths: WallItem[];
   pillars: WallItem[];
   caps: WallItem[];
+  /**
+   * V5.4: masonry behind a brick face that backs onto solid mass (a pocket, bedrock or a wall with no room
+   * beside it): fills the notch between the face and the hex edge to the wall's height, so the wall and the
+   * mass behind it read as one block instead of a slab with a trench behind it.
+   */
+  backs: WallItem[];
   /** Cave walls (every open neighbour in a rock, earth or bone room): jittered dark rock blocks, not brick. */
   rocks: WallItem[];
   /** Where a sconce on this wall hex should hang: offset from the hex centre to the brick face toward the given direction index. */
@@ -81,6 +84,10 @@ export interface WallContext {
   rooms: ReadonlySet<string>;
   /** Is this a floor-like tile of a cave room (rock, earth, bone)? Walls facing only caves are rock mass. */
   cave(t: TileDef | undefined): boolean;
+  /** V5.4: is this hex solid mass to the wall's height (a wall tile, or infill that stands that high)? */
+  mass(h: Hex): boolean;
+  /** V5.4: the colour of that mass (look/infill.ts), for the backing. */
+  massColor(h: Hex): THREE.Color;
 }
 
 type Family = { kind: 'axis'; i: number } | { kind: 'v'; parity: 0 | 1 };
@@ -162,7 +169,7 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
   }
   const lone = [...qual.values()].filter((h) => !taken.has(hexKey(h)));
 
-  const out: LookWalls = { hexes: new Set([...qual.keys(), ...rocks.map(hexKey)]), bricks: [], cores: [], plinths: [], pillars: [], caps: [], rocks: [], sconceAt: () => null, frame: () => null };
+  const out: LookWalls = { hexes: new Set([...qual.keys(), ...rocks.map(hexKey)]), bricks: [], cores: [], plinths: [], pillars: [], caps: [], backs: [], rocks: [], sconceAt: () => null, frame: () => null };
   for (const h of rocks) {
     const j = (k: number) => hash2(h.q, h.r, 50 + k);
     out.rocks.push({ h, rot: j(0) * Math.PI * 2, dx: (j(1) - 0.5) * 0.2, dz: (j(2) - 0.5) * 0.2, dy: 0, sx: 0.96 + j(3) * 0.12, sy: 0.9 + j(4) * 0.2, sz: 0.96 + j(5) * 0.12, color: new THREE.Color(WALL_LOOK.rock).multiplyScalar(0.8 + j(6) * 0.4) });
@@ -228,9 +235,27 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
       const h = nearest(mid);
       out.cores.push({ h, rot, ...place(h, mid), dy: 0, sx: (half - WALL_LOOK.brickD * 0.6) * 2, sy: H, sz: len, color: new THREE.Color(WALL_LOOK.mortar) });
     }
+    const ext = run.f.kind === 'axis' ? 1.0 : 0.866;
+    /** Run hexes whose face on side -1 / +1 backs onto mass. */
+    const backed = new Set<string>();
     for (const h of run.hexes) {
       const o = w2(h).sub(mid).dot(n);
-      sconce.set(hexKey(h), { n, f: half, o, ext: run.f.kind === 'axis' ? 1.0 : 0.866 });
+      sconce.set(hexKey(h), { n, f: half, o, ext });
+      // V5.4: a side whose every neighbour is mass gets backed (and its bricks, hidden inside, are skipped).
+      for (const side of [-1, 1] as const) {
+        const nbs = DIRS.filter((d) => {
+          const w = hexToWorld(d, 1);
+          return side * (w.x * n.x + w.z * n.y) > 0.1;
+        }).map((d) => add(h, d));
+        if (!nbs.length || !nbs.every((nb) => ctx.mass(nb))) continue;
+        backed.add(`${hexKey(h)}|${side}`);
+        const a = half;
+        const b = side * o + ext + 0.12;
+        if (b - a < 0.05) continue;
+        const dn = (side * (a + b)) / 2 - o;
+        const col = ctx.massColor(nbs[0]!);
+        out.backs.push({ h, rot, dx: n.x * dn, dz: n.y * dn, dy: 0, sx: b - a, sy: H, sz: (run.f.kind === 'axis' ? Math.sqrt(3) : 1.5) + 0.04, color: col });
+      }
     }
     // Bricks on both faces, running bond.
     const rows = Math.ceil(H / WALL_LOOK.brickH);
@@ -247,6 +272,7 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
           const along = c0.clone().addScaledVector(dir, (s0 + s1) / 2);
           const p = along.addScaledVector(n, side * (half - WALL_LOOK.brickD / 2 + (j - 0.5) * 0.04));
           const h = nearest(p);
+          if (backed.has(`${hexKey(h)}|${side}`)) continue;
           out.bricks.push({ h, rot: rot + (j - 0.5) * 0.03, ...place(h, p), dy: row * WALL_LOOK.brickH + bh / 2 + 0.015, sx: WALL_LOOK.brickD, sy: bh, sz: s1 - s0 - 0.04, color: brickCol(seed) });
         }
       }
@@ -301,7 +327,7 @@ export function buildLookWalls(ctx: WallContext, walls: Hex[]): LookWalls {
 }
 
 /** Geometries for the batches (unit-sized where the item scales them). */
-export function wallGeometries(): { rock: THREE.BufferGeometry; brick: THREE.BufferGeometry; core: THREE.BufferGeometry; plinth: THREE.BufferGeometry; pillar: THREE.BufferGeometry; cap: THREE.BufferGeometry } {
+export function wallGeometries(): { rock: THREE.BufferGeometry; back: THREE.BufferGeometry; brick: THREE.BufferGeometry; core: THREE.BufferGeometry; plinth: THREE.BufferGeometry; pillar: THREE.BufferGeometry; cap: THREE.BufferGeometry } {
   const shade = (g0: THREE.BufferGeometry, top: number, side: number): THREE.BufferGeometry => {
     const g = g0.index ? g0.toNonIndexed() : g0;
     const pos = g.getAttribute('position');
@@ -322,6 +348,7 @@ export function wallGeometries(): { rock: THREE.BufferGeometry; brick: THREE.Buf
   return {
     rock: shade(new THREE.CylinderGeometry(1.02, 1.08, H, 6, 1).translate(0, H / 2, 0), 1.05, 0.75),
     brick: shade(unitBox(), 1.06, 1),
+    back: shade(unitBox(), 1, 0.7),
     core: shade(unitBox(), 1.15, 0.9),
     plinth: shade(new THREE.CylinderGeometry(WALL_LOOK.plinthR * 0.97, WALL_LOOK.plinthR, WALL_LOOK.plinthH, 6, 1).translate(0, WALL_LOOK.plinthH / 2, 0), 1.1, 0.8),
     pillar: shade(new THREE.CylinderGeometry(WALL_LOOK.pillarR, WALL_LOOK.pillarR * 1.1, H + 0.1, 8, 1).translate(0, (H + 0.1) / 2, 0), 1.1, 1),

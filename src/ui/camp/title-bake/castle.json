@@ -1,9 +1,9 @@
 {
   "file": "castle.webp",
   "file2x": "castle@2x.webp",
-  "x": 863,
+  "x": 864,
   "y": 253,
-  "w": 1057,
+  "w": 1056,
   "h": 827,
   "glows": [
     {
@@ -60,5 +60,5 @@
     "src/view/look/floors.ts",
     "src/view/look/walls.ts"
   ],
-  "hash": "e5b29cf9f29fd6f992c512f89d2b16f8bf4ad464c824702225c125df0a86103b"
+  "hash": "669be2015e9eec1843831467c5bf263d043b51bb30d5e66a6ccbe0d03a7264ac"
 }
